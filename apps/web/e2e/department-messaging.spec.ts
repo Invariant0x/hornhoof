@@ -253,7 +253,8 @@ for (const look of LOOKS) {
     await shot(page, card, `address-added-${browserName}-${name}`);
 
     /* The address is on the channel's list, agreed and added by Max; he takes its consent back there. */
-    const listed = card.getByRole('list', { name: c.listTitle(1), exact: true });
+    await expect(addresses.getByRole('heading', { name: c.listTitle(1), exact: true })).toBeVisible();
+    const listed = addresses.getByRole('list');
     const line = listed.getByRole('listitem').filter({ hasText: TEST_ADDRESS });
     await expect(line).toContainText(c.statuses.granted);
     expect(await small(line)).toEqual([]);
@@ -264,6 +265,10 @@ for (const look of LOOKS) {
     await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), line.getByRole('button', { name: c.revoke, exact: true }).click()]);
     await expect(line).toContainText(c.statuses.revoked);
     await expect(line.getByRole('button')).toHaveCount(0);
+    /* Taking back says so in place of what adding said, and the heading counts only consent in force (#1201). */
+    await expect(line.getByRole('status')).toHaveText(c.takenBack(TEST_ADDRESS));
+    await expect(card.getByRole('status')).toHaveCount(1);
+    await expect(addresses.getByRole('heading', { name: c.listTitle(0), exact: true })).toBeVisible();
     expect(posted.at(-1)).toEqual({ path: '/api/outbound/permissions/pm1/revoke', body: {} });
     await fits(page, panel);
     expect.soft(await offences(part, { ...listWords, danger: [] })).toEqual([]);
