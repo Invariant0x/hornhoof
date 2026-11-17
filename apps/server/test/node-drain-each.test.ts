@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
 import type { NodeIdentity } from '../src/modules/nodes/hub.js';
 import { nodeDrain, nodeHeldFrom } from '../src/modules/updates/node-drain.js';
@@ -232,7 +232,7 @@ describe('a node that waits for an update takes no new turn', () => {
     await until(() => f.app.ctx.hub.isReady(id));
     const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
     const ask = askFor(f, google.key);
-    const record = async () => (await f.db.select({ since: nodes.updateWaitSince }).from(nodes).where(eq(nodes.id, google.nodeId)))[0]!.since?.toISOString() ?? null;
+    const record = async () => (await f.db.select(only(nodes, 'updateWaitSince')).from(nodes).where(eq(nodes.id, google.nodeId)))[0]!.updateWaitSince?.toISOString() ?? null;
     const shown = async () => (await f.app.inject({ url: '/api/machines', ...as(f.ceo) })).json().machines.find((m: { id: string }) => m.id === f.host.id).drain ?? null;
     expect([await record(), await shown()]).toEqual([null, null]);
 

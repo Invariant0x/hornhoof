@@ -2,6 +2,7 @@ import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, typ
 import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { testFileResults, testParts, testRuns, testSuiteMemory, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { unitKey as keyOf } from './plan-environment.js';
 
 /* Reusing green test results. A release runs every test file once, in its first run; a later run of the same release runs only
@@ -102,13 +103,13 @@ const ofRepositoryRuns = (run: Pick<Run, 'companyId'>, scope: RepositoryScope) =
    else that commit. */
 async function releaseOf(db: Db, run: Run, scope: RepositoryScope): Promise<string> {
   if (run.branch && RELEASE.test(run.branch)) return run.branch;
-  const [checked] = await db.select({ branch: testRuns.branch }).from(testRuns)
+  const [checked] = await db.select(only(testRuns, 'branch')).from(testRuns)
     .where(and(ofRepositoryRuns(run, scope), eq(testRuns.commitSha, run.commitSha!), sql`${testRuns.branch} ~ ${RELEASE.source}`)).orderBy(desc(testRuns.number)).limit(1);
   return checked?.branch ?? run.commitSha!;
 }
 /* When the release had its first whole run that ended, or null before it. */
 async function releaseStart(db: Db, run: Run, scope: RepositoryScope, release: string): Promise<Date | null> {
-  const [full] = await db.select({ createdAt: testRuns.createdAt }).from(testRuns)
+  const [full] = await db.select(only(testRuns, 'createdAt')).from(testRuns)
     .where(and(ofRepositoryRuns(run, scope), inArray(testRuns.status, ['passed', 'failed']), sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`${testRuns.fileCache}->>'release' = ${release}`))
     .orderBy(asc(testRuns.createdAt)).limit(1);
   return full?.createdAt ?? null;
@@ -243,7 +244,7 @@ const fitsOneMessage = (suiteId: string, files: KeptFile[]): boolean => KeptFile
    longer fits one message the part's own go on alone: to a tool, no memory only costs time. */
 async function mergeKept(db: Db, scope: RepositoryScope, suiteId: string, files: KeptFile[]): Promise<void> {
   await db.transaction(async tx => {
-    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
+    const [kept] = await tx.select(only(testSuiteMemory, 'files')).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
     const paths = new Set(files.map(file => file.path)), merged = [...(kept?.files ?? []).filter(file => !paths.has(file.path)), ...files];
     const value = fitsOneMessage(suiteId, merged) ? merged : files;
     await tx.insert(testSuiteMemory).values({ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, suiteId, files: value })

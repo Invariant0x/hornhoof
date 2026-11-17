@@ -7,7 +7,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { machines, publicLinks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { linkMode, readLinkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
@@ -101,7 +101,7 @@ export class PublicLinks {
      ever uses it. True once the company has a link row, hidden or not; false while the relay does not give one. */
   ensureHidden(companyId: string): Promise<boolean> {
     return this.inTurn(async () => {
-      const [old] = await this.ctx.db.select({ name: publicLinks.name }).from(publicLinks).where(eq(publicLinks.companyId, companyId));
+      const [old] = await this.ctx.db.select(only(publicLinks, 'name')).from(publicLinks).where(eq(publicLinks.companyId, companyId));
       if (old) return true;
       try {
         await this.change(companyId, undefined, true);

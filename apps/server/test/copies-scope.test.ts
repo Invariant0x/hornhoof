@@ -5,6 +5,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { certificates, companies, departments, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { rank } from '../src/modules/copies/order.js';
 import { CUT_TRIES_MS, cutReplication, leaveData } from '../src/modules/copies/scope.js';
@@ -78,7 +79,7 @@ async function company() {
   const rowOf = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
   const linkRow = async () => (await db.select().from(publicLinks))[0]!;
   const keyOf = async () => decryptSecret((await linkRow()).keyEnc, config.secret);
-  const secrets = async () => (await db.select({ kind: peerSecrets.kind }).from(peerSecrets)).map(row => row.kind).sort();
+  const secrets = async () => (await db.select(only(peerSecrets, 'kind')).from(peerSecrets)).map(row => row.kind).sort();
   const listed = { departments: [departmentId], teams: [] };
   const patch = (access: object = listed, id = p!.id) => app.inject({ method: 'PATCH', url: `/api/people/${id}`, payload: { access }, ...as(ceo) });
   const personOf = async (id = p!.id) => (await db.select().from(people).where(eq(people.id, id)))[0]!;
@@ -154,7 +155,7 @@ describe("a machine whose owner no longer sees the whole company", () => {
     expect((await c.patch()).statusCode).toBe(200);
     expect(await c.rowOf(c.w.id)).toEqual(before.w);
     expect(await c.rowOf(c.e.id)).toMatchObject({ role: 'data', uploadState: null, dataLeftAt: null, copyName: before.e.copyName });
-    const live = await c.db.select({ serial: certificates.serial }).from(certificates).where(and(isNull(certificates.revokedAt)));
+    const live = await c.db.select(only(certificates, 'serial')).from(certificates).where(and(isNull(certificates.revokedAt)));
     expect(live.map(row => row.serial)).toEqual(expect.arrayContaining([c.w.serial, c.e.serial]));
     /* A change that takes nobody's data away changes no key: one department for another, and a person with no copy. */
     const calls = c.keyChanges();

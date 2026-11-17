@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Checker } from '../../checker.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
 
@@ -297,7 +297,7 @@ export async function recordRunWait(tx: Tx, run: RunSource, stage: RunStage, at:
 /* A run moved to another stage. A stage with a policy has a clock of its own, from now; without one the dates it has stay. */
 export async function moveRunStage(tx: Tx, run: RunSource, stage: RunStage, at: Date): Promise<void> {
   const sourceKey = runSourceKey(run.id);
-  const [seen] = await tx.select({ sourceState: taskWaits.sourceState }).from(taskWaits).where(and(eq(taskWaits.taskId, run.taskId), eq(taskWaits.sourceKey, sourceKey), inArray(taskWaits.state, OPEN_STATES)));
+  const [seen] = await tx.select(only(taskWaits, 'sourceState')).from(taskWaits).where(and(eq(taskWaits.taskId, run.taskId), eq(taskWaits.sourceKey, sourceKey), inArray(taskWaits.state, OPEN_STATES)));
   if (!seen || seen.sourceState.stage === stage) return;
   const task = await lockedTask(tx, run.taskId);
   const wait = await lastOfSource(tx, task, 'run', sourceKey);
@@ -340,7 +340,7 @@ function replanned(wait: TaskWait, valid: ReplanWait): { owner: WaitOwnerBinding
 export async function replanWait(tx: Tx, input: ReplanWait & { actor: Actor }): Promise<TaskWait> {
   const { actor, ...source } = input;
   const valid = parsed(ReplanWait, source);
-  const [seen] = await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, valid.waitId));
+  const [seen] = await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, valid.waitId));
   if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
   const task = await lockedTask(tx, seen.taskId);
   const [wait] = await tx.select().from(taskWaits).where(eq(taskWaits.id, valid.waitId)).for('update');
@@ -369,7 +369,7 @@ export type FinalReviewStep = { wait: TaskWait; ordinal: number; skipped: number
 /* The final review due now, once: whoever holds this step writes its one notice in the same transaction. The sequence goes on
    from its anchor and no promise moves. A source that signals once stands at the top level after it, with none left. */
 export async function claimFinalReview(tx: Tx, input: { waitId: string; expectedGeneration: number; at: Date }): Promise<FinalReviewStep | null> {
-  const [seen] = await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, input.waitId));
+  const [seen] = await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, input.waitId));
   if (!seen) return null;
   const task = await lockedTask(tx, seen.taskId);
   const [wait] = await tx.select().from(taskWaits).where(eq(taskWaits.id, input.waitId)).for('update');
