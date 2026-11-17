@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { ASSISTANT_TABLES, HIDDEN, isKey, KEY_NAMES, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
+import { ASSISTANT_TABLES, HIDDEN, isKey, KEY_FIELDS, KEY_NAMES, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
 import { notConfirmed } from '../../db/confirm.js';
 import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
 import { sources } from '../../db/sources.js';
@@ -22,7 +22,7 @@ const CLOSED_AFTER_SIGN_INS =
 const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
 /* What the orchestrator reads of them and of every other table: all but the keys. */
 const KEYS = `the keys (columns ending in _enc or _hash, and ${KEY_NAMES.slice(0, -1).join(', ')} and ${KEY_NAMES.at(-1)})`;
-const KEYS_CLOSED = `The tool reads every column but ${KEYS}: name the other columns instead of *.`;
+const KEYS_CLOSED = `The tool reads every column but ${KEYS}, secret tool answers, assistant event payloads and delivery addresses: name the other columns instead of *.`;
 const HORNHOOF_WRITES = `Hornhoof writes sign-ins, ${CLOSED_AFTER_SIGN_INS} itself: the tool only reads them.`;
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 /* The orchestrator's in a company with no active owner, for whom else it would write. */
@@ -73,7 +73,7 @@ const closedColumns = (table: string, columns: string[]) =>
 const secretsOf = (table: string) => (SECRET[table] ? closedColumns(table, SECRET[table]) : undefined);
 /* The orchestrator's: the keys of a table it knows by name, or which they are. */
 const keysOf = (table: string) => {
-  const keys = (SECRET[table] ?? []).filter(isKey);
+  const keys = [...(SECRET[table] ?? []).filter(isKey), ...(KEY_FIELDS[table] ?? [])];
   return keys.length ? closedColumns(table, keys) : KEYS_CLOSED;
 };
 const closedToRead = (table: string): string | undefined =>
