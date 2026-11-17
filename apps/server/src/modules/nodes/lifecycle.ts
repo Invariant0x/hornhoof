@@ -47,7 +47,7 @@ async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<Program
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
   await handleNodeMessage(ctx, id, msg);
   if (msg.type === 'hello') {
-    checkConnectedPhones(ctx, id);
+    void checkConnectedPhones(ctx, id);
     await restoreOperatorNode(ctx, id);
   }
 }

@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, companyPhones, jobs, machines, nodes, phoneSessions } from '../../db/schema.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { taskByRef } from '../tasks/views.js';
+import { pendingPhoneReadiness, refreshPhoneReadiness } from './readiness.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -12,7 +13,7 @@ import { idOnly, only } from '../../db/selections.js';
 /* An employee or assistant that borrows a phone, and the turn it runs. */
 export type PhoneAgent = { id: string; companyId: string; jobId: string | null };
 
-const holding = ['starting', 'active', 'revoking'] as const;
+export const holding = ['starting', 'active', 'revoking'] as const;
 const unfinished = ['queued', ...holding] as const;
 export const phoneBinding = (p: CompanyPhone): PhoneBinding => ({ phoneId: p.id, serial: p.serial, hardwareKey: p.hardwareKey });
 
@@ -82,6 +83,8 @@ export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
     if (!waiting) return null;
     const [job] = await tx.select(only(jobs, 'error')).from(jobs).where(eq(jobs.id, waiting.session.jobId));
     if (job?.error === 'cancelled') return null;
+    const pending = pendingPhoneReadiness(ctx, phoneId);
+    if (pending) return { pending };
     const generation = phone.generation + 1;
     const expires = new Date(ctx.clock() + PHONE_LEASE_MS);
     await tx.update(companyPhones).set({ generation }).where(eq(companyPhones.id, phoneId));
@@ -89,6 +92,10 @@ export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
     return { phone: { ...phone, generation }, session: session! };
   });
   if (!next) return;
+  if (next.pending) {
+    await next.pending;
+    return pumpPhone(ctx, phoneId);
+  }
   const { phone, session } = next;
   const reply = await phoneRequest(ctx, nodeIdentity(phone.nodeId), { type: 'phone.open', requestId: randomUUID(), grant: { sessionId: session.id, generation: phone.generation, binding: phoneBinding(phone), expiresAt: session.leaseUntil!.toISOString() } });
   if (reply.status !== 'ok') { await finishPhoneSession(ctx, session.id, 'failed'); return; }
@@ -98,7 +105,8 @@ export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
 async function revokeAndSettle(ctx: Ctx, phone: CompanyPhone, session: PhoneSession): Promise<void> {
   const reply = await phoneRequest(ctx, nodeIdentity(phone.nodeId), { type: 'phone.revoke', requestId: randomUUID(), sessionId: session.id, generation: phone.generation, binding: phoneBinding(phone) });
   if (reply.status !== 'ok') return;
-  await ctx.db.update(phoneSessions).set({ status: 'ended', endedAt: new Date(ctx.clock()) }).where(and(eq(phoneSessions.id, session.id), eq(phoneSessions.status, 'revoking')));
+  const [ended] = await ctx.db.update(phoneSessions).set({ status: 'ended', endedAt: new Date(ctx.clock()) }).where(and(eq(phoneSessions.id, session.id), eq(phoneSessions.status, 'revoking'))).returning();
+  if (ended) await refreshPhoneReadiness(ctx, phone);
   await pumpPhone(ctx, phone.id);
 }
 
@@ -139,13 +147,15 @@ export async function reconcilePhone(ctx: Ctx, phoneId: string): Promise<void> {
   const sessions = await ctx.db.select({ session: phoneSessions, status: jobs.status, error: jobs.error }).from(phoneSessions).innerJoin(jobs, eq(jobs.id, phoneSessions.jobId)).where(and(eq(phoneSessions.phoneId, phoneId), isNull(phoneSessions.endedAt)));
   for (const { session, status, error } of sessions) {
     if (session.leaseUntil && session.leaseUntil.getTime() <= ctx.clock()) {
-      await ctx.db.transaction(async tx => {
+      const expired = await ctx.db.transaction(async tx => {
         const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, phoneId)).for('update');
         const [current] = await tx.select().from(phoneSessions).where(eq(phoneSessions.id, session.id));
-        if (!current || current.endedAt || !current.leaseUntil || current.leaseUntil.getTime() > ctx.clock()) return;
-        await tx.update(companyPhones).set({ generation: phone!.generation + 1 }).where(eq(companyPhones.id, phoneId));
+        if (!phone || !current || current.endedAt || !current.leaseUntil || current.leaseUntil.getTime() > ctx.clock()) return;
+        await tx.update(companyPhones).set({ generation: phone.generation + 1 }).where(eq(companyPhones.id, phoneId));
         await tx.update(phoneSessions).set({ status: session.status === 'queued' ? 'cancelled' : 'ended', reason: session.reason ?? 'lost', endedAt: new Date(ctx.clock()) }).where(and(eq(phoneSessions.id, session.id), isNull(phoneSessions.endedAt)));
+        return phone;
       });
+      if (expired) await refreshPhoneReadiness(ctx, expired);
     } else if (status !== 'running' || error === 'cancelled') await finishPhoneSession(ctx, session.id, error === 'cancelled' ? 'cancelled' : 'lost');
   }
   await pumpPhone(ctx, phoneId);

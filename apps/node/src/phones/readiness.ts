@@ -24,33 +24,43 @@ check_setting global adaptive_battery_management_enabled 0 appSleep
 check_setting global app_standby_enabled 0 appSleep
 check_setting global adb_allowed_connection_time 0 debugTrust
 
-if [ "$(locksettings get-disabled 2>/dev/null)" != true ]; then
-  locksettings set-disabled true >/dev/null 2>&1
-fi
 unlocked=$(locksettings get-disabled 2>/dev/null)
+if [ "$unlocked" != true ]; then
+  locksettings set-disabled true >/dev/null 2>&1
+  unlocked=$(locksettings get-disabled 2>/dev/null)
+fi
 [ "$unlocked" = true ] || echo lock
 
 idle_off() {
   [ "$(dumpsys deviceidle enabled deep 2>/dev/null)" = 0 ] && [ "$(dumpsys deviceidle enabled light 2>/dev/null)" = 0 ]
 }
-idle_off || dumpsys deviceidle disable >/dev/null 2>&1
-idle_off || echo deviceIdle
+if ! idle_off; then
+  dumpsys deviceidle disable >/dev/null 2>&1
+  idle_off || echo deviceIdle
+fi
+
+awake() { printf '%s\n' "$power" | grep -Eq 'mWakefulness=Awake|mWakefulnessRaw=Awake'; }
+adaptive_off() { printf '%s\n' "$power" | grep -Eq 'adaptive=false|mAdaptiveEnabled=false'; }
 
 power=$(dumpsys power 2>/dev/null)
-if ! printf '%s\n' "$power" | grep -Eq 'mWakefulness=Awake|mWakefulnessRaw=Awake'; then
+if ! awake; then
   input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
+  reread_power=1
 fi
-if [ "$(settings get global low_power 2>/dev/null)" != 0 ]; then
+low_power=$(settings get global low_power 2>/dev/null)
+if [ "$low_power" != 0 ]; then
   cmd power set-mode 0 >/dev/null 2>&1
+  low_power=$(settings get global low_power 2>/dev/null)
 fi
-if ! printf '%s\n' "$power" | grep -Eq 'adaptive=false|mAdaptiveEnabled=false'; then
+if ! adaptive_off; then
   cmd power set-adaptive-power-saver-enabled false >/dev/null 2>&1
+  reread_power=1
 fi
-power=$(dumpsys power 2>/dev/null)
-if [ "$(settings get global low_power 2>/dev/null)" != 0 ] || ! printf '%s\n' "$power" | grep -Eq 'adaptive=false|mAdaptiveEnabled=false'; then
+if [ "$reread_power" = 1 ]; then power=$(dumpsys power 2>/dev/null); fi
+if [ "$low_power" != 0 ] || ! adaptive_off; then
   echo batterySaver
 fi
-if ! printf '%s\n' "$power" | grep -Eq 'mWakefulness=Awake|mWakefulnessRaw=Awake' || printf '%s\n' "$power" | grep -Eq 'mMaximumScreenOffTimeoutFromDeviceAdmin=.*enforced=true|mIsPowered=false'; then
+if ! awake || printf '%s\n' "$power" | grep -Eq 'mMaximumScreenOffTimeoutFromDeviceAdmin=.*enforced=true|mIsPowered=false'; then
   echo awake
 fi
 
@@ -68,7 +78,8 @@ exempt_apps() {
   for app in $packages; do
     if ! printf '%s\n' "$allowed" | grep -Fxq "$app"; then set -- "$@" "+$app"; fi
   done
-  if [ "$#" -gt 0 ]; then dumpsys deviceidle whitelist "$@" >/dev/null 2>&1; fi
+  [ "$#" -gt 0 ] || return 0
+  dumpsys deviceidle whitelist "$@" >/dev/null 2>&1
   allowed=$(allowed_apps) || return 1
   for app in $packages; do
     printf '%s\n' "$allowed" | grep -Fxq "$app" || return 1

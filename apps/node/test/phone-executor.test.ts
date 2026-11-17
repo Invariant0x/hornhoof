@@ -76,6 +76,15 @@ describe('phone messages on the execution node', () => {
     expect(p.calls.filter(c => c.args.join(' ').endsWith('shell sh'))).toHaveLength(1);
   });
 
+  it('leaves the phone alone while an agent holds a session', async () => {
+    const p = phone();
+    await p.open();
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(1), binding: p.grant.binding });
+    expect(p.reply(1)?.status).toBe('busy');
+    expect(p.calls.some(c => c.args.join(' ').endsWith('shell sh'))).toBe(false);
+    p.phones.close();
+  });
+
   it('reports a failed check when adb returns no complete readback after the restart', async () => {
     const p = phone(SCREEN, 'ZF525LRDQS', 'lock\n');
     const binding = { ...p.grant.binding };
