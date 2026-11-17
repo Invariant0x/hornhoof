@@ -6,9 +6,11 @@ import { controlledTime, registerStep, until as runSteps } from './worker-keeper
 let monotonic = 0;
 let signal: AbortSignal;
 const leases = new Set<() => Promise<void>>();
+export const WALL_TIME = Date.now();
 
 export function peerTime(context: TestContext): void {
   controlledTime(context);
+  vi.setSystemTime(WALL_TIME);
   signal = context.signal;
   monotonic = 0;
   leases.clear();

@@ -10,6 +10,7 @@ import type { TLSSocket } from 'node:tls';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import type { PGlite } from '@electric-sql/pglite';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
@@ -37,8 +38,8 @@ import type { PeerSessions } from '../src/net/peer-sessions.js';
 import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
-import { setUpCompany, TEST_SECRET, testApp } from './helpers.js';
-import { advance, certificate, leaseRound, leaseStep, networkRound, peerTime, registerKeeper, state, step, tunnelRound, until } from './keeper-peer-time.js';
+import { fixture, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
+import { advance, certificate, leaseRound, leaseStep, networkRound, peerTime, registerKeeper, state, step, tunnelRound, until, WALL_TIME } from './keeper-peer-time.js';
 
 /* The keeper's frpc commands are observed, and its child lifecycle is a recorded sample, without waiting on Node or frpc. */
 vi.mock('node:child_process', async importOriginal => {
@@ -72,7 +73,9 @@ const ed25519 = (): MachineKey => {
 /* The company's app, which believes the keeper's address: the test's keeper and the test itself both come from it. */
 async function company(withLink = true) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
-  await setUpCompany(app);
+  await app.ready();
+  const client = (db as unknown as { $client: PGlite }).$client;
+  await fixture(client, `keeper-peer company ${JSON.stringify(config)}`, () => setUpCompany(app), { at: WALL_TIME });
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   if (withLink) await saveLink(db, config, acme!.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' } });
