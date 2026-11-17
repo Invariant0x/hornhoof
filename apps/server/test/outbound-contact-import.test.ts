@@ -1,12 +1,29 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { decryptSecret } from '../src/crypto/secrets.js';
 import { outboundContactFields, outboundContacts } from '../src/db/schema.js';
 import { workbook } from './outbound-contact-workbook.js';
 import { as } from './helpers.js';
-import { world } from './outbound-world.js';
+import { dispatched, published, world } from './outbound-world.js';
 
 const ROWS = [['address', 'consent', 'name', 'organization'], ['import-ann@shop.example', 'yes', 'Ann', 'The shop'], ['no@shop.example', '', 'No consent', ''], ['', 'yes', 'No address', ''], ['extra@shop.example', 'yes', 'Extra', 'Shop', 'surplus']];
 
 describe('a consented contact table', () => {
+  it.each(['csv', 'xlsx'] as const)('adds values to an existing contact through %s and prepares their rendered message for dispatch', async format => {
+    const w = await world();
+    const rows = [['address', 'consent', 'name', 'organization', 'personal_line'], ['ann@shop.example', 'yes', 'Ann', 'Example shop', 'Thank you for visiting.']];
+    const bytes = format === 'csv' ? Buffer.from(rows.map(row => row.join(',')).join('\n')) : workbook(rows);
+    const response = await w.c.app.inject({ method: 'POST', url: '/api/outbound/contacts/import', ...as(w.c.ceoToken), payload: { channelId: w.channel.id, filename: `contacts.${format}`, data: bytes.toString('base64'), source: 'Signup sheet', evidence: 'Recorded consent' } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({ added: 0, updated: 1, skipped: [] });
+    const [saved] = await w.c.db.select().from(outboundContactFields).where(eq(outboundContactFields.contactId, w.contact.id));
+    expect(JSON.parse(decryptSecret(saved!.fieldsEnc, w.ctx.config.secret))).toEqual({ name: 'Ann', organization: 'Example shop', personal_line: 'Thank you for visiting.' });
+    const field = await published(w.c, { kind: 'variable', field: 'name' });
+    const result = await w.submit({ document: { ...w.document, variables: [{ slotId: w.variableSlot, valueRef: field.entryId }] } });
+    expect(result.status).toBe('scheduled');
+    expect(await dispatched(w, result.messageId)).toMatchObject({ kind: 'begun', sealedPayload: { recipient: 'ann@shop.example', text: expect.stringContaining('Hello from Ann.') } });
+  });
+
   it.each(['csv', 'xlsx'] as const)('imports %s fields and names skipped rows without echoing their private contents', async format => {
     const w = await world();
     const bytes = format === 'csv' ? Buffer.from(ROWS.map(row => row.join(',')).join('\n')) : workbook(ROWS);

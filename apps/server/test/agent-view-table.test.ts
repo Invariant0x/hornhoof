@@ -219,7 +219,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/vault', 'PATCH /api/vault/:id', 'DELETE /api/vault/:id',
   'POST /api/outbound/accounts', 'POST /api/outbound/accounts/:id/events', 'POST /api/outbound/accounts/:id/bind', 'POST /api/outbound/accounts/:id/release', 'POST /api/outbound/accounts/:id/revoke', 'POST /api/outbound/accounts/:id/rotate', 'POST /api/outbound/attempts/:id/settle', 'GET /api/outbound/channels/:id/accounts',
   'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
-  'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
+  'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/import', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
   'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/decline', 'POST /api/machines/:id/access/open',
