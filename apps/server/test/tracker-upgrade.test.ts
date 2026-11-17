@@ -1,8 +1,12 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, goalEvents, goals, people, taskEvents, tasks } from '../src/db/schema.js';
 import { upgradeCompany } from '../src/modules/tracker/upgrade.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, ownDatabases, setUpCompany, testApp } from './helpers.js';
+
+/* Some tests make the database refuse a write halfway, which a truncate does not undo. */
+ownDatabases();
 
 async function company() {
   const { app, db } = await testApp();
@@ -22,6 +26,14 @@ async function company() {
     (await db.insert(tasks).values({ companyId, number: ++number, departmentId, title: `Task ${number}`, ...values }).returning())[0]!;
   const patch = (path: string, payload: object) => app.inject({ method: 'PATCH', url: path, payload, ...as(ceo) });
   return { app, db, ctx: app.ctx, companyId, dev: dev!, sales: sales!, loose: loose!, task, patch, ivanId: await id('ivan@acme.com'), olegId: await id('oleg@acme.com'), mariaId: await id('maria@acme.com') };
+}
+
+/* From here on the database refuses the change of the table's rows that the condition names, as a server that fails right
+   there writes nothing more. What it gives back takes the refusal away again. */
+async function failAt(db: Db, change: 'update' | 'insert', table: 'tasks' | 'agents', when = 'true'): Promise<() => Promise<unknown>> {
+  await db.execute(sql.raw(`create or replace function hh_fail() returns trigger language plpgsql as $$ begin raise exception 'The upgrade failed here.'; end $$`));
+  await db.execute(sql.raw(`create trigger hh_fail before ${change} on ${table} for each row when (${when}) execute function hh_fail()`));
+  return () => db.execute(sql.raw(`drop trigger hh_fail on ${table}`));
 }
 
 const lines = async (db: Awaited<ReturnType<typeof company>>['db'], taskId: string) =>
@@ -78,5 +90,44 @@ describe('the one-time upgrade of a company from before the tracker', () => {
     expect(managers.filter(a => a.role?.endsWith('-PM')).map(a => [a.role, a.departmentId]).sort()).toEqual([['DEV-PM', dev.id], ['SAL-PM', sales.id]]);
     expect(managers.some(a => a.departmentId === loose.id)).toBe(false);
     expect((await db.select({ due: companies.trackerDue }).from(companies))[0]!.due).toBe(false);
+  });
+
+  /* Three open tasks of a company from before the tracker. Sales is listed by two people, so the CEO takes its decisions;
+     Development only by Oleg. */
+  async function due() {
+    const made = await company();
+    await made.db.update(companies).set({ trackerDue: true });
+    const top = await made.task(made.sales.id);
+    const under = await made.task(made.dev.id, { parentId: top.id });
+    const inDev = await made.task(made.dev.id);
+    const state = async () => ({
+      responsible: (await made.db.select().from(tasks).orderBy(asc(tasks.number))).map(t => t.responsiblePersonId),
+      managers: (await made.db.select({ role: agents.roleKey }).from(agents).where(eq(agents.kind, 'worker'))).map(a => a.role).sort(),
+      due: (await made.db.select({ due: companies.trackerDue }).from(companies))[0]!.due,
+    });
+    return { ...made, top, under, inDev, state };
+  }
+
+  it('leaves every task and the mark as they were when filling the tasks fails halfway, and a later run does it all', async () => {
+    const { ctx, db, companyId, inDev, state, olegId, ivanId } = await due();
+    /* The last of the three open tasks: the two before it are filled by then. */
+    const back = await failAt(db, 'update', 'tasks', `new.id = '${inDev.id}'`);
+    await expect(upgradeCompany(ctx, companyId)).rejects.toMatchObject({ cause: { message: 'The upgrade failed here.' } });
+    expect(await state()).toEqual({ responsible: [null, null, null], managers: [], due: true });
+
+    await back();
+    await upgradeCompany(ctx, companyId);
+    expect(await state()).toEqual({ responsible: [ivanId, ivanId, olegId], managers: ['DEV-PM', 'SAL-PM'], due: false });
+  });
+
+  it('takes back the responsible people it named when hiring the product managers fails, and a later run does it all', async () => {
+    const { ctx, db, companyId, state, olegId, ivanId } = await due();
+    const back = await failAt(db, 'insert', 'agents');
+    await expect(upgradeCompany(ctx, companyId)).rejects.toMatchObject({ cause: { message: 'The upgrade failed here.' } });
+    expect(await state()).toEqual({ responsible: [null, null, null], managers: [], due: true });
+
+    await back();
+    await upgradeCompany(ctx, companyId);
+    expect(await state()).toEqual({ responsible: [ivanId, ivanId, olegId], managers: ['DEV-PM', 'SAL-PM'], due: false });
   });
 });
