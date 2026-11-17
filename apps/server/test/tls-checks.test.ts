@@ -2,7 +2,8 @@ import type { RequestListener } from 'node:http';
 import https from 'node:https';
 import net, { type AddressInfo } from 'node:net';
 import { createSecureContext } from 'node:tls';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { probe } from '../src/modules/tls/checks.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
 import { closedPort } from './closed-port.js';
@@ -30,10 +31,31 @@ const healthOnly: RequestListener = (req, res) => {
 
 const serverOf = (pair: Pair, listener: RequestListener = healthOnly) => https.createServer({ key: pair.keyPem, cert: pair.certPem }, listener);
 
-const quickly = async (asked: Promise<boolean>): Promise<{ answer: boolean; ms: number }> => {
-  const started = performance.now();
-  return { answer: await asked, ms: performance.now() - started };
-};
+/* Runs a probe on a clock that moves only here: on to the probe's next timer, once every try it has started has reached the
+   server, which answers nothing more. The probe then waits for nothing but time. Gives the answer, the virtual
+   milliseconds it took, and the tries it made. */
+async function onVirtualTime(probing: () => Promise<boolean>, reached: () => number): Promise<{ answer: boolean; ms: number; tries: number }> {
+  const asks = vi.spyOn(https, 'get');
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  const restore = () => {
+    vi.useRealTimers();
+    asks.mockRestore();
+  };
+  onTestFinished(restore);
+  try {
+    const started = Date.now();
+    let answer: boolean | undefined;
+    void probing().then(given => void (answer = given));
+    const waitsForTime = () => vi.getTimerCount() > 0 && reached() >= asks.mock.calls.length;
+    for (;;) {
+      await eventually(() => answer !== undefined || waitsForTime());
+      if (answer !== undefined) return { answer, ms: Date.now() - started, tries: asks.mock.calls.length };
+      await vi.advanceTimersToNextTimerAsync();
+    }
+  } finally {
+    restore();
+  }
+}
 
 describe('probe', () => {
   it('probe is true for its own certificate and false for another or a closed port', async () => {
@@ -63,21 +85,29 @@ describe('probe', () => {
 
   it('gives up on a server that never finishes TLS, or never answers', async () => {
     const own = await selfSigned('localhost');
-    const silent = await urlOf(net.createServer(() => {}));
-    const mute = await urlOf(serverOf(own, () => {}));
-    for (const url of [silent, mute]) {
-      const { answer, ms } = await quickly(probe(url, own.certPem, { ca: own.certPem, tries: 3, everyMs: 10, timeoutMs: 200, deadlineMs: 500 }));
+    let connected = 0;
+    let asked = 0;
+    const silent = await urlOf(net.createServer(() => void connected++));
+    const mute = await urlOf(serverOf(own, () => void asked++));
+    const servers = [
+      { url: silent, reached: () => connected },
+      { url: mute, reached: () => asked },
+    ];
+    for (const { url, reached } of servers) {
+      const { answer, ms } = await onVirtualTime(() => probe(url, own.certPem, { ca: own.certPem, tries: 3, everyMs: 10, timeoutMs: 200, deadlineMs: 500 }), reached);
       expect(answer).toBe(false);
-      expect(ms).toBeLessThan(1500);
+      expect(ms).toBeLessThanOrEqual(500);
     }
   });
 
   it('stops at the deadline, however many tries are left', async () => {
     const own = await selfSigned('localhost');
-    const mute = await urlOf(serverOf(own, () => {}));
-    const { answer, ms } = await quickly(probe(mute, own.certPem, { ca: own.certPem, tries: 100, everyMs: 10, timeoutMs: 200, deadlineMs: 300 }));
+    let asked = 0;
+    const mute = await urlOf(serverOf(own, () => void asked++));
+    const { answer, ms, tries } = await onVirtualTime(() => probe(mute, own.certPem, { ca: own.certPem, tries: 100, everyMs: 10, timeoutMs: 200, deadlineMs: 300 }), () => asked);
     expect(answer).toBe(false);
-    expect(ms).toBeLessThan(1500);
+    expect(ms).toBeLessThanOrEqual(300);
+    expect(tries).toBeLessThan(100);
   });
 
   it('asks over a new connection each time', async () => {
