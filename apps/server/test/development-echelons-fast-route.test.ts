@@ -83,7 +83,7 @@ describe('echelon route without idle handoffs', () => {
     const player = await f.hire('Turnkey Dev', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
     await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, player.id));
     const { task } = await f.create({
-      assigneeAgentId: player.id, small: false, riskClass: 'security',
+      assigneeAgentId: player.id, architectAgentId: f.author.id, small: false, riskClass: 'security',
       reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined,
     });
     expect((await f.detail(task.id)).echelons).toMatchObject({

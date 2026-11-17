@@ -92,6 +92,21 @@ describe('test-only repair and src/** return at Tests without task cancellation'
     expect((await f.detail()).echelons.candidateId).toBe(f.snapshot.candidateId);
   });
 
+  it('returns an unchanged candidate for a source defect without requiring a test repair first', async () => {
+    const f = await testsFixture();
+    const delta = 'logic/totals.ts: clamp the negative discount before computing tax.';
+    const returned = await report(f.ctx, f.tester.id, f.task.id, {
+      done: false, summary: 'The existing regression test exposed a source defect.',
+      verification: { candidateId: f.snapshot.candidateId!, revision: f.snapshot.revision, delta },
+    });
+    expect(returned.task).toMatchObject({ status: 'open', assigneeAgentId: f.author.id });
+    expect(returned.wakes[0]?.note).toContain(delta);
+    expect((await f.detail()).echelons).toMatchObject({
+      stage: 'development', phase: 'active', candidateId: f.snapshot.candidateId,
+      revision: f.snapshot.revision + 1,
+    });
+  });
+
   it('returns the candidate with a delta description to the code executor when src/** changes are needed, preserving immutable revision history', async () => {
     const f = await testsFixture();
     withCommits(f, TEST_FIX, {
