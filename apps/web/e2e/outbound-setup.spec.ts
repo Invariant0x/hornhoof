@@ -108,7 +108,7 @@ for (const look of LOOKS) {
     expect.soft(await offences(part, words)).toEqual([]);
     const measured: Measured[] = [{ browser: browserName, look: name, screen: 'settings', ...(await edges(part)) }];
     await shot(page, block(t.outboundSetup.channelsTitle), `settings-channels-${browserName}-${name}`);
-    await shot(page, part.getByRole('list', { name: t.outboundSetup.contact.listTitle }), `settings-addresses-${browserName}-${name}`);
+    await shot(page, part.locator('.outbound-contacts').filter({ has: page.getByRole('list', { name: t.outboundSetup.contact.listTitle(2), exact: true }) }), `settings-addresses-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.catalogTitle), `settings-catalog-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.logTitle), `settings-log-${browserName}-${name}`);
 
