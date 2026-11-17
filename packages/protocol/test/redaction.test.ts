@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS } from '../src/redaction.js';
 
 describe('stored prose, masked as it is written', () => {
@@ -48,6 +48,55 @@ describe('stored prose, masked as it is written', () => {
       expect(hideCredentials(address), address).toBe(expected);
       expect(cleanDiagnostic(address), address).toBe(expected);
     }
+  });
+
+  it('leaves incomplete URL credentials alone and still hides later nested or separate URLs', () => {
+    for (const plain of [
+      '://user:pass@host', '123://user:pass@host', 'a://:pass@host', 'a://user:@host',
+      'a://user:pass/part@host', 'a://user name:pass@host', 'a://user:pass word@host',
+    ]) expect(hideCredentials(plain), plain).toBe(plain);
+    expect(hideCredentials('a://a://user:pass@host')).toBe(`a://a://${HIDDEN}@host`);
+    expect(hideCredentials('a://user:one:two@host b://other:pass@next')).toBe(`a://${HIDDEN}@host b://${HIDDEN}@next`);
+  });
+
+  it('uses bounded URL searches on long words at two input sizes', () => {
+    const find = String.prototype.indexOf;
+    const read = String.prototype.charAt;
+    const measured = (text: string) => {
+      let searches = 0, searched = 0, inspected = 0;
+      const searching = vi.spyOn(String.prototype, 'indexOf').mockImplementation(function (this: string, needle: string, from = 0) {
+        const at = find.call(this, needle, from);
+        if (this === text && needle === '://') {
+          searches += 1;
+          searched += (at < 0 ? text.length : at + needle.length) - from;
+        }
+        return at;
+      });
+      const reading = vi.spyOn(String.prototype, 'charAt').mockImplementation(function (this: string, at: number) {
+        if (this === text) inspected += 1;
+        return read.call(this, at);
+      });
+      try {
+        return { text: hideCredentials(text), searches, steps: searched + inspected };
+      } finally {
+        searching.mockRestore();
+        reading.mockRestore();
+      }
+    };
+    const sizes = [2048, 4096];
+    const plain = sizes.map(size => measured('f'.repeat(size)));
+    for (const [i, result] of plain.entries()) {
+      expect(result.text).toBe('f'.repeat(sizes[i]!));
+      expect(result.searches).toBe(1);
+      expect(result.steps).toBe(sizes[i]);
+    }
+    const urls = sizes.map(size => measured(`${'f'.repeat(size)}://user:pass@host.example`));
+    for (const [i, result] of urls.entries()) {
+      expect(result.text).toBe(`${'f'.repeat(sizes[i]!)}://${HIDDEN}@host.example`);
+      expect(result.searches).toBe(2);
+      expect(result.steps).toBeLessThanOrEqual(2 * sizes[i]! + 32);
+    }
+    expect(urls[1]!.steps).toBeLessThanOrEqual(2 * urls[0]!.steps);
   });
 });
 

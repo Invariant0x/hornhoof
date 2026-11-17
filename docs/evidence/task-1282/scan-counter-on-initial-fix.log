@@ -1,0 +1,44 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/packages/protocol
+
+ ❯ test/redaction.test.ts (11 tests | 1 failed | 10 skipped) 6ms
+   ❯ stored prose, masked as it is written (6)
+     ↓ hides labelled passwords and credentials of a known format
+     ↓ keeps code, headers, flags, links and ordinary words as they are written
+     ↓ hides an exact value only from eight characters on
+     ↓ keeps a maximum-size assistant conversation and masks a following URL password
+     ↓ masks URL passwords beside scheme characters, with their prefixes and public addresses preserved
+     × uses bounded URL searches on long words at two input sizes 5ms
+   ↓ a diagnostic cleaned for a reader who may not read where it comes from (5)
+     ↓ hides labelled Russian passwords and keeps ordinary prose and identifiers
+     ↓ hides credentials by their shape
+     ↓ hides paths in a home or user folder, and keeps the rest
+     ↓ keeps each list to its own kind, so the node log hides credentials and leaves its paths
+     ↓ leaves no part of a credential at the edge of a cut made after cleaning
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/redaction.test.ts > stored prose, masked as it is written > uses bounded URL searches on long words at two input sizes
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/redaction.test.ts:81:31
+     79|     for (const [i, result] of plain.entries()) {
+     80|       expect(result.text).toBe('f'.repeat(sizes[i]!));
+     81|       expect(result.searches).toBe(1);
+       |                               ^
+     82|       expect(result.steps).toBe(sizes[i]);
+     83|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  15:25:30
+   Duration  952ms (transform 98%, import 1%, tests 1%)
