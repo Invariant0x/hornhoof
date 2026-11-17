@@ -46,7 +46,14 @@ export class PrivateValues {
   }
 
   hide<T>(value: T): T {
-    if (typeof value === 'string') return this.text(value) as T;
+    if (typeof value === 'string') {
+      if (this.values.has(value)) return '[hidden]' as T;
+      if (/^\s*[[{]/.test(value)) {
+        try { return JSON.stringify(this.hide(JSON.parse(value))) as T; }
+        catch { /* A plain report may begin with a bracket. */ }
+      }
+      return this.text(value) as T;
+    }
     if (Array.isArray(value)) return value.map(item => this.hide(item)) as T;
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, IDENTITY.test(key) ? item : this.hide(item)])) as T;
     return value;
