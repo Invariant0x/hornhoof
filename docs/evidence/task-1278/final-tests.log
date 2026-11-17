@@ -1,0 +1,36 @@
+
+ RUN  v5.0.5 /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1278/apps/server
+
+ ✓ test/computer-scope.test.ts (19 tests) 6887ms
+   ✓ machine access scope (19)
+     ✓ opens for 1h and names its opener 1158ms
+     ✓ opens for 8h and names its opener 360ms
+     ✓ keeps owner-only opening and permits the owner, CEO and delegate to close 1157ms
+     ✓ names no person as the opener when the orchestrator opens access itself 309ms
+     ✓ names the person who closes access or declines its request 578ms
+     ✓ offers heads and workers command tools without asking for access 575ms
+ ✓ test/tasks-tools.test.ts (30 tests) 13937ms
+   ✓ task tools (13)
+     ✓ keeps a long UTF-8 comment intact through MCP 4363ms
+     ✓ keeps a long UTF-8 submit intact through MCP 761ms
+     ✓ keeps a long UTF-8 report intact through MCP 443ms
+     ✓ gives each kind of agent its task tools 535ms
+     ✓ tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal 376ms
+     ✓ keeps mandatory Review and skips optional Security when no risk was assigned 316ms
+     ✓ refuses the eleventh task in one turn 539ms
+     ✓ keeps the newest of a long log within one answer, and says how much of it was left out 341ms
+     ✓ hides other departments' tasks from an employee 430ms
+   ✓ asking a person (3)
+     ✓ asks a person only with every promised material attached, and keeps a note that should not end a wait off the task 360ms
+     ✓ keeps the question as an outgoing message to its responsible person 352ms
+     ✓ keeps what the question is about, and takes no topic it does not know 608ms
+   ✓ a small task (2)
+     ✓ is set and read by the giver, never by its executor 858ms
+   ✓ a task's kind and risk class (8)
+     ✓ changes the work kind without waking whoever holds the task, and a log line says so 570ms
+
+ Test Files  2 passed (2)
+      Tests  49 passed (49)
+   Start at  15:01:30
+   Duration  19.44s (tests 80%, import 17%, transform 3%)
+
