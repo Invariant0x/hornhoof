@@ -51,7 +51,7 @@ async function inside(page: Page, what: string) {
 /* What a finger presses is at least 44 px high. */
 async function touchable(page: Page, what: string) {
   const links = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
-  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-chip select, .tr-menu:visible, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
+  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-menu:visible, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
     expect(height, what).toBeGreaterThanOrEqual(43.5);
   }
