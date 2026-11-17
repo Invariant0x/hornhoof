@@ -263,7 +263,7 @@ describe('telling screens that decisions changed', () => {
     await until(() => streams.dan.messages.some(m => m.type === 'computer'));
   });
 
-  it('tells the orchestrator acting for the CEO nothing of the request for the computer on its stream', async () => {
+  it('tells the orchestrator acting for the CEO of the request for the computer on its stream, as it sees what the CEO sees', async () => {
     const c = await company();
     await listen(c.app);
     const headers = orchestratorHeaders(c.ids.ivan, c.orchestrator.id);
@@ -271,10 +271,7 @@ describe('telling screens that decisions changed', () => {
     expect(inside.res.status).toBe(200);
     await c.askComputer('Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
-    /* What comes after the change on the same stream shows the change itself went by. */
-    c.ctx.bus.publish(c.acme.id, { type: 'org' });
-    await until(() => inside.messages.some(m => m.type === 'org'));
-    expect(inside.messages.some(m => m.type === 'computer')).toBe(false);
+    await until(() => inside.messages.some(m => m.type === 'computer'));
   });
 
   it("tells people who see the whole company that the orchestrator's cards changed, and the others nothing of it", async () => {
