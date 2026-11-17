@@ -2259,7 +2259,7 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    event = (turn.privacy ??= new ToolPrivacy()).event(event, event.kind === 'tool' ? this.bridge.toolPolicy(a.key, event.name) : undefined);
+    event = (turn.privacy ??= new ToolPrivacy()).event(event, undefined, name => this.bridge.toolPolicy(a.key, name));
     if (turn.privacy.sensitive) a.privateOutput = true;
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
@@ -3020,25 +3020,26 @@ export class TerminalHost {
     await this.opts.tmux.kill(a.name);
     if (await this.opts.tmux.has(a.name)) return busy('its session is still there');
     this.operator?.exited(a.key, { code: null, signal: null });
-    if (a.turn) return busy(TURN_BEGAN);
+    if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
-    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, tail: null, fresh: false, started: null, privateOutput: false });
+    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, fresh: false, started: null, privateOutput: false });
     return RETIRED;
   }
 
   /* The program sleeps: it ends, and its pane stays with what it printed for people to scroll back through. Its session stays
-     the agent's, which Hornhoof gives the next turn to start it again in. */
+     the agent's, which Hornhoof gives the next turn to start it again in. The node keeps its place in the program's log:
+     read again from its start, the log's turns would seem to run still, and the next turn would wait for them to end. */
   private async sleepProgram(a: Agent): Promise<RetireResult> {
     if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.intentional(a, 'completed');
     await this.opts.tmux.stop(a.name);
     if (await this.opts.tmux.alive(a.name)) return busy('its program still runs');
     this.operator?.exited(a.key, { code: null, signal: null });
-    if (a.turn) return busy(TURN_BEGAN);
+    if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programAsleep(a);
-    Object.assign(a, { hash: null, instance: null, launch: null, tail: null, fresh: false, started: null });
+    Object.assign(a, { hash: null, instance: null, launch: null, fresh: false, started: null });
     return RETIRED;
   }
 

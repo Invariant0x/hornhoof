@@ -117,6 +117,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   new TaskTools(server, ctx, job).register();
 }
 
+export function registerHolderTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  new TaskTools(server, ctx, job).registerHolderTools();
+}
+
 class TaskTools {
   private readonly db: Ctx['db'];
   private readonly boss: boolean;
@@ -137,8 +141,13 @@ class TaskTools {
     if (this.job.agentKind !== 'worker') this.registerTurnTools();
     if (this.job.agentKind === 'head') this.registerCreateTask();
     if (this.job.agentKind !== 'worker') this.registerManagementTools();
-    if (this.job.agentKind !== 'orchestrator') this.registerExecutionTools();
-    if (this.job.agentKind !== 'orchestrator') this.registerReleaseTurn();
+    if (this.job.agentKind !== 'orchestrator') this.registerHolderTools();
+  }
+
+  /* What the holder of a task hands in and records; the orchestrator keeps them on its shelf. */
+  registerHolderTools(): void {
+    this.registerExecutionTools();
+    this.registerReleaseTurn();
   }
 
   /* The orchestrator gives the work of every department and reads their turns; a head those of its own. */
