@@ -342,6 +342,7 @@ select:disabled { opacity: .55; }
 }
 .dialog:focus { outline: none; }
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }
 .update-progress { display: grid; gap: 8px; }
@@ -571,6 +572,18 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.map-workspace { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.map-workspace > .map { position: relative; inset: auto; }
+.worker-legend { min-inline-size: 0; background: var(--surface); border-block-start: 1px solid var(--line); }
+.worker-legend summary { display: flex; align-items: center; gap: 8px; min-block-size: 44px; margin: 0; padding: 8px 16px; border: 0; background: none; font: inherit; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; cursor: pointer; list-style: none; }
+.worker-legend summary::-webkit-details-marker { display: none; }
+.worker-legend summary:hover { background: var(--surface2); }
+.worker-legend summary:focus-visible { outline-offset: -2px; }
+.worker-legend summary .ic { transform: rotate(90deg); }
+.worker-legend[open] summary .ic { transform: rotate(-90deg); }
+.worker-legend ul { display: flex; flex-wrap: wrap; gap: 8px 24px; max-block-size: 28vh; margin: 0; padding: 8px 16px 12px; overflow: auto; scrollbar-gutter: stable; list-style: none; }
+.worker-legend li, .worker-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
+.worker-legend li > span:last-child, .worker-name > b { min-inline-size: 0; }
 .map::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -1458,17 +1471,35 @@ body:has(.form-foot) .version-mark { display: none; }
 .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
 .dot.working { background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
 .dot.needs_subscription { background: var(--amber); }
-/* One square per employee on a department's card on the map. */
-.cells { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
-.cell { width: 9px; height: 9px; background: var(--idle); }
-.cell.w { background: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
-.cell.q { background: color-mix(in srgb, var(--cyan) 45%, var(--idle)); }
-.cell.r { background: var(--amber); animation: breathe 3.2s ease-in-out infinite; }
-.cell.h { background: var(--pink); }
-.cell.o { background: none; box-shadow: inset 0 0 0 1px var(--amber); }
+/* Worker marks use the current skin's ink roles and the tracker's status rings. */
+:root {
+  --worker-employee-fill: var(--muted);
+  --worker-generalist-fill: var(--tracker-working-ring);
+  --worker-ghost-ink: var(--muted);
+  --worker-ghost-running: var(--tracker-working-ring);
+  --worker-ghost-waiting: var(--tracker-waiting-ring);
+}
+.worker-mark { display: inline-grid; place-items: center; flex: none; inline-size: 14px; block-size: 14px; color: var(--worker-employee-fill); }
+.worker-mark[data-worker-kind='generalist'] { color: var(--worker-generalist-fill); }
+.worker-mark[data-worker-kind='ghost'] { color: var(--worker-ghost-ink); }
+.worker-mark .ic { inline-size: 100%; block-size: 100%; }
+.worker-mark:is([data-worker-kind='employee'], [data-worker-kind='generalist']) .ic { fill: currentColor; }
+/* Department cards use 9 px staff marks and 12 px ghost marks. The map sets the card height from their wrapped rows. */
+.cells { display: flex; flex: none; flex-wrap: wrap; gap: 3px; margin-block-start: 2px; }
+.worker-mark.cell { --cell-ink: var(--line2); inline-size: 9px; block-size: 9px; color: var(--cell-ink); }
+.cell.w { --cell-ink: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
+.cell.q { --cell-ink: color-mix(in srgb, var(--cyan) 45%, var(--idle)); }
+.cell.r { --cell-ink: var(--amber); animation: breathe 3.2s ease-in-out infinite; }
+.cell.h { --cell-ink: var(--pink); }
+.cell.o { --cell-ink: var(--amber); }
+.worker-mark.cell.o .ic { fill: none; }
+.worker-mark.cell[data-worker-kind='ghost'] { inline-size: 12px; block-size: 12px; color: var(--worker-ghost-ink); }
+.worker-mark.cell[data-worker-kind='ghost'].w { color: var(--worker-ghost-running); filter: drop-shadow(0 0 2px var(--worker-ghost-running)); animation: none; }
+.worker-mark.cell[data-worker-kind='ghost'].q { color: var(--worker-ghost-waiting); }
 .cell.ping { animation: ping .9s ease-out; }
+@media (prefers-reduced-motion: reduce) { .cells .cell { animation: none; } }
 @keyframes breathe { 0%, 100% { opacity: .95; } 50% { opacity: .55; } }
-@keyframes ping { 0% { background: var(--ink); transform: scale(1.8); } 100% { transform: none; } }
+@keyframes ping { 0% { color: var(--ink); transform: scale(1.8); } 100% { transform: none; } }
 /* The department's tasks under its people, and a new task written in place. */
 .dv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dv-h h3 { margin-bottom: 10px; }
@@ -1534,6 +1565,8 @@ body:has(.form-foot) .version-mark { display: none; }
 .ac-head p { margin: 0; }
 .ac-head .btn { margin-top: 8px; }
 .ac-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ac-state .worker-mark.working { color: var(--tracker-working-ring); }
+.ac-state .worker-mark.needs_subscription { color: var(--tracker-waiting-ring); }
 .ac-state .ast { flex: 0 1 auto; max-width: 100%; box-sizing: border-box; white-space: normal; }
 .ac-failure { max-width: 100%; font-size: 12.5px; color: var(--pink-ink); }
 .offline-plan { display: grid; gap: 8px; min-width: 0; }
@@ -1708,10 +1741,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
-/* The tracker, PROPOSAL items "Tracker" of the style book: the left panel, then the main area with where the person is,
+/* The tracker, as shown in "Tracker" in the style book: the left panel, then the main area with where the person is,
    the view and its filters and the work, and the card at the end side. On a phone the left panel is a drawer over the page,
    the board's columns stand one under another and the card takes the whole width. */
-.tracker { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; max-width: 1440px; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
+.tracker { display: grid; grid-template-columns: clamp(220px, 17vw, 280px) minmax(0, 1fr); gap: 20px; align-items: start; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
 @media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
 /* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
    stays where the person scrolled it. */
@@ -1719,19 +1752,25 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
 }
-.tr-side { position: sticky; top: 84px; display: grid; gap: 8px; align-content: start; min-width: 0; max-height: calc(100vh - 100px); overflow: auto; scrollbar-width: none; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
-/* The panel scrolls with no bar of its own, so every engine leaves its content the same width (style book section 9). */
-.tr-side::-webkit-scrollbar { display: none; }
+.tr-side { position: sticky; inset-block-start: 84px; display: grid; gap: 8px; align-content: start; min-inline-size: 0; max-block-size: calc(100vh - 100px); overflow: auto; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
+.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; font: 600 18px var(--f-display); overflow-wrap: anywhere; }
+.tr-new { margin-inline-start: auto; }
 .tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
-.tr-side-close { display: none; justify-content: flex-end; }
+.tr-side .tr-side-close { display: none; margin-inline-start: auto; }
 .tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; width: 100%; min-height: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
 .tr-item:hover { background: var(--surface2); }
 .tr-item.on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
 .tr-item:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-item-name { min-width: 0; overflow-wrap: anywhere; }
-.tr-item small { grid-column: 1 / -1; font-size: 12px; font-weight: 400; color: var(--muted); overflow-wrap: anywhere; }
+.tr-item-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; overflow-wrap: anywhere; }
+.tr-item-name > .ic, .tr-side-caption > .ic { color: var(--muted); }
+.tr-item.on .tr-item-name > .ic { color: currentColor; }
 .tr-count { font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-badge { min-inline-size: 20px; padding-inline: 4px; border: 1px solid var(--line2); border-radius: 1em; text-align: center; }
+.tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
+.tr-side-caption { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
+.tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
 .tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; }
 .tr-unfold .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
 .tr-unfold[aria-expanded="true"] .chev { transform: rotate(90deg); }
@@ -1747,33 +1786,39 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-person b { font-weight: 600; overflow-wrap: anywhere; }
 .tr-people .linkish { justify-self: start; font-size: 12.5px; overflow-wrap: anywhere; }
 .tr-turns { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
-.tr-main { display: grid; gap: 16px; align-content: start; min-width: 0; }
-.tr-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px 16px; min-width: 0; }
-.tr-top > .btn { min-height: 44px; }
-.tr-write { grid-row: 1; grid-column: 2; align-self: start; }
+.tr-main { display: grid; gap: 12px; align-content: start; min-inline-size: 0; }
+.tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding-block-end: 10px; border-block-end: 1px solid var(--line); }
+.tr-write { justify-self: start; max-inline-size: 100%; }
 .tr-menu { display: none; }
-.tr-where { display: grid; gap: 4px; min-width: 0; }
-.tr-where h1 { margin: 0; overflow-wrap: anywhere; }
-.tr-where p { margin: 0; overflow-wrap: anywhere; }
-.tr-tools { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; min-width: 0; }
+.tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.tr-divider { color: var(--muted); }
+.tr-where bdi { min-inline-size: 0; }
+.tr-search { flex: 1 1 220px; max-inline-size: 280px; min-inline-size: 0; margin-inline-start: auto; }
+.tr-search .field > label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+.tr-view-as { max-inline-size: 100%; min-inline-size: 0; }
+.tr-view-as .field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.tr-view-as .field-control { flex: 0 1 auto; max-inline-size: 100%; min-inline-size: 0; }
+.tr-top .task-search input { padding-inline: 12px 44px; }
+.tr-top .task-search .zbtn { inset-inline: auto 0; inset-block-start: 0; }
 .tr-make { justify-content: flex-start; }
-.tr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-width: 0; }
-.tr-views { flex: 0 1 360px; min-width: min(100%, 260px); }
-.tr-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.tr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding-inline-start: 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface); font-size: 13px; font-weight: 600; color: var(--muted); }
-.tr-chip > span { overflow-wrap: anywhere; }
-.tr-chip.on { border-color: var(--cyan); color: var(--cyan-ink); }
-/* The chip's choice is as wide in every engine, its arrow at the end side of the line in both directions. */
-.tr-chip select {
-  inline-size: 160px; max-inline-size: 100%; min-inline-size: 0; block-size: 40px; padding-block: 0; padding-inline: 8px 28px;
-  border: 0; background-color: var(--surface); font: inherit; font-weight: 500; line-height: 40px; color: var(--ink);
-}
-[dir="rtl"] .tr-chip select { background-position: 10px 50%, 15px 50%; }
-.tr-chip select:is(:focus, :focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
-/* In the light skin a cyan line on white is too faint for a border, and cyan words over the glow too faint for words: a
-   chosen chip, card or node, a goal's node and a node under the pointer draw their border in the ink of the accent. */
-:root[data-scheme="light"] :is(.tr-chip.on, .tr-node.goal, .tr-node.on, button.tr-node:hover, .tr-card.on) { border-color: var(--cyan-ink); }
-:root[data-scheme="light"] .tr-views label.on { color: var(--ink); }
+.tr-bar { display: grid; gap: 8px; min-inline-size: 0; }
+.tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 4px; min-inline-size: 0; margin: 0; padding: 0; border: 0; border-block-end: 1px solid var(--line); }
+.tr-views label, .tr-add-view { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-inline-size: 100%; min-block-size: 40px; margin: 0; padding: 6px 12px; border: 0; border-block-end: 2px solid transparent; background: none; color: var(--muted); font: 600 14px var(--f-display); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-views label.on { border-block-end-color: var(--tracker-working-ring); color: var(--ink); }
+.tr-views label:hover, .tr-add-view:hover { color: var(--ink); background: var(--surface2); }
+.tr-views label:focus-within, .tr-chip:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.tr-view-empty { margin: 0; padding: 8px 12px; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.tr-chips { display: flex; flex-wrap: wrap; gap: 8px; min-inline-size: 0; }
+.tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 32px; margin: 0; padding: 4px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 13px; color: var(--muted); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-chip:hover { color: var(--ink); }
+.tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
+.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: min(100%, 180px); min-block-size: 40px; padding: 6px 10px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
+.tr-person-picker .ic { transform: rotate(90deg); }
+.tr-person-picker:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.tr-chip select, .tr-person-picker select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
+/* In the light skin a cyan line on white is too faint for a border: a chosen card or node, a goal's node and a node under
+   the pointer draw their border in the ink of the accent, as chips and views do through --tracker-working-ring. */
+:root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover, .tr-card.on) { border-color: var(--cyan-ink); }
 .tr-goals { display: grid; gap: 8px; min-width: 0; }
 .tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
 .tr-goals ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -1787,38 +1832,128 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-wait { color: var(--amber-ink); overflow-wrap: anywhere; }
 .tp-late { color: var(--amber-ink); font-weight: 600; }
 
-/* The list: a group per state in words, the names of its columns above it where the list is wide, each task a row of name,
-   executor, responsible, goal and due; where it is narrow, each value with its name under the task. */
-.tr-list { container: tr-list / inline-size; display: grid; gap: 18px; min-width: 0; }
-.tr-group { display: grid; gap: 6px; min-width: 0; }
-.tr-group-head { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
-.tr-group-head > .goal-fold { font-size: inherit; color: var(--ink); }
-.tr-rows { display: grid; margin: 0; padding: 0; list-style: none; min-width: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
-.tr-rows.sub { margin-block-start: 4px; margin-inline-start: 12px; background: var(--surface2); }
-.tr-row { display: grid; gap: 2px; min-width: 0; padding: 8px 12px; border-block-start: 1px solid var(--line); }
-.tr-row:first-child { border-block-start: 0; }
-.tr-row.on { box-shadow: inset 3px 0 0 var(--cyan); }
-[dir="rtl"] .tr-row.on { box-shadow: inset -3px 0 0 var(--cyan); }
-.tr-cells { display: grid; grid-template-columns: minmax(0, 3fr) repeat(3, minmax(0, 1.2fr)) minmax(0, 1fr); align-items: baseline; gap: 4px 12px; min-width: 0; font-size: 13px; }
-.tr-head { padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+/* Tracker palette aliases follow the skin without adding fields to skin files. */
+:root {
+  --tracker-palette-accent: var(--cyan);
+  --tracker-palette-warning: var(--amber);
+  --tracker-palette-attention: var(--pink);
+  --tracker-palette-success: var(--ok);
+  --tracker-palette-blue: var(--p-kimi);
+  --tracker-palette-violet: var(--p-glm);
+  --tracker-program-claude: var(--p-claude);
+  --tracker-program-codex: color-mix(in srgb, var(--muted), var(--ink) 45%);
+  --tracker-program-kimi: var(--p-kimi);
+  --tracker-program-glm: var(--p-glm);
+  --tracker-program-antigravity: var(--p-antigravity);
+  --tracker-program-other: var(--muted);
+  --tracker-priority-urgent: var(--pink-ink);
+  --tracker-priority-high: var(--amber-ink);
+  --tracker-priority-normal: var(--cyan-ink);
+  --tracker-priority-low: var(--muted);
+  --tracker-mark-ink: var(--bg);
+  --tracker-mark-strength: 100%;
+  --tracker-working-ring: var(--cyan);
+  --tracker-waiting-ring: var(--amber);
+}
+:root[data-scheme='light'] {
+  --tracker-mark-ink: var(--ink);
+  --tracker-mark-strength: 30%;
+  --tracker-working-ring: var(--cyan-ink);
+  --tracker-waiting-ring: var(--amber-ink);
+}
+.tr-mark, .tr-status-pill {
+  background: color-mix(in srgb, var(--tr-tone) var(--tracker-mark-strength), var(--surface));
+  color: var(--tracker-mark-ink);
+}
+.tr-mark { display: inline-grid; place-items: center; flex: none; min-inline-size: 20px; min-block-size: 20px; padding-inline: 2px; font-size: 12px; font-weight: 600; line-height: 1.1; }
+.tr-avatar { border-radius: 50%; }
+.tr-executor { border-radius: 2px; }
+.tr-executor[data-worker-kind='generalist'] { display: inline-flex; align-items: center; gap: 2px; }
+.tr-executor .worker-mark[data-worker-kind='generalist'] { inline-size: 10px; block-size: 10px; color: inherit; }
+.tr-stage-ghost { margin-inline-start: 4px; vertical-align: middle; }
+.tr-relation .tr-dept-mark { min-inline-size: 16px; min-block-size: 16px; font-size: 11px; }
+.tr-mark[data-tone='accent'] { --tr-tone: var(--tracker-palette-accent); }
+.tr-mark[data-tone='warning'] { --tr-tone: var(--tracker-palette-warning); }
+.tr-mark[data-tone='attention'] { --tr-tone: var(--tracker-palette-attention); }
+.tr-mark[data-tone='success'] { --tr-tone: var(--tracker-palette-success); }
+.tr-mark[data-tone='blue'] { --tr-tone: var(--tracker-palette-blue); }
+.tr-mark[data-tone='violet'] { --tr-tone: var(--tracker-palette-violet); }
+.tr-executor[data-program='claude'] { --tr-tone: var(--tracker-program-claude); }
+.tr-executor[data-program='codex'] { --tr-tone: var(--tracker-program-codex); }
+.tr-executor[data-program='kimi'] { --tr-tone: var(--tracker-program-kimi); }
+.tr-executor[data-program='glm'] { --tr-tone: var(--tracker-program-glm); }
+.tr-executor[data-program='antigravity'] { --tr-tone: var(--tracker-program-antigravity); }
+.tr-executor[data-program='other'] { --tr-tone: var(--tracker-program-other); }
+.tr-priority { display: inline-flex; align-items: center; gap: 4px; max-inline-size: 100%; color: var(--tracker-priority-normal); }
+.tr-priority.urgent { color: var(--tracker-priority-urgent); }
+.tr-priority.high { color: var(--tracker-priority-high); }
+.tr-priority.low { color: var(--tracker-priority-low); }
+.tr-priority-arrow { inline-size: 10px; block-size: 10px; fill: currentColor; stroke: none; }
+.tr-dept-mark, .tr-status-pill {
+  --cut: calc(4px * var(--cut-k));
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+
+/* The list uses the same column tracks for the heading and every row, including work under another task. */
+.tr-list { container: tr-list / inline-size; display: grid; min-inline-size: 0; }
+.tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
+.tr-group { border-block-end: 1px solid var(--line); }
+.tr-group-head { margin: 0; padding-block-start: 8px; font-size: 14px; }
+.tr-group-toggle, .tr-add-task { display: flex; align-items: center; gap: 8px; min-block-size: 36px; max-inline-size: 100%; margin: 0; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-group-toggle:hover, .tr-add-task:hover { background: var(--surface2); color: var(--cyan-ink); }
+.tr-group-arrow { inline-size: 0; block-size: 0; border: 4px solid transparent; border-inline-start-color: currentColor; }
+.tr-group-toggle[aria-expanded="true"] .tr-group-arrow { border-inline-start-color: transparent; border-block-start-color: currentColor; }
+.tr-status-pill { --tr-tone: var(--muted); padding: 2px 8px; text-transform: uppercase; }
+.tr-group.working .tr-status-pill { --tr-tone: var(--tracker-palette-accent); }
+.tr-group.waiting .tr-status-pill, .tr-group.you .tr-status-pill { --tr-tone: var(--tracker-palette-warning); }
+.tr-group.blocked .tr-status-pill { --tr-tone: var(--tracker-palette-attention); }
+.tr-group.done .tr-status-pill { --tr-tone: var(--tracker-palette-success); }
+.tr-group.review .tr-status-pill { --tr-tone: var(--tracker-palette-violet); }
+.tr-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.tr-row-line { min-block-size: 40px; padding: 8px; border-block-end: 1px solid var(--line); }
+.tr-row-line.on { border-inline-start: 3px solid var(--cyan); padding-inline-start: 5px; background: var(--glow); }
+.tr-cells { display: grid; grid-template-columns: minmax(0, 4fr) repeat(3, minmax(0, 1.15fr)) minmax(0, 1.4fr) minmax(0, .9fr); align-items: center; gap: 4px 12px; min-inline-size: 0; font-size: 13px; }
+.tr-head { padding: 8px; border-block-end: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--muted); }
 .tr-head > span { overflow-wrap: anywhere; }
-.tr-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 14px; }
+.tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
+.tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
+.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: 24px; min-block-size: 24px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
+.tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
+[dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
+.tr-branch-count { display: inline-flex; align-items: center; gap: 4px; }
+.tr-rows[hidden] { display: none; }
+.tr-status-dot { flex: 0 0 auto; inline-size: 14px; block-size: 14px; border: 2px solid var(--muted); border-radius: 50%; }
+.tr-status-dot.working { border-color: var(--tracker-working-ring); }
+.tr-status-dot.waiting, .tr-status-dot.you { border-color: var(--tracker-waiting-ring); }
+.tr-status-dot.blocked { border-color: var(--pink-ink); }
+.tr-status-dot.review { border-color: var(--tracker-palette-violet); }
+.tr-status-dot.done { border-color: var(--ok); background: var(--ok); }
+.tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
+.tr-task-name > .tr-wait, .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-row-line .tr-title { min-block-size: 24px; }
 .tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
-.tr-title:hover { color: var(--cyan-ink); }
-.tr-name .tstate, .tr-name .badge { white-space: normal; }
-.tr-name small { flex-basis: 100%; font-size: 12px; }
-.tr-cell { min-width: 0; overflow-wrap: anywhere; }
+.tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
+.tr-name .badge { white-space: normal; }
+.tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; padding: 2px 6px; border: 1px solid var(--line2); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { color: var(--muted); }
+.tr-id-name { display: none; }
 @container tr-list (max-width: 640px) {
   .tr-head { display: none; }
-  .tr-cells { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .tr-cell { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 12.5px; }
+  .tr-row-line { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 8px 12px; }
+  .tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 8px), 12%); }
+  .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; font-size: 13px; }
   .tr-cell:has(.tr-v:empty) { display: none; }
-  .tr-k { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
+  .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
-  .tr-v { color: var(--ink); }
+  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; color: var(--ink); }
+  .tr-id-name { display: inline; min-inline-size: 0; overflow-wrap: anywhere; }
+  .tr-title, .tr-name { font-size: 16px; }
+  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: 44px; }
+  .tr-goal-link { display: inline-flex; align-items: center; }
 }
 
 /* The board: as many columns side by side as the width holds, each with its name and count, cards one under another. */
@@ -1886,13 +2021,16 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tr-stage { display: grid; gap: 8px; padding-block-end: 12px; border-block-end: 1px solid var(--line); }
 
 @media (max-width: 760px) {
-  .tracker { grid-template-columns: minmax(0, 1fr); }
+  .tracker { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-inline: 12px; }
+  .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
+  .tr-where { flex: 1 1 200px; }
+  .tr-view-as { flex: 1 1 100%; }
+  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: 44px; }
+  .tr-row-caret { inline-size: 44px; }
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
-  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-height: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
+  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-block-size: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
   .tr-side.open { display: grid; }
-  .tr-side-close { display: flex; }
-  .tr-top { grid-template-columns: minmax(0, 1fr); }
-  .tr-write { grid-row: auto; grid-column: auto; }
+  .tr-side .tr-side-close { display: inline-grid; }
   .tr-menu { display: inline-flex; justify-self: start; min-height: 44px; }
   .tr-canvas { height: calc(100vh - 220px); min-height: 320px; }
 }
@@ -2110,6 +2248,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tgates li.skipped { opacity: 0.6; }
 .tgates li.current::before { background: var(--cyan); box-shadow: 0 0 0 4px var(--glow); }
 .tgates li.current span { color: var(--cyan-ink); font-weight: 600; }
+.tgates .worker-mark[data-worker-kind='ghost'] { margin-inline-end: 4px; vertical-align: middle; color: var(--worker-ghost-ink); }
 .tp-brief { font-weight: 500; }
 .tp-body { display: grid; gap: 6px; font-size: 14px; }
 .tp-subs, .tp-log { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -2808,6 +2947,8 @@ th.k-prio .sorth { white-space: nowrap; }
 /* A skin of pixels cuts every corner in two square steps of 2 px, times its cut, whatever the usual cut of the part.
    Last in the file and as specific as the rule of each part, so a part that drops its cut, a ghost button or a focused
    one, keeps doing so. */
+:where(:root[data-cut='steps']) .tr-dept-mark,
+:where(:root[data-cut='steps']) .tr-status-pill,
 :where(:root[data-cut='steps']) .edge,
 :where(:root[data-cut='steps']) .btn,
 :where(:root[data-cut='steps']) .tview .lchip,

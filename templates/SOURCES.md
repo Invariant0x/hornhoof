@@ -6,6 +6,10 @@ The list at the end names every template, what it learned from and its licence. 
 
 The development templates carry Hornhoof's own T1-T11 testing policy and coding cycle with four task kinds. Product environment discovery and ownership are also project-owned procedures, shared by Development and Operations. These project-owned rules govern affected tests, the final whole-suite run, release-scoped mutation testing, deterministic evidence and the Bug, Known behaviour, Unknown path and Legacy code cycles for any company and language.
 
+The one-shot stage declarations, judge briefs and stage-owner guidance are Hornhoof's own text. They use the procedure in `skills/hh-one-shot-calls.md`.
+
+The first-contact offer and setup procedures in `skills/orch-interview.md` and `skills/orch-company.md` are Hornhoof's own text. Telegram's bot guide explains the BotFather and Start steps.
+
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
@@ -224,6 +228,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/ops-intake.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-mcp-config-review.md` | Written for Hornhoof | affaan-m/ECC skills/mcp-dependency-review/SKILL.md | Hornhoof |
 | `skills/ops-node-health.md` | Written for Hornhoof | affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
+| `skills/ops-phone-readiness.md` | Written for Hornhoof | Hornhoof's own procedure for checking and restoring connected phone settings | Hornhoof |
 | `skills/ops-postmortem.md` | Written for Hornhoof | wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md | Hornhoof |
 | `skills/ops-program-operator.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-runbook.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md | Hornhoof |

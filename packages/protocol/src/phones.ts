@@ -56,13 +56,17 @@ export const PhoneGrant = z.strictObject({
 export type PhoneGrant = z.infer<typeof PhoneGrant>;
 
 export const PhoneProbe = z.strictObject({ type: z.literal('phone.probe'), requestId: z.uuid(), endpoint: PhoneEndpoint, pairing: PhonePairing.optional() });
+export const PhoneBaseline = z.strictObject({ type: z.literal('phone.baseline'), requestId: z.uuid(), binding: PhoneBinding });
+export const PhoneReadinessIssue = z.enum(['connection', 'nodeUpdate', 'check', 'lock', 'awake', 'brightness', 'batterySaver', 'appSleep', 'deviceIdle', 'appBattery', 'debugTrust', 'prompt']);
+export type PhoneReadinessIssue = z.infer<typeof PhoneReadinessIssue>;
+const PhoneReadiness = z.array(PhoneReadinessIssue).max(PhoneReadinessIssue.options.length);
 export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), requestId: z.uuid(), grant: PhoneGrant });
 export const PhoneAction = z.strictObject({ type: z.literal('phone.action'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), operation: PhoneOperation });
 export const PhoneRenew = z.strictObject({ type: z.literal('phone.renew'), sessionId: z.uuid(), generation: z.number().int().nonnegative(), expiresAt: z.iso.datetime() });
 export const PhoneRevoke = z.strictObject({ type: z.literal('phone.revoke'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), binding: PhoneBinding });
 export const PhoneReply = z.strictObject({
   type: z.literal('phone.reply'), requestId: z.uuid(), status: z.enum(['ok', 'failed', 'needs_person', 'session_gone', 'busy']),
-  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(),
+  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(), readiness: PhoneReadiness.optional(),
 });
 export type PhoneReply = z.infer<typeof PhoneReply>;
 export const PhoneFrame = z.strictObject({
@@ -70,5 +74,5 @@ export const PhoneFrame = z.strictObject({
   at: z.iso.datetime(), capture: PhoneCapture,
 });
 export type PhoneFrame = z.infer<typeof PhoneFrame>;
-export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
+export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
 export type PhoneServerMessage = z.infer<typeof PhoneServerMessage>;

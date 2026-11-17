@@ -20,10 +20,33 @@ function withRoute(key: string, stages: string): string {
 
 describe('the route of every department template', () => {
   it('keeps the stages of Development and the skill of each of its checks', () => {
-    expect(templates.stagesOf('development').stages).toEqual([
+    expect(templates.stagesOf('development').stages.map(({ stage, ability }) => ({ stage, ability }))).toEqual([
       { stage: 'architecture', ability: null }, { stage: 'development', ability: null }, { stage: 'review', ability: 'dev-review-diff' },
       { stage: 'cleanup', ability: 'dev-cleanup' }, { stage: 'security', ability: 'dev-security-review' }, { stage: 'tests', ability: 'dev-test-environment' },
     ]);
+  });
+
+  it('declares stock one-shot stages only for independent drafting, research and checks', () => {
+    expect(Object.fromEntries(TEMPLATE_KEYS.map(key => [key, templates.stagesOf(key).stages.flatMap(({ stage, oneShot }) =>
+      oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
+    )]))).toEqual({
+      operations: [{ stage: 'review', fanOut: 3, judge: true }],
+      development: [{ stage: 'review', fanOut: 3, judge: true }, { stage: 'security', fanOut: 3, judge: true }],
+      marketing: [{ stage: 'development', fanOut: 5, judge: true }, { stage: 'review', fanOut: 3, judge: true }],
+      sales: [{ stage: 'review', fanOut: 3, judge: true }],
+      business_development: [{ stage: 'development', fanOut: 5, judge: false }],
+      design: [{ stage: 'development', fanOut: 3, judge: true }],
+      support: [{ stage: 'review', fanOut: 3, judge: true }],
+      finance: [{ stage: 'review', fanOut: 3, judge: true }],
+      home_devices: [],
+      household: [],
+    });
+  });
+
+  it.each(['hh-task-flow', 'hh-check-work', 'dev-review-diff', 'dev-security-review'])('points stage owners to one-shot briefing and how to use the judge in %s', id => {
+    const calls = templates.skills.get('hh-one-shot-calls')!;
+    const guidance = templates.skills.get(id)!.body.split('\n\n').find(part => part.includes(`the ability "${calls.title.en}"`));
+    expect(guidance).toMatch(/one-shot.*brief.*judge/);
   });
 
   it('gives every department a route of its own, each with the work stage', () => {

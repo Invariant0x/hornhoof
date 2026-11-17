@@ -1,4 +1,5 @@
-import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
+import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
+import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait, WaitSourceKind } from '@hornhoof/protocol/waits';
@@ -152,11 +153,13 @@ export type Employee = {
   name: string;
   roleId: string | null;
   teamId?: string | null;
+  turnkey?: boolean;
   title: Lang | null;
   kind: 'head' | 'worker';
   model: string;
   modelName: string | null;
   provider: ProviderId | null;
+  apiProtocol?: ApiProtocol;
   /* The level its model thinks at, when Hornhoof knows it. */
   effort: string | null;
   state: AgentState;
@@ -215,10 +218,12 @@ export type Department = {
   /* The results accepted into its open turn, the next release, as far as this person sees them; none while it runs no turn
      or out of reach. */
   turnProgress?: DepartmentTurnProgress | null;
+  oneShotStages?: OneShotStage[];
   /* Its one-shot calls that wait or run now; startedAt: none while one waits for its turn on the machine. */
   calls?: CallMark[];
 };
 
+export type OneShotStage = { stage: EchelonStage; fanOut: number; judge: boolean };
 export type CallMark = { id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null };
 
 export type { ApprovalChannel, ApprovalMode };
@@ -337,6 +342,7 @@ export type AgentCardView = {
   product: { id: string; name: string } | null;
   team?: { id: string; name: string } | null;
   teams?: { id: string; name: string }[];
+  turnkey?: boolean;
   model: string;
   /* The level a person picked, or null for the Default. */
   effort: string | null;
@@ -472,6 +478,7 @@ export type TaskLine = {
   title: string;
   brief: string;
   status: TaskStatus;
+  priority?: TaskPriority;
   externalWait?: ExternalWait | null;
   /* Paused work wakes nobody until it is resumed; root is the task the pause was placed on. */
   paused?: { at: string; reason: string; root: string } | null;

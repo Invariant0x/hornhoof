@@ -9,6 +9,8 @@ You can check a result against its task and hand it forward only when it meets i
 
 Read "task" first: its body says what was asked and how it is accepted, and task.echelons names your stage and the candidate you check. You check the result, not its author's account of it. The check is the same for your own result: read it cold, as if another had written it.
 
+At a one-shot review stage, follow the ability "One-shot calls". In the brief, give each call an independent check with the candidate, its acceptance criteria and the evidence needed for that check. Use the route's judge to combine the findings. Verify the findings you rely on against the sources, and do checks that need live access yourself before giving your verdict.
+
 **What to read.** Where the result is a commit, read what it changed from task.review. Where it is a document, read the hand-in in the task log and fetch every file it names with `hh-fetch`. Read the sources the result relies on, not only the result.
 
 1. **Does it do what the task asked?** Every requirement met, nothing added that was not asked. Missing work is a finding.

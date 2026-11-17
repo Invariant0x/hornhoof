@@ -105,6 +105,11 @@ export async function canViewAgent(db: Db, me: Person, agent: AgentRow, planId: 
   return seesAgent(await viewerOf(db, me), await placeOf(db, agent, planId));
 }
 
+/* A personal channel can reach the orchestrator without opening its window or shared history. */
+export async function canContactAgent(db: Db, me: Person, agent: AgentRow): Promise<boolean> {
+  return agent.companyId === me.companyId && (agent.kind === 'orchestrator' || await canViewAgent(db, me, agent));
+}
+
 export const agentHidden = () => new ApiError(403, 'forbidden', 'This employee is not on a plan of yours in a department you have, nor in a department you own.', 'agent_hidden');
 
 export async function requireAgentView(db: Db, me: Person, agent: AgentRow, planId: string | null = agent.subscriptionId): Promise<void> {

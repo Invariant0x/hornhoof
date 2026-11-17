@@ -18,6 +18,25 @@ const skills = [...templates.skills.values()];
 describe('templates', () => {
   const body = (id: string) => templates.skills.get(id)!.body;
 
+  it('loads first contact instructions for starting the selected work', () => {
+    expect(body('orch-interview')).toContain('first-contact');
+    expect(body('orch-company')).toMatch(/first-contact[\s\S]*build_structure[\s\S]*create_task/);
+    expect(body('orch-interview')).toMatch(/vault[\s\S]*\/api\/agents\/orchestrator\/telegram[\s\S]*stock Personal assistant instructions/);
+  });
+
+  it('lets the home team carry out reversible device work the notebook allows', () => {
+    expect(body('home-real-world-approval')).toMatch(/reversible[\s\S]*CE[O]['’]s yes/);
+    for (const id of ['home-network', 'home-smart-control', 'home-work-pipeline']) {
+      expect(body(id)).not.toMatch(/waits? for a person['’]s approval|Acting waits for a person/);
+    }
+  });
+
+  it('loads the connected phone procedure for Operations', () => {
+    expect(templates.roles.get('OPS-HEAD')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.roles.get('OPS-FIX')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.skills.get('ops-phone-readiness')?.body).toMatch(/Company phones[\s\S]*after an update/);
+  });
+
   it('keeps role identities to one sentence and procedure-free across every department', () => {
     for (const role of roles) {
       expect(role.body, role.id).toMatch(/^You are [^\n.!?]+\.$/);
@@ -369,7 +388,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(186);
+    expect(skills).toHaveLength(187);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -1609,10 +1628,8 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
 
-/* Ivan's rule for every company: a person is asked only for an irreversible deletion (the CEO's yes) or for what only they
-   know, and nothing that goes out of the company waits for a person's yes by default. Household skills keep a person's
-   word on physical actions and payments in a home, and a shared operations change keeps its own approval. */
-const STILL_ASK = new Set(['home-bills', 'home-network', 'home-shopping', 'home-smart-control', 'ops-change-request']);
+/* A shared operations change keeps its own approval. */
+const STILL_ASK = new Set(['ops-change-request']);
 const OUTBOUND_CONFIRMATIONS = [
   /\b(?:each|every) (?:exact )?public (?:item|post|variant|reply|change)\b[^.!?]*\b(?:requires?|needs?|retains?)\b[^.!?]*\bapproval\b/i,
   /\bpublic (?:items?|content|changes|use|proposals|publishing|russian content)\b[^.!?]*\b(?:requires?|retains?|needs?|waits? for(?! nobody| no one))\b[^.!?]*\bapproval\b/i,

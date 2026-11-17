@@ -110,6 +110,15 @@ const office = (checkerSkills = ['hh-check-work'], options: { turn?: boolean } =
   fixture('marketing', { head: 'MKT-HEAD', author: 'MKT-WRITE' }, checkerSkills, { repo: false, ...options });
 
 describe('a department that keeps no repository', () => {
+  it('stores the stock one-shot work and review stages on a document task', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    expect((await f.echelons(task.id)).oneShot).toEqual({
+      development: { fanOut: 5, judge: expect.stringContaining('headline') },
+      review: { fanOut: 3, judge: expect.stringContaining('claim') },
+    });
+  });
+
   it('takes the work of an employee through its stages as a document', async () => {
     const f = await office();
     const { task } = await f.create({ paths: undefined });

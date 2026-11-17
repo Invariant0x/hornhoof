@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
@@ -39,9 +40,11 @@ import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 
+const Priority = z.enum(TASK_PRIORITIES).nullable().optional();
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
   urgent: z.boolean().optional(),
+  priority: Priority,
   title: z.string().trim().min(1).max(120),
   brief: z.string().max(600).default(''),
   body: z.string().max(20000).default(''),
@@ -64,6 +67,7 @@ const NewTaskBody = z.object({
 });
 /* What a person changes of a task beside its work, on the task as they saw it. */
 const TaskPatch = z.strictObject({
+  priority: Priority,
   version: z.number().int().min(0),
   revision: z.number().int().min(0),
   title: z.string().trim().min(1).max(120).optional(),
@@ -386,7 +390,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await createTask(ctx, actorOf(me), {
       title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
       parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
-      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
@@ -399,7 +403,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = TaskPatch.parse(req.body);
     const task = await changed(me, id);
     const row = await editTask(ctx, actorOf(me), task, {
-      title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      title: body.title, brief: body.brief, why: body.why, priority: body.priority, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     }, { version: body.version, revision: body.revision });
     return { task: await detail(me, row) };
   });

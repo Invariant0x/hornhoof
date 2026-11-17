@@ -30,6 +30,12 @@ const assignmentCard = (assignment = '', skill = 'Write the test first.') => {
 };
 
 describe('AgentCard', () => {
+  it('identifies a turnkey member on the employee card', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, team: { id: 'u1', name: 'Whole tasks' }, turnkey: true }] });
+    await screen.findByRole('heading', { name: 'Bruno', level: 3 });
+    expect(screen.getByRole('img', { name: 'Generalist: does a task whole' })).toHaveAttribute('data-worker-kind', 'generalist');
+  });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 3, 16, 0));

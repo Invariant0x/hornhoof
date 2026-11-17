@@ -574,7 +574,7 @@ class TaskTools {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage })) })));
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
           const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),
@@ -658,9 +658,9 @@ class TaskTools {
     this.server.registerTool('update_task', {
       description: 'The department head revises the current task or checking owner without returning it to the author. With echelonStage and ownerAgentId, assigns an eligible owner to a future pending echelon stage without moving or waking the current owner; producer, model capability, ability and scope rules still apply. stage is the stage of the tracker pipeline, not an echelon stage. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
       inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), echelonStage: z.enum(ECHELON_STAGES).optional().describe('A future pending echelon stage of this task to give ownerAgentId in advance.'), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
-    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
+    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, priority, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
-      const tracker = { goal, responsible, why, due, pipeline, stage };
+      const tracker = { goal, responsible, why, due, pipeline, stage, priority };
       /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
          either is written, so a refused part leaves the other as it was. With a change of the work, what the tracker
          keeps is written in the same move, checked again there: both are in, or neither. */

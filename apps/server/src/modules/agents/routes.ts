@@ -44,6 +44,7 @@ export type AgentCard = FailureState & {
   product: { id: string; name: string } | null;
   team: { id: string; name: string } | null;
   teams: { id: string; name: string }[];
+  turnkey: boolean;
   model: string;
   /* The level a person picked, or null to follow its role. */
   effort: string | null;
@@ -117,10 +118,11 @@ const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
   retry: i.retryOf !== null,
 });
 
-async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<{ team: { id: string; name: string } | null; teams: { id: string; name: string }[] }> {
-  if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [] };
-  const deptTeams = await db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
-  return { team: deptTeams.find(t => t.id === agent.teamId) ?? null, teams: deptTeams };
+async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<Pick<AgentCard, 'team' | 'teams' | 'turnkey'>> {
+  if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [], turnkey: false };
+  const deptTeams = await db.select({ id: teams.id, name: teams.name, turnkey: teams.turnkey }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
+  const options = deptTeams.map(({ id, name }) => ({ id, name }));
+  return { team: options.find(t => t.id === agent.teamId) ?? null, teams: options, turnkey: deptTeams.some(t => t.id === agent.teamId && t.turnkey) };
 }
 
 async function applyTeamPatch(db: Ctx['db'], agent: AgentRow, next: AgentRow, team: string | null | undefined, invalid: (message: string, reason: ErrorReason) => ApiError): Promise<void> {

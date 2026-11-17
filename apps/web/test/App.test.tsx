@@ -62,6 +62,25 @@ describe('App', () => {
     expect(calls.map(c => c.path)).not.toContain('/api/me');
   });
 
+  it('offers work as soon as a person with limited access accepts their invitation', async () => {
+    window.history.replaceState(null, '', '/invite/abc123');
+    const me: Me = { ...MARIA, person: { ...MARIA.person, scopeKind: 'listed' } };
+    mockApi({
+      'GET /api/invites/abc123': [200, { companyName: 'Acme', name: 'Maria', email: me.person.email, title: '', access: { whole: false, departments: [], teams: [] } }],
+      'POST /api/invites/abc123/accept': [200, { person: me.person }],
+      'GET /api/setup': [200, { needed: false }],
+      'GET /api/me': [200, me],
+      'GET /api/orchestrator/first-contact': [200, { offers: ['fixProject', 'checkSetup', 'telegram', 'assistant'] }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText('Choose a password'), 'long-enough-pass');
+    await user.click(screen.getByRole('button', { name: 'Join' }));
+    await user.click(await screen.findByRole('button', { name: 'Skip for now' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Talk to the orchestrator' });
+    expect(await within(dialog).findByRole('button', { name: 'Set up my personal assistant' })).toBeInTheDocument();
+  });
+
   it('shows the version and build in a corner on every screen, login too', async () => {
     mockApi({ 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [401, signedOut], 'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
     render(<App />);

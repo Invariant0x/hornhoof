@@ -48,6 +48,27 @@ describe('a person makes a task with what the tracker keeps', () => {
     expect([withGoal.statusCode, withGoal.json().error.reason]).toEqual([400, 'goal_invalid']);
   });
 
+  it('stores priority on create and edit, lists it and allows resetting it', async () => {
+    const { db, ceo, dev, send, get, work } = await company();
+    const legacy = await work('Earlier task');
+    const made = await send('POST', ceo, '/api/tasks', { title: 'Payments', department: dev.id, priority: 'high' });
+    expect(made.statusCode, made.body).toBe(201);
+    const task = made.json().task;
+    expect(task).toMatchObject({ priority: 'high', urgent: false });
+    const edited = await send('PATCH', ceo, `/api/tasks/${task.id}`, { priority: 'urgent', version: task.version, revision: task.revision });
+    expect(edited.statusCode, edited.body).toBe(200);
+    expect(edited.json().task).toMatchObject({ priority: 'urgent', urgent: false, version: task.version, revision: task.revision + 1 });
+    const listed = (await get(ceo, '/api/tasks?status=all')).json().tasks as { id: string; priority: string }[];
+    expect(listed.find(t => t.id === task.id)?.priority).toBe('urgent');
+    expect(listed.find(t => t.id === legacy.task.id)?.priority).toBe('normal');
+    expect((await db.select().from(tasks).where(eq(tasks.id, legacy.task.id)))[0]?.priority).toBeNull();
+    const invalid = await send('PATCH', ceo, `/api/tasks/${task.id}`, { priority: 'top', version: task.version, revision: task.revision + 1 });
+    expect(invalid.statusCode).toBe(400);
+    const reset = await send('PATCH', ceo, `/api/tasks/${task.id}`, { priority: null, version: task.version, revision: task.revision + 1 });
+    expect(reset.json().task).toMatchObject({ priority: 'normal' });
+    expect(reset.json().task.log.at(-1)).toMatchObject({ kind: 'edited', data: { fields: ['priority'] } });
+  });
+
   it('names who answers for each department beside the departments the tracker lists', async () => {
     const { ceo, dev, sales, olegId, mariaId, get } = await company();
     const listed = (await get(ceo, '/api/task-departments')).json().departments as { id: string; responsible: { id: string; name: string } | null }[];
