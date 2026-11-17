@@ -1,18 +1,32 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 /* The packages a worktree of a clone shares with the clone: a worktree made for a task need not install what its clone has
    installed from the same lockfile. */
 
 const lockOf = dir => { try { return readFileSync(join(dir, 'package-lock.json')); } catch { return null; } };
+const packagesOf = file => { try { return JSON.parse(readFileSync(file, 'utf8')).packages ?? null; } catch { return null; } };
+const RECORD = 'node_modules/.package-lock.json';
 
-/* The clone this worktree was made from, when it finished an install of this very lockfile, else null. */
+/* Whether node_modules holds what the folder's lockfile names, by what npm keeps of its install in RECORD: each package at
+   the lockfile's version, none the lockfile no longer names, and none missing but one it names for another machine only.
+   A workspace's own entry changes with each release and installs nothing. */
+export function installedFrom(dir) {
+  const wanted = packagesOf(join(dir, 'package-lock.json')), got = packagesOf(join(dir, RECORD));
+  if (!wanted || !got) return false;
+  const installs = path => path.includes('node_modules/');
+  const same = (a, b) => a.version === b.version && a.resolved === b.resolved;
+  return Object.entries(wanted).every(([path, entry]) => !installs(path) || (got[path] ? same(entry, got[path]) : entry.optional === true))
+    && Object.keys(got).every(path => !installs(path) || path in wanted);
+}
+
+/* The clone this worktree was made from, when its packages are installed from this very lockfile, else null. */
 export function cloneWithModules(root, git) {
   let common;
   try { common = git(['rev-parse', '--path-format=absolute', '--git-common-dir']).trim(); } catch { return null; }
   const clone = dirname(common), ours = lockOf(root), theirs = lockOf(clone);
   if (resolve(clone) === resolve(root) || !ours || !theirs || !ours.equals(theirs)) return null;
-  return existsSync(join(clone, 'node_modules/.package-lock.json')) ? clone : null;
+  return installedFrom(clone) ? clone : null;
 }
 
 /* Each package links to the clone's. A folder of links, a scope or .bin, is made anew with the same links, so that a link to a
@@ -37,8 +51,9 @@ function workspaceFolders(root) {
   });
 }
 
-/* The worktree's node_modules, and each workspace's, from its clone's. The worktree's own goes in place last and whole, so
-   one that stopped halfway leaves none and is made again. Whether it took them. */
+/* The worktree's node_modules, and each workspace's, from its clone's, in place of what it had. The worktree's own goes in
+   place last and whole, with its own copy of npm's record of the install, so one that stopped halfway leaves none and is
+   made again. Whether it took them. */
 export function shareModules(root, git) {
   const clone = cloneWithModules(root, git);
   if (!clone) return false;
@@ -51,6 +66,8 @@ export function shareModules(root, git) {
   const staged = join(root, `node_modules.shared-${process.pid}`);
   rmSync(staged, { recursive: true, force: true });
   mirror(join(clone, 'node_modules'), staged);
+  copyFileSync(join(clone, RECORD), join(staged, '.package-lock.json'));
+  rmSync(join(root, 'node_modules'), { recursive: true, force: true });
   renameSync(staged, join(root, 'node_modules'));
   return true;
 }
