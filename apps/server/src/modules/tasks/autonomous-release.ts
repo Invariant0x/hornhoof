@@ -180,9 +180,9 @@ function matchesLegacyFullCommand(department: Dept, command: string): boolean {
 
 async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run): Promise<boolean> {
   if (!isPassedCommitRun(run, commit)) return false;
+  if (run.command === '') return wholeProductRun(db, run, companyId, department.id, commit);
   const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  if (!completeRunParts(parts, run, companyId, commit)) return false;
-  return run.command === '' ? validFullProductRun(run, parts, companyId, department.id, commit) : matchesLegacyFullCommand(department, run.command);
+  return completeRunParts(parts, run, companyId, commit) && matchesLegacyFullCommand(department, run.command);
 }
 
 async function newestFailedNumber(db: QueryDb, companyId: string, departmentId: string, commit: string): Promise<number> {

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
@@ -36,7 +36,7 @@ describe('the release step of a turn', () => {
   it('asks in its description for a whole run of the turn branch, which may take what its release proved', async () => {
     const f = await releasing();
     const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
-    expect(tool.description).toMatch(/runId a passed whole run of it: the first run of its release, or a later one that took only what its release proved/);
+    expect(tool.description).toMatch(/runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own/);
     expect(tool.description).not.toMatch(/nothing reused/);
     expect(tool.inputSchema.properties?.runId).toMatchObject({ description: 'A passed whole run of that commit.' });
   });
@@ -75,6 +75,8 @@ describe('the release step of a turn', () => {
   it('refuses a passed run of a command of its own, with no product and no receipts, though a person approved the commit', async () => {
     const f = await releasing();
     const run = await f.fullRun({ command: 'printf smoke-{part}-{parts}' });
+    /* Any agent of the department with a task may start one on the turn branch at R. */
+    await f.db.update(testRuns).set({ agentId: f.author.id }).where(eq(testRuns.id, run.id));
     await f.approve();
     const result = await f.recordRelease({ runId: run.id });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
@@ -92,6 +94,28 @@ describe('the release step of a turn', () => {
     await f.db.update(testParts).set(change(part!)).where(eq(testParts.id, part!.id));
     await f.approve();
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining("it is no run of the product's full profile with a passed receipt of every part on this commit") as unknown });
+  });
+
+  /* What proves a run of the product is the receipts its machines sent for every part, not who asked for it. */
+  it('takes a run of the product that another agent of the department started', async () => {
+    const f = await releasing();
+    const run = await f.fullRun();
+    await f.db.update(testRuns).set({ agentId: f.author.id }).where(eq(testRuns.id, run.id));
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
+  });
+
+  it('refuses a run of the product that an agent of another department started, and takes one the orchestrator started', async () => {
+    const f = await releasing();
+    const run = await f.fullRun();
+    const [other] = await f.db.insert(departments).values({ companyId: f.task.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    const [outsider] = await f.db.insert(agents).values({ companyId: f.task.companyId, kind: 'worker', name: 'Outsider', roleKey: 'SAL-AE', departmentId: other!.id, model: '', subscriptionId: f.head.subscriptionId! }).returning();
+    await f.db.update(testRuns).set({ agentId: outsider!.id }).where(eq(testRuns.id, run.id));
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('an agent of another department started it') as unknown });
+    const [orchestrator] = await f.db.select().from(agents).where(and(eq(agents.companyId, f.task.companyId), eq(agents.kind, 'orchestrator')));
+    await f.db.update(testRuns).set({ agentId: orchestrator!.id }).where(eq(testRuns.id, run.id));
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
   });
 
   it("refuses a run of the product's profile that is not its full run", async () => {

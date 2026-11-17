@@ -595,7 +595,7 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is the head of the turn branch turn-<number>, runId a passed whole run of it: the first run of its release, or a later one that took only what its release proved; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked needs none, and its entry in the autonomous release log approves it. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is the head of the turn branch turn-<number>, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked needs none, and its entry in the autonomous release log approves it. " +
           'It says what the release brings and whether each of its commits was checked. Then fast-forward main to the commit and tag it vX.Y.Z: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact head commit of the turn branch.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
