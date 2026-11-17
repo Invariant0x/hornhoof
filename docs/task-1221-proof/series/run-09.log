@@ -1,0 +1,24 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1221/apps/server
+
+ ✓ test/worker-keeper.test.ts (29 tests) 8691ms
+   ✓ a worker's keeper (29)
+     ✓ joins with its ticket and serves the company on its front door 1213ms
+     ✓ reports its machine, and answers its own status without passing it on 301ms
+     ✓ reports its key for backups, and holds the bundles it is picked for until its owner says no 360ms
+     ✓ finds the server set up in the place of the one that was lost, and sends it the bundles it holds 1142ms
+     ✓ drops a renewal answer it cannot trust 480ms
+     ✓ waits for a computer another row holds, and takes no ticket twice 306ms
+     ✓ downloads the server's build and installs when told 311ms
+     ✓ pins its owner's key only from a ticket that let it in, and reports the pin's print 317ms
+     ✓ says a machine that holds no database is wiped, and one that was wiped once its updater said so 352ms
+ ✓ test/worker-keeper-fixture.test.ts (2 tests) 753ms
+   ✓ the worker keeper fixture (2)
+     ✓ starts the company when another process has taken the port a probe released 464ms
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  05:06:38
+   Duration  16.52s (tests 79%, import 17%, transform 3%)
+
+JSON report written to /tmp/task-1221-series-150e3e1f/run-09.json

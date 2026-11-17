@@ -1,0 +1,1 @@
+Usage: npm run -s check:author -- --sha <40 hex> --base <40 hex> [--allow-whole]

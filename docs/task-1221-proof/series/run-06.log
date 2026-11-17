@@ -1,0 +1,33 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1221/apps/server
+
+ ✓ test/worker-keeper.test.ts (29 tests) 12192ms
+   ✓ a worker's keeper (29)
+     ✓ joins with its ticket and serves the company on its front door 1039ms
+     ✓ becomes a data machine when its row says so 302ms
+     ✓ keeps what the leader says of this machine's copy whole: the leader it is of, and the slot to join 308ms
+     ✓ says when it could not become a data machine 353ms
+     ✓ shows its parts 376ms
+     ✓ reports its key for backups, and holds the bundles it is picked for until its owner says no 627ms
+     ✓ finds the server set up in the place of the one that was lost, and sends it the bundles it holds 1616ms
+     ✓ keeps its bundles behind an older leader, and goes on reporting to it 329ms
+     ✓ drops a renewal answer it cannot trust 436ms
+     ✓ waits for a computer another row holds, and takes no ticket twice 344ms
+     ✓ downloads the server's build and installs when told 456ms
+     ✓ pins its owner's key only from a ticket that let it in, and reports the pin's print 846ms
+     ✓ sends its ticket again when its owner's key could not be kept 405ms
+     ✓ carries the server's own computer access from its app to its updater 463ms
+     ✓ reports the print of the key its owner gave the server's machine, and its system 335ms
+     ✓ carries computer access over the peer link, opened only by what its owner signed 591ms
+     ✓ says a machine that holds no database is wiped, and one that was wiped once its updater said so 691ms
+ ✓ test/worker-keeper-fixture.test.ts (2 tests) 1228ms
+   ✓ the worker keeper fixture (2)
+     ✓ starts the company when another process has taken the port a probe released 705ms
+     ✓ starts a worker when another process has taken the port a probe released 431ms
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  05:05:36
+   Duration  21.93s (tests 81%, import 17%, transform 3%)
+
+JSON report written to /tmp/task-1221-series-150e3e1f/run-06.json

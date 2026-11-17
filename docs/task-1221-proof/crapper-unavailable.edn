@@ -1,0 +1,5 @@
+{:entries [
+  {:name "assertCandidate", :namespace "docs.task-1221-series", :complexity 3, :coverage nil, :crap nil}
+  {:name "head", :namespace "docs.task-1221-series", :complexity 1, :coverage nil, :crap nil}
+  {:name "sample", :namespace "docs.task-1221-series", :complexity 1, :coverage nil, :crap nil}
+]}

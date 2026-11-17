@@ -1,0 +1,42 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1221/apps/server
+
+ ✓ test/worker-keeper.test.ts (29 tests) 18627ms
+   ✓ a worker's keeper (29)
+     ✓ joins with its ticket and serves the company on its front door 1656ms
+     ✓ reports its machine, and answers its own status without passing it on 542ms
+     ✓ says the company moves when the leader is lost, by itself and to anyone 568ms
+     ✓ becomes a data machine when its row says so 417ms
+     ✓ shows its parts 353ms
+     ✓ reports its key for backups, and holds the bundles it is picked for until its owner says no 507ms
+     ✓ finds the server set up in the place of the one that was lost, and sends it the bundles it holds 2296ms
+     ✓ keeps its bundles behind an older leader, and goes on reporting to it 490ms
+     ✓ goes on telling a leader of the build before of its copy and its backups, without the measures that one refuses 404ms
+     ✓ refuses the network routes to whoever comes to the worker's web port 440ms
+     ✓ keeps the network across a restart without the server, and says where the company is 340ms
+     ✓ dials by the view's secret 554ms
+     ✓ renews by its key when its certificate has ended 631ms
+     ✓ stops at disconnect and says so 466ms
+     ✓ drops a renewal answer it cannot trust 951ms
+     ✓ waits for a computer another row holds, and takes no ticket twice 743ms
+     ✓ downloads the server's build and installs when told 761ms
+     ✓ pins its owner's key only from a ticket that let it in, and reports the pin's print 700ms
+     ✓ sends its ticket again when its owner's key could not be kept 801ms
+     ✓ carries the server's own computer access from its app to its updater 622ms
+     ✓ reports the print of the key its owner gave the server's machine, and its system 487ms
+     ✓ carries computer access over the peer link, opened only by what its owner signed 945ms
+     ✓ has a data machine's keeper report its addresses and its host's name 334ms
+     ✓ reports what its updater learned of the machine where the installer wrote neither name nor system 334ms
+     ✓ reports its round trip and the internet 465ms
+     ✓ says a machine that holds no database is wiped, and one that was wiped once its updater said so 1122ms
+ ✓ test/worker-keeper-fixture.test.ts (2 tests) 1064ms
+   ✓ the worker keeper fixture (2)
+     ✓ starts the company when another process has taken the port a probe released 635ms
+     ✓ starts a worker when another process has taken the port a probe released 345ms
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  05:03:45
+   Duration  32.54s (tests 85%, import 12%, transform 3%)
+
+JSON report written to /tmp/task-1221-series-150e3e1f/run-01.json
