@@ -1,17 +1,18 @@
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, onTestFinished } from 'vitest';
+import { afterAll, expect, onTestFinished, TestRunner } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 
 type Entry = { tag: string };
 
 /* A copy of the migrations folder with its journal cut as asked, for a folder named from prefix. A migrator reads the
    journal and the SQL of each migration it names. The snapshots beside them, 32.7 of the folder's 33 MB, it never opens,
-   and copying them twice a test cost a busy machine up to a second each time. */
+   and copying them twice a test cost a busy machine up to a second each time. The folder goes when the test ends, or,
+   cut as the file is collected, once the file's tests have run. */
 export async function migrationsCut(prefix: string, cut: (entries: Entry[]) => Entry[]): Promise<string> {
   const folder = await mkdtemp(join(tmpdir(), prefix));
-  onTestFinished(() => rm(folder, { recursive: true, force: true }));
+  (TestRunner.getCurrentTest() ? onTestFinished : afterAll)(() => rm(folder, { recursive: true, force: true }));
   const journal = JSON.parse(await readFile(join(MIGRATIONS, 'meta/_journal.json'), 'utf8')) as { entries: Entry[] };
   journal.entries = cut(journal.entries);
   await mkdir(join(folder, 'meta'));
