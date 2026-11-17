@@ -303,6 +303,42 @@ describe('a task', () => {
     }
   });
 
+  it('shows each one-shot call in its log, in each language: its brief, input, answer, verdict and how long it took', async () => {
+    const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
+    const call = (over: object) => ({ batch: 'aaaaaaaa-0000-4000-8000-000000000001', judge: false, brief: 'Look for unsafe SQL.', input: null, stage: null, error: null, verdict: null, startedAt: '2026-11-17T10:00:00.000Z', finishedAt: '2026-11-17T10:02:00.000Z', ...over });
+    const withCalls = {
+      ...TASK_DETAIL,
+      log: [
+        ...TASK_DETAIL.log,
+        { kind: 'call', text: 'One-shot call 1 of batch aaaa answered: Line 12 builds SQL from a string.', data: call({ number: 1, input: 'src/users.ts', status: 'done', result: 'Line 12 builds SQL from a string.', verdict: { pass: false, reason: 'unsafe SQL on line 12' } }), by: bruno, at: '2026-11-17T10:02:00.000Z' },
+        { kind: 'call', text: 'One-shot call 2 of batch aaaa failed: out of time', data: call({ number: 2, input: 'src/orders.ts', status: 'failed', error: 'timeout', result: 'out of time', finishedAt: '2026-11-17T10:00:30.000Z' }), by: bruno, at: '2026-11-17T10:02:01.000Z' },
+        { kind: 'call', text: 'The judge call of batch aaaa answered: The finding is real.', data: call({ number: 3, judge: true, brief: 'Keep only the real findings.', status: 'done', result: 'The finding is real.', verdict: { pass: false, reason: 'the finding is real' } }), by: bruno, at: '2026-11-17T10:04:00.000Z' },
+      ],
+    };
+    for (const [lang, words] of [
+      ['en', { title: 'Bruno ran a one-shot call', judge: 'Bruno ran a judge call', answered: 'Call 1 answered; it took 2 min.', failed: 'Call 2 failed; it ran less than a minute.', judged: 'The judge answered; it took 2 min.', verdict: 'Verdict: did not pass. unsafe SQL on line 12', brief: 'Brief: Look for unsafe SQL.', input: 'Input: src/users.ts', answer: 'Answer: Line 12 builds SQL from a string.' }],
+      ['ru', { title: 'Bruno запустил разовый вызов', judge: 'Bruno запустил судью вызовов', answered: 'Вызов 1 ответил, это заняло 2 мин.', failed: 'Вызов 2 не справился, он шел менее минуты.', judged: 'Судья ответил, это заняло 2 мин.', verdict: 'Итог: не принято. unsafe SQL on line 12', brief: 'Задание: Look for unsafe SQL.', input: 'Входные данные: src/users.ts', answer: 'Ответ: Line 12 builds SQL from a string.' }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      shell({ 'GET /api/tasks/t12': [200, { task: withCalls }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await openFromTracker(user, 12);
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      await within(panel).findAllByRole('listitem');
+      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title) || text.includes(words.judge));
+      expect(lines).toHaveLength(3);
+      for (const said of [words.title, words.answered, words.verdict, words.brief, words.input, words.answer]) expect(lines[0]).toContain(said);
+      expect(lines[1]).toContain(words.failed);
+      expect(lines[1]).toContain('out of time');
+      for (const said of [words.judge, words.judged]) expect(lines[2]).toContain(said);
+      /* The English line kept for the agents is not what a person reads. */
+      expect(panel).not.toHaveTextContent('of batch aaaa');
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('says in its log, in each language, that the machine of a turn is out of reach, and that it is back', async () => {
     const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
     const job = 'aaaaaaaa-0000-4000-8000-000000000001';

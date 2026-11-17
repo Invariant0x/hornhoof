@@ -17,6 +17,7 @@ import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { resetDuration } from './reset';
 import { PhoneRecordings } from './PhoneRecordings';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
@@ -30,6 +31,7 @@ function authorOf(t: Messages, e: TaskLogLine): string {
 function eventKey(e: TaskLogLine): string {
   if (e.kind === 'verdict') return field(e.data, 'pass') ? 'passed' : 'sentBack';
   if (e.kind === 'report') return field(e.data, 'done') ? 'reported' : 'notDone';
+  if (e.kind === 'call') return field(e.data, 'judge') ? 'judgeCall' : 'call';
   return e.kind;
 }
 
@@ -68,6 +70,30 @@ function awayText(t: Messages, e: TaskLogLine, when: (at: string) => string): st
   return stage === 'away' && typeof since === 'string' ? t.tasks.away.gone(machine, when(since)) : null;
 }
 
+/* How a one-shot call ended and how long it took, with its verdict when it gave one. */
+function callText(t: Messages, e: TaskLogLine): string | null {
+  const [n, judge, status, verdict] = [field(e.data, 'number'), field(e.data, 'judge'), field(e.data, 'status'), field(e.data, 'verdict')];
+  if (typeof n !== 'number') return null;
+  const [from, to] = [field(e.data, 'startedAt'), field(e.data, 'finishedAt')];
+  const took = typeof from === 'string' && typeof to === 'string' ? resetDuration(t, Date.parse(to) - Date.parse(from)) : null;
+  const done = status === 'done';
+  const line = judge ? (done ? t.tasks.calls.judgeAnswered(took) : t.tasks.calls.judgeFailed(took)) : done ? t.tasks.calls.answered(n, took) : t.tasks.calls.failed(n, took);
+  if (!verdict || typeof verdict !== 'object') return line;
+  const reason = field(verdict, 'reason');
+  return `${line} ${field(verdict, 'pass') ? t.tasks.calls.passed : t.tasks.calls.notPassed}${typeof reason === 'string' && reason ? ` ${reason}` : ''}`;
+}
+
+/* What a one-shot call was given and what it answered, as written. */
+function CallParts({ data }: { data: unknown }) {
+  const t = useT();
+  const parts = [[t.tasks.calls.brief, field(data, 'brief')], [t.tasks.calls.input, field(data, 'input')], [t.tasks.calls.answer, field(data, 'result')]] as const;
+  return (
+    <>
+      {parts.map(([name, text]) => (typeof text === 'string' && text ? <LogParagraph key={name} text={text} fullRef={null} prefix={`${name}: `} /> : null))}
+    </>
+  );
+}
+
 function skippedText(t: Messages, e: TaskLogLine): string {
   const wake = field(e.data, 'wake');
   if (typeof wake !== 'string') return e.text;
@@ -90,6 +116,7 @@ const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string
   wake_obsolete: obsoleteText,
   interrupted: (t, e, when) => cutText(t, e.data, when),
   away: awayText,
+  call: callText,
 };
 const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
 
@@ -242,6 +269,7 @@ export function LogEntry({ entry, when, words }: { entry: TaskLogLine; when: (at
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
+      {entry.kind === 'call' && <CallParts data={entry.data} />}
     </li>
   );
 }

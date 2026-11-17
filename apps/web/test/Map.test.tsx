@@ -233,6 +233,34 @@ describe('Map', () => {
     }
   });
 
+  it("marks each one-shot call of a department on its card while it waits or runs, in each language", async () => {
+    const [dev] = DEV_ORG.departments;
+    const by = dev!.employees[1]!;
+    const at = '2026-11-17T10:00:00.000Z';
+    const calls = [
+      { id: 'c1', number: 1, judge: false, task: 12, by: by.id, stage: 'review', startedAt: at },
+      { id: 'c2', number: 2, judge: false, task: 12, by: by.id, stage: 'review', startedAt: at },
+      { id: 'c3', number: 3, judge: true, task: 12, by: by.id, stage: 'review', startedAt: null },
+    ];
+    for (const [lang, name, first, judge] of [
+      ['en', 'One-shot calls: 2 running, 1 waiting for its turn', `Call 1 on #12, started by ${by.name}`, `Judge call on #12, started by ${by.name}`],
+      ['ru', 'Разовые вызовы: идут 2, ждут очереди 1', `Вызов 1 по #12 от ${by.name}`, `Судья вызовов по #12 от ${by.name}`],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      onTestFinished(() => localStorage.removeItem('hh-lang'));
+      mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, calls }] }] });
+      const { unmount } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+      const marks = await screen.findByRole('img', { name });
+      expect([...marks.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell w', 'cell q']);
+      expect([...marks.querySelectorAll('.cell')].map(c => c.getAttribute('title'))).toEqual([first, first.replace('1', '2'), judge]);
+      unmount();
+    }
+    mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, calls: [] }] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.cells.calls')).toBeNull();
+  });
+
   it('fills the upper gauge one segment of 24 per share of working agents, clear of both ends of the middle line', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 4, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);

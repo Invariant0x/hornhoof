@@ -425,6 +425,10 @@ export const en = {
     deputy: (where: string) => `Deputy: ${where}`,
     agentsWorking: 'agents working',
     deptAgents: 'Agents at work out of all',
+    /* One-shot calls of a department while they wait or run: short runs of an employee's program that each answer once. */
+    calls: (running: number, waiting: number) => `One-shot calls: ${running} running, ${waiting} waiting for ${waiting === 1 ? 'its' : 'their'} turn`,
+    call: (n: number, task: number, by: string) => `Call ${n} on #${task}, started by ${by}`,
+    judgeCall: (task: number, by: string) => `Judge call on #${task}, started by ${by}`,
     /* What a department's open turn holds: every result accepted into its branch. */
     readyForRelease: (n: number) => `Ready for release: ${n}`,
     orchestrator: 'Orchestrator',
@@ -1876,6 +1880,21 @@ export const en = {
       interrupted: (by: string) => `${by}'s turn was cut off by a node restart`,
       /* Hornhoof's own line, of nobody's doing. */
       away: () => 'A turn and its machine',
+      call: (by: string) => `${by} ran a one-shot call`,
+      judgeCall: (by: string) => `${by} ran a judge call`,
+    },
+    /* A one-shot call in the task's history: how it ended and how long it took; its brief, input and answer stay as
+       written. took: none when it never started. */
+    calls: {
+      answered: (n: number, took: string | null) => `Call ${n} answered${took ? `; it took ${took}` : ''}.`,
+      failed: (n: number, took: string | null) => `Call ${n} failed${took ? `; it ran ${took}` : ''}.`,
+      judgeAnswered: (took: string | null) => `The judge answered${took ? `; it took ${took}` : ''}.`,
+      judgeFailed: (took: string | null) => `The judge failed${took ? `; it ran ${took}` : ''}.`,
+      passed: 'Verdict: passed.',
+      notPassed: 'Verdict: did not pass.',
+      brief: 'Brief',
+      input: 'Input',
+      answer: 'Answer',
     },
     /* A turn on a task whose machine Hornhoof cannot reach, and that machine coming back. machine: its name, or none
        for the server's own machine or one that never said its name. */

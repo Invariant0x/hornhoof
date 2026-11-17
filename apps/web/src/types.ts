@@ -215,7 +215,11 @@ export type Department = {
   /* The results accepted into its open turn, the next release, as far as this person sees them; none while it runs no turn
      or out of reach. */
   turnProgress?: DepartmentTurnProgress | null;
+  /* Its one-shot calls that wait or run now; startedAt: none while one waits for its turn on the machine. */
+  calls?: CallMark[];
 };
+
+export type CallMark = { id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null };
 
 export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
