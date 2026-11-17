@@ -473,11 +473,11 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(await sessions.ask(SERVER_NETWORK_ID, 'POST', '/peer/switch/offer', { a: 1 })).toEqual({ status: 200, body: { machine: SERVER_ID, got: { a: 1 } } });
     expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/switch/state?switch=x')).toEqual({ status: 200, body: { machine: SERVER_ID, got: null } });
     expect(asked).toEqual([[WORKER_ID, 'POST', '/peer/switch/offer', { a: 1 }], [WORKER_ID, 'GET', '/peer/switch/state?switch=x', undefined]]);
-    /* With no session to the machine, or to none of that id, the answer is none at once. */
-    const started = performance.now();
-    expect(await sessions.ask(other, 'POST', '/peer/switch/offer', {})).toBeNull();
-    expect(await sessions.ask('e'.repeat(64), 'POST', '/peer/switch/offer', {})).toBeNull();
-    expect(performance.now() - started).toBeLessThan(1000);
+    /* With no session to the machine, or to none of that id, the answer is none at once: it is there before the event
+       loop takes one more turn, with no timer and no socket waited on. */
+    const atOnce = (answer: Promise<unknown>) => Promise.race([answer.then(value => ({ value })), new Promise(resolve => setImmediate(() => resolve('not yet')))]);
+    expect(await atOnce(sessions.ask(other, 'POST', '/peer/switch/offer', {}))).toEqual({ value: null });
+    expect(await atOnce(sessions.ask('e'.repeat(64), 'POST', '/peer/switch/offer', {}))).toEqual({ value: null });
     /* A machine that never answers, and an answer that is no JSON, are none too. */
     expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/switch/never', undefined, 100)).toBeNull();
     expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/nothing')).toBeNull();
