@@ -719,8 +719,9 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
-  /* The place the turn took on its machine is free: the turns that wait for one there go in their order. */
-  if (job.startedAt) await placeFreed(ctx, await machineOfTurn(ctx.db, job));
+  /* The place the turn took on its machine is free: the turns that wait for one there go in their order. Not waited for:
+     whoever ended the turn may stand in the line of an agent that waits there, which this sends on. */
+  if (job.startedAt) void machineOfTurn(ctx.db, job).then(machine => placeFreed(ctx, machine)).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'The turns that wait for a place on a machine could not be sent on.'));
 }
 
 async function recordFailedTurn(
