@@ -717,6 +717,8 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
   return !message.command && message.commitSha === description.commitSha && JSON.stringify(message.repositoryScope) === JSON.stringify(description.repositoryScope);
 }
 
+export const MAX_JOB_TIMEOUT_MS = 2 ** 31 - 1;
+
 const ServerMessage = z.discriminatedUnion('type', [
   CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
@@ -734,8 +736,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     effort: Effort.nullable().optional(),
     /* How full Claude Code's context gets before it compacts the conversation, in tokens; left out, its own window. */
     compactWindow: z.number().int().min(100_000).max(1_000_000).optional(),
-    /* Node's timers wait at most this long; a longer one fires at once. */
-    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    /* Zero means an untimed one-shot call. Node's timers cannot wait past the signed integer limit. */
+    timeoutMs: z.number().int().nonnegative().max(MAX_JOB_TIMEOUT_MS),
     secret: z.string().nullable(),
     /* For an API key: where its program sends its calls and in which protocol. A node from before runs the Claude and
        OpenAI APIs at their own addresses without it. */
@@ -754,7 +756,7 @@ const ServerMessage = z.discriminatedUnion('type', [
        the workspace's repository cloned in it, which the node removes after. It keeps no session, has no inbox and takes
        its turn by the machine's memory: it starts, and says so, once the machine has memory for its program. */
     call: z.literal(true).optional(),
-  }),
+  }).refine(job => job.timeoutMs > 0 || job.call === true),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has every numbered message of the node's stream up to this number, applied or failed for good; the node

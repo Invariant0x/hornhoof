@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
+import { MAX_JOB_TIMEOUT_MS, cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
 import { PRIVATE_TOOL_NOTE, ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
@@ -110,7 +110,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
 function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<RunResult>(done => {
-    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms + Math.min(30_000, ms / 10));
+    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), Math.min(MAX_JOB_TIMEOUT_MS, ms + Math.min(30_000, ms / 10)));
   });
   return Promise.race([run, timeout]).finally(() => clearTimeout(timer));
 }
@@ -319,7 +319,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     await beforeRun();
     started = true;
     const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => err instanceof ProgramNotStarted ? notStarted(err) : failed(message(err), 'agent_failed'));
-    res = await (untimed && !call ? run : withTimeout(run, msg.timeoutMs));
+    res = await (msg.timeoutMs === 0 || (untimed && !call) ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId && !call) rememberSession(dir, res.sessionId, place.workDir);
   } catch (err) {
     res = started ? failed(message(err), 'agent_failed') : notStarted(err);

@@ -146,6 +146,12 @@ describe('server messages', () => {
     expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions, skills }))).toMatchObject({ type: 'job.run', instructions, skills });
   });
 
+  it('allows an untimed one-shot call and still requires a time for other jobs', () => {
+    const job = { ...SERVER[0], timeoutMs: 0 };
+    expect(parseServerMessage(JSON.stringify(job))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...job, call: true }))).toMatchObject({ call: true, timeoutMs: 0 });
+  });
+
   it('let a node say it writes skills as files, which nodes before it do not', () => {
     const hello = { type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true };
     expect(parseNodeMessage(JSON.stringify(hello))).toEqual(hello);

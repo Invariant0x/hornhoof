@@ -203,7 +203,7 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
         await wakeQueued(ctx.db, w);
         continue;
       }
-      const key = `${w.agentId}:${w.taskId}:${w.why}:${w.cause?.eventId ?? ""}`;
+      const key = `${w.agentId}:${w.taskId}:${w.why}:${w.cause?.callBatch ?? w.cause?.eventId ?? ""}`;
       const queued = !seen.has(key) && (await queueWake(ctx, w));
       seen.add(key);
       await wakeQueued(ctx.db, w);

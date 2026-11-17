@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Assignment changes made by a department head show the head and the person whose authority it used.
 - Editing an employee card preserves a tracker nudge that arrives during the edit.
+- One-shot batches save the wake with their delivery claim so a failed write can be retried.
 
 ### Changed
 
@@ -18,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
 - Employees can send messages and file improvements throughout a turn.
 - People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
+- One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
 
 ## [0.32.0] - 2026-11-17
 
