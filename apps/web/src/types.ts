@@ -482,8 +482,8 @@ export type TaskLine = {
 };
 
 /* by.for: the person the orchestrator acted for. */
-export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
-export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
+export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
+export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; byOrchestrator?: boolean; agent: AgentRef | null; at: string };
 /* big: over 50 MB, it lives 30 days on one machine and is lost if that machine goes. */
 export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string; big?: true };
 

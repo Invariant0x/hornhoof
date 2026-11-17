@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
+import jpeg from 'jpeg-js';
+import { PNG } from 'pngjs';
 import { SaxesParser } from 'saxes';
 import type { PhoneCapture, PhoneElement } from '@hornhoof/protocol';
 export type { PhoneCapture, PhoneElement } from '@hornhoof/protocol';
 
-const SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
+/* A model sees a picture best at this size on its long side; a larger one costs more and shows it nothing more. */
+const LONG_SIDE = 1568;
 const MAX_TREE_BYTES = 2 * 1024 * 1024;
 type Rect = PhoneElement['bounds'];
 
@@ -42,10 +45,37 @@ export function parsePhoneTree(raw: string): PhoneElement[] {
   return elements;
 }
 
-/* The screen as the phone shows it, as a person holding it would see it. A screen with no readable tree still shows. */
-export function phoneCapture(xml: string, png: Buffer): PhoneCapture {
+/* The screen as a person holding the phone sees it: a JPEG of at most 1568 px on its long side, with the elements in its
+   pixels; scale turns them back into the phone's. A screen with no readable tree still shows, and one with no readable
+   picture still gives its elements in the phone's pixels. */
+export function phoneCapture(xml: string, png: Buffer): { capture: PhoneCapture; scale: number } {
   let elements: PhoneElement[] = [];
   try { elements = parsePhoneTree(xml); } catch { /* No tree, the picture alone. */ }
-  const picture = png.length >= 24 && png.subarray(0, 8).equals(SIGNATURE) && png.toString('ascii', 12, 16) === 'IHDR';
-  return picture ? { png: png.toString('base64'), width: png.readUInt32BE(16), height: png.readUInt32BE(20), elements } : { png: null, width: 0, height: 0, elements };
+  let screen: PNG;
+  try { screen = PNG.sync.read(png); } catch { return { capture: { jpeg: null, width: 0, height: 0, elements }, scale: 1 }; }
+  const scale = Math.max(1, screen.width / LONG_SIDE, screen.height / LONG_SIDE);
+  const width = Math.round(screen.width / scale), height = Math.round(screen.height / scale);
+  const picture = jpeg.encode({ data: shrink(screen, width, height), width, height }, 80).data;
+  const at = (n: number) => Math.round(n / scale);
+  return { capture: { jpeg: picture.toString('base64'), width, height, elements: elements.map(e => ({ ...e, bounds: [at(e.bounds[0]), at(e.bounds[1]), at(e.bounds[2]), at(e.bounds[3])] })) }, scale };
+}
+
+/* Each pixel of the smaller picture is the average of the screen's pixels under it, so small text stays readable. */
+function shrink(screen: PNG, width: number, height: number): Buffer {
+  if (width === screen.width && height === screen.height) return screen.data;
+  const from = screen.data, to = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const top = Math.floor(y * screen.height / height), bottom = Math.max(top + 1, Math.floor((y + 1) * screen.height / height));
+    for (let x = 0; x < width; x++) {
+      const left = Math.floor(x * screen.width / width), right = Math.max(left + 1, Math.floor((x + 1) * screen.width / width));
+      let r = 0, g = 0, b = 0;
+      for (let sy = top; sy < bottom; sy++) for (let sx = left; sx < right; sx++) {
+        const i = (sy * screen.width + sx) * 4;
+        r += from[i]!; g += from[i + 1]!; b += from[i + 2]!;
+      }
+      const n = (bottom - top) * (right - left), o = (y * width + x) * 4;
+      to[o] = Math.round(r / n); to[o + 1] = Math.round(g / n); to[o + 2] = Math.round(b / n); to[o + 3] = 255;
+    }
+  }
+  return to;
 }

@@ -169,8 +169,8 @@ Keep the current per-test app, database cleanup, fencing, schema checks and late
 write protection. Separate the ACL company's serializable rows from functions
 bound to the current app; restore those rows through the existing `appFixture`
 mechanism. Cache the busy company's serializable task map by that same mechanism.
-Rebind `work` and `get` to each fresh app. This reuses no app, connection, function
-or mutable descriptor across tests, and it changes no production handler, access
+Rebind `work` and `get` to each fresh app. The row cache stores no app, connection or function; each case keeps its own app,
+guarded database handle and mutable descriptors, and it changes no production handler, access
 assertion, actor combination or timeout. Shared `helpers-db.ts` stays unchanged.
 
 Verification required by the head: each of agent-view-table and route-access
@@ -178,3 +178,11 @@ alone three consecutive times, with a shuffled table run proving case isolation;
 record load 1m, build, server/test types and ESLint. The original protected checks
 stay in place. If shared database helpers need a further change, also execute the
 three named neighboring test files and repair only failures with the same cause.
+
+The integration base advanced to `a27bc368b1e027af70883d06d1da9ba2b07985ab`.
+It changes the protocol, lockfile and server code, so the required final series
+will be run again on the merged candidate after dependency preparation. Earlier
+shuffled table runs on `78eb832fa28d65b96589723039fd94b13eb5eebe` all passed
+58 of 58 at seeds 1196, 1197 and 1198, with start load 1m 11.91, 10.29 and 13.05.
+Their runner durations were 50.41, 25.27 and 74.14 seconds. The test inventory and
+all assertion bodies are byte-for-byte unchanged from the first checked code.
