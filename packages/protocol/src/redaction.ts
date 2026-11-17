@@ -3,6 +3,9 @@
 
 export const HIDDEN = '[hidden]';
 
+/* An install command belongs to the person it was made for; a conversation never keeps its join code. */
+export const hideJoinCodes = (text: string): string => text.replace(/--join [A-Za-z0-9_-]+/g, `--join ${HIDDEN}`);
+
 type Pattern = readonly [RegExp, string];
 
 /* The shortest secret hidden by its exact value: shorter ones would hide ordinary words. */

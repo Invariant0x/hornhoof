@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import type { PGlite, Transaction } from '@electric-sql/pglite';
+import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agentInbox, agents, attachments, companies, departments, jobs, people, secretRedactions, subscriptions, taskEvents, tasks, toolCalls } from '../src/db/schema.js';
 import { createTask, comment } from '../src/modules/tasks/engine.js';
 import { appendEvent } from '../src/modules/events/store.js';
@@ -67,6 +68,40 @@ describe('secrets in stored prose', () => {
     expect(Buffer.from((await db.select().from(attachments))[0]!.bytes).toString()).toBe('[hidden]');
     /* An old copy brings the value back only through a merge, which checks its rows against the fingerprint. */
     expect(await db.select().from(secretRedactions)).toEqual([expect.objectContaining({ characters: marker.length, fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) })]);
+  });
+
+  it('never sends the selected value in SQL text or parameters', async () => {
+    const { app, db, agent, companyId, ceo } = await company();
+    const marker = 'sqlBoundarySecret1077!';
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Existing secret', brief: '', body: marker, departmentId: null, assigneeAgentId: agent.id });
+    await appendEvent(app.ctx, { companyId, agentId: agent.id, kind: 'text', data: { text: marker } });
+    const client = (db as unknown as { $client: PGlite }).$client;
+    const queries = vi.spyOn(client, 'query');
+    const statements = vi.spyOn(client, 'exec');
+    const inside: unknown[][] = [];
+    const transaction = client.transaction.bind(client);
+    const transactions = vi.spyOn(client, 'transaction').mockImplementation(<T>(work: (tx: Transaction) => Promise<T>) => transaction(async tx => {
+      const queries = vi.spyOn(tx, 'query');
+      const statements = vi.spyOn(tx, 'exec');
+      try {
+        return await work(tx);
+      } finally {
+        inside.push(...queries.mock.calls, ...statements.mock.calls);
+        queries.mockRestore();
+        statements.mockRestore();
+      }
+    }));
+    try {
+      const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.body).not.toContain(marker);
+      expect(inside.some(([text]) => typeof text === 'string' && text.includes('jsonb_populate_record'))).toBe(true);
+      expect(JSON.stringify([...queries.mock.calls, ...statements.mock.calls, ...inside])).not.toContain(marker);
+    } finally {
+      queries.mockRestore();
+      statements.mockRestore();
+      transactions.mockRestore();
+    }
   });
 
   it('checks department authority on the server and rejects ordinary readers', async () => {

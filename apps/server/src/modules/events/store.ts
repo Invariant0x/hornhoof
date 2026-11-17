@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@hornhoof/protocol';
-import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
+import { hideCredentialsIn, hideJoinCodes } from '@hornhoof/protocol/redaction';
 import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
@@ -30,6 +30,13 @@ const columns = {
 
 type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
 
+/* Conversation events keep their older join-code guard as well as the shared prose mask. */
+function hideEventSecrets(data: unknown): unknown {
+  const masked = hideCredentialsIn(data);
+  const text = JSON.stringify(masked);
+  return text?.includes('--join ') ? JSON.parse(hideJoinCodes(text)) : masked;
+}
+
 const view = (r: Row): EventView => ({
   seq: r.seq,
   kind: r.kind,
@@ -43,7 +50,7 @@ const view = (r: Row): EventView => ({
 export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e: NewEvent, also?: WithEvent): Promise<EventView> {
   const message = e.kind === 'message' ? e.message ?? await incomingEnvelope(ctx, e.companyId, e.agentId, e.personId, e.data) : undefined;
   const data = message ? messageData(e.data, message) : e.data;
-  const values = { companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCredentialsIn(data), personId: e.personId ?? null };
+  const values = { companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideEventSecrets(data), personId: e.personId ?? null };
   const outgoing = await outgoingLetter(ctx.db, e, message);
   const rows = await storeEvents(ctx.db, values, outgoing, also);
   const event = await publishEvent(ctx, e.companyId, e.agentId, rows[0]!.id);
@@ -58,7 +65,7 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
     if (!job?.agentId) return null;
-    const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideCredentialsIn(event), personId: null }).returning({ id: agentEvents.id });
+    const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideEventSecrets(event), personId: null }).returning({ id: agentEvents.id });
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
@@ -72,7 +79,7 @@ async function outgoingLetter(db: Db, e: NewEvent, message?: MessageEnvelope): P
   const [senderJob] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, senderId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   return {
     companyId: e.companyId, agentId: senderId, jobId: senderJob?.id ?? null, kind: 'message',
-    data: hideCredentialsIn(messageData({ text: (e.data as { text?: unknown }).text }, { ...message, direction: 'out' })), personId: null,
+    data: hideEventSecrets(messageData({ text: (e.data as { text?: unknown }).text }, { ...message, direction: 'out' })), personId: null,
   };
 }
 
