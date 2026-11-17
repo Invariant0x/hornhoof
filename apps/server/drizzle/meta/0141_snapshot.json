@@ -1,5 +1,5 @@
 {
-  "id": "12915b6f-e395-4915-bc9e-1c3465cd1aea",
+  "id": "803ea7b2-923f-47e9-a064-f947e68eba0b",
   "prevId": "5f829f8b-5959-487a-b004-ee750350050e",
   "version": "7",
   "dialect": "postgresql",
@@ -5327,13 +5327,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'orchestrator'"
         }
       },
       "indexes": {},
@@ -5385,10 +5378,6 @@
         "machine_access_asked": {
           "name": "machine_access_asked",
           "value": "(asked_reason IS NULL) = (asked_at IS NULL)"
-        },
-        "machine_access_scope": {
-          "name": "machine_access_scope",
-          "value": "scope IN ('orchestrator', 'all_agents')"
         }
       },
       "isRLSEnabled": true
@@ -7616,6 +7605,263 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.one_shot_calls": {
+      "name": "one_shot_calls",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "batch": {
+          "name": "batch",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "judge": {
+          "name": "judge",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caller_agent_id": {
+          "name": "caller_agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caller_job_id": {
+          "name": "caller_job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "brief": {
+          "name": "brief",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input": {
+          "name": "input",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wants_verdict": {
+          "name": "wants_verdict",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "judge_brief": {
+          "name": "judge_brief",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "told": {
+          "name": "told",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "one_shot_calls_task_id": {
+          "name": "one_shot_calls_task_id",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "one_shot_calls_department_id": {
+          "name": "one_shot_calls_department_id",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "one_shot_calls_company_id_companies_id_fk": {
+          "name": "one_shot_calls_company_id_companies_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "one_shot_calls_job_id_jobs_id_fk": {
+          "name": "one_shot_calls_job_id_jobs_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "one_shot_calls_caller_agent_id_agents_id_fk": {
+          "name": "one_shot_calls_caller_agent_id_agents_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "caller_agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "one_shot_calls_caller_job_id_jobs_id_fk": {
+          "name": "one_shot_calls_caller_job_id_jobs_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "caller_job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "one_shot_calls_task_id_tasks_id_fk": {
+          "name": "one_shot_calls_task_id_tasks_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "one_shot_calls_department_id_departments_id_fk": {
+          "name": "one_shot_calls_department_id_departments_id_fk",
+          "tableFrom": "one_shot_calls",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "department_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "one_shot_calls_job_id_unique": {
+          "name": "one_shot_calls_job_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "job_id"
+          ]
+        },
+        "one_shot_calls_batch_number": {
+          "name": "one_shot_calls_batch_number",
+          "nullsNotDistinct": false,
+          "columns": [
+            "batch",
+            "number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "one_shot_calls_number": {
+          "name": "one_shot_calls_number",
+          "value": "\"one_shot_calls\".\"number\" > 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.outbound_accounts": {

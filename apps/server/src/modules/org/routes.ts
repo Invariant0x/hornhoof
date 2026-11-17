@@ -25,6 +25,7 @@ import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
 import { keyEndFor, onlineIn, subView } from '../subscriptions/views.js';
+import { runningCalls } from '../calls/calls.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }, roleEffort?: string): string | null {
@@ -201,6 +202,12 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const reworks = await reworkTimes(db, me.companyId, map.serverNow, WHOLE);
     const linesOf = shownLines(linesSeen(viewer, map.lines), allAgents);
     const inside = (id: string) => waysInside(viewer, ways, id);
+    /* One-shot calls that wait or run now: each shows in its department's funnel while it lives. */
+    const calls = await runningCalls(ctx, me.companyId);
+    const callsOf = (deptId: string) => {
+      const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
+      return calls.filter(c => c.departmentId && ids.has(c.departmentId));
+    };
 
     return {
       company,
@@ -255,6 +262,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
+          calls: callsOf(d.id),
         }))),
     };
   });

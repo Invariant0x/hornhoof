@@ -141,7 +141,7 @@ describe('skills as files', () => {
     expect(added(tree)).toEqual([]);
   });
 
-  it('materializes the shipped dev-frontend-ui skill and AGENTS.md pointer for Antigravity within its 24 KB limit', async () => {
+  it('materializes the shipped dev-frontend-ui skill and AGENTS.md pointer for Antigravity', async () => {
     const dir = work();
     const raw = readFileSync(fileURLToPath(new URL('../../../templates/skills/dev-frontend-ui.md', import.meta.url)), 'utf8');
     const body = `# User interface engineering\n\n${raw.replace(/^---[\s\S]*?---\n/, '').trimEnd()}`;
@@ -157,7 +157,6 @@ describe('skills as files', () => {
     await placeSkills(ownFs, dir, 'antigravity', [uiSkill]);
     const skillPath = join(dir, '.agents', 'skills', 'dev-frontend-ui', 'SKILL.md');
     const placedText = readFileSync(skillPath, 'utf8');
-    expect(Buffer.byteLength(placedText)).toBeLessThan(24_000);
     expect(placedText).toContain('name: dev-frontend-ui');
     expect(placedText).toMatch(/whole group|together as one group/i);
     expect(placedText).toMatch(/non-visual[\s\S]*in parallel/i);

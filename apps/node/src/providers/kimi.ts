@@ -134,47 +134,52 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       await interactiveLogin(bin, ['login'], env(), io, user);
     },
 
-    async run(input: RunInput): Promise<RunResult> {
-      const args = [`--prompt=${input.prompt}`, '--output-format', 'stream-json'];
-      if (input.sessionId) args.push('--session', input.sessionId);
-      if (input.model) args.push('-m', input.model);
+    run: input => runKimi(input, false),
 
-      /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
-      const mcpJson = join(ensureDir(home), 'mcp.json');
-      if (input.tools) {
-        const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
-        writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
-      } else rmSync(mcpJson, { force: true });
-      if (input.instructions) tellKimi(input, input.instructions, user);
-
-      let sessionId: string | null = input.sessionId;
-      let answer = '';
-      const done = await runProgram({
-        bin,
-        args,
-        env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
-        user,
-        cwd: input.workDir,
-        timeoutMs: input.timeoutMs,
-        signal: input.signal,
-        onLine(line) {
-          const ev = objectLine(line) as KimiEvent | null;
-          if (!ev) return;
-          for (const event of kimiEvents(ev)) input.onEvent?.(event);
-          const id = ev.session_id ?? ev.sessionId;
-          if (typeof id === 'string') sessionId = id;
-          if (ev.role === 'assistant') answer = textOf(ev.content) || answer;
-        },
-      });
-
-      const ended = withProgramExit(done.output, done);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
-      if (done.code === 0 && answer) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
-      return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(done.output) ? 'not_logged_in' : 'agent_failed', limits: null };
-    },
+    /* Print mode is Kimi Code's one call, and its stream-json output needs it. */
+    oneCall: input => runKimi({ ...input, sessionId: null }, true),
 
     async secrets() {
       return [...credentials().flatMap(tokensIn), ...credentialSecrets(home)];
     },
   };
+
+  async function runKimi(input: RunInput, once: boolean): Promise<RunResult> {
+    const args = [...(once ? ['--print'] : []), `--prompt=${input.prompt}`, '--output-format', 'stream-json'];
+    if (input.sessionId) args.push('--session', input.sessionId);
+    if (input.model) args.push('-m', input.model);
+
+    /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
+    const mcpJson = join(ensureDir(home), 'mcp.json');
+    if (input.tools) {
+      const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
+      writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
+    } else rmSync(mcpJson, { force: true });
+    if (input.instructions) tellKimi(input, input.instructions, user);
+
+    let sessionId: string | null = input.sessionId;
+    let answer = '';
+    const done = await runProgram({
+      bin,
+      args,
+      env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
+      user,
+      cwd: input.workDir,
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+      onLine(line) {
+        const ev = objectLine(line) as KimiEvent | null;
+        if (!ev) return;
+        for (const event of kimiEvents(ev)) input.onEvent?.(event);
+        const id = ev.session_id ?? ev.sessionId;
+        if (typeof id === 'string') sessionId = id;
+        if (ev.role === 'assistant') answer = textOf(ev.content) || answer;
+      },
+    });
+
+    const ended = withProgramExit(done.output, done);
+    if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
+    if (done.code === 0 && answer) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
+    return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(done.output) ? 'not_logged_in' : 'agent_failed', limits: null };
+  }
 }

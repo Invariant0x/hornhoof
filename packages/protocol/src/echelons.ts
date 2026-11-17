@@ -12,6 +12,9 @@ export type EchelonStep = {
   inputCandidateId: string | null;
   candidateId: string | null;
 };
+/* A stage its owner runs as one-shot calls: fanOut calls of their plan at once on one brief, then, when it names one, a judge
+   call with this brief that reads every answer. */
+export type EchelonOneShot = { fanOut: number; judge: string | null };
 export type EchelonsSnapshot = {
   kind: 'development_echelons';
   version: 1;
@@ -25,6 +28,8 @@ export type EchelonsSnapshot = {
   stages: EchelonStep[];
   /* The skill whoever checks at a stage must carry, as the route of the task's department named it when the task was made. */
   abilities: Partial<Record<EchelonStage, string>>;
+  /* The stages the route of the task's department marked one-shot when the task was made; a route made before has none. */
+  oneShot?: Partial<Record<EchelonStage, EchelonOneShot>>;
   candidateId: string | null;
   assignment: EchelonModel | null;
   security: { required: boolean; reason: string | null; addedBy: string | null };

@@ -12,6 +12,7 @@ import { HELLO_IDS_BEFORE_ACKS, parseNodeMessage, parseTestEnvironment } from '@
 import { readTestEnvironment } from '../src/test-environment.js';
 import { DEFAULT_BACKOFF } from '../src/connection.js';
 import { buildOf, runNode } from '../src/main.js';
+import { CALL_BYTES } from '../src/call-room.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { Outbox } from '../src/outbox.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -484,6 +485,56 @@ describe('runNode', () => {
     expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'status', 'job.done']);
     expect(server.received[2]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
     expect(server.received[3]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
+  });
+
+  /* One-shot calls whose programs answer once released, and what each was asked. */
+  const heldCalls = () => {
+    const asked: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const calling: ProviderAdapter = { ...adapter, oneCall: async input => { asked.push(input.prompt); await held; return { ok: true, sessionId: null, result: `${input.prompt}: two findings`, output: '', error: null, limits: null }; } };
+    return { asked, release, calling };
+  };
+  const callRun = (jobId: string) => ({ type: 'job.run' as const, jobId, subscriptionId: 's1', provider: 'claude' as const, prompt: `review ${jobId}`, sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, call: true as const });
+
+  it("starts many one-shot calls at once in their program's one-call mode where the memory holds them, with no slot of the check queue", async () => {
+    const server = await fakeServer({ grantChecks: false });
+    const { asked, release, calling } = heldCalls();
+    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, freeMemory: () => 64 * CALL_BYTES });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const ids = Array.from({ length: 12 }, (_, i) => `c${i + 1}`);
+    for (const id of ids) server.send(callRun(id));
+    /* All twelve run at once: none answers before every one has been asked. */
+    await server.wait(() => asked.length === 12 && server.received.filter(m => m.type === 'job.started').length === 12);
+    expect(server.received.filter(m => m.type === 'job.started').map(m => m.type === 'job.started' && m.jobId).sort()).toEqual([...ids].sort());
+    expect(server.received.some(m => m.type === 'check.acquire')).toBe(false);
+    release();
+    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 12);
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'c3')).toMatchObject({ ok: true, result: 'review c3: two findings' });
+  });
+
+  it('keeps a one-shot call waiting, not started, while the machine has no memory for its program, and stops it there when asked', async () => {
+    const server = await fakeServer();
+    const { asked, release, calling } = heldCalls();
+    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, freeMemory: () => 0 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    /* With no call running, one starts all the same. */
+    server.send(callRun('c1'));
+    await server.wait(() => asked.length === 1);
+    server.send(callRun('c2'));
+    await server.barrier('second sent');
+    expect(asked).toEqual(['review c1']);
+    const started = () => server.received.filter(m => m.type === 'job.started').map(m => m.type === 'job.started' && m.jobId);
+    expect(started()).toEqual(['c1']);
+    server.send({ type: 'job.cancel', jobId: 'c2' });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'c2'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'c2')).toMatchObject({ ok: false, error: 'cancelled' });
+    release();
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'c1'));
+    expect(started()).toEqual(['c1']);
+    expect(asked).toEqual(['review c1']);
   });
 
   it('sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does', async () => {
