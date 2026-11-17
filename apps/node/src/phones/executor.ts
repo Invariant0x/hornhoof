@@ -1,4 +1,4 @@
-import { PhoneCapture, PhoneServerMessage, type PhoneFrame, type PhoneOperation, type PhoneReply, type PhoneGrant } from '@hornhoof/protocol';
+import { PhoneCapture, PhoneServerMessage, networkEndpoint, type PhoneFrame, type PhoneOperation, type PhoneReply, type PhoneGrant } from '@hornhoof/protocol';
 import type { PhoneAdb } from './adb.js';
 import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
@@ -63,7 +63,7 @@ export class PhoneExecutor {
       const { adb } = this.deps;
       const stop = new AbortController();
       if (m.pairing && await adb.pair(m.pairing.endpoint, m.pairing.code, stop.signal) !== 'paired') return reply('needs_person');
-      if (await adb.connect(m.endpoint, stop.signal) !== 'connected') return reply('needs_person');
+      if (networkEndpoint(m.endpoint) && await adb.connect(m.endpoint, stop.signal) !== 'connected') return reply('needs_person');
       const devices = (await adb.devices(stop.signal)).filter(d => d.serial === m.endpoint);
       const verified = await Promise.all(devices.map(async device => {
         if (device.status !== 'device') return device;
@@ -78,7 +78,7 @@ export class PhoneExecutor {
       try {
         await this.#sessions.use(grant.sessionId, grant.generation, async state => {
           const { adb } = this.deps;
-          if (await adb.connect(grant.binding.serial, state.signal) !== 'connected') throw new Error('phone_needs_person');
+          if (networkEndpoint(grant.binding.serial) && await adb.connect(grant.binding.serial, state.signal) !== 'connected') throw new Error('phone_needs_person');
           if (!(await adb.devices(state.signal)).some(d => d.serial === grant.binding.serial && d.status === 'device')) throw new Error('phone_needs_person');
           await this.assertDevice(state);
         });
