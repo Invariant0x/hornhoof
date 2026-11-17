@@ -10,7 +10,7 @@ import type { TLSSocket } from 'node:tls';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
@@ -37,7 +37,23 @@ import type { PeerSessions } from '../src/net/peer-sessions.js';
 import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
-import { setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { setUpCompany, TEST_SECRET, testApp } from './helpers.js';
+import { advance, certificate, leaseRound, leaseStep, networkRound, peerTime, registerKeeper, state, step, tunnelRound, until } from './keeper-peer-time.js';
+
+/* The keeper's frpc commands are observed, and its child lifecycle is a recorded sample, without waiting on Node or frpc. */
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  class RecordedChild extends original.ChildProcess {
+    override kill(signal: NodeJS.Signals | number = 'SIGTERM'): boolean {
+      if (this.exitCode !== null || this.signalCode !== null) return false;
+      const ended = typeof signal === 'string' ? signal : 'SIGTERM';
+      Object.defineProperty(this, 'signalCode', { value: ended });
+      queueMicrotask(() => this.emit('exit', null, ended));
+      return true;
+    }
+  }
+  return { ...original, ChildProcess: RecordedChild, spawn: () => new RecordedChild() };
+});
 
 const MACHINE_ID = `ab12cd34${'0'.repeat(24)}`;
 const ignore = (): void => {};
@@ -64,7 +80,7 @@ async function company(withLink = true) {
 }
 
 async function listening(app: FastifyInstance, port = 0): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port });
+  await app.listen({ host: '127.0.0.1', port: port || await testPort() });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -73,7 +89,7 @@ type Stand = Awaited<ReturnType<typeof company>>;
 async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partial<KeeperOptions> = {}) {
   const lines: string[] = [];
   const offered: { config: string; clientId: string }[] = [];
-  /* A stand-in for the second frpc: the config is the real one, and the child sleeps until it is stopped. */
+  /* The real configuration is kept; the recorded child above owns process liveness. */
   const peerClientFor = (services: PeerServices, clientId: string, local: { data: number; app: number }) => {
     offered.push({ config: peerConfigFor(services, { machineId: MACHINE_ID, local }), clientId });
     return { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
@@ -87,7 +103,7 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
-    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
+    ports: { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() },
     everyMs: 20,
     linkEveryMs: 50,
     peerEveryMs: 20,
@@ -98,8 +114,31 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     ...extra,
   });
   const ports = await keeper.start();
+  const round = async () => {
+    await leaseRound(keeper);
+    await networkRound(keeper);
+    if (extra.reportEveryMs !== undefined) await keeper['identity']!['report']();
+    if (extra.backupsEveryMs !== undefined) await keeper['backups']?.round();
+    if (extra.sync?.slots) await keeper['keepSlots']();
+    if (extra.beatEveryMs !== undefined) await keeper['beating'].tick();
+    await tunnelRound(keeper);
+  };
+  const remove = registerKeeper(keeper, round);
+  const stop = keeper.stop.bind(keeper);
+  let stopped = false;
+  keeper.stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    remove();
+    await stop();
+  };
   onTestFinished(() => keeper.stop());
-  return { keeper, dir, controlDir, lines, ports, offered };
+  /* Initial certificate replies and the first network read settle once, with no recurring work competing with them. */
+  await certificate(keeper);
+  await networkRound(keeper);
+  await networkRound(keeper);
+  await tunnelRound(keeper);
+  return { keeper, dir, controlDir, lines, ports, offered, round };
 }
 
 /* A worker of the company's network: a row with its key, and a certificate of the database's authority for it. */
@@ -162,6 +201,7 @@ function send(to: Target, options: http.RequestOptions, body: unknown): Promise<
 const closed = (session: ClientHttp2Session): Promise<void> => new Promise(resolve => (session.closed || session.destroyed ? resolve() : session.once('close', () => resolve())));
 
 describe('the peer link in the keeper', () => {
+  beforeEach(peerTime);
   it('serves the peer link once its certificate is in, and names each peer to the app by its certificate', async () => {
     const c = await company();
     const { keeper } = await keeperBeside(c, await listening(c.app));
@@ -209,6 +249,7 @@ describe('the peer link in the keeper', () => {
     expect(await toApp(session)).not.toBeNull();
 
     await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, w.serial));
+    await until(() => keeper['peers']!.revoked().has(w.serial));
     await closed(session);
     await until(() => (JSON.parse(readFileSync(join(dir, CRL_FILE), 'utf8')) as { serials: string[] }).serials.includes(w.serial));
     const again = sessionOf(peer, w);
@@ -245,6 +286,7 @@ describe('the peer link in the keeper', () => {
     });
     await new Promise<void>(resolve => back.listen(away.port, '127.0.0.1', resolve));
     onTestFinished(() => void back.close());
+    await until(() => second.keeper['peers']!['listening'] !== null);
     const ports = await second.keeper.peerPorts();
     expect(await toApp(sessionOf(ports.peer, w))).toBeNull();
   });
@@ -353,7 +395,8 @@ describe('the peer link in the keeper', () => {
     /* An id of the length older installs have, which is a machine's id as much as today's. */
     const networkId = `77cc${'3'.repeat(28)}`;
     await c.db.update(machines).set({ networkId, uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, w.id));
-    await until(async () => (await put(Buffer.from('rows'))) === 201);
+    await until(() => keeper['peers']!.current()!.uploads.some(one => one.machine === w.id));
+    expect(await put(Buffer.from('rows'))).toBe(201);
     const load = JSON.parse(readFileSync(join(controlDir, 'load.json'), 'utf8')) as { machine: string; file: string; database: string; unpackMax: number };
     expect(load.machine).toBe(w.id);
     expect(load.database).toMatch(/^hornhoof_upload_77cc333333333333_[0-9]{8}t[0-9]{6}$/);
@@ -505,20 +548,11 @@ describe('the peer link in the keeper', () => {
   /* A keeper's intervals in the stepped tests' own time: a tick every 400 ms of its clocks, as those tests were written for. */
   const STEPPED = { everyMs: 400, linkEveryMs: 1_000, peerEveryMs: 400 } as const;
   function steppedClock() {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
     const began = performance.now();
     const now = (): { wall: number; mono: number } => ({ wall: Date.now(), mono: performance.now() - began });
-    /* The clocks move on by ms, every interval due on the way fires, and what those started settles. */
-    const step = async (ms: number): Promise<void> => {
-      await vi.advanceTimersByTimeAsync(ms);
-      await new Promise<void>(resolve => setImmediate(resolve));
-    };
-    /* A keeper's tick at a time until the state comes; with no deadline, as until has none. */
+    const step = leaseStep;
     const stepUntil = async (check: () => boolean): Promise<void> => {
-      while (!check()) await step(STEPPED.everyMs);
+      await state(async () => { if (check()) return true; await step(STEPPED.everyMs); return check(); });
     };
     return { now, step, stepUntil };
   }
@@ -543,8 +577,6 @@ describe('the peer link in the keeper', () => {
   }
 
   it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async ({ signal }) => {
-    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-    onTestFinished(() => { vi.useRealTimers(); });
     const c = await company();
     const clock = { wall: Date.now(), mono: 0 };
     const now = () => ({ ...clock });
@@ -572,7 +604,7 @@ describe('the peer link in the keeper', () => {
       await keeper['holder'].tick();
       keeper['giveWord']();
     };
-    const stepUntil = (check: () => boolean) => until(async () => { signal.throwIfAborted(); await step(); return check(); });
+    const stepUntil = (check: () => boolean) => state(async () => { signal.throwIfAborted(); await step(); return check(); });
     const renewals = () => lease.calls.filter(call => call.method === 'renew').length;
     await stepUntil(() => keeper.mode() === 'lead' && renewals() > 3);
     /* Alone with the data it asks nobody: its lease is its own word. */
@@ -825,13 +857,7 @@ describe('the peer link in the keeper', () => {
     const target = await listening(c.app);
     const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
     const { catalog } = syncCatalog(copy);
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
     const clock = { wall: Date.now(), mono: 0 };
-    const mono = vi.spyOn(performance, 'now').mockImplementation(() => clock.mono);
-    onTestFinished(() => {
-      mono.mockRestore();
-      vi.useRealTimers();
-    });
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
     let unknownReads = 0;
@@ -867,7 +893,7 @@ describe('the peer link in the keeper', () => {
       signal.throwIfAborted();
       clock.wall += ms;
       clock.mono += ms;
-      vi.setSystemTime(clock.wall);
+      advance(ms);
       await keeper['sync']!.look();
       await keeper['holder'].look();
       await keeper['holder'].tick();
@@ -923,7 +949,6 @@ describe('the peer link in the keeper', () => {
       },
     }) as Db;
 
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
     const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
@@ -942,7 +967,7 @@ describe('the peer link in the keeper', () => {
       },
     };
     let linkStarts = 0;
-    const { keeper, lines, offered } = await keeperBeside({ ...c, db }, target, folder(), {
+    const { keeper, lines, offered, round } = await keeperBeside({ ...c, db }, target, folder(), {
       lease: fakeLease({ othersHoldData: true }),
       now: () => ({ wall: Date.now(), mono: performance.now() }),
       throughput: { start: ignore, stop: ignore, best: () => ({}) },
@@ -955,31 +980,34 @@ describe('the peer link in the keeper', () => {
       clientFor: () => (linkStarts++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
       sync: { catalog, relay: relayClient, everyMs: 3000, routeEveryMs: 0 },
     });
-    onTestFinished(async () => {
-      await keeper.stop();
-      vi.useRealTimers();
-    });
-
-    const stepUntil = async (stepMs: number, check: () => boolean) => {
-      while (!check()) {
-        await vi.advanceTimersByTimeAsync(stepMs);
-        await new Promise<void>(resolve => setImmediate(resolve));
+    /* Healthy gaps only need lease renewals. Observe the full keeper in and just after each relay outage, and at
+       the requested endpoint, retaining settings failures and tunnel transitions without idle database polling. */
+    const move = async (ms: number) => {
+      while (ms > 0) {
+        const before = performance.now() - startMono;
+        const by = Math.min(3000, ms);
+        advance(by);
+        await leaseRound(keeper);
+        ms -= by;
+        if (ms === 0 || silent(before) || silent(performance.now() - startMono)) await round();
       }
     };
-    return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil };
+    const stepUntil = async (stepMs: number, check: () => boolean) => {
+      await state(async () => { if (check()) return true; await move(stepMs); return check(); });
+    };
+    return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil, move };
   }
 
   it('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
     /* Every six virtual minutes the path through hornhoof.org gives no answer for four seconds. */
-    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil } = await relaySilenceStand(
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil, move } = await relaySilenceStand(
       elapsed => (elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000),
     );
     await stepUntil(3000, () => keeper.mode() === 'lead' && offered.length === 1 && linkStarts() === 1);
 
     /* Six virtual minutes in: the relay hiccup drops neither tunnel, and restarts neither frpc. */
     const toSixMin = 360_000 - (performance.now() - startMono);
-    await vi.advanceTimersByTimeAsync(toSixMin + 6_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(toSixMin + 6_000);
     expect(keeper.mode()).toBe('lead');
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
@@ -987,9 +1015,9 @@ describe('the peer link in the keeper', () => {
     /* Twelve virtual minutes in, with a failed settings read at the same mark: ownLink stays known, so leading resumes
        as soon as the relay answers again, and the peer tunnel still never restarts. */
     const toBeforeTwelveMin = 719_500 - (performance.now() - startMono);
-    await vi.advanceTimersByTimeAsync(toBeforeTwelveMin);
+    await move(toBeforeTwelveMin);
     failOnce.on = true;
-    await vi.advanceTimersByTimeAsync(4_000);
+    await move(4_000);
     expect(keeper.mode()).toBe('lead');
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
@@ -1005,28 +1033,25 @@ describe('the peer link in the keeper', () => {
     expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await keeper.stop();
-    vi.useRealTimers();
   });
 
   it('holds the peer tunnel through one empty read during a one-second relay silence, and says why when the link goes', async () => {
     let silenceFrom = Number.POSITIVE_INFINITY;
-    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, silentReads, stepUntil } = await relaySilenceStand(
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, silentReads, stepUntil, move } = await relaySilenceStand(
       elapsed => elapsed >= silenceFrom && elapsed < silenceFrom + 1_000,
     );
     await stepUntil(3000, () => offered.length === 1 && linkStarts() === 1);
 
     /* A one-second relay silence leaves one peer read empty; holdThroughOneEmptyRead keeps the peer frpc running. */
     silenceFrom = performance.now() - startMono + 2_500;
-    await vi.advanceTimersByTimeAsync(9_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(9_000);
     expect(silentReads()).toBeGreaterThan(0);
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
     /* A single failed settings read keeps the last settings as well, restarting neither tunnel. */
     failOnce.on = true;
-    await vi.advanceTimersByTimeAsync(3_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(3_000);
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
@@ -1041,7 +1066,6 @@ describe('the peer link in the keeper', () => {
     expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await keeper.stop();
-    vi.useRealTimers();
   });
 
   it('offers no peer doors in read mode, stops the public link on the first read after a lease ends, and stops peer doors when leading ends', async () => {
@@ -1061,16 +1085,8 @@ describe('the peer link in the keeper', () => {
       },
     };
 
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
-    onTestFinished(() => {
-      vi.restoreAllMocks();
-      vi.useRealTimers();
-    });
     const stepUntil = async (stepMs: number, check: () => boolean) => {
-      while (!check()) {
-        await vi.advanceTimersByTimeAsync(stepMs);
-        await new Promise<void>(resolve => setImmediate(resolve));
-      }
+      await state(async () => { if (check()) return true; await step(stepMs); return check(); });
     };
 
     /* A keeper in read mode never offers peer doors through hornhoof.org, even when both peer secrets exist. */
@@ -1088,8 +1104,7 @@ describe('the peer link in the keeper', () => {
       readerPorts = true;
     });
     await stepUntil(3000, () => readerPorts);
-    await vi.advanceTimersByTimeAsync(9000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await step(9000);
     expect(reader.keeper.mode()).toBe('read');
     expect(reader.offered).toEqual([]);
     await reader.keeper.stop();
@@ -1119,31 +1134,33 @@ describe('the peer link in the keeper', () => {
     await stepUntil(20, () => leaderPorts && leader.keeper.mode() === 'lead' && leader.offered.length === 1 && linkStarts === 1);
 
     const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    onTestFinished(() => kill.mockRestore());
     leaderLease.problemsAre(['another machine holds the lease']);
     renews.hold = false;
     clock.wall += 11_000;
     clock.mono += 11_000;
-    await stepUntil(20, () => leader.keeper.mode() === 'read' && !leader.keeper.linkWanted());
+    await leaseRound(leader.keeper);
+    expect(leader.keeper.mode()).toBe('read');
+    expect(leader.keeper.linkWanted()).toBe(false);
     expect(kill).not.toHaveBeenCalled();
 
     /* First 3 s read: the public link is told to stop at once, while the peer tunnel holds through one read. */
-    await vi.advanceTimersByTimeAsync(3000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    advance(3000);
+    await tunnelRound(leader.keeper);
     expect(kill).toHaveBeenCalledTimes(1);
-    await until(() => leader.lines.includes('No public link: the tunnel waits.'));
+    await state(() => leader.lines.includes('No public link: the tunnel waits.'));
     expect(leader.lines).toContain('Stopping the public link while this keeper holds no lease or waits after a lease ended.');
 
     /* Second 3 s read: sustained read mode stops the peer tunnel as well, saying why first. */
-    await vi.advanceTimersByTimeAsync(3000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    advance(3000);
+    await tunnelRound(leader.keeper);
     expect(kill).toHaveBeenCalledTimes(2);
-    await until(() => leader.lines.includes('No public link: this machine is not offered to its peers through it.'));
+    await state(() => leader.lines.includes('No public link: this machine is not offered to its peers through it.'));
     const peerWhyAt = leader.lines.indexOf('Stopping the peer tunnel: this keeper no longer leads.');
     expect(peerWhyAt).toBeGreaterThanOrEqual(0);
     expect(peerWhyAt).toBeLessThan(leader.lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await leader.keeper.stop();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
+    kill.mockRestore();
   });
 });
