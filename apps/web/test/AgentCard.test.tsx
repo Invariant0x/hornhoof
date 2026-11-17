@@ -44,6 +44,28 @@ describe('AgentCard', () => {
     expect(await screen.findByText(/^Switched on or off: Orchestrator, /)).toBeInTheDocument();
   });
 
+  it('names the acting head and whose rights it used, keeping human, old and automatic changes in both languages', async () => {
+    for (const [lang, head, human, orchestrator, automatic] of [
+      ['en', 'Name: Head Hana (authority: Dana),', 'Skills: Ivan,', 'Switched on or off: Orchestrator,', 'Reset to the template,'],
+      ['ru', 'Имя: глава Hana (права Dana),', 'Навыки: Ivan,', 'Включен или выключен: Оркестратор,', 'Возврат к шаблону,'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const at = '2026-10-30T09:00:00.000Z';
+      open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [
+        { field: 'name', personName: 'Dana', actingAgent: { id: 'head-id', name: 'Hana' }, byOrchestrator: false, at },
+        { field: 'skills', personName: 'Ivan', actingAgent: null, byOrchestrator: false, at },
+        { field: 'switch', personName: null, actingAgent: null, byOrchestrator: true, at },
+        { field: 'reset', personName: null, actingAgent: null, byOrchestrator: false, at },
+      ] }] });
+      await screen.findByRole('heading', { name: 'Bruno' });
+      const history = within(screen.getByRole('heading', { name: lang === 'en' ? 'Changes' : 'Изменения' }).parentElement!);
+      const lines = history.getAllByRole('listitem').map(item => item.textContent);
+      for (const expected of [head, human, orchestrator, automatic]) expect(lines.some(line => line?.startsWith(expected)), `${lang}: ${expected}`).toBe(true);
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('lists its turns a node restart cut off, why, where and on which task, in each language', async () => {
     const interrupted = [
       { job: 'bbbbbbbb-0000-4000-8000-000000000002', at: '2026-11-03T00:20:00.000Z', cause: 'container' as const, node: 'dev-laptop', task: { id: 't12', number: 12 }, retry: true },

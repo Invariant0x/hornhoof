@@ -1593,6 +1593,7 @@ export const en = {
     templateChanged: 'Template changed',
     rawBroken: 'Keep the identity, headings and assignment and skill markers as they are. Turn skills on and off in the list above.',
     history: 'Changes',
+    byHead: (head: string, person: string | null) => `Head ${head} (authority: ${person ?? 'unknown'})`,
     changed: (what: string, who: string | null, when: string) => (who ? `${what}: ${who}, ${when}` : `${what}, ${when}`),
     timer: 'Timer',
     timerAbout: 'The employee wakes on its own every so often, outside any task, and does what you write here.',
