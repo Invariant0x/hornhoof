@@ -2031,6 +2031,7 @@ export const en = {
     nothingWorking: 'Nobody works on a task at this moment.',
     waitTasks: 'Tasks that wait for you',
     waitTasksOf: (name: string) => `Tasks that wait for ${name}`,
+    priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Task', executor: 'Executor', responsible: 'Responsible', goal: 'Goal', due: 'Due', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done` },
     nobody: 'Nobody',
     noGoal: 'No goal',
@@ -2162,6 +2163,7 @@ export const en = {
       passed: (from: string, to: string) => `${from} no longer reaches this place, so ${to} answers for it now.`,
       goalCreated: (by: string) => `${by} set the goal`,
       fields: {
+        priority: 'the priority',
         title: 'the title', brief: 'the short text', why: 'the why', goal: 'the goal', responsible: 'who answers for it', due: 'the due date', pipeline: 'the pipeline',
         stage: 'the stage', parent: 'the bigger goal', target: 'the target', current: 'where it stands now', unit: 'what it is counted in',
       } as Record<string, string>,

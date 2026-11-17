@@ -55,6 +55,18 @@ describe('tracker tools', () => {
     expect(await has(pia)).toEqual(['goals', 'set_goal', 'set_pipeline', 'tidy_task']);
   });
 
+  it('sets tracker priority through task creation and editing', async () => {
+    const { db, head, bruno, tools } = await company();
+    const agent = await tools(head);
+    const made = await call(agent, 'create_task', { title: 'Checkout', brief: 'Pay.', body: 'Card.', executor: bruno.id, resultKind: 'coordination', priority: 'low' });
+    expect(made.isError, text(made)).toBeFalsy();
+    const [task] = await db.select().from(tasks).where(eq(tasks.title, 'Checkout'));
+    expect(task).toMatchObject({ priority: 'low' });
+    const edited = await call(agent, 'update_task', { task: task!.number, priority: 'high' });
+    expect(edited.isError, text(edited)).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, task!.id)))[0]).toMatchObject({ priority: 'high', version: task!.version });
+  });
+
   it('set goals of the own department, the company ones only through the orchestrator', async () => {
     const { db, dev, head, orchestrator, olegId, tools } = await company();
     const top = await call(await tools(orchestrator), 'set_goal', { company: true, title: 'Grow', why: 'Revenue before the round.' });

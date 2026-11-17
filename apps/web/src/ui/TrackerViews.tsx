@@ -1,7 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, type Asks, type HumanStatus } from '../task-board';
-import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
+import { boardColumns, doerOf, layoutTree, listGroups, NODE, priorityOf, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
 import { Fold } from './TaskBoard';
@@ -31,6 +31,11 @@ function Cell({ name, children }: { name: string; children: ReactNode }) {
   );
 }
 
+export function PriorityWord({ task }: { task: TaskLine }) {
+  const t = useT();
+  return <span>{t.tracker.priority[priorityOf(task)]}</span>;
+}
+
 function ListRow({ tree, rows, sub = false }: { tree: TaskTree; rows: Rows; sub?: boolean }) {
   const t = useT();
   const { language } = useLanguage();
@@ -51,6 +56,7 @@ function ListRow({ tree, rows, sub = false }: { tree: TaskTree; rows: Rows; sub?
         </span>
         <Cell name={words.executor}>{doerOf(task)?.name ?? t.tracker.nobody}</Cell>
         <Cell name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Cell>
+        <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>{task.goal?.title ?? t.tracker.noGoal}</Cell>
         <Cell name={words.due}>{due ? <span className={due.late ? 'tp-late' : undefined}>{due.text}</span> : ''}</Cell>
       </div>
@@ -78,7 +84,7 @@ function Group({ group, rows }: { group: ListGroup; rows: Rows }) {
       {open && (
         <>
           <div className="tr-cells tr-head" aria-hidden="true">
-            <span>{words.task}</span><span>{words.executor}</span><span>{words.responsible}</span><span>{words.goal}</span><span>{words.due}</span>
+            <span>{words.task}</span><span>{words.executor}</span><span>{words.responsible}</span><span>{t.tracker.priority.label}</span><span>{words.goal}</span><span>{words.due}</span>
           </div>
           <ul className="tr-rows">{group.trees.map(tree => <ListRow key={tree.task.id} tree={tree} rows={rows} />)}</ul>
         </>

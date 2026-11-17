@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { goals as trees, humanStatus, type Asks, type Goal as TaskTree, type HumanStatus } from './task-board';
 import type { Employee, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskLine } from './types';
 
@@ -23,6 +24,8 @@ export function boardStatus(task: TaskLine, asksYou = false): BoardStatus {
 /* The order the list's groups read in: what needs people first, then what stopped, is checked, moves and has not started,
    and what is over. */
 const NEED: HumanStatus[] = ['waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
+export const priorityOf = (task: TaskLine) => task.priority ?? 'normal';
+const byPriority = (a: TaskTree, b: TaskTree) => TASK_PRIORITIES.indexOf(priorityOf(a.task)) - TASK_PRIORITIES.indexOf(priorityOf(b.task)) || newestFirst(a, b);
 const newestFirst = (a: TaskTree, b: TaskTree) => b.task.number - a.task.number;
 
 export type ListGroup = { status: HumanStatus; trees: TaskTree[] };
@@ -44,7 +47,7 @@ function counted(nodes: TaskTree[], all: TaskLine[]): TaskTree[] {
    subtasks are counted over, when those given are only part of it. */
 export function listGroups(tasks: TaskLine[], asksYou?: Asks, all: TaskLine[] = tasks): ListGroup[] {
   const top = counted(trees(tasks), all);
-  return NEED.map(status => ({ status, trees: top.filter(tree => humanStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(newestFirst) })).filter(g => g.trees.length > 0);
+  return NEED.map(status => ({ status, trees: top.filter(tree => humanStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(byPriority) })).filter(g => g.trees.length > 0);
 }
 
 /* A stage with how deep it stands in its pipeline's tree. */

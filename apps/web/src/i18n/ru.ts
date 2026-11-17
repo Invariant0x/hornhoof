@@ -2027,6 +2027,7 @@ export const ru: Messages = {
     nothingWorking: 'Сейчас никто не работает над задачами.',
     waitTasks: 'Задачи, которые ждут вас',
     waitTasksOf: (name: string) => `Задачи, которые ждут ответа (${name})`,
+    priority: { label: 'Приоритет', urgent: 'Срочно', high: 'Высокий', normal: 'Обычный', low: 'Низкий' },
     list: { task: 'Задача', executor: 'Исполнитель', responsible: 'Ответственный', goal: 'Цель', due: 'Срок', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}` },
     nobody: 'Никто',
     noGoal: 'Без цели',
@@ -2156,6 +2157,7 @@ export const ru: Messages = {
       passed: (from: string, to: string) => `${from} больше не имеет доступа сюда, поэтому теперь отвечает ${to}.`,
       goalCreated: (by: string) => `${by} поставил цель`,
       fields: {
+        priority: 'приоритет',
         title: 'название', brief: 'краткое описание', why: 'зачем', goal: 'цель', responsible: 'ответственного', due: 'срок', pipeline: 'конвейер',
         stage: 'этап', parent: 'большую цель', target: 'цель в числах', current: 'где цель сейчас', unit: 'в чем считаем',
       } as Record<string, string>,

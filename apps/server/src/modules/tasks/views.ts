@@ -1,3 +1,4 @@
+import type { TaskPriority } from '@hornhoof/protocol';
 import { findingReport } from './review-findings.js';
 import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { routeSnapshots } from './echelons-store.js';
@@ -48,6 +49,7 @@ export type TaskLine = {
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
   urgent: boolean;
+  priority: TaskPriority;
   small: boolean;
   /* The goal it serves, through the task at the top of its work; who answers for it; why it exists; by when. */
   goal: GoalRef | null;
@@ -195,6 +197,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   workKind: t.workKind,
   riskClass: t.riskClass,
   urgent: t.urgent,
+  priority: t.priority ?? 'normal',
   small: t.small,
   goal: n.goal(t),
   responsible: n.person(t.responsiblePersonId),

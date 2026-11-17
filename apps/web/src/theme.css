@@ -1796,7 +1796,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-row:first-child { border-block-start: 0; }
 .tr-row.on { box-shadow: inset 3px 0 0 var(--cyan); }
 [dir="rtl"] .tr-row.on { box-shadow: inset -3px 0 0 var(--cyan); }
-.tr-cells { display: grid; grid-template-columns: minmax(0, 3fr) repeat(3, minmax(0, 1.2fr)) minmax(0, 1fr); align-items: baseline; gap: 4px 12px; min-width: 0; font-size: 13px; }
+.tr-cells { display: grid; grid-template-columns: minmax(0, 3fr) repeat(4, minmax(0, 1.2fr)) minmax(0, 1fr); align-items: baseline; gap: 4px 12px; min-width: 0; font-size: 13px; }
 .tr-head { padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .tr-head > span { overflow-wrap: anywhere; }
 .tr-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 14px; }

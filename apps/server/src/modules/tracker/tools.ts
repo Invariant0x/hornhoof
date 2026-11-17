@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -19,7 +20,9 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 
 /* What the tracker keeps of a task, as the task tools take it. */
 const GoalRef = z.number().int().positive().describe('The number of the goal this work serves, as goals lists them. Work under a task serves the goal of the task above it and names none.');
+const Priority = z.enum(TASK_PRIORITIES).nullable().optional().describe('Priority in the tracker. Normal is the default; null resets it.');
 export const TrackerFields = {
+  priority: Priority,
   goal: GoalRef.optional(),
   responsible: z.uuid().optional().describe("The person who answers for the result, as company lists people. Without one: the parent's, else the goal's, else the person who decides for the department."),
   why: z.string().trim().max(300).optional().describe('Why the work matters, in a short sentence people read.'),
@@ -27,9 +30,9 @@ export const TrackerFields = {
   pipeline: z.uuid().optional().describe("The department's pipeline it goes along, from goals. Its stage follows whoever holds it."),
   stage: z.uuid().optional().describe('The stage of that pipeline it stands in, when not where its holder stands.'),
 };
-type TrackerArgs = { goal?: number; responsible?: string; why?: string; due?: string; pipeline?: string; stage?: string };
+type TrackerArgs = { priority?: TaskPriority | null; goal?: number; responsible?: string; why?: string; due?: string; pipeline?: string; stage?: string };
 /* The same in the engine's names; it fits both a new task and an edit. */
-type TrackerGiven = { goalId?: string; responsiblePersonId?: string; why?: string; dueAt?: Date; pipelineId?: string; pipelineStageId?: string };
+type TrackerGiven = { priority?: TaskPriority | null; goalId?: string; responsiblePersonId?: string; why?: string; dueAt?: Date; pipelineId?: string; pipelineStageId?: string };
 
 /* The goal of the company with this number. */
 async function goalIdOf(ctx: Pick<Ctx, 'db'>, companyId: string, number: number): Promise<string> {
@@ -41,6 +44,7 @@ async function goalIdOf(ctx: Pick<Ctx, 'db'>, companyId: string, number: number)
 /* The tracker's part of what a task tool was given, in the engine's names. */
 export async function trackerInputOf(ctx: Pick<Ctx, 'db'>, companyId: string, args: TrackerArgs): Promise<TrackerGiven> {
   return {
+    ...(args.priority !== undefined ? { priority: args.priority } : {}),
     ...(args.goal !== undefined ? { goalId: await goalIdOf(ctx, companyId, args.goal) } : {}),
     ...(args.responsible !== undefined ? { responsiblePersonId: args.responsible } : {}),
     ...(args.why !== undefined ? { why: args.why } : {}),
@@ -51,7 +55,7 @@ export async function trackerInputOf(ctx: Pick<Ctx, 'db'>, companyId: string, ar
 }
 
 export const hasTrackerFields = (args: TrackerArgs) => Object.values(pick(args)).some(v => v !== undefined);
-const pick = ({ goal, responsible, why, due, pipeline, stage }: TrackerArgs): TrackerArgs => ({ goal, responsible, why, due, pipeline, stage });
+const pick = ({ goal, responsible, why, due, pipeline, stage, priority }: TrackerArgs): TrackerArgs => ({ goal, responsible, why, due, pipeline, stage, priority });
 
 /* An agent keeps goals and pipelines of its own department; the orchestrator, of any and of the company. */
 const agentGuard = (job: ToolJob): GoalGuard & PipelineGuard => async spot => {
@@ -183,12 +187,13 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
     'tidy_task',
     {
       description:
-        "Makes a task of your department clear for people: its title, brief, why, goal, pipeline and stage, and who answers for it, only the person who decides for the department or the one already responsible for its goal. Who does the work, its status, urgency, pause, waits and route stay with the head: ask the head when they look wrong. Nobody is woken.",
+        "Makes a task of your department clear for people: its title, brief, why, priority, goal, pipeline and stage, and who answers for it, only the person who decides for the department or the one already responsible for its goal. Who does the work, its status, urgency, pause, waits and route stay with the head: ask the head when they look wrong. Nobody is woken.",
       inputSchema: {
         task: z.union([z.number().int().positive(), z.string().regex(/^#?\d+$/)]).describe('The task, by number, like 12.'),
         title: z.string().trim().min(1).max(120).optional(),
         brief: z.string().max(600).optional(),
         why: z.string().trim().max(300).optional(),
+        priority: Priority,
         goal: GoalRef.nullable().optional(),
         pipeline: z.uuid().nullable().optional(),
         stage: z.uuid().nullable().optional(),
@@ -202,7 +207,7 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
         if (!job.departmentId || task.departmentId !== job.departmentId) throw refuse(403, 'not_your_department', `#${task.number} is not of your department. Its own product manager or head keeps it.`);
         const goalId = input.goal === undefined ? undefined : input.goal === null ? null : await goalIdOf(ctx, job.companyId, input.goal);
         if (input.responsible !== undefined) await requireNamable(ctx, task, input.responsible, goalId);
-        const edit: TaskEdit = { title: input.title, brief: input.brief, why: input.why, goalId, responsiblePersonId: input.responsible, pipelineId: input.pipeline, pipelineStageId: input.stage };
+        const edit: TaskEdit = { title: input.title, brief: input.brief, why: input.why, priority: input.priority, goalId, responsiblePersonId: input.responsible, pipelineId: input.pipeline, pipelineStageId: input.stage };
         const row = await editTask(ctx, actor, task, edit, seenOf(task));
         return `#${row.number} reads "${row.title}" now.`;
       }),

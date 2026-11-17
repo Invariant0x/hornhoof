@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
@@ -18,6 +19,7 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
   const [body, setBody] = useState('');
+  const [priority, setPriority] = useState<TaskPriority>('normal');
   const [product, setProduct] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -33,6 +35,7 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
         brief: brief.trim(),
         body: body.trim(),
         department: d.id,
+        ...(priority === 'normal' ? {} : { priority }),
         ...(product ? { product } : {}),
       });
       onCreated(task);
@@ -50,6 +53,11 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
       <Field label={t.dept.details}>
         {p => <textarea {...p} rows={5} value={body} onChange={e => setBody(e.target.value)} maxLength={20000} placeholder={t.dept.detailsPlaceholder} />}
       </Field>
+      <Field label={t.tracker.priority.label}>{p => (
+        <select {...p} value={priority} onChange={e => setPriority(e.target.value as TaskPriority)}>
+          {TASK_PRIORITIES.map(level => <option key={level} value={level}>{t.tracker.priority[level]}</option>)}
+        </select>
+      )}</Field>
       {d.products.length > 0 && (
         <Field label={t.dept.product}>
           {p => (

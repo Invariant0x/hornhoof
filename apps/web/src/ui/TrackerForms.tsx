@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
@@ -84,7 +85,7 @@ function TrackerForm({ label, busy, failure, onSubmit, onCancel, children }: { l
 }
 
 const taskFields = (task: TaskDetail) => ({
-  title: task.title, brief: task.brief, why: task.why ?? '', goal: task.goal?.id ?? '', responsible: task.responsible?.id ?? '', due: dayOf(task.dueAt), pipeline: task.pipelineId ?? '', stage: task.pipelineStageId ?? '',
+  title: task.title, brief: task.brief, why: task.why ?? '', goal: task.goal?.id ?? '', responsible: task.responsible?.id ?? '', due: dayOf(task.dueAt), priority: task.priority ?? 'normal', pipeline: task.pipelineId ?? '', stage: task.pipelineStageId ?? '',
 });
 
 /* What the tracker keeps of a task, changed by whoever acts on its work: only what the person changed goes, with the version
@@ -97,7 +98,7 @@ export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetai
   const { goals } = useGoals();
   const { pipelines } = usePipelines();
   const { draft, set, was, version, revision, refused } = useDraft(taskFields(task), task.version, task.revision);
-  const { title, brief, why, goal, responsible, due, pipeline, stage } = draft;
+  const { title, brief, why, goal, responsible, due, priority, pipeline, stage } = draft;
   const { busy, failure, send } = useSend(onDone, err => {
     if (!changedMeanwhile(err)) return;
     refused();
@@ -117,6 +118,7 @@ export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetai
     if (why.trim() !== was.why) change.why = why.trim();
     if (!task.parentId && goal !== was.goal) change.goal = goal || null;
     if (responsible && responsible !== was.responsible) change.responsible = responsible;
+    if (priority !== was.priority) change.priority = priority;
     if (due !== was.due) change.due = isoOf(due);
     if (pipeline !== was.pipeline) change.pipeline = pipeline || null;
     if (pipeline && stage !== was.stage) change.stage = stage || null;
@@ -149,6 +151,11 @@ export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetai
           </select>
         )}
       </Field>
+      <Field label={t.tracker.priority.label}>{p => (
+        <select {...p} value={priority} onChange={e => set({ priority: e.target.value })}>
+          {TASK_PRIORITIES.map(level => <option key={level} value={level}>{t.tracker.priority[level]}</option>)}
+        </select>
+      )}</Field>
       <Field label={words.due}>{p => <input {...p} type="date" value={due} onChange={e => set({ due: e.target.value })} />}</Field>
       {ours.length > 0 && (
         <Field label={words.pipeline}>

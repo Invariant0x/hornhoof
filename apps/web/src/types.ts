@@ -1,3 +1,4 @@
+import type { TaskPriority } from '@hornhoof/protocol';
 import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
@@ -473,6 +474,7 @@ export type TaskLine = {
   title: string;
   brief: string;
   status: TaskStatus;
+  priority?: TaskPriority;
   externalWait?: ExternalWait | null;
   /* Paused work wakes nobody until it is resumed; root is the task the pause was placed on. */
   paused?: { at: string; reason: string; root: string } | null;

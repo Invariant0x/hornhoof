@@ -28,6 +28,9 @@ export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } fro
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
 export { PROVIDER_IDS, type ProviderId };
+
+export const TASK_PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export { API_PROTOCOLS, API_PROVIDERS, apiEndpoint, isApiProvider, type ApiEndpoint, type ApiProtocol, type ApiProvider } from './providers.js';
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;

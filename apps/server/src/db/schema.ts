@@ -5,7 +5,7 @@ import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
-import type { UnitFingerprint } from '@hornhoof/protocol';
+import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -1184,6 +1184,7 @@ export const tasks = pgTable(
     responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
     /* Why the task exists, in plain words; the brief says what the result is. */
     why: text('why').notNull().default(''),
+    priority: text('priority').$type<TaskPriority>(),
     dueAt: timestamp('due_at', { withTimezone: true }),
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
@@ -1196,6 +1197,7 @@ export const tasks = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [
+    check('tasks_priority_known', sql`${t.priority} in ('urgent', 'high', 'normal', 'low')`),
     unique('tasks_company_number').on(t.companyId, t.number),
     index('tasks_goal_id').on(t.goalId),
     index('tasks_responsible').on(t.responsiblePersonId),

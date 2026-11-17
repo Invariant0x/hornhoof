@@ -1,3 +1,4 @@
+import { PriorityWord } from './TrackerViews';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -315,6 +316,7 @@ function TaskFacts({ task }: { task: TaskDetail }) {
       <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
       <Fact name={words.executor}>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</Fact>
       {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
+      <Fact name={t.tracker.priority.label}><PriorityWord task={task} /></Fact>
       {due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined}>{due.text}</span></Fact>}
       {(time || waits.length > 0) && (
         <Fact name={words.time}>

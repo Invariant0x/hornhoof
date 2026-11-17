@@ -137,6 +137,19 @@ describe('My tasks and View as', () => {
 });
 
 describe('the views and the card', () => {
+  it('orders list tasks by priority and shows it in the row and the card', async () => {
+    const user = userEvent.setup();
+    const high = line({ ...PAY, priority: 'high' });
+    const normal = line({ id: 't25', number: 25, title: 'Later task' });
+    shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [normal, high] }], 'GET /api/tasks/t21': [200, { task: detail(high) }] });
+    const list = await main();
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#25 Later task']));
+    expect(rowOf(list, '#21 Take card payments')).toHaveTextContent('High');
+    expect(rowOf(list, '#25 Later task')).toHaveTextContent('Normal');
+    await user.click(within(list).getByRole('button', { name: 'Take card payments' }));
+    expect(within(await card('#21 Take card payments')).getByRole('definition', { name: 'Priority' })).toHaveTextContent('High');
+  });
+
   it('shows the run in the list and the person who set the wait and its deadline on the card', async () => {
     const user = userEvent.setup();
     const since = '2026-11-17T21:45:00.000Z';
