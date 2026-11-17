@@ -74,7 +74,7 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
-  it('keeps the retained terminal tail private in a later typed turn', async () => {
+  it.each([false, true])('keeps the retained terminal tail private in a later typed turn, completed: %s', async completed => {
     const marker = 'retained-tail-marker-1178';
     const t = await liveTerminal('claude', 'queued');
     t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'secret-call', name: 'mcp__hornhoof__vault_save', input: { password: marker } }] } });
@@ -86,11 +86,13 @@ describe('what a turn tells Hornhoof', () => {
     const opened = t.sent.find((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open')!;
     t.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed-after-secret', toolToken: 'typed-token', ref: opened.ref });
     await t.on(prompted);
-    t.ends(`retained pane ${marker}`, 3);
+    if (completed) t.finish('Follow-up delivered.');
+    else t.ends(`retained pane ${marker}`, 3);
     await t.until(() => t.sent.some(m => m.type === 'job.done' && m.jobId === 'typed-after-secret'));
     const done = t.sent.find((m): m is Extract<NodeMessage, { type: 'job.done' }> => m.type === 'job.done' && m.jobId === 'typed-after-secret')!;
     expect(done.tail).not.toContain(marker);
     expect(done.tail).toMatch(/hidden/i);
+    if (completed) expect(done.result).toBe('Follow-up delivered.');
   });
 
   it('shows a clean screen after the sensitive program and its tmux session were removed', async () => {
