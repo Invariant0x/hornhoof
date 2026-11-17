@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import * as acme from 'acme-client';
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, problemOf, retryAfterSeconds } from '../src/modules/tls/acme.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
 import { closedPort } from './closed-port.js';
@@ -146,6 +146,16 @@ async function newAccountOn(fake: { directoryUrl: string }, opts: { backoff?: { 
   return new AcmeAccount(fake.directoryUrl, await newAccountKey(), null, opts);
 }
 
+/* The step's outcome on a clock that never moves, so a step that waited for any time would never end. Whatever timer the
+   step set while it asked, such as its request's own timeout, it has let go. */
+async function withoutWaiting<T>(step: () => Promise<T>): Promise<PromiseSettledResult<T>> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => void vi.useRealTimers());
+  const [outcome] = await Promise.allSettled([step()]);
+  expect(vi.getTimerCount(), 'timers left waiting').toBe(0);
+  return outcome!;
+}
+
 describe('the settings it runs on', () => {
   it("names Let's Encrypt's production directory", () => {
     expect(LETS_ENCRYPT).toBe('https://acme-v02.api.letsencrypt.org/directory');
@@ -165,22 +175,18 @@ describe('the settings it runs on', () => {
 describe('AcmeAccount, on a fake ACME server', () => {
   it('tells a rate limit and its Retry-After, without waiting it out', async () => {
     const fake = await fakeAcme({ '/new-account': () => problem(429, RATE_LIMITED, 'too many', { 'retry-after': '7200' }) });
-    const started = Date.now();
-    await expect((await newAccountOn(fake)).account()).rejects.toMatchObject({
-      kind: 'refused',
-      type: RATE_LIMITED,
-      retryAfterS: 7200,
-      message: expect.stringContaining('too many'),
+    const account = await newAccountOn(fake);
+    expect(await withoutWaiting(() => account.account())).toMatchObject({
+      status: 'rejected',
+      reason: { kind: 'refused', type: RATE_LIMITED, retryAfterS: 7200, message: expect.stringContaining('too many') },
     });
-    expect(Date.now() - started).toBeLessThan(2000);
     expect(fake.hits('/new-account')).toBe(1);
   });
 
   it('says unreachable for a server error, at once', async () => {
     const fake = await fakeAcme({ '/new-account': () => ({ status: 500 }) });
-    const started = Date.now();
-    await expect((await newAccountOn(fake)).account()).rejects.toMatchObject({ kind: 'unreachable', type: null });
-    expect(Date.now() - started).toBeLessThan(2000);
+    const account = await newAccountOn(fake);
+    expect(await withoutWaiting(() => account.account())).toMatchObject({ status: 'rejected', reason: { kind: 'unreachable', type: null } });
     expect(fake.hits('/new-account')).toBe(1);
   });
 

@@ -15,7 +15,7 @@ export function validScopePaths(paths: readonly string[]): boolean {
 }
 
 /* Accompanying test files and test, tests and e2e folders are allowed on any scoped task. */
-function isTestPath(path: string): boolean {
+export function isTestPath(path: string): boolean {
   const parts = path.split('/');
   const file = parts[parts.length - 1]!;
   return TEST_FILE.test(file) || parts.slice(0, -1).some(dir => TEST_DIRS.has(dir));

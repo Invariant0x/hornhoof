@@ -4,6 +4,7 @@ import net from 'node:net';
 import { Duplex } from 'node:stream';
 import tls, { type TLSSocket } from 'node:tls';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { LinkListener, linkVisitor } from '../src/modules/tls/listener.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
 import { proxyV2, visitorHeader } from './proxy-v2.js';
@@ -12,6 +13,9 @@ const HOST = 'acme.hornhoof.test';
 const VISITOR = '203.0.113.9';
 const TLS_CLIENT = { servername: HOST, rejectUnauthorized: false };
 const V2_LOCAL = 0x20;
+/* What the listener gives a connection for its PROXY header and then for its TLS handshake. */
+const HEADER_MS = 5000;
+const HANDSHAKE_MS = 10_000;
 
 /* What the keeper's third door is here: a server with no port of its own, which says who the listener says it serves. */
 function sayingWho(options: http.ServerOptions = {}): http.Server {
@@ -92,10 +96,42 @@ function ask(socket: TLSSocket, { path }: { path: string }): Promise<Answer> {
 
 const health = { path: '/api/health' };
 
-async function closedAfterMs(socket: net.Socket): Promise<number> {
-  const started = performance.now();
-  await once(socket, 'close');
-  return performance.now() - started;
+/* The listener's timers on a clock only the test moves. Sockets and Node's own timers stay real, so a close that comes
+   while the clock stands still came from what the listener read, not from a deadline. */
+function onTestClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => void vi.useRealTimers());
+}
+
+/* A visitor's TLS whose hello the listener has answered, so that its handshake deadline runs. The client's next words, its
+   Finished first, wait until goOn: until then the handshake stays half done. */
+async function helloAnswered(port: number): Promise<{ raw: net.Socket; client: TLSSocket; goOn: () => void }> {
+  const raw = await rawConnection(port);
+  raw.write(visitorHeader(VISITOR));
+  let answered = false;
+  let held: Buffer[] | null = [];
+  const carrier = new Duplex({
+    read() {},
+    write(chunk: Buffer, _encoding, done) {
+      if (answered && held) held.push(chunk);
+      else raw.write(chunk);
+      done();
+    },
+  });
+  const answer = once(raw, 'data');
+  raw.on('data', chunk => {
+    answered = true;
+    carrier.push(chunk);
+  });
+  const client = tls.connect({ socket: carrier, ...TLS_CLIENT });
+  client.on('error', () => {});
+  onTestFinished(() => void client.destroy());
+  await answer;
+  const goOn = () => {
+    for (const chunk of held ?? []) raw.write(chunk);
+    held = null;
+  };
+  return { raw, client, goOn };
 }
 
 describe('the certificate of the TLS listener', () => {
@@ -179,33 +215,46 @@ describe('how a connection opens', () => {
 
   it('closes a connection with no header in 5 s, and a bad header at once', async () => {
     const { port } = await listening();
+    onTestClock();
     const silent = await rawConnection(port);
     const halfHeader = await rawConnection(port);
+    const late = await rawConnection(port);
     const bad = await rawConnection(port);
-    const silentMs = closedAfterMs(silent);
-    const halfHeaderMs = closedAfterMs(halfHeader);
-    const badMs = closedAfterMs(bad);
+    const badClosed = once(bad, 'close');
     halfHeader.write(visitorHeader(VISITOR).subarray(0, 20));
     bad.write('GET / HTTP/1.1\r\n');
 
-    expect(await badMs).toBeLessThan(1000);
-    for (const ms of await Promise.all([silentMs, halfHeaderMs])) {
-      expect(ms).toBeGreaterThan(4500);
-      expect(ms).toBeLessThan(6000);
-    }
+    await badClosed;
+    /* The deadlines of the other three, each from when its connection came, with the clock where it was. */
+    await eventually(() => vi.getTimerCount() === 3);
+    await vi.advanceTimersByTimeAsync(HEADER_MS - 1);
+    expect(vi.getTimerCount()).toBe(3);
+    /* One whose whole header comes just before its time is still taken. */
+    late.write(visitorHeader(VISITOR));
+    expect((await ask(await secured(tls.connect({ socket: late, ...TLS_CLIENT })), health)).status).toBe(200);
+    const closed = Promise.all([once(silent, 'close'), once(halfHeader, 'close')]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await closed;
   });
 
   it('closes a connection whose handshake does not finish in 10 s, and not one that finished', async () => {
-    const { port } = await listening();
-    const finished = await overTls(port);
-    const stalled = await rawConnection(port);
-    const stalledMs = closedAfterMs(stalled);
-    stalled.write(visitorHeader(VISITOR));
+    const { port, server } = await listening();
+    onTestClock();
+    const stalled = await helloAnswered(port);
+    const finished = await helloAnswered(port);
+    const stalledClosed = once(stalled.raw, 'close');
 
-    const ms = await stalledMs;
-    expect(ms).toBeGreaterThan(9500);
-    expect(ms).toBeLessThan(11000);
-    expect((await ask(finished, health)).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_MS - 1);
+    expect(vi.getTimerCount()).toBe(2);
+    /* The server is given a connection once its handshake is done. */
+    const handedOver = once(server, 'connection');
+    finished.goOn();
+    await handedOver;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await stalledClosed;
+    expect((await ask(finished.client, health)).status).toBe(200);
   });
 
   it('goes on after a visitor resets the connection at any stage', async () => {
@@ -236,13 +285,14 @@ describe('how a connection opens', () => {
 
   it('closes a connection that stops speaking TLS after the handshake', async () => {
     const { port } = await listening();
+    onTestClock();
     const raw = await rawConnection(port);
     raw.write(visitorHeader(VISITOR));
     const client = await secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
     client.on('error', () => {});
-    const rawMs = closedAfterMs(raw);
+    const closed = once(raw, 'close');
     raw.write(Buffer.alloc(64, 0x17));
-    expect(await rawMs).toBeLessThan(1000);
+    await closed;
     expect((await ask(await overTls(port), health)).status).toBe(200);
   });
 
@@ -256,11 +306,12 @@ describe('how a connection opens', () => {
 
   it('closes only that connection when what follows the header is not TLS', async () => {
     const { port } = await listening();
+    onTestClock();
     const garbled = await rawConnection(port);
-    const garbledMs = closedAfterMs(garbled);
+    const closed = once(garbled, 'close');
     garbled.write(Buffer.concat([visitorHeader(VISITOR), Buffer.from('these are not the bytes of a TLS hello\r\n')]));
 
-    expect(await garbledMs).toBeLessThan(1000);
+    await closed;
     expect((await ask(await overTls(port), health)).status).toBe(200);
   });
 });
@@ -285,28 +336,28 @@ describe('opening the TLS listener', () => {
 describe('closing the TLS listener', () => {
   it('stops taking connections when closed', async () => {
     const { listener, port } = await listening();
+    onTestClock();
     const asking = await overTls(port);
     const silent = await overTls(port);
-    const silentMs = closedAfterMs(silent);
-    const started = performance.now();
+    const silentClosed = once(silent, 'close');
     const closing = listener.close(200);
 
     /* One already open may still finish what it asks in the grace; what is left after the grace is closed. */
     expect((await ask(asking, health)).status).toBe(200);
     await expect(rawConnection(port)).rejects.toMatchObject({ code: 'ECONNREFUSED' });
 
+    await vi.advanceTimersByTimeAsync(200);
     await closing;
-    expect(performance.now() - started).toBeLessThan(1000);
-    expect(await silentMs).toBeLessThan(1000);
+    await silentClosed;
   });
 
   it('resolves as soon as its connections have ended', async () => {
     const { listener, port } = await listening();
+    onTestClock();
     const open = await overTls(port);
-    const started = performance.now();
+    /* With the clock still, so that the grace is not what ends it. */
     const closing = listener.close(10_000);
     open.destroy();
     await closing;
-    expect(performance.now() - started).toBeLessThan(1000);
   });
 });

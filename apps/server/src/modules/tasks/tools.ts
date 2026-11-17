@@ -320,8 +320,22 @@ class TaskTools {
     if (products.length) throw refuse(400, 'task_invalid', `Name the product whose repository the change goes to: the code of your department lives in the repositories of its products (${products.map(product => `${product.name ?? 'unnamed'} (${product.id}): ${product.url}`).join('; ')}). Without one the task has no repository and closes by a report.`);
   }
 
-  private async createdTaskText(task: Task, executor: Agent): Promise<string> {
-    return `Created #${task.number} for ${executor.name}.${await this.waiting(task)}`;
+  private async optionalMember(head: Agent, id: string | undefined): Promise<Agent | null> {
+    return id ? this.member(head, id) : null;
+  }
+
+  private async checkCreatedScope(agent: Agent, executor: Agent, input: { product?: string; resultKind?: 'code' | 'document' | 'coordination'; paths?: string[] }): Promise<void> {
+    if (input.resultKind === 'document' && input.paths?.length) {
+      throw refuse(400, 'task_invalid', 'A document has no paths: its holder attaches files to the task. Leave paths out, or make it a code task.');
+    }
+    if (input.resultKind !== 'coordination' && input.resultKind !== 'document' && await echelonsFor(this.db, { companyId: agent.companyId, holderId: executor.id })) {
+      await this.checkCodeScope(agent, input);
+    }
+  }
+
+  private async createdTaskText(task: Task, executor: Agent, architect: Agent | null = null): Promise<string> {
+    const holder = architect && task.assigneeAgentId === architect.id ? architect : executor;
+    return `Created #${task.number} for ${holder.name}.${await this.waiting(task)}`;
   }
 
   private registerTasks(): void {
@@ -598,22 +612,22 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         this.run(async () => {
           const agent = await this.me();
           await this.underCap(agent);
           const executor = await this.member(agent, input.executor);
+          const architect = await this.optionalMember(agent, input.architectAgentId);
           if (input.independentPart) await this.member(agent, input.independentPart.executor);
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
-          if (input.resultKind === 'document' && input.paths?.length) throw refuse(400, 'task_invalid', 'A document has no paths: its holder attaches files to the task. Leave paths out, or make it a code task.');
-          if (input.resultKind !== 'coordination' && input.resultKind !== 'document' && await echelonsFor(this.db, { companyId: agent.companyId, holderId: executor.id })) await this.checkCodeScope(agent, input);
-          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
-          return { text: await this.createdTaskText(moved.task, executor), moved };
+          await this.checkCreatedScope(agent, executor, input);
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
+          return { text: await this.createdTaskText(moved.task, executor, architect), moved };
         }),
     );
   }
@@ -633,13 +647,13 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false gives a failing one to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false returns a source defect to Development when verification.delta describes the repair, or otherwise gives the failure to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
-          this.plain(task, summary);
+          this.plain(task, summary, ...(verification?.delta ? [verification.delta] : []));
           const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
@@ -670,7 +684,7 @@ class TaskTools {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, when the candidate\'s own change passed and it only needs the main line, its owner merges the main line into the candidate branch and submits the merge with review.baseCommit naming the main commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, its owner merges the main line into the candidate branch and submits the merge with review.baseCommit naming the main commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
       async ({ task: ref, summary, evidence, review, operationId }) =>

@@ -1,0 +1,81 @@
+dependencies
+cwd: .
+command: npm run -s deps
+exit: 0
+$ npm ci --ignore-scripts
+$ npm run -s prepare
+$ npm run -s build -w @hornhoof/protocol
+$ npm run -s build -w @hornhoof/node
+
+
+server build
+cwd: apps/server
+command: npm run build
+exit: 0
+
+> @hornhoof/server@0.29.3 build
+> tsc -p tsconfig.json && node -e "require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })"
+
+
+
+server types including tests
+cwd: apps/server
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+node build
+cwd: apps/node
+command: npm run build
+exit: 0
+
+> @hornhoof/node@0.29.3 build
+> tsc -p tsconfig.json
+
+
+
+node types including tests
+cwd: apps/node
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+protocol build
+cwd: packages/protocol
+command: npm run build
+exit: 0
+
+> @hornhoof/protocol@0.29.3 build
+> tsc -p tsconfig.json
+
+
+
+protocol types including tests
+cwd: packages/protocol
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+web types
+cwd: apps/web
+command: npx tsc -p tsconfig.json --noEmit
+exit: 0
+(no output)
+
+server changed-file lint
+cwd: apps/server
+command: npx --no-install eslint src/modules/assistants/mcp.ts src/modules/computer/tools.ts src/modules/conversation/queue.ts src/modules/events/store.ts src/modules/nodes/messages.ts src/modules/phones/recording.ts src/modules/phones/tools.ts src/modules/tasks/attachments.ts src/modules/tasks/wake.ts src/modules/tools/calls.ts src/modules/tools/mcp.ts src/modules/tools/outside.ts src/modules/tools/privacy.ts src/modules/tools/private-turns.ts src/modules/tools/private-upload.ts src/modules/tools/shelf.ts src/modules/vault/tools.ts test/assistant-agent.test.ts test/events.test.ts test/helpers-db.ts test/node-messages.test.ts test/phone-fixture.ts test/private-upload.test.ts test/read-tools.test.ts test/task-files.test.ts test/tool-calls.test.ts test/vault-fixture.ts test/vault-phone-privacy.test.ts test/vault-tools.test.ts
+exit: 0
+(no output)
+
+node changed-file lint
+cwd: apps/node
+command: npx --no-install eslint src/runner.ts src/terminal/bridge.ts src/terminal/host.ts src/terminal/recordings.ts src/terminal/tmux.ts test/runner.test.ts test/terminal-bridge.test.ts test/terminal-host-live-helpers.ts test/terminal-host-secrets.test.ts test/terminal-tmux.test.ts
+exit: 0
+(no output)
+
+protocol changed-file lint
+cwd: packages/protocol
+command: npx --no-install eslint src/index.ts src/tool-privacy.ts test/tool-privacy.test.ts
+exit: 0
+(no output)
