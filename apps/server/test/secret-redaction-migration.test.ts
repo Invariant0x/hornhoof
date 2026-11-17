@@ -12,7 +12,7 @@ it('upgrades an existing database without discarding prose, and a suppression ro
   const client = await freshPglite();
   onTestFinished(() => client.close());
   const db = drizzle(client);
-  await migrate(db, { migrationsFolder: await migrationsUpTo('0128_department_autonomous_release') });
+  await migrate(db, { migrationsFolder: await migrationsUpTo('0136_outbound_contact_log') });
   const company = await client.query<{ id: string }>("insert into companies (name) values ('Acme') returning id");
   const companyId = company.rows[0]!.id;
   await client.query("insert into tasks (company_id, number, title, body) values ($1, 1, 'Kept', 'Old text')", [companyId]);

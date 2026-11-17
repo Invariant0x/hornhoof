@@ -32,6 +32,17 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('a task', () => {
+  it.each([
+    ['en', 'Save passwords in the company vault'],
+    ['ru', 'Сохраняйте пароли в хранилище компании'],
+  ])('offers the vault for masked text in %s without exposing a value', async (language, label) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, body: 'password=[hidden]' } }] });
+    const panel = await openTask(user);
+    expect(within(panel).getByRole('link', { name: label })).toHaveAttribute('href', '/settings/passwords');
+  });
+
   it('lets an authorized person hide an existing secret, then clears the input', async () => {
     const user = userEvent.setup();
     const task = { ...TASK_DETAIL, mayHideSecret: true, body: 'OldMarker1077!' };

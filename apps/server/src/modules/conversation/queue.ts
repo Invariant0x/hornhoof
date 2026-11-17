@@ -1,5 +1,5 @@
-import { countOnly, idOnly, only } from '../../db/selections.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';

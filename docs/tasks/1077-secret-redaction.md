@@ -1,6 +1,8 @@
 # Hide secrets in stored text
 
-Task 1077. Base: origin/turn-31, d44ecb8c7d3d0b6d7ce690e01c25046f0404b212.
+Task 1077. Original base: origin/turn-31, d44ecb8c7d3d0b6d7ce690e01c25046f0404b212.
+
+The continued candidate takes origin/turn-31 at 73d4a6e9521059384503aa8f2d9a4942635d1568, regenerates the unpublished migration as 0137_secret_redactions and offers the now available company vault beside masked task text. Queue changes from the incoming release are kept; only the credential scrub calls are added.
 
 ## Plan
 

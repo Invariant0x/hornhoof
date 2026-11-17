@@ -1,5 +1,5 @@
-import { countOnly, idOnly, only } from '../../db/selections.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
