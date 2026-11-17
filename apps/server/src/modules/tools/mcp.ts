@@ -45,6 +45,7 @@ import { GRANTS } from '../templates/load.js';
 import { actingFor, Shelf } from './shelf.js';
 import { registerSourceTool } from './source.js';
 import { registerLogsTool } from './logs.js';
+import { registerShellTool } from './shell.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -195,6 +196,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
   registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
   registerSourceTool(server, ctx);
   registerLogsTool(server, ctx, job);
+  registerShellTool(server);
   registerOrchestratorImprovementTools(server, ctx, job);
   registerMergeTools(server, ctx, job);
 }
