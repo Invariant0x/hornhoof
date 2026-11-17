@@ -10,7 +10,7 @@ const NEVER = 2_147_483_647;
 
 type Seen = { method: string; url: string; auth: string; body: string };
 
-async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }> {
+async function upstream(result: unknown = { ok: true }): Promise<{ url: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = [];
   const server = createServer((req, res) => {
     let body = '';
@@ -18,7 +18,7 @@ async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }
     req.on('end', () => {
       seen.push({ method: req.method!, url: req.url!, auth: req.headers.authorization ?? '', body });
       res.writeHead(200, { 'content-type': 'application/json', 'x-file-name': 'build.tar.gz' });
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }));
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     });
   });
   await listenIn(server);
@@ -51,6 +51,75 @@ const toolCall = (...names: string[]) => {
 describe("the node's bridge to Hornhoof's tools", () => {
   const closers: (() => void)[] = [];
   afterEach(() => { vi.useRealTimers(); closers.splice(0).forEach(c => c()); });
+
+  it.each([false, true])('marks a sensitive request and learns its response before giving it to the program, delegated: %s', async delegated => {
+    const result = { content: [{ type: 'text', text: '{"password":"private-bridge-marker"}' }] };
+    const up = await upstream(result);
+    const observed: unknown[] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => { observed.push({ key, name, input, answer }); } });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const url = bridge.agent('agent-1').mcpUrl;
+    const params = { name: 'vault_entry', arguments: { entry: 'Partner' } };
+    const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: delegated ? { name: 'use_tool', arguments: params } : params };
+    const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+    expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result });
+    expect(observed).toEqual([
+      { key: 'agent-1', name: 'vault_entry', input: { entry: 'Partner' }, answer: undefined },
+      { key: 'agent-1', name: 'vault_entry', input: { entry: 'Partner' }, answer: { jsonrpc: '2.0', id: 1, result } },
+    ]);
+  });
+
+  it('uses the sensitive flag of a newly listed tool before forwarding its input or reply', async () => {
+    const policy = { sensitive: true, secretInput: ['value'], secretOutput: ['value'] };
+    const result = { tools: [{ name: 'new_private_tool', _meta: policy }], content: [{ type: 'text', text: '{"value":"private-generic-marker"}' }] };
+    const up = await upstream(result);
+    const observed: unknown[] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => { observed.push({ key, name, input, answer }); } });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const url = bridge.agent('agent-1').mcpUrl;
+    await (await fetch(url, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).text();
+    const request = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'new_private_tool', arguments: { value: 'private-input-marker' } } };
+    await (await fetch(url, { method: 'POST', body: JSON.stringify(request) })).text();
+    expect(observed).toEqual([
+      { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: undefined },
+      { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: { jsonrpc: '2.0', id: 1, result } },
+    ]);
+  });
+
+  it('waits for private output cleanup before forwarding a sensitive call', async () => {
+    const up = await upstream();
+    let seen = false;
+    let release!: () => void;
+    const cleanup = new Promise<void>(resolve => { release = resolve; });
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: async (_key, _name, _input, answer) => { if (!answer) { seen = true; await cleanup; } } });
+    const forward = vi.spyOn(bridge as unknown as { forward: (url: string, init: RequestInit, retry: boolean) => Promise<Response> }, 'forward').mockResolvedValue(new Response('{"jsonrpc":"2.0","id":1,"result":{}}'));
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const response = fetch(bridge.agent('agent-1').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: toolCall('vault_entry') });
+    try {
+      await eventually(() => seen);
+      expect(forward).not.toHaveBeenCalled();
+    } finally { release(); }
+    await (await response).text();
+    expect(forward).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a sensitive call when private output cleanup fails, without exposing the error', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: async () => { throw new Error('private-cleanup-error-marker'); } });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const response = await fetch(bridge.agent('agent-1').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: toolCall('vault_entry') });
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain('private-cleanup-error-marker');
+    expect(up.seen).toEqual([]);
+  });
 
   /* The bridge's pauses between tries, taken on no clock: each one is only written down. */
   async function bridgeTo(statuses: number[]) {
