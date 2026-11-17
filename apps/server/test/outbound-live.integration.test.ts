@@ -8,7 +8,8 @@ import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
 import { as, until } from './helpers.js';
 import { EVENT_KEY, FROM, NEVER, SIGNING_KEY, closeKept, frozenOf, hookWay, keep, liveSenders, liveWebhook, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
-import { closedPort, hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
+import { hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
+import { closedPort } from './closed-port.js';
 import { QUIET, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 
 /* The whole way, from an agent's tool to bytes on a real wire and back. Control receivers on this machine, synthetic secrets. */

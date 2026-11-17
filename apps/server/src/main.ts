@@ -8,6 +8,7 @@ import { agentSqlFollowsMode } from './modules/keeper/app-mode.js';
 import { KeeperServed } from './modules/keeper/served.js';
 import { publicUrl } from './modules/link/link.js';
 import { setupLink } from './modules/setup/code.js';
+import { serverLog } from './modules/tools/logs.js';
 
 function requireDbUrl(url: string | undefined): string {
   if (!url) throw new Error('DATABASE_URL is not set.');
@@ -24,7 +25,7 @@ const app = await buildApp({
   db,
   agentSql: config.keeper ? null : await openAgentSql(url),
   config,
-  logger: { level: process.env.LOG_LEVEL || 'info' },
+  logger: { level: process.env.LOG_LEVEL || 'info', stream: serverLog },
 });
 const sayRunning = async (): Promise<void> => console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
 if (config.keeper) {

@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agents, assistants, attachments, companies, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { disposition, fileLink } from '../src/modules/assistants/files.js';
 import { callSkill } from '../src/modules/assistants/skills.js';
 import { WORDS } from '../src/modules/assistants/words.js';
+import { unsubscribeToken } from '../src/modules/outbound/contacts.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -106,9 +108,9 @@ describe('files an assistant downloads for its owner', () => {
     const ava = await assistant(c);
     const hidden = await file(c, { taskId: (await c.work('Other report', c.crew.other)).id, agentId: c.crew.other.id });
     const said = {
-      'ru-RU,ru;q=0.9,en;q=0.8': 'такого файла в Hornhoof нет, или вам его там не открыть.',
-      'en-GB': 'there is no such file in Hornhoof, or you cannot open it there.',
-      '': 'there is no such file in Hornhoof, or you cannot open it there.',
+      'ru-RU,ru;q=0.9,en;q=0.8': 'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.',
+      'en-GB': 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.',
+      '': 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.',
     };
     for (const [lang, message] of Object.entries(said)) {
       for (const id of [hidden.id, randomUUID(), 'not-a-uuid']) {
@@ -120,9 +122,48 @@ describe('files an assistant downloads for its owner', () => {
   });
 });
 
+describe('a link to one file, for its owner to open on a phone', () => {
+  const opened = (c: AclCompany, url: string, lang?: string) => c.app.inject({ url: new URL(url).pathname, headers: lang ? { 'accept-language': lang } : {} });
+
+  it('downloads that file for 7 days with no key and no sign-in, and then says in the phone\'s language that the link is over', async () => {
+    const c = await aclCompany();
+    const kept = await file(c, { name: 'Архив май.zip', mediaType: 'application/octet-stream' });
+    const url = fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', kept.id);
+    expect(url).toMatch(/^https:\/\/ann\.hornhoof\.org\/api\/files\/[\w-]+\.[\w-]+$/);
+    const got = await opened(c, url);
+    expect(got.statusCode).toBe(200);
+    expect(got.rawPayload).toEqual(BYTES);
+    expect(got.headers).toMatchObject({ 'content-type': 'application/octet-stream', 'content-length': String(BYTES.length), 'content-disposition': disposition('Архив май.zip'), 'x-content-type-options': 'nosniff' });
+    vi.setSystemTime(new Date('2026-11-23T13:59:59Z'));
+    expect((await opened(c, url)).statusCode).toBe(200);
+    vi.setSystemTime(new Date('2026-11-23T14:00:00Z'));
+    const over = await opened(c, url, 'ru-RU,ru;q=0.9');
+    expect(over.statusCode).toBe(410);
+    expect(over.json()).toEqual({ error: { code: 'gone', message: 'ссылка на файл работала 7 дней, и они прошли.', reason: 'file_link_expired' } });
+    expect((await opened(c, url, 'en')).json().error.message).toBe('the link to the file worked for 7 days, and they are over.');
+  });
+
+  it('opens nothing for a link changed by one character, of another file, signed for something else, or of a file that is gone', async () => {
+    const c = await aclCompany();
+    const [kept, other] = [await file(c), await file(c, { name: 'other.xlsx' })];
+    const url = fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', kept.id);
+    const [payload, mac] = new URL(url).pathname.split('/').pop()!.split('.');
+    const otherPayload = new URL(fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', other.id)).pathname.split('/').pop()!.split('.')[0];
+    const stop = unsubscribeToken(c.app.ctx.config.secret, { companyId: c.companyId, contactId: randomUUID(), channelId: randomUUID(), purpose: 'first_contact' });
+    const wrong = [`${payload}.${mac!.slice(0, -1)}${mac!.endsWith('A') ? 'B' : 'A'}`, `${otherPayload}.${mac}`, stop, 'not-a-link', `${payload}.${mac}.x`];
+    for (const link of wrong) {
+      const got = await opened(c, `https://ann.hornhoof.org/api/files/${link}`);
+      expect(got.statusCode).toBe(404);
+      expect(got.json()).toEqual({ error: { code: 'not_found', message: WORDS.attachment_unknown!.en, reason: 'attachment_unknown' } });
+    }
+    await c.db.delete(attachments).where(eq(attachments.id, kept.id));
+    expect((await opened(c, url)).statusCode).toBe(404);
+  });
+});
+
 it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in both languages', () => {
   const said = Object.values(WORDS).flatMap(words => [words!.en, words!.ru]);
-  expect(said).toHaveLength(28);
+  expect(said).toHaveLength(32);
   for (const words of said) {
     expect(words).toMatch(/^(?:\p{Ll}|Hornhoof )/u);
     expect(words).not.toMatch(/[\u2013\u2014\u0401\u0451]|did not come|did not go|не дошел|не ушло|(?<!\p{L})(?:I|me|my|я|мне|меня|мой)(?!\p{L})/u);

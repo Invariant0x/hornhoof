@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { PhoneEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
@@ -70,7 +70,7 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
     if (!draft.name.trim()) p.name = t.phones.nameProblem;
     if (!machines.some(m => m.id === draft.machineId && m.online)) p.machineId = t.phones.computerProblem;
     if (!PhoneEndpoint.safeParse(draft.endpoint.trim()).success) p.endpoint = t.phones.addressProblem;
-    if ((draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !PhoneEndpoint.safeParse(draft.pairingAddress.trim()).success)) p.code = t.phones.codeProblem;
+    if ((draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !networkEndpoint(draft.pairingAddress.trim()))) p.code = t.phones.codeProblem;
     setProblems(p);
     const first = Object.keys(p)[0];
     if (first) form.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
@@ -102,7 +102,7 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
       <Field label={t.phones.name} problem={problems.name}>{props => <input {...props} name="name" autoComplete="off" maxLength={100} value={draft.name} onChange={e => edit('name', e.target.value)} />}</Field>
       <Field label={t.phones.computer} problem={problems.machineId} hint={machines.length === 0 ? t.phones.noComputers : undefined}>{props => <select {...props} name="machineId" value={draft.machineId} onChange={e => edit('machineId', e.target.value)}><option value="">{t.phones.chooseComputer}</option>{machines.map(m => <option key={m.id} value={m.id} disabled={!m.online}>{m.hostname}</option>)}</select>}</Field>
       <Field label={t.phones.address} problem={problems.endpoint} hint={t.phones.networkHint}>{props => <input {...props} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
-      <Field label={t.phones.pairingAddress}>{props => <input {...props} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
+      <Field label={t.phones.pairingAddress} hint={t.phones.pairingAddressHint}>{props => <input {...props} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
       <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} name="code" type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
       <div className="entry-actions"><button type="button" className="btn" onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button></div>
       {devices && <div role="status">{devices.length === 0 ? <p>{t.phones.noDevices}</p> : devices.map(d => <p key={d.serial} className="phone-device">{t.phones.device(d.model, d.serial)}<small>{t.phones.devices[d.status]}</small></p>)}</div>}

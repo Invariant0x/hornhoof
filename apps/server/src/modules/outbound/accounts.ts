@@ -207,10 +207,10 @@ function settingsFrom(ctx: Ctx, row: { configEnc: string; adapter: Channel['adap
 export const markInvalid = (ctx: Ctx, accountId: string, configGeneration: number, now = new Date()) =>
   ctx.db.update(outboundAccounts).set({ status: 'invalid', updatedAt: now }).where(and(eq(outboundAccounts.id, accountId), eq(outboundAccounts.configGeneration, configGeneration), eq(outboundAccounts.status, 'active')));
 
-/* A setting and its secret never pass through a model, a head's included: only a person gives them, on their own screen. A
-   model connects an account only with the settings of one the company has, by sameAs. */
+/* A setting and its secret never pass through a head: only a person gives them, on their own screen, or the orchestrator. A
+   head connects an account only with the settings of one the company has, by sameAs. */
 function refuseModel(me: Person): void {
-  if (me.via) throw notYours('Only a person does this: settings never pass through a model. Connect it with sameAs, the settings of an account the company has, or ask a person to give new ones on the channel\'s screen.');
+  if (me.viaHead) throw notYours('Only a person does this: settings never pass through a model. Connect it with sameAs, the settings of an account the company has, or ask a person to give new ones on the channel\'s screen.');
 }
 
 /* The settings of an account the caller runs, for a new account of a channel with the same adapter, sending from its own

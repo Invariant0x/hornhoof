@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import { requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { ownDepartment } from '../departments/approval-policy.js';
 import { jobOf } from '../tools/job.js';
@@ -130,11 +130,10 @@ function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
     return proposeRevision(ctx, { ...input, departmentId: dept.id, companyId: me.companyId, author: me.via ? { kind: 'agent', id: me.via } : { kind: 'person', id: me.id } });
   });
 
-  /* A person who runs the department publishes, or its head carrying out their word, which the log keeps with both names.
-     The orchestrator, even for the person its turn answers, never makes words sendable. */
+  /* A person who runs the department publishes, or its head carrying out their word, which the log keeps with both names,
+     or the orchestrator acting for the owner. */
   app.post('/api/outbound/catalog/:id/publish', async req => {
     const me = await requirePerson(req, db);
-    if (viaOrchestrator(me)) throw notYours('Only a person who runs this department, or its head carrying out their word, publishes what a message may say.');
     const row = await manageRevision(ctx, me, idOf(req));
     const published = await publishRevision(db, row, me.id, ShownRevision.parse(req.body ?? {}));
     await logSetup(db, me, { companyId: row.companyId, departmentId: row.departmentId, channelId: row.channelId, kind: 'catalog_published', subjectId: row.id, detail: { entryId: row.entryId, revision: row.revision, kind: row.kind } });

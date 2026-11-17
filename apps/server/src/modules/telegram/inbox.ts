@@ -120,7 +120,7 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
       notes.push(said ? `[A voice message${seconds(file)}. Its words, as speech recognition heard them: ${said}]` : `[A voice message${seconds(file)}, with no transcript: its recording is the file voice.ogg below.]`);
     }
     try {
-      ids.push((await keepMessageFile(ctx, me, agentId, bytes, name)).id);
+      ids.push((await keepMessageFile(ctx, me, agentId, { bytes, size: bytes.length }, name)).id);
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       notes.push(`[${name} did not come: Hornhoof has no room left for the company's files.]`);
