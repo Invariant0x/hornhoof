@@ -62,6 +62,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Agents and assistants give files of any size; one over 50 MB stays 30 days on the disk of the machine that took it.
 - Such a file is outside copies and backups and is lost with its machine; the task card and the chat say so by name.
 - The orchestrator finds and calls any Hornhoof tool with `find_tool` and `use_tool`, and any route with `api`.
+- An agent on a lent phone presses Back and Home and types any text, Russian, emoji and new lines too.
+- The orchestrator searches and reads the source and logs of the very Hornhoof build that runs.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
 ### Changed
@@ -95,6 +97,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
 - The orchestrator acting for the owner is refused nothing the CEO or an employee may do; heads keep their limits.
 - Department messaging lists a channel's addresses apart from its buttons, under a heading that counts them.
+- An agent sees each phone screen as a JPEG of at most 1568 px, so a screen with a photo reaches it whole.
+- The orchestrator's `api` reads every page `view` did, and `view` is gone.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
