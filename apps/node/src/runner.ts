@@ -84,9 +84,9 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
   const output = program ? programEnded(text, program, program.complete) : text;
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
-    result: res.privateValues?.text(redact(res.result, secrets)) ?? (res.sensitive ? PRIVATE_TOOL_NOTE : redact(res.result, secrets)), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
+    result: privateText(res.result, res, secrets), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
-    ...(res.failure ? { failure: { ...res.failure, text: res.privateValues?.text(redact(res.failure.text, secrets)).slice(0, 2000) ?? (res.sensitive ? PRIVATE_TOOL_NOTE : redact(res.failure.text, secrets).slice(0, 2000)) } } : {}),
+    ...(res.failure ? { failure: { ...res.failure, text: privateText(res.failure.text, res, secrets).slice(0, 2000) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
 }
@@ -287,5 +287,13 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   /* Everything the program held at any point of the run, so a token it had only in between is hidden too. */
   for (const s of await adapter.secrets().catch(() => [])) known.add(s);
-  return jobDone(msg.jobId, { ...res, sensitive: res.sensitive || privacy.sensitive, privateValues: res.privateValues ?? privacy.values, tokens: withModel(res.tokens, msg.model) }, [...known]);
+  return jobDone(msg.jobId, { ...withPrivacy(res, privacy), tokens: withModel(res.tokens, msg.model) }, [...known]);
+}
+
+function privateText(text: string, result: RunResult, secrets: string[]): string {
+  return result.privateValues?.text(redact(text, secrets)) ?? (result.sensitive ? PRIVATE_TOOL_NOTE : redact(text, secrets));
+}
+
+function withPrivacy(result: RunResult, privacy: ToolPrivacy): RunResult {
+  return { ...result, sensitive: result.sensitive || privacy.sensitive, privateValues: result.privateValues ?? privacy.values };
 }

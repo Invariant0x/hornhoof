@@ -454,8 +454,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], (_req, body, done) => done(null, body));
     scope.post('/api/attachments', async (req, reply) => {
       const job = await attachmentJobOf(ctx, req);
-      const values = privateTurn(db, job.id)?.values;
-      if (!values && await sensitiveTurn(db, job.id, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
+      const values = await uploadValues(db, job.id);
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
@@ -465,7 +464,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
-      const taken = await received(ctx.config.filesDir, values ? privateUpload(req.body, values) : req.body);
+      const taken = await received(ctx.config.filesDir, privateUpload(req.body, values));
       const row = await keepTaken(ctx.config.filesDir, taken, async () => {
         const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, values?.text(raw ?? '') || raw);
         await checkAttachmentSpace(ctx, job.companyId, task, toChat, taken.size);
@@ -525,4 +524,10 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .type(file.mediaType)
       .send(await fileStream(ctx, file.id, file.length));
   });
+}
+
+async function uploadValues(db: Db, jobId: string) {
+  const values = privateTurn(db, jobId)?.values;
+  if (!values && await sensitiveTurn(db, jobId, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
+  return values;
 }
