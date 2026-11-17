@@ -48,7 +48,7 @@ function ListRow({ tree, rows, sub = false }: { tree: TaskTree; rows: Rows; sub?
           <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
           {sub && <StateWord status={humanStatus(task, rows.asksYou?.(task.id) ?? false)} />}
           {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
-          {waits && <small className="tr-wait">{waits}</small>}
+          {waits && <small className="tr-wait" dir="auto">{waits}</small>}
         </span>
         <Cell name={words.executor}>{doerOf(task)?.name ?? t.tracker.nobody}</Cell>
         <Cell name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Cell>

@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { TaskWaitView } from '@hornhoof/protocol/waits';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, tasks, taskWaits, turns, waitPolicies } from '../src/db/schema.js';
+import { agents, jobs, tasks, taskWaits, testRuns, turns, waitPolicies } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ask, createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { afterSourceKey } from '../src/modules/tasks/wait-state.js';
@@ -27,6 +28,65 @@ const apartWork = async (c: AclCompany, title: string) => {
 
 type View = TaskWaitView;
 const waitsOn = async (c: AclCompany, task: Pick<Task, 'id'>, token: string): Promise<View[]> => (await c.get(`/api/tasks/${task.id}`, token)).json().task.waits as View[];
+const timeWaits = async (c: AclCompany, task: Task, token = c.tokens.ceo) =>
+  (await c.get(`/api/tasks/${task.id}`, token)).json().task.time.waitsOn;
+const SINCE = '2026-11-17T21:45:00.000Z';
+const UNTIL = '2026-11-17T22:35:00.000Z';
+
+async function keepExternal(c: AclCompany, task: Task, extra: Partial<NonNullable<Task['externalWait']>> = {}) {
+  const externalWait = { operation: randomUUID(), reason: 'Check the deployment', since: SINCE, until: UNTIL, ...extra };
+  await c.db.update(tasks).set({ externalWait }).where(eq(tasks.id, task.id));
+  await c.db.insert(taskWaits).values({ companyId: c.companyId, taskId: task.id, kind: 'external', sourceKey: `wait_for:${externalWait.operation}`, sourceRevision: 0, state: 'legacy_needs_plan', ownerAgentId: task.assigneeAgentId, createdAt: new Date(SINCE) });
+}
+
+describe('what a task is waiting for', () => {
+  it('shows the external reason only to someone who can read what the holder wrote', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Deploy', c.crew.owned);
+    await keepExternal(c, task);
+    expect(await timeWaits(c, task)).toEqual([{ kind: 'external', reason: 'Check the deployment', who: null, since: SINCE }]);
+    expect(await timeWaits(c, task, c.tokens.wes)).toEqual([{ kind: 'external', reason: null, who: null, since: SINCE }]);
+  });
+
+  it('names the employee asked to act even when someone else owns the wait', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Deploy', c.crew.mine);
+    await keepExternal(c, task, { on: { kind: 'employee', employee: c.crew.owned.id, name: c.crew.owned.name } });
+    expect(await timeWaits(c, task)).toMatchObject([{ kind: 'external', who: { kind: 'agent', id: c.crew.owned.id, name: c.crew.owned.name } }]);
+  });
+
+  it('names the reviewer from the review itself and never names the executor as the target', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Review', c.crew.mine);
+    const review = { companyId: c.companyId, taskId: task.id, kind: 'review' as const, sourceRevision: 0, state: 'legacy_needs_plan' as const, ownerAgentId: c.crew.mine.id, createdAt: new Date(SINCE) };
+    await c.db.insert(taskWaits).values({ ...review, sourceKey: `review:${task.id}:review:${randomUUID()}:${c.crew.owned.id}` });
+    expect(await timeWaits(c, task)).toEqual([{ kind: 'review', reason: null, who: { kind: 'agent', id: c.crew.owned.id, name: c.crew.owned.name }, since: SINCE }]);
+    await c.db.update(taskWaits).set({ sourceKey: `review:${task.id}:review:${randomUUID()}:${c.crew.mine.id}` }).where(eq(taskWaits.taskId, task.id));
+    expect(await timeWaits(c, task)).toMatchObject([{ kind: 'review', who: null }]);
+  });
+
+  it('names the current recipient of a question even when its wait has a different owner', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Ask', c.crew.mine);
+    await ask(c.app.ctx, c.crew.mine.id, task.id, { kind: 'question', text: 'Which currency?', topic: 'task' });
+    await c.db.update(taskWaits).set({ ownerPersonId: c.ids.ceo }).where(eq(taskWaits.taskId, task.id));
+    expect(await timeWaits(c, task, c.tokens.olga)).toMatchObject([{ kind: 'person', who: { kind: 'person', id: c.ids.olga } }]);
+  });
+
+  it.each([['tests', 'run'], ['work', 'work']] as const)('uses the number of a %s run even when two records name it', async (kind, shownKind) => {
+    const c = await aclCompany();
+    const task = await c.work('Test the release', c.crew.mine);
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.crew.mine.subscriptionId!, agentId: c.crew.mine.id, taskId: task.id, prompt: 'Test it', timeoutMs: 60_000 }).returning();
+    const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, agentId: c.crew.mine.id, taskId: task.id, jobId: job!.id, kind, number: 108, command: 'test', timeoutMs: 60_000 }).returning();
+    await c.db.insert(taskWaits).values({ companyId: c.companyId, taskId: task.id, kind: 'run', sourceKey: `run:${run!.id}`, sourceRevision: 0, state: 'legacy_needs_plan', ownerAgentId: c.crew.mine.id, createdAt: new Date(SINCE) });
+    const expected = [{ kind: shownKind, reason: '108', who: null, since: SINCE }];
+    expect(await timeWaits(c, task)).toEqual(expected);
+    await keepExternal(c, task, { run: run!.id, reason: 'Rerun 108 on turn-32 9900330a, then release_turn' });
+    expect(await timeWaits(c, task)).toEqual(expected);
+    const list = await c.get('/api/tasks?status=all', c.tokens.ceo);
+    expect(list.json().tasks.find((row: Task) => row.id === task.id).time.waitsOn).toEqual(expected);
+  });
+});
 
 describe('what people read of the waits on a task', () => {
   it('says who answers by when, soonest first, and nothing of its source, proof or route', async () => {
@@ -62,6 +122,7 @@ describe('what people read of the waits on a task', () => {
     const res = await c.get(`/api/tasks/${follow.id}`, c.tokens.ann);
     expect(res.json().task.waits).toHaveLength(2);
     expect(res.json().task.time.waitsOn).toHaveLength(2);
+    expect(res.json().task.time.waitsOn).toEqual(expect.arrayContaining([far, seen].map(task => ({ kind: 'after', who: null, reason: `#${task.number}`, since: expect.any(String) }))));
     expect(res.json().task.waitsFor).toEqual([far.number, seen.number]);
     expect(leaks(res, [agent])).toEqual([]);
     for (const word of ['Own secret', hidden.id, afterSourceKey(hidden.id)]) expect(res.body).not.toContain(word);

@@ -97,7 +97,7 @@ export function goalsUnder(id: string, goals: GoalView[]): Set<string> {
 }
 
 /* Who does a task: the employee who writes it, else the one who holds it now. */
-export const doerOf = (task: TaskLine) => task.executor ?? task.assignee;
+export const doerOf = (task: Partial<Pick<TaskLine, 'executor' | 'assignee'>>) => task.executor ?? task.assignee;
 
 export function filterTasks(tasks: TaskLine[], f: WorkFilter, goals: GoalView[], asksYou?: Asks): TaskLine[] {
   const served = f.goal ? goalsUnder(f.goal, goals) : null;
@@ -124,8 +124,11 @@ export function workingNow(tasks: TaskLine[], org: Org | null): TaskLine[] {
 }
 
 /* The open tasks that wait for a person's answer or work. */
+export const isWaitForPerson = (wait: NonNullable<TaskLine['time']>['waitsOn'][number], personId: string): boolean =>
+  wait.kind === 'person' && wait.who?.kind === 'person' && wait.who.id === personId;
+
 export function waitingOn(tasks: TaskLine[], personId: string): TaskLine[] {
-  return tasks.filter(t => !closed(t) && (t.time?.waitsOn ?? []).some(w => w.who?.kind === 'person' && w.who.id === personId));
+  return tasks.filter(t => !closed(t) && (t.time?.waitsOn ?? []).some(w => isWaitForPerson(w, personId)));
 }
 
 /* Who answers for the departments and the goals, in the departments' order: the departments each answers for and how many

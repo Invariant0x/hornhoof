@@ -68,6 +68,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   onClearPerson?: () => void;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
+  recipient: string;
 };
 
 type Shown = Pick<Decisions, 'requests' | 'proposals'> & { machineAccess: ComputerAccessDecision[]; merges: MergeDecision[]; machinesAway: MachineAwayCard[] };
@@ -153,7 +154,7 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 /* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer, the cards Hornhoof
    kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
    taken off. */
-function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, ...rest }: Waiting) {
+function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
   const { cards: kept, load: reloadCards } = useWaitCards();
@@ -167,7 +168,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
       {personId && onClearPerson && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={reloadCards} />
-      {tasks.length > 0 && <WaitingTasks tasks={tasks} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
+      {tasks.length > 0 && <WaitingTasks tasks={tasks} recipient={recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
       {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
@@ -176,7 +177,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
 }
 
 /* Tasks that wait for a person, each with how long already. */
-function WaitingTasks({ tasks, heading, onOpenTask }: { tasks: TaskLine[]; heading: string; onOpenTask: (id: string) => void }) {
+function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLine[]; recipient: string; heading: string; onOpenTask: (id: string) => void }) {
   const t = useT();
   return (
     <div className="tr-waits">
@@ -185,7 +186,7 @@ function WaitingTasks({ tasks, heading, onOpenTask }: { tasks: TaskLine[]; headi
         {tasks.map(task => (
           <li key={task.id}>
             <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>#{task.number} {task.title}</button>
-            <small>{waitText(t, task)}</small>
+            <small dir="auto">{waitText(t, task, undefined, recipient)}</small>
           </li>
         ))}
       </ul>
@@ -351,6 +352,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const viewAs = me.canDecideCompany ?? (me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company'));
   const viewed = viewAs ? (place.personId ?? null) : null;
   const decisionsOf = viewed ?? (place.show === 'waits' ? (place.personId ?? null) : null);
+  const recipient = decisionsOf ?? me.person.id;
   const who = viewed ?? me.person.id;
   const whoName = people.find(p => p.id === who)?.name ?? t.tasks.someone;
   const other = who !== me.person.id;
@@ -360,7 +362,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
   const own = mine(all, goals, who);
   const working = workingNow(all, org);
-  const waitsOnWho = waitingOn(all, who);
+  const waitsOnWho = waitingOn(all, recipient);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   const department = section.kind === 'department' ? places?.departments.find(d => d.id === section.id) : undefined;
   const departmentName = section.kind === 'department' ? (section.id === 'none' ? t.tracker.side.orchestrator : department ? deptLabel(t, department) : '') : '';
@@ -399,7 +401,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     const product = org?.departments.find(d => d.id === place.department)?.products.find(p => p.id === place.product);
     switch (section.kind) {
       case 'mine': return { title: other ? t.tracker.where.theirs(whoName) : t.tracker.where.mine, about: other ? t.tracker.where.theirsAbout(whoName) : t.tracker.where.mineAbout };
-      case 'waits': return { title: other ? t.tracker.where.waitsFor(whoName) : t.tracker.where.waits, about: '' };
+      case 'waits': return { title: recipient === me.person.id ? t.tracker.where.waits : t.tracker.where.waitsFor(people.find(p => p.id === recipient)?.name ?? t.tasks.someone), about: '' };
       case 'working': return { title: t.tracker.where.working, about: t.tracker.where.workingAbout };
       case 'turns': return { title: t.tracker.where.turns, about: '' };
       case 'company': return { title: t.tracker.where.company, about: '' };
@@ -429,6 +431,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       personId={decisionsOf}
       onClearPerson={clearPerson}
       tasks={waitsOnWho}
+      recipient={recipient}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
       onOpenOrchestrator={onOpenOrchestrator}

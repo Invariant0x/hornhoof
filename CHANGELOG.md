@@ -25,6 +25,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Tasks and goals keep their recorded responsible person if they close while responsibility is being passed on.
 - A failed tracker upgrade notice no longer stops other hiring notices from being sent.
 - Operator screens and replies hide short known credentials before they leave a node, using the same masking rules as the server.
+- The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
+- A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 
 ### Changed
 

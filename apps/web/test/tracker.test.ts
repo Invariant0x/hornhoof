@@ -127,7 +127,7 @@ describe('the filters', () => {
   it('finds the open tasks that wait for a person, and none that wait for an agent or are over', () => {
     const since = '2026-11-16T08:00:00.000Z';
     const waits = (over: Partial<TaskLine> & { id: string; number: number }, who: { kind: 'person' | 'agent'; id: string } | null) =>
-      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ who: who && { ...who, name: '' }, since }] } });
+      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: who?.kind === 'person' ? 'person' : 'review', who: who && { ...who, name: '' }, reason: null, since }] } });
     const tasks = [waits({ id: 'a', number: 1, status: 'waiting' }, { kind: 'person', id: 'p3' }), waits({ id: 'b', number: 2 }, { kind: 'agent', id: 'p3' }), waits({ id: 'c', number: 3, status: 'done' }, { kind: 'person', id: 'p3' }), waits({ id: 'd', number: 4 }, null), ...TASKS];
     expect(ids(waitingOn(tasks, 'p3'))).toEqual(['a']);
   });

@@ -460,7 +460,7 @@ export type TaskPlace = { id: string; name: string } | null;
 export type PersonRef = { id: string; name: string };
 /* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
    waits for since when. */
-export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: { who: { kind: 'person' | 'agent'; id: string; name: string } | null; since: string }[] };
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: { who: { kind: 'person' | 'agent'; id: string; name: string } | null; since: string; kind: WaitSourceKind | 'work'; reason: string | null }[] };
 /* A task another one comes after, or that comes after it, and where it stands. */
 export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 

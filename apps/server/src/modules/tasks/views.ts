@@ -14,10 +14,10 @@ import type { Lang } from '../templates/load.js';
 import { type Task } from './engine.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
-import { openWaitsOf, prerequisiteOf, shownWaits } from './wait-views.js';
+import { openWaitsOf, shownWaits } from './wait-views.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 import { trackerLookups, type GoalRef, type TrackerLookups } from '../tracker/task-view.js';
-import type { TimeFacts } from './time-facts.js';
+import { reviewerOf, type TimeFacts } from './time-facts.js';
 
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
@@ -121,12 +121,13 @@ type Names = TrackerLookups & {
 };
 
 /* Names for everything the tasks point at, read in one go. */
-async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after' | 'createdAt' | 'responsiblePersonId'>[], more: string[] = []): Promise<Names> {
+async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t: Task) => boolean, more: string[] = []): Promise<Names> {
   const independent = await independentViews(ctx.db, rows.map(t => t.id));
   const partExecutors = [...independent.values()].flatMap(record => record.kind === 'part' ? [record.part.executor] : []);
   const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
-  const waitOwners = [...waits.values()].flat().map(w => w.ownerAgentId);
-  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...waitOwners, ...more].filter((x): x is string => Boolean(x)))];
+  const reviewers = [...waits.values()].flat().map(reviewerOf);
+  const employees = rows.flatMap(t => t.externalWait?.on?.kind === 'employee' ? [t.externalWait.on.employee] : []);
+  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...reviewers, ...employees, ...more].filter((x): x is string => Boolean(x)))];
   const placeIds = [...new Set(rows.flatMap(t => [t.departmentId, t.productId]).filter((x): x is string => Boolean(x)))];
   const turnIds = [...new Set(rows.map(t => t.turnId).filter((x): x is string => Boolean(x)))];
   const agentRows = agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(inArray(agents.id, agentIds)) : [];
@@ -136,7 +137,8 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'compa
   const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
   const routes = await routeSnapshots(ctx.db, rows);
   const lookups = nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits);
-  const tracker = await trackerLookups(ctx.db, rows, lookups.waits, id => lookups.agent(id)?.name);
+  const seenAfter = new Map(afterRows.filter(t => t.status !== 'done' && sees(t)).map(t => [t.id, t.number]));
+  const tracker = await trackerLookups(ctx.db, rows, lookups.waits, { agent: id => lookups.agent(id)?.name, task: id => seenAfter.get(id) });
   return { ...lookups, ...tracker, route: t => routes.get(t.id)! };
 }
 
@@ -198,20 +200,15 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   responsible: n.person(t.responsiblePersonId),
   why: t.why,
   dueAt: t.dueAt?.toISOString() ?? null,
-  time: shownWaitsOn(n.time(t), n.waits(t), id => n.after(t).some(a => a.id === id && sees(a))),
+  time: n.time(t),
   pipelineId: t.pipelineId,
   pipelineStageId: t.pipelineStageId,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
 
-/* Whom a task waits for, as its waits show it: nothing of a wait for a task the reader does not see. The facts list the
-   waits in their order. */
-const shownWaitsOn = (time: TimeFacts, waits: TaskWait[], seen: (id: string) => boolean): TimeFacts =>
-  ({ ...time, waitsOn: time.waitsOn.filter((_, i) => { const prerequisite = prerequisiteOf(waits[i]!); return prerequisite === null || seen(prerequisite); }) });
-
 export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t: Task) => boolean): Promise<TaskLine[]> {
-  const n = await names(ctx, rows);
+  const n = await names(ctx, rows, sees);
   return rows.map(t => line(t, n, sees));
 }
 
@@ -275,7 +272,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
-  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.flatMap(r => [r.agentId, r.answeredByAgentId]), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  const n = await names(ctx, [task, ...subs], sees, [...events.map(e => e.agentId), ...asks.flatMap(r => [r.agentId, r.answeredByAgentId]), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
   return {
