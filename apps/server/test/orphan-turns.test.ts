@@ -4,6 +4,7 @@ import type { FastifyRequest } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, requests, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -73,7 +74,7 @@ async function company() {
   const away = () => { online = false; awayAt = Date.now(); };
   const back = () => { online = true; awayAt = null; };
   const facts = async (jobId: string) =>
-    (await db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message')))).map(e => e.data as { text?: string; turnFact?: boolean }).filter(d => d.turnFact);
+    (await db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message')))).map(e => e.data as { text?: string; turnFact?: boolean }).filter(d => d.turnFact);
   /* What the turn's program streams through its node while it works with no screen: a line of its answer. */
   let seq = 0;
   const said = (on: NodeIdentity, jobId: string) =>

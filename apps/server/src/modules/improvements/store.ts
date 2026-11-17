@@ -3,7 +3,7 @@ import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, FEEDBACK_KINDS, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { fingerprintOfReport } from '../feedback/inbox.js';
@@ -122,7 +122,7 @@ export async function moveImprovementTx(db: Db | Tx, companyId: string, id: stri
     .where(and(eq(improvements.id, id), eq(improvements.companyId, companyId), eq(improvements.status, from)))
     .returning();
   if (!moved) {
-    const [there] = await db.select({ status: improvements.status }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
+    const [there] = await db.select(only(improvements, 'status')).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
     if (!there) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
     throw new ApiError(409, 'conflict', `This improvement is ${there.status} already.`, 'improvement_decided');
   }

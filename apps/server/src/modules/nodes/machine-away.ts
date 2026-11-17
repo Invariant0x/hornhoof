@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
 import { agents, companies, machines, nodeConnections, nodes, people } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 
 /* A machine with agents on it that has been off the line this long is a person's to switch on. All of this is read from the
    machine's own history and asks no agent, as they may all be on that machine. So there is nothing to create or to close, and
@@ -55,7 +55,7 @@ const newest = (dates: (Date | null)[]): Date | null => dates.reduce<Date | null
 export async function shownAway(ctx: Pick<Ctx, 'db' | 'startedAt' | 'clock'>, machineId: string): Promise<boolean> {
   const [connections, heard] = await Promise.all([
     ctx.db.select().from(nodeConnections).where(eq(nodeConnections.machineId, machineId)),
-    ctx.db.select({ lastSeenAt: nodes.lastSeenAt }).from(nodes).where(eq(nodes.machineId, machineId)),
+    ctx.db.select(only(nodes, 'lastSeenAt')).from(nodes).where(eq(nodes.machineId, machineId)),
   ]);
   return spellToShow(connections, newest(heard.map(h => h.lastSeenAt)), ctx.startedAt, new Date(ctx.clock()))?.back === null;
 }

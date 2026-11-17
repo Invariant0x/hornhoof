@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { OperatorCheck, OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { agentEvents, agents, jobs, programInstances, programOperatorCases } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { wordsDigest } from '../src/modules/program-operator/deliveries.js';
@@ -84,7 +85,7 @@ export async function stuckPrograms(withOperator = false) {
     return running!;
   };
 
-  const peopleTold = async (agentId: string) => (await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEscalation' is not null`)));
+  const peopleTold = async (agentId: string) => (await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEscalation' is not null`)));
   const continuationsOf = (jobId: string) => c.db.select().from(jobs).where(eq(jobs.continueOf, jobId));
 
   return { ...c, orchestrator: orchestrator!, opsHead, record, deliveryFact, runs, runOf, runningOf, unrecorded, unrecordedIdle, caseOf, casesOf, failedTurn, heard, retryDue, failsOnce, peopleTold, continuationsOf, instanceOf };

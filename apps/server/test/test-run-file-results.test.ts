@@ -2,6 +2,7 @@ import { PREPARATION_UNIT, hashTestEnvironment, parseTestEnvironment, type NodeM
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
@@ -88,7 +89,7 @@ async function fixture(turnNumber = 3, preparation = false, full = true) {
   };
   const greenRows = () => db.select().from(testFileResults).orderBy(asc(testFileResults.file));
   const told = async () => {
-    const rows = await db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.agentId, agent!.id));
+    const rows = await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, agent!.id));
     return rows.map(row => row.prompt).join('\n');
   };
   return { app, db, agent: agent!, job: job!, task: task!, start, finish, partsOf, runOf, ranFiles, greenRows, told, companyId };
