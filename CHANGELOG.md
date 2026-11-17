@@ -41,6 +41,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A closed operator case no longer fails a turn whose program took later words, so a working program keeps its turn.
 - The map's agent count reads as one phrase right to left, and on a phone its hint stands above the bottom buttons.
 - An address whose consent was taken back says it gets no more messages, and the heading counts only consent in force.
+- Tests owners can repair test files or return source fixes without cancelling the task.
+- A Tests owner's repair is taken on the candidate's own base, without a new main or a full run's ids.
+- Vault values an agent uses stay out of turn records, replays, terminal recordings and phone runs.
 
 ### Added
 
@@ -68,6 +71,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A node uses a phone plugged by cable into its machine, through a socket its administrator puts in the phone folder.
 - The orchestrator searches and reads the source and logs of the very Hornhoof build that runs.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
+- `create_task` takes an `architectAgentId` that names the task's architect.
 
 ### Changed
 
@@ -105,6 +109,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The orchestrator's SQL reads every table and every column except keys; its write rights do not change.
 - A decision the orchestrator takes as the owner shows "decided by the orchestrator" in the task's questions and log.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
+- Tasks skip redundant handoffs while keeping required Security checks and candidate history.
 
 ## [0.29.2] - 2026-11-16
 
