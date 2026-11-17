@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { JobUser } from '../isolation.js';
@@ -12,6 +12,7 @@ export type Recording = { name: string; file: string; ready: string; flush: stri
 const digest = (name: string): string => createHash('sha256').update(name).digest('hex');
 const capturePath = (file: string): boolean => isAbsolute(file) && !file.includes('\0') && /^\.hh-output-[a-f0-9]{16}\.log$/.test(basename(file));
 const manifest = z.object({ name: z.string().min(1).max(256), file: z.string().refine(capturePath) });
+const privacy = z.object({ jobId: z.string().min(1).max(200).nullable() });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /* A replaced recording cannot make the node follow a link, block on a pipe or read an unbounded file. */
@@ -118,9 +119,21 @@ export class Recordings {
     return existsSync(join(this.dir, `${digest(name)}.private`));
   }
 
-  protect(name: string): void {
+  private privacyPath(name: string): string {
+    return join(this.dir, `${digest(name)}.private`);
+  }
+
+  privateJob(name: string): string | null {
+    if (!this.isPrivate(name)) return null;
+    return privacy.parse(JSON.parse(recorded(this.privacyPath(name), 4096) ?? 'null')).jobId;
+  }
+
+  protect(name: string, jobId: string | null): void {
     this.privateDir();
-    writePrivate(join(this.dir, `${digest(name)}.private`), 'private', null);
+    const pending = `${this.privacyPath(name)}.${randomBytes(8).toString('hex')}.pending`;
+    writePrivate(pending, JSON.stringify({ jobId }), null);
+    try { renameSync(pending, this.privacyPath(name)); }
+    finally { rmSync(pending, { force: true }); }
   }
 
   release(name: string): void {

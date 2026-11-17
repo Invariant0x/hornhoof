@@ -1,4 +1,5 @@
 import type { NodeMessage } from '@hornhoof/protocol';
+import { existsSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,13 +78,28 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it.each([true, false])('restores private output after a node restart, resuming the secret turn: %s', async resumed => {
+    const marker = 'private-node-restart-marker-1178';
+    const jobId = resumed ? 'job-private' : 'job-next';
+    const t = await liveTerminal('claude', 'queued', { jobId, privateJob: 'job-private' });
+    t.finish(resumed ? `Report with ${marker}.` : 'Safe follow-up report.');
+    const result = await t.on(t.running);
+    const done = jobDone(jobId, result, []);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+    expect(JSON.stringify(done)).not.toContain(marker);
+    expect(done.result).toBe(resumed ? 'Sensitive tool data and raw terminal output hidden.' : 'Safe follow-up report.');
+  });
+
   it.each(['vault_entry', 'vault_save', 'custom_secret'])('learns %s through the bridge when the program emits no tool transcript', async name => {
     const marker = 'private-unreported-bridge-marker-1178';
+    let recordingFile = '';
+    let fileAtCall = true;
     const server = createServer((req, res) => {
       let body = '';
       req.on('data', chunk => { body += String(chunk); });
       req.on('end', () => {
         const call = JSON.parse(body) as { id: number; method: string };
+        if (call.method === 'tools/call') fileAtCall = existsSync(recordingFile);
         const result = call.method === 'tools/list' ? { tools: [{ name, _meta: { sensitive: true } }] }
           : { content: [{ type: 'image', data: 'aaaa', mimeType: 'image/png' }, { type: 'text', text: name === 'vault_entry' ? JSON.stringify({ password: marker }) : name === 'vault_save' ? 'Saved.' : marker }] };
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -93,6 +109,9 @@ describe('what a turn tells Hornhoof', () => {
     await listenIn(server);
     cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
     const t = await liveTerminal('claude', 'queued', { host: { hornhoof: `http://127.0.0.1:${(server.address() as AddressInfo).port}` } });
+    const recording = t.tmux['recordings'].create('a-receipt', t.tmux.scratch());
+    recordingFile = recording.file;
+    writeFileSync(recordingFile, marker);
     const post = (method: string, params?: unknown) => fetch(t.host['bridge'].agent('receipt').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
     await t.on(t.carry(async () => {
       if (name === 'custom_secret') await (await post('tools/list')).text();
@@ -100,6 +119,8 @@ describe('what a turn tells Hornhoof', () => {
       expect(response.status).toBe(200);
       await response.text();
     }));
+    expect(fileAtCall).toBe(false);
+    expect(existsSync(recordingFile)).toBe(false);
     t.screen.mockResolvedValueOnce(`screen with ${marker}`);
     expect((await t.host['operatorPane']('receipt')).cells).toMatch(/hidden/i);
     t.finish(`Report with ${marker}.`);
