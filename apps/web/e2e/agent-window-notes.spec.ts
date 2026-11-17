@@ -76,7 +76,7 @@ for (const look of LOOKS) {
     const [a, l] = [await box(asleep), await box(limit)];
     expect(Math.abs(a.x - l.x)).toBeLessThanOrEqual(1);
     /* Each is led by the word of its kind, in a frame. */
-    for (const [note, word] of [[asleep, t.notes.asleep], [memory, t.notes.memory], [limit, t.notes.wait]] as const) {
+    for (const [note, word] of [[asleep, t.notes.asleep], [memory, t.notes.wait], [limit, t.notes.wait]] as const) {
       const framed = note.getByText(word, { exact: true });
       await expect(framed).toBeVisible();
       expect(await framed.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth))).toBeGreaterThanOrEqual(1);

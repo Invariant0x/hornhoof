@@ -1263,7 +1263,6 @@ export const en = {
     /* The notes at the foot of an agent's window, each led by a word in a frame that says what kind of note it is. */
     notes: {
       label: 'Notes',
-      memory: 'Memory',
       wait: 'Waiting',
       asleep: 'Asleep',
       notSent: 'Not sent',

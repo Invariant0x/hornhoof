@@ -308,7 +308,7 @@ function stateNotes(t: Messages, language: Language, state: OrchestratorState, r
 }
 
 const memoryNote = (t: Messages, state: OrchestratorState): WindowNote | null =>
-  state.memoryWait ? { id: 'memory', word: t.window.notes.memory, text: t.window.memoryWait, tone: 'wait' } : null;
+  state.memoryWait ? { id: 'memory', word: t.window.notes.wait, text: t.window.memoryWait, tone: 'wait' } : null;
 
 /* Access to machines is opened and closed in Machines: here only a note of each machine the orchestrator asks for, and
    one of the machines open to it, each with the way to that place. */
