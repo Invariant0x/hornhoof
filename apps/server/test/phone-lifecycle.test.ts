@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { PHONE_LEASE_MS } from '@hornhoof/protocol';
-import { phoneSessions } from '../src/db/schema.js';
+import { jobs, phoneSessions } from '../src/db/schema.js';
+import { pumpPhone } from '../src/modules/phones/queue.js';
 import { cancelJob } from '../src/modules/tasks/wake.js';
 import { as, mcp, until } from './helpers.js';
 import { phoneCompany } from './phone-fixture.js';
@@ -47,4 +48,23 @@ it('cancellation and a lost lease release the phone and promote the next live jo
   const now = c.app.ctx.clock();
   c.app.ctx.clock = () => now + PHONE_LEASE_MS + 1;
   expect(value(await secondTools.callTool({ name: 'phone_session', arguments: { session: queued.id } }) as Reply)).toMatchObject({ status: 'ended', reason: 'lost' });
+});
+
+it('lends the phone to the next job when the oldest queued job is already cancelled', async () => {
+  const c = await phoneCompany();
+  const { id: phoneId } = (await c.addPhone()).json<{ id: string }>();
+  const first = await c.startTurn(c.nora.id, c.task.id);
+  const second = await c.startTurn(c.sammy.id, c.task.id);
+  const [cancelled, waiting] = await c.db.insert(phoneSessions).values([
+    { companyId: c.companyId, phoneId, agentId: c.nora.id, jobId: first.job.id, taskId: c.task.id },
+    { companyId: c.companyId, phoneId, agentId: c.sammy.id, jobId: second.job.id, taskId: c.task.id },
+  ]).returning();
+  await c.db.update(jobs).set({ error: 'cancelled' }).where(eq(jobs.id, first.job.id));
+
+  await pumpPhone(c.app.ctx, phoneId);
+
+  const sessions = await c.db.select().from(phoneSessions).where(eq(phoneSessions.phoneId, phoneId));
+  const status = new Map(sessions.map(s => [s.id, s.status]));
+  expect([status.get(cancelled!.id), status.get(waiting!.id)]).toEqual(['queued', 'active']);
+  expect(c.calls.filter(m => m.type === 'phone.open').map(m => m.grant.sessionId)).toEqual([waiting!.id]);
 });

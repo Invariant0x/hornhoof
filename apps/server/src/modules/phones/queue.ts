@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { PHONE_LEASE_MS, type PhoneBinding, type PhoneOperation, type PhoneReply } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, companyPhones, jobs, machines, nodes, phoneSessions } from '../../db/schema.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { taskByRef } from '../tasks/views.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
-import { idOnly, only } from '../../db/selections.js';
+import { idOnly } from '../../db/selections.js';
 
 /* An employee or assistant that borrows a phone, and the turn it runs. */
 export type PhoneAgent = { id: string; companyId: string; jobId: string | null };
@@ -77,11 +77,9 @@ export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
     const [active] = await tx.select(idOnly(phoneSessions)).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phoneId), inArray(phoneSessions.status, [...holding]))).limit(1);
     if (active) return null;
     const [waiting] = await tx.select({ session: phoneSessions }).from(phoneSessions).innerJoin(jobs, eq(jobs.id, phoneSessions.jobId)).innerJoin(agents, eq(agents.id, phoneSessions.agentId))
-      .where(and(eq(phoneSessions.phoneId, phoneId), eq(phoneSessions.status, 'queued'), eq(jobs.status, 'running'), isNull(agents.removedAt)))
+      .where(and(eq(phoneSessions.phoneId, phoneId), eq(phoneSessions.status, 'queued'), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`, isNull(agents.removedAt)))
       .orderBy(asc(phoneSessions.order)).limit(1);
     if (!waiting) return null;
-    const [job] = await tx.select(only(jobs, 'error')).from(jobs).where(eq(jobs.id, waiting.session.jobId));
-    if (job?.error === 'cancelled') return null;
     const generation = phone.generation + 1;
     const expires = new Date(ctx.clock() + PHONE_LEASE_MS);
     await tx.update(companyPhones).set({ generation }).where(eq(companyPhones.id, phoneId));

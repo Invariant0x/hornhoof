@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A cancelled turn in the phone queue no longer delays lending to the next waiting turn.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
