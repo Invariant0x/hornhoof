@@ -16,6 +16,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
 - Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Employees can send messages and file improvements throughout a turn.
+- People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
 
 ## [0.32.0] - 2026-11-17
 

@@ -971,7 +971,6 @@ export const agentEvents = pgTable(
   },
   t => [
     index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
-    index('agent_events_message_sender_window').on(t.companyId, sql`(${t.data}->>'by')`, t.createdAt).where(sql`${t.kind} = 'message'`),
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
@@ -2042,6 +2041,20 @@ export const feedbackSignals = pgTable(
   },
   t => [primaryKey({ columns: [t.cardId, t.installation] })],
 );
+
+/* The result of a proposal and its update commit together, so a replay cannot add another finding or signal. */
+export const improvementSubmissions = pgTable('improvement_submissions', {
+  key: text('key').primaryKey(),
+  result: jsonb('result').$type<{ improvement: string; sent?: { number: number | null }; note?: string }>(),
+});
+
+/* The sender keeps the repeat count it offered and whether it was accepted. The inbox keeps which card took the signal. */
+export const feedbackSubmissions = pgTable('feedback_submissions', {
+  key: text('key').primaryKey(),
+  repeats: integer('repeats'),
+  sent: boolean('sent').notNull().default(false),
+  cardId: uuid('card_id').references(() => feedbackInbox.id, { onDelete: 'cascade' }),
+});
 
 /* The company's public link at the relay, like acme.hornhoof.org: its name and address, the key that changes or removes
    it there and the tunnel's settings, the last two encrypted. One deployment has one company, so at most one link. */
