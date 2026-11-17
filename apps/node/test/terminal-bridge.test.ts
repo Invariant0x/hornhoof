@@ -180,6 +180,32 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen[1]).toMatchObject({ url: '/api/attachments', auth: 'Bearer tok-turn-2', body: 'png' });
   });
 
+  /* Codex sends the agent's secret from its environment as a bearer token, to the tools address that carries none: the
+     secret stays off its command line, which any process of the machine reads. */
+  it('knows an agent by the secret its program sends as a bearer token to the tools address without one, and by nothing else', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const other = bridge.agent('agent-2');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    expect(a.mcpUrl).toBe(`${a.mcpAddress}/${a.secret}`);
+    expect(a.mcpAddress).not.toContain(a.secret);
+    expect(a.hookUrl.endsWith(`/hook/${a.secret}`)).toBe(true);
+    const post = (to: string, authorization?: string) => fetch(to, { method: 'POST', headers: { 'content-type': 'application/json', ...(authorization ? { authorization } : {}) }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+    const res = await post(a.mcpAddress, `Bearer ${a.secret}`);
+    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    expect(up.seen).toEqual([expect.objectContaining({ url: '/mcp', auth: 'Bearer tok-turn-1' })]);
+    for (const auth of ['Bearer wrong', a.secret, `Basic ${a.secret}`, undefined]) expect((await post(a.mcpAddress, auth)).status).toBe(404);
+    /* The secret in the path names the agent; a bearer token beside it names no other. */
+    expect((await post(a.mcpUrl, `Bearer ${other.secret}`)).status).toBe(200);
+    expect(up.seen.at(-1)).toMatchObject({ auth: 'Bearer tok-turn-1' });
+    const attach = a.attachUrl.slice(0, -a.secret.length - 1);
+    expect((await fetch(attach, { method: 'POST', headers: { authorization: `Bearer ${a.secret}` }, body: Buffer.from('png') })).status).toBe(404);
+    expect(up.seen).toHaveLength(2);
+  });
+
   it("hands on a task's files both ways, with their names and of any size, and nothing else under the picture address", async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});

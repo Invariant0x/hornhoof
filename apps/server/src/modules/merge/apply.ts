@@ -14,6 +14,7 @@ import {
 } from './snapshot.js';
 import type { MergeSource } from './source.js';
 import { nameOf, valueWords } from './words.js';
+import { fingerprintMask, maskCompanyRows, maskJson, maskRow, type Fingerprint, type Mask } from '../tasks/hide-secret.js';
 
 export type { CodeLine } from './snapshot.js';
 
@@ -128,7 +129,7 @@ export class UnitWriter {
   constructor(
     readonly q: Query,
     readonly facts: Facts,
-    private readonly opts: { now: string; label: string; afterRestore: boolean; whole?: (t: TableFacts, key: Record<string, unknown>) => Promise<Row | null> },
+    private readonly opts: { now: string; label: string; afterRestore: boolean; whole?: (t: TableFacts, key: Record<string, unknown>) => Promise<Row | null>; mask?: Mask | null },
   ) {}
 
   /* A file is read as its hash; a row that is written needs its bytes, from the source while it is there. False when
@@ -140,6 +141,17 @@ export class UnitWriter {
     if (!whole) return false;
     for (const name of files) row[name] = whole[name];
     return true;
+  }
+
+  /* A value the company hid never lands from a source's row: its prose as the fingerprints leave it. set: the columns an
+     update writes, which a text file's size joins when its bytes change. */
+  private masked(t: TableFacts, row: Row, set?: string[]): void {
+    const now = this.opts.mask ? maskRow(t, row, this.opts.mask) : null;
+    for (const [name, value] of Object.entries(now ?? {})) {
+      if (set && !set.includes(name) && !(name === 'size' && set.includes('bytes'))) continue;
+      row[name] = value;
+      if (set && !set.includes(name)) set.push(name);
+    }
   }
 
   /* Before a pass over these units: what is open here now. running: the jobs that are left running, with their nodes. */
@@ -270,6 +282,7 @@ export class UnitWriter {
     const row = await this.prepared(t, ruleOf(t.name), unit);
     if (!row) return;
     if (!(await this.withFiles(t, unit, row, t.columns.map(column => column.name)))) return void (unit.refused = NO_FILE);
+    this.masked(t, row);
     await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
     unit.written = row;
     unit.done = 'added';
@@ -306,6 +319,7 @@ export class UnitWriter {
     }
     if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
     if (!(await this.withFiles(t, unit, row, set))) return void (unit.refused = NO_FILE);
+    this.masked(t, row, set);
     unit.written = { ...unit.y!, ...Object.fromEntries(set.map(column => [column, row[column]])) };
     unit.done = 'changed';
     if (set.length === 0) return;
@@ -435,6 +449,8 @@ class Merge {
   private path: Path = 'compare';
   private cutoff: Date | null = null;
   private facts!: Facts;
+  /* The company's hidden values, by their fingerprints, here and from the source: what no row of the source brings back. */
+  private secrets: Mask | null = null;
   private proving: JournalRow[] = [];
   private asked = 0;
   private now = '';
@@ -471,9 +487,13 @@ class Merge {
     if ((await src.companyId()) !== merge.companyId) throw new MergeRefused(ANOTHER_COMPANY);
 
     await this.plan();
+    const brought = await this.hidden();
     await this.write();
     const carried = await this.carry();
     await this.backups();
+    /* A value hidden there and new here is looked for once in this side's own rows of the company, in this transaction. */
+    const fresh = fingerprintMask(brought);
+    if (fresh) await maskCompanyRows(q, this.facts, merge.companyId, fresh);
     const tasks = await this.record(carried);
     const code = await this.codeOf(tasks);
     const [from, to] = await this.span(row.source);
@@ -484,6 +504,25 @@ class Merge {
       [merge.id, this.path, this.cutoff, JSON.stringify(this.counts), JSON.stringify(tasks), JSON.stringify(code), from, to],
     );
     return { path: this.path, counts: this.counts, tasks, code, from, to };
+  }
+
+  /* The fingerprints of the company here, and those the source brings that are new here, which this returns. */
+  private async hidden(): Promise<Fingerprint[]> {
+    const here = await this.q<Fingerprint>('SELECT fingerprint, characters, window_hash FROM public.secret_redactions WHERE company_id = $1::uuid', [this.merge.companyId]);
+    const known = new Set(here.map(found => found.fingerprint));
+    const brought = this.units
+      .filter(unit => unit.table === 'secret_redactions' && unit.op === 'insert' && unit.x?.company_id === this.merge.companyId && !known.has(String(unit.x.fingerprint)))
+      .map(unit => unit.x as unknown as Fingerprint);
+    this.secrets = fingerprintMask([...here, ...brought]);
+    return brought;
+  }
+
+  /* A row's image in what the merge keeps, as the fingerprints leave its prose. */
+  private scrubbed(table: unknown, image: unknown): unknown {
+    const t = this.facts.tables.get(String(table));
+    if (!this.secrets || !t || !image || typeof image !== 'object') return image;
+    const now = maskRow(t, image as Row, this.secrets);
+    return now ? { ...(image as Row), ...Object.fromEntries(Object.entries(now).filter(([name]) => name in (image as Row))) } : image;
   }
 
   /* Which way, and one unit for every row the source has something to say of. */
@@ -631,6 +670,7 @@ class Merge {
     const writer = new UnitWriter(q, this.facts, {
       now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare',
       whole: (t, key) => this.src.wholeOf(t, key),
+      mask: this.secrets,
     });
     /* What nodes said of jobs whose rows were away, on either side. */
     const running = parkedNodes([...(await parkedOf(q)), ...(await this.src.parked())]);
@@ -692,6 +732,7 @@ class Merge {
      nodes told the source of jobs it had no row of comes too, applied or not as the source left it. */
   private async backups(): Promise<void> {
     for (const parked of await this.src.parked()) {
+      if (this.secrets) parked.body = maskJson(parked.body, this.secrets);
       await this.q('INSERT INTO net.parked SELECT * FROM jsonb_populate_record(NULL::net.parked, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(parked)]);
     }
     for (const backup of await this.src.backups()) {
@@ -802,6 +843,7 @@ class Merge {
       this.counts.conflicts += 1;
     }
     for (const row of conflicts) {
+      Object.assign(row, { here: this.scrubbed(row.tbl, row.here), there: this.scrubbed(row.tbl, row.there), why: typeof row.why === 'string' && this.secrets ? this.secrets(row.why) : row.why });
       await q(
         `INSERT INTO net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, task_id, cols, here, there, at, why)
          VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, $5, $6, $7, $8::uuid, ARRAY(SELECT jsonb_array_elements_text($9::jsonb)), $10::jsonb, $11::jsonb, $12::timestamptz, $13)`,
@@ -809,6 +851,7 @@ class Merge {
       );
     }
     for (const row of kept) {
+      Object.assign(row, { was: this.scrubbed(row.tbl, row.was), here: this.scrubbed(row.tbl, row.here) });
       await q(
         `INSERT INTO net.merge_rows (merge, tbl, key, how, cols, was, here) VALUES ($1::uuid, $2, $3::jsonb, $4, ARRAY(SELECT jsonb_array_elements_text($5::jsonb)), $6::jsonb, $7::jsonb)
          ON CONFLICT (merge, tbl, key) DO NOTHING`,

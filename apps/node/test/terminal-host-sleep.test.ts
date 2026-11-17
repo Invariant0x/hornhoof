@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { userMessage } from './fakes/word-receipts.mjs';
 import { atWork, cleanups, SESSION } from './terminal-host-receipts-helpers.js';
@@ -50,6 +52,33 @@ describe('a program that sleeps between turns', () => {
     const [name, launched] = c.launch.mock.calls.at(-1)!;
     expect(name).toBe('a-receipt');
     expect(launched.command.join(' ')).toContain(SESSION);
+  });
+
+  /* Any process of the machine reads a program's command line. Claude Code reads the address of its tools, with the agent's
+     secret in it, from a file of the agent folder that only its user reads, there while the program runs; Codex reads the
+     secret from its environment. */
+  it.each(['claude', 'codex'] as const)("starts %s with no argument that holds the agent's secret for its tools, and the file of it goes as the program sleeps", async kind => {
+    const c = await atWorkThatSleeps(kind);
+    const secret = new URL(c.host['bridge'].agent('receipt').mcpUrl).pathname.split('/').at(-1)!;
+    const file = join(c.workDir, '.hh-mcp.json');
+    const holdsSecret = (command: string[]) => command.filter(part => part.includes(secret));
+    const [, first] = c.launch.mock.calls[0]!;
+    expect(holdsSecret(first.command)).toEqual([]);
+    if (kind === 'claude') {
+      expect(first.command[first.command.indexOf('--mcp-config') + 1]).toBe(file);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(readFileSync(file, 'utf8')).toContain(secret);
+    }
+    c.finish();
+    await c.on(c.running);
+    await c.until(() => c.host['agents'].get('receipt')?.asleep === true);
+    expect(existsSync(file)).toBe(false);
+    const before = c.launch.mock.calls.length;
+    void c.run();
+    await c.until(() => c.launch.mock.calls.length > before);
+    expect(holdsSecret(c.launch.mock.calls.at(-1)![1].command)).toEqual([]);
+    expect(existsSync(file)).toBe(kind === 'claude');
+    if (kind === 'claude') expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   /* Seen on a Kimi node on 16.11: the turn after a sleep read the program's log again from its start, took the turns it

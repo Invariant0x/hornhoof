@@ -61,6 +61,7 @@ import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
+import { expireAccess } from './modules/computer/expiry.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { startNodeDrains } from './modules/updates/node-drain.js';
@@ -361,6 +362,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     () => clearInterval(holdersTimer),
   );
   app.addHook('onClose', async () => clearInterval(holdersTimer));
+  let accessExpiryTimer: NodeJS.Timeout | undefined;
+  ctx.mode.whenLead(
+    () => { accessExpiryTimer = setInterval(() => void expireAccess(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not expire machine access.')), 60_000).unref(); },
+    () => clearInterval(accessExpiryTimer),
+  );
+  app.addHook('onClose', async () => clearInterval(accessExpiryTimer));
   /* While this app leads it takes over the server's own computer access as an app from before left it, and looks
      again until that is done, at first every second and then less often: its own machine gets its row only once its
      keeper has asked. The other machines are served meanwhile. */

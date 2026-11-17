@@ -1251,6 +1251,21 @@ export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 's
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
+/* A permanent suppression fingerprint, carried by ordinary replication and merges. Never keeps the selected text. */
+export const secretRedactions = pgTable('secret_redactions', {
+  id: id(),
+  companyId: companyId(),
+  fingerprint: text('fingerprint').notNull(),
+  characters: integer('characters').notNull(),
+  /* The rolling hash of the value's code points that finds a window worth a full hash, so an old copy is checked in one pass. */
+  windowHash: integer('window_hash').notNull(),
+  personId: uuid('person_id').notNull().references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  uniqueIndex('secret_redactions_fingerprint').on(t.companyId, t.fingerprint),
+  check('secret_redactions_length', sql`${t.characters} > 0`),
+]);
+
 export const taskEvents = pgTable(
   'task_events',
   {
@@ -2917,6 +2932,7 @@ export const machineAccess = pgTable(
       .primaryKey()
       .references(() => machines.id),
     companyId: companyId(),
+    scope: text('scope', { enum: ['orchestrator', 'all_agents'] }).notNull().default('orchestrator'),
     until: timestamp('until', { withTimezone: true }),
     askedReason: text('asked_reason'),
     askedAt: timestamp('asked_at', { withTimezone: true }),
@@ -2924,7 +2940,7 @@ export const machineAccess = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
   },
-  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
+  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`), check('machine_access_scope', sql`scope IN ('orchestrator', 'all_agents')`)],
 ).enableRLS();
 
 /* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO

@@ -1,0 +1,2 @@
+ALTER TABLE "machine_access" ADD COLUMN "scope" text DEFAULT 'orchestrator' NOT NULL;--> statement-breakpoint
+ALTER TABLE "machine_access" ADD CONSTRAINT "machine_access_scope" CHECK (scope IN ('orchestrator', 'all_agents'));

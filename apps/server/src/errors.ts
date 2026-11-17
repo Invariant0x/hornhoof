@@ -195,6 +195,7 @@ export type ErrorReason =
   | 'machine_unreachable'
   | 'no_core'
   | 'grant_needed'
+  | 'confirm_needed'
   | 'bad_grant'
   | 'key_not_held'
   | 'no_key'

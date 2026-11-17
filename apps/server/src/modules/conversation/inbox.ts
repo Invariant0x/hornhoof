@@ -1,4 +1,4 @@
-import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
+import { cleanDiagnostic, hideCredentials } from '@hornhoof/protocol/redaction';
 import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
@@ -97,7 +97,7 @@ export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage 
     taskNumber: task?.number ?? null,
     kind: letterKind(m),
     source: m.notification?.source ?? null,
-    text: m.text,
+    text: hideCredentials(m.text),
     jobId,
     status,
     readAt: status === 'unread' ? null : new Date(),

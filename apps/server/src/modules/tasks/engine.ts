@@ -1,3 +1,4 @@
+import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
@@ -211,6 +212,7 @@ const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.a
 type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource };
 
 export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
+  n = hideCredentialsIn(n);
   const kept = await preserveNote(tx, task, n, config);
   const [row] = await tx
     .insert(taskEvents)
@@ -221,6 +223,7 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
 
 /* A line of Hornhoof's own, which nobody signed. */
 export async function ownNote(tx: Tx, task: Pick<Task, 'id' | 'companyId'>, n: { kind: TaskEventKind; text: string; data: Record<string, unknown> }): Promise<void> {
+  n = hideCredentialsIn(n);
   await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, ...n });
 }
 
@@ -602,6 +605,7 @@ async function executorResult(ctx: Ctx, input: NewTask): Promise<NonNullable<New
 }
 
 export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
+  input = hideCredentialsIn(input);
   if (input.resultKind === undefined && input.executor) {
     const resultKind = await executorResult(ctx, input);
     input = { ...input, resultKind, executor: resultKind !== 'coordination' };
@@ -930,6 +934,7 @@ async function cleanupTurn(db: Db, task: Task): Promise<string> {
 
 /* tracker: an edit of what the tracker keeps that goes with the change, written in the same move or not at all. */
 export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange, tracker?: TaskEdit): Promise<Moved> {
+  c = hideCredentialsIn(c);
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   await requireTaskHead(ctx, task, agentId);
@@ -1033,6 +1038,7 @@ async function endFormerOwnerTurns(tx: Tx, task: Task, set: Partial<Task>): Prom
 /* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor, once in a
    piece of work: held says it stays blocked as its executor blocked it again after a comment opened it. */
 export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved & { held?: true }> {
+  text = hideCredentialsIn(text);
   const task = await loadTask(ctx.db, taskId);
   if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
   const words = text.trim();
