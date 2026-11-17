@@ -1,7 +1,15 @@
 import { Readable } from 'node:stream';
 import { PrivateValues } from '@hornhoof/protocol';
 import { expect, it } from 'vitest';
-import { privateUpload } from '../src/modules/tools/private-upload.js';
+import { privateFilename, privateUpload } from '../src/modules/tools/private-upload.js';
+
+it('masks an issued value in an attachment name while preserving an unnamed upload', () => {
+  const values = new PrivateValues();
+  values.remember('private-filename-marker');
+  expect(privateFilename(values, 'private-filename-marker.txt')).toBe('[hidden].txt');
+  expect(privateFilename(values, undefined)).toBeUndefined();
+  expect(privateFilename(undefined, 'ordinary.txt')).toBe('ordinary.txt');
+});
 
 it('refuses a streamed secret across chunk and UTF-8 boundaries before yielding it to storage', async () => {
   const marker = 'private-upload-маркер-1178';
