@@ -33,8 +33,7 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
       /* The lease and frame order still advance. A vault-using turn keeps only that metadata, never a screen that may
          show the value it typed, including when an old node sends an unmasked frame. */
-      const hidden = await sensitiveTurn(tx, held.session.jobId, true);
-      const bytes = !hidden && frame.capture.png ? Buffer.from(frame.capture.png, 'base64') : null;
+      const bytes = await frameBytes(tx, held.session.jobId, frame.capture.png);
       if (bytes && pictureType(bytes) !== 'image/png') return;
       let attachmentId: string | null = null;
       if (bytes) {
@@ -96,4 +95,8 @@ export async function imageBytes(ctx: Ctx, companyId: string, id: string | null)
   const [file] = await ctx.db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
   if (!file) throw phoneMissing();
   return Buffer.from(file.bytes);
+}
+
+async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, png: string | undefined): Promise<Buffer | null> {
+  return await sensitiveTurn(db, jobId, true) || !png ? null : Buffer.from(png, 'base64');
 }
