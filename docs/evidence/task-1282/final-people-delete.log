@@ -1,0 +1,15 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/people-delete.test.ts (8 tests) 4932ms
+   ✓ DELETE /api/people/:id (8)
+     ✓ takes a person off the list and the map for good: their sessions, keys, machines and own plans end 2244ms
+     ✓ keeps old tasks pointing at the person, with their name, and frees their email for a new invite 753ms
+     ✓ ends an invite that was never accepted 322ms
+     ✓ deletes an assistant: its key opens nothing and its own agent leaves the company, while its owner's plan stays 373ms
+     ✓ leaves nothing to change on a deleted person or assistant: no status, invite link or key brings them back 338ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  15:35:44
+   Duration  18.19s (tests 69%, import 18%, transform 13%)

@@ -1,0 +1,22 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/assistant-agent.test.ts (35 tests) 8781ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 529ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1146ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1139ms
+   ✓ freshText (6)
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 318ms
+ ✓ test/stored-secrets.test.ts (10 tests) 2974ms
+   ✓ secrets in stored prose (10)
+     ✓ masks tasks and comments before storing their copies 966ms
+     ✓ checks department authority on the server and rejects ordinary readers 378ms
+     ✓ keeps the mask stable even when the selection occurs within its spelling 308ms
+     ✓ cleans an archived comment and lets a person select its full saved text 344ms
+
+ Test Files  2 passed (2)
+      Tests  45 passed (45)
+   Start at  15:34:54
+   Duration  19.42s (tests 80%, import 14%, transform 6%)

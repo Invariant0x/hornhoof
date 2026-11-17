@@ -1,0 +1,14 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/assistant-agent.test.ts (35 tests) 8366ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 485ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1150ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1132ms
+
+ Test Files  1 passed (1)
+      Tests  35 passed (35)
+   Start at  15:40:50
+   Duration  17.35s (tests 84%, import 11%, transform 4%)

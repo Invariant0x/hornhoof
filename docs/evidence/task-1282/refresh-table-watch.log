@@ -1,0 +1,22 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/watch-tools.test.ts (35 tests) 6288ms
+   ✓ tools a skill grants (35)
+     ✓ exposes node restart evidence to the failure collector separately from agent output 1173ms
+     ✓ let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message 352ms
+     ✓ send at most ten messages in one turn 412ms
+ ✓ test/agent-view-table.test.ts (58 tests) 7154ms
+   ✓ every real route (1)
+     ✓ has its place in the table 514ms
+   ✓ one thing of one agent (30)
+     ✓ GET /api/agents/:id 459ms
+     ✓ POST /api/tasks/:id/comments 327ms
+     ✓ POST /api/tasks/:id/cancel 313ms
+   ✓ every list (27)
+     ✓ GET /api/org shows each person only what they may see 392ms
+
+ Test Files  2 passed (2)
+      Tests  93 passed (93)
+   Start at  15:39:42
+   Duration  20.80s (tests 84%, import 10%, transform 6%)

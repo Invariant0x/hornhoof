@@ -1,0 +1,166 @@
+{
+  "task": 1282,
+  "status": "DONE",
+  "candidate": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab",
+  "branch": "task-1282",
+  "turnBranch": "turn-32",
+  "initialBase": "f311bea6312771faabc3d9fece0a6faf97f7ad3e",
+  "checkedBase": "968b890b56da994c3c82c6088e611b56bf93694a",
+  "finalBase": "877f559aa6f05c7eaf286dc96d98daf42cc060bb",
+  "baseRefreshScopeStat": {
+    "paths": [
+      "packages/protocol/src/redaction.ts",
+      "packages/protocol/test/redaction.test.ts",
+      "apps/server/test/agent-view-table.test.ts",
+      "apps/server/test/assistant-agent.test.ts",
+      "apps/server/test/watch-tools.test.ts"
+    ],
+    "output": "",
+    "exit": 0
+  },
+  "sourceChanges": [
+    "apps/server/test/agent-view-table.test.ts",
+    "apps/server/test/watch-tools.test.ts",
+    "packages/protocol/src/redaction.ts",
+    "packages/protocol/test/redaction.test.ts"
+  ],
+  "author": {
+    "command": "NODE_OPTIONS=--max-old-space-size=4096 npm run -s check:author -- --sha 0ee128ed0dd086b5fefe2541b5a5e8ffa0e9ea00 --base 968b890b56da994c3c82c6088e611b56bf93694a",
+    "commit": "0ee128ed0dd086b5fefe2541b5a5e8ffa0e9ea00",
+    "exit": 0,
+    "numbers": {
+      "tests": {
+        "passed": 105,
+        "failed": 0,
+        "skipped": 0,
+        "total": 105
+      },
+      "changedLines": {
+        "covered": 19,
+        "total": 19
+      },
+      "worstCrap": 4,
+      "dryerFlags": 0
+    },
+    "stages": [
+      {
+        "name": "format",
+        "status": "unavailable",
+        "exitCode": null,
+        "partId": null
+      },
+      {
+        "name": "lint",
+        "status": "passed",
+        "exitCode": 0,
+        "partId": null
+      },
+      {
+        "name": "types",
+        "status": "passed",
+        "exitCode": 0,
+        "partId": null
+      },
+      {
+        "name": "tests",
+        "status": "passed",
+        "exitCode": 0,
+        "partId": null
+      },
+      {
+        "name": "crapper",
+        "status": "passed",
+        "exitCode": 0,
+        "partId": null
+      },
+      {
+        "name": "dryer",
+        "status": "passed",
+        "exitCode": 0,
+        "partId": null
+      }
+    ],
+    "leftToFullRunCount": 914
+  },
+  "refresh": {
+    "commit": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab",
+    "authorization": "Head of development final refresh instruction: no overlap means only tsc, lint and three or four target test files.",
+    "types": {
+      "command": "NODE_OPTIONS=--max-old-space-size=4096 npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+      "exit": 0
+    },
+    "lint": {
+      "command": "NODE_OPTIONS=--max-old-space-size=4096 npx --no-install eslint apps/server/test/agent-view-table.test.ts apps/server/test/watch-tools.test.ts packages/protocol/src/redaction.ts packages/protocol/test/redaction.test.ts",
+      "exit": 0
+    },
+    "tests": [
+      {
+        "cwd": "apps/server",
+        "command": "NODE_OPTIONS=--max-old-space-size=4096 npx --no-install vitest run test/agent-view-table.test.ts test/watch-tools.test.ts --maxWorkers=1",
+        "passed": 93,
+        "exit": 0
+      },
+      {
+        "cwd": "apps/server",
+        "command": "NODE_OPTIONS=--max-old-space-size=4096 npx --no-install vitest run test/assistant-agent.test.ts --maxWorkers=1",
+        "passed": 35,
+        "exit": 0
+      },
+      {
+        "cwd": "packages/protocol",
+        "command": "npx --no-install vitest run test/redaction.test.ts --maxWorkers=1",
+        "passed": 12,
+        "exit": 0
+      }
+    ]
+  },
+  "otherPassedTests": {
+    "commit": "0ee128ed0dd086b5fefe2541b5a5e8ffa0e9ea00",
+    "files": [
+      "apps/server/test/stored-secrets.test.ts",
+      "apps/server/test/people-delete.test.ts",
+      "apps/node/test/node-log.test.ts",
+      "apps/node/test/redact.test.ts"
+    ],
+    "passed": 37,
+    "exit": 0,
+    "fingerprint": "base-refresh-fingerprint.json"
+  },
+  "uniquePassedTests": 177,
+  "executedOnFinal": 140,
+  "reusedOnly": 37,
+  "build": {
+    "command": "npm run build -w @hornhoof/server",
+    "commit": "0ee128ed0dd086b5fefe2541b5a5e8ffa0e9ea00",
+    "exit": 0,
+    "reuse": "Identical production code, font inputs, lockfile and configuration; see base-refresh-fingerprint.json."
+  },
+  "url": {
+    "baselinePath": "packages/protocol/src/redaction.ts",
+    "baselineLine": 19,
+    "baselineCommit": "f311bea6312771faabc3d9fece0a6faf97f7ad3e",
+    "counterRedExit": 1,
+    "counterGreenExit": 0,
+    "equivalenceCases": 64420,
+    "equivalenceDifferences": 0,
+    "sourceSha256": "e70bc8967ebffe362004148df7c41ce6fc1316865e6bd2b9daefb48f0ba41701"
+  },
+  "selfReview": "Complete, including secret masking, access rows, scheme boundaries and synchronous scanner state. No external checker on the turnkey task.",
+  "integration": {
+    "command": "git push origin HEAD:refs/heads/turn-32",
+    "exit": 0,
+    "force": false,
+    "from": "877f559aa6f05c7eaf286dc96d98daf42cc060bb",
+    "to": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab",
+    "remoteReadback": {
+      "refs/heads/task-1282": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab",
+      "refs/heads/turn-32": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab"
+    }
+  },
+  "limits": [
+    "No formatter is configured; format is unavailable, not passed.",
+    "No whole suite or run_tests was invoked; release validation remains with the release owner.",
+    "Equivalence corpus is bounded, not an exhaustive proof.",
+    "Unchanged hideCredentialsIn had CRAP 30 in the direct protocol coverage; new scanner functions each have CRAP 4 and 100 percent coverage."
+  ]
+}

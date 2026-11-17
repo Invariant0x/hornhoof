@@ -1,0 +1,9 @@
+{:entries [
+  {:name "hideCredentialsIn", :namespace "redaction", :complexity 5, :coverage 0.0, :crap 30.0}
+  {:name "hasSchemeBefore", :namespace "redaction", :complexity 4, :coverage 100.0, :crap 4.0}
+  {:name "hideUrlPasswords", :namespace "redaction", :complexity 4, :coverage 100.0, :crap 4.0}
+  {:name "cleanDiagnostic", :namespace "redaction", :complexity 1, :coverage 100.0, :crap 1.0}
+  {:name "hiddenBy", :namespace "redaction", :complexity 1, :coverage 100.0, :crap 1.0}
+  {:name "hideCredentials", :namespace "redaction", :complexity 1, :coverage 100.0, :crap 1.0}
+  {:name "hideJoinCodes", :namespace "redaction", :complexity 1, :coverage 100.0, :crap 1.0}
+]}

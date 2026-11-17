@@ -1,0 +1,16 @@
+{
+  "checkedCandidate": "0ee128ed0dd086b5fefe2541b5a5e8ffa0e9ea00",
+  "finalCandidate": "d5c8f8295859ed1996997cc3c3f79d3abef0ddab",
+  "checkedBase": "968b890b56da994c3c82c6088e611b56bf93694a",
+  "finalBase": "877f559aa6f05c7eaf286dc96d98daf42cc060bb",
+  "changedPaths": [
+    "apps/node/test/main.test.ts",
+    "apps/web/test/Subscriptions.test.tsx",
+    "apps/web/test/subscriptions-helpers.ts",
+    "apps/web/test/subscriptions-plans.test.tsx",
+    "docs/reports/task-1218.md"
+  ],
+  "allOtherGitTreeEntriesIdentical": true,
+  "inputSha256": "3ae24682d681d3dd9f5dd4f901f0dca5e424855057e2c8617e80644b16c13f95",
+  "reusedScope": "Existing author, build, storage, people-delete and node-log/redact results. The source, lockfile, configs, helpers and named tests of these checks are identical. Refresh tsc, lint and four target files separately on the final candidate."
+}

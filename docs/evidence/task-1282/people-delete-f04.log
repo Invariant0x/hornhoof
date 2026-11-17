@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/people-delete.test.ts (8 tests) 1932ms
+   ✓ DELETE /api/people/:id (8)
+     ✓ takes a person off the list and the map for good: their sessions, keys, machines and own plans end 928ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  15:32:03
+   Duration  6.97s (tests 67%, import 21%, transform 12%)

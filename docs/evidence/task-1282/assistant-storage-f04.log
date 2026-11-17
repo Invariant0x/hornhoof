@@ -1,0 +1,20 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/assistant-agent.test.ts (35 tests) 8794ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 568ms
+   ✓ an assistant's own agent, for the company (2)
+     ✓ is changed on its assistant's card, not as an employee: its own card neither edits nor removes it 300ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1227ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1161ms
+ ✓ test/stored-secrets.test.ts (10 tests) 2669ms
+   ✓ secrets in stored prose (10)
+     ✓ masks tasks and comments before storing their copies 886ms
+     ✓ checks department authority on the server and rejects ordinary readers 400ms
+
+ Test Files  2 passed (2)
+      Tests  45 passed (45)
+   Start at  15:31:31
+   Duration  18.04s (tests 81%, import 12%, transform 6%)

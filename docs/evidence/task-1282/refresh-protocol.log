@@ -1,0 +1,9 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/packages/protocol
+
+ ✓ test/redaction.test.ts (12 tests) 17ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  15:41:45
+   Duration  89ms (tests 56%, import 23%, transform 15%, worker 6%)
