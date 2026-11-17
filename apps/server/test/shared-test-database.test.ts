@@ -1,6 +1,7 @@
-import type { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterAll, describe, expect, inject, it, onTestFinished, vi } from 'vitest';
 import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
@@ -12,7 +13,7 @@ let lastShared: PGlite | undefined;
 afterAll(() => {
   expect(lastShared?.closed).toBe(true);
 });
-const { checkSharedDatabase, createTestDb, databasesOpened, fixture, prepareSharedDatabase, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
+const { asTestDb, checkSharedDatabase, createTestDb, databasesOpened, fixture, prepareSharedDatabase, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
 afterAll(() => {
   lastShared = sharedDatabase();
@@ -64,8 +65,7 @@ describe('the tests of one file', { shuffle: false }, () => {
 
   it('find in it the same rows as in a new copy of the migrated database', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await rowsOfEachTable(emptied)).toEqual(await rowsOfEachTable(copy));
+    expect(await rowsOfEachTable(emptied)).toEqual(pristine.rows);
   });
 
   /* A new copy holds rows its migrations wrote outside public too, as the horizon of merges in net. */
@@ -100,8 +100,7 @@ describe('agent SQL in a test', { shuffle: false }, () => {
 
   it('leaves the rights and roles of a new copy to the next test', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await rights(emptied)).toEqual(await rights(copy));
+    expect(await rights(emptied)).toEqual(pristine.rights);
   });
 });
 
@@ -180,8 +179,7 @@ describe('a setting of the connection', { shuffle: false }, () => {
 
   it('does not reach the next test as that setting', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await applicationName(emptied)).toEqual(await applicationName(copy));
+    expect(await applicationName(emptied)).toEqual(pristine.applicationName);
   });
 });
 
@@ -198,8 +196,7 @@ describe('what a test leaves for the planner', { shuffle: false }, () => {
 
   it('is gone for the next test, as on a new copy', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+    expect((await plannerView(emptied)).rows).toEqual(pristine.planner);
   });
 
   it('can be statistics an analyze made of every table', async () => {
@@ -212,8 +209,7 @@ describe('what a test leaves for the planner', { shuffle: false }, () => {
   it('does not reach the next test as statistics', async () => {
     const emptied = await createTestDb();
     expect((await statistics(emptied)).rows).toEqual([]);
-    const copy = await createTestDb();
-    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+    expect((await plannerView(emptied)).rows).toEqual(pristine.planner);
   });
 
   it('does not fail its file', async () => {
@@ -441,3 +437,19 @@ describe('a test run', () => {
     expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe('UTC');
   });
 });
+
+/* The untouched migrated database is an independent input to comparisons with the shared one. Capture it once during
+   collection: repeatedly opening the same control copy tested infrastructure speed inside the scenario's deadline.
+   The separate two-database case above still exercises createTestDb while another database is held. */
+const pristine = await (async () => {
+  const client = new PGlite({ loadDataDir: new Blob([readFileSync(inject('migratedDataDir'))]) });
+  try {
+    const { db } = await asTestDb(client);
+    return {
+      rows: await rowsOfEachTable(db),
+      rights: await rights(db),
+      applicationName: await applicationName(db),
+      planner: (await plannerView(db)).rows,
+    };
+  } finally { await client.close(); }
+})();
