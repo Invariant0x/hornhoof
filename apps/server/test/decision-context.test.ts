@@ -15,6 +15,7 @@ import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/mod
 import { BUILTIN } from './builtin.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
+import { keptAnswer } from '../src/modules/tools/calls.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
@@ -192,6 +193,32 @@ it('uses the owner across named MCP, generic MCP and HTTP while delegate input i
   expect(built.isError, text(built)).toBeFalsy();
   expect((await call(client, 'api', { path: '/api/people' })).isError).toBeFalsy();
   expect((await c.app.inject({ method: 'PUT', url: path, headers, payload: { isCeoDelegate: false } })).statusCode).toBe(200);
+});
+
+it('returns the same machine command in the named tool and the owner screen, with no join code in the conversation', async () => {
+  const c = await company();
+  const client = await mcp(c.app, TOKEN);
+  const result = await call(client, 'machine_command', {});
+  expect(result.isError, text(result)).toBeFalsy();
+  const made = JSON.parse(text(result));
+  expect(made.command).toContain('--join ');
+  const screen = (await c.app.inject({ url: '/api/nodes/commands', ...as(c.tokens.ceo) })).json();
+  expect(screen.commands).toMatchObject([{ id: made.id, command: made.command }]);
+  const code = made.command.split('--join ')[1];
+  await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId: c.job.id, kind: 'tool_result', data: { summary: made.command } });
+  const saved = await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.orchestrator.id));
+  expect(JSON.stringify(saved)).toContain('--join [hidden]');
+  expect(JSON.stringify(saved)).not.toContain(code);
+  expect(JSON.stringify(keptAnswer(result))).not.toContain(code);
+});
+
+it('shows pending decision cards to the orchestrator through the same HTTP view as the owner', async () => {
+  const c = await company();
+  const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
+  const client = await mcp(c.app, TOKEN);
+  const result = await call(client, 'api', { path: '/api/requests' });
+  expect(result.isError, text(result)).toBeFalsy();
+  expect(JSON.parse(text(result)).proposals).toMatchObject([{ id: card!.id }]);
 });
 
 describe('answer_request in a turn', () => {

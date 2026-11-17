@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { PRIVATE_COMMAND_REFUSED, PRIVATE_TURN_LOST, type ToolPrivacyPolicy } from '@hornhoof/protocol';
+import { hideJoinCodes } from '@hornhoof/protocol/redaction';
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -74,8 +75,12 @@ export function currentInvocation(): string | null {
   return base?.startsWith('tool:') ? base.slice('tool:'.length) : null;
 }
 
-/* What is kept of an answer: the answer, or a note that it was too large. */
-export const keptAnswer = (answer: unknown): unknown => (JSON.stringify(answer).length > ANSWER_MAX ? say(TOO_LARGE) : answer);
+/* The replay record keeps join codes hidden, as the conversation does. */
+export function keptAnswer(answer: unknown): unknown {
+  const text = JSON.stringify(answer);
+  if (text.length > ANSWER_MAX) return say(TOO_LARGE);
+  return text.includes('--join ') ? JSON.parse(hideJoinCodes(text)) : answer;
+}
 
 type Call = { db: Db; jobId: string; id: string; name: string };
 
