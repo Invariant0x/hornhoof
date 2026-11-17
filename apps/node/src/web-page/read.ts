@@ -3,9 +3,9 @@ import type { PageLink, PageSample } from './collect.js';
 /* What a page read in the browser comes to. A sign-in or a robot check is no failure of the call: the page was reached, and
    what stands in the way is for a person, as hh-browse signs in nowhere and gets past no check. */
 
-export type PageStatus = 'ok' | 'login_required' | 'robot_check' | 'http_error' | 'refused' | 'failed';
+type PageStatus = 'ok' | 'login_required' | 'robot_check' | 'http_error' | 'refused' | 'failed';
 export type Answer = { status: number; headers: Record<string, string> } | null;
-export type Judgement = { status: PageStatus; reason: string | null; notes: string[] };
+type Judgement = { status: PageStatus; reason: string | null; notes: string[] };
 export type BrowseResult = {
   status: PageStatus;
   reason: string | null;

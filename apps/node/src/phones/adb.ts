@@ -6,13 +6,13 @@ import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
-export type AdbRun = (call: AdbCall) => Promise<Buffer>;
+type AdbRun = (call: AdbCall) => Promise<Buffer>;
 
 /* The phone's own PNG of a whole screen of a photo, up to 10.4 MB at 1080x2400, comes whole before the node shrinks it. */
-export const ADB_MAX_BYTES = 16 * 1024 * 1024;
+const ADB_MAX_BYTES = 16 * 1024 * 1024;
 
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
-export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 /* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written.
    input text types plain Latin letters, digits and signs only; any other text gives null. */
@@ -22,7 +22,7 @@ function textScript(value: string): string | null {
 }
 
 /* No stdout, stderr, script or adb error object is logged or returned on failure. */
-export const adbRunner = (executable: string, environment?: NodeJS.ProcessEnv): AdbRun => call => new Promise((resolve, reject) => {
+const adbRunner = (executable: string, environment?: NodeJS.ProcessEnv): AdbRun => call => new Promise((resolve, reject) => {
   if (call.signal.aborted) return reject(new Error('phone_cancelled'));
   const child = spawn(executable, call.args, { stdio: ['pipe', 'pipe', 'pipe'], shell: false, signal: call.signal, killSignal: 'SIGKILL', ...(environment ? { env: environment } : {}) });
   const chunks: Buffer[] = [];

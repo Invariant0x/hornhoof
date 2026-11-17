@@ -11,7 +11,7 @@ const MAX_TREE_BYTES = 2 * 1024 * 1024;
 type Rect = PhoneElement['bounds'];
 
 /* UIAutomator owns this XML. DTDs, entities, malformed trees and uncertain bounds give no tree. */
-export function parsePhoneTree(raw: string): PhoneElement[] {
+function parsePhoneTree(raw: string): PhoneElement[] {
   if (Buffer.byteLength(raw) > MAX_TREE_BYTES || /<!/.test(raw)) throw new Error('phone_tree_invalid');
   const start = raw.indexOf('<hierarchy');
   const end = raw.lastIndexOf('</hierarchy>');
