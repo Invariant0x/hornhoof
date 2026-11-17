@@ -63,6 +63,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Such a file is outside copies and backups and is lost with its machine; the task card and the chat say so by name.
 - The orchestrator finds and calls any Hornhoof tool with `find_tool` and `use_tool`, and any route with `api`.
 - An agent on a lent phone presses Back and Home and types any text, Russian, emoji and new lines too.
+- A node uses a phone plugged by cable into its machine, through a socket its administrator puts in the phone folder.
 - The orchestrator searches and reads the source and logs of the very Hornhoof build that runs.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
@@ -99,6 +100,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Department messaging lists a channel's addresses apart from its buttons, under a heading that counts them.
 - An agent sees each phone screen as a JPEG of at most 1568 px, so a screen with a photo reaches it whole.
 - The orchestrator's `api` reads every page `view` did, and `view` is gone.
+- The orchestrator's SQL reads every table and every column except keys; its write rights do not change.
+- A decision the orchestrator takes as the owner shows "decided by the orchestrator" in the task's questions and log.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
