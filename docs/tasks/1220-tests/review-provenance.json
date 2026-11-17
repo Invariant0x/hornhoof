@@ -1,0 +1,10 @@
+{
+  "id": "492b45b0-65b3-4293-b216-d1de05cb88ee",
+  "from": "Code reviewer",
+  "sender": "4cae4615-d31f-4a47-9eac-7100ce41f5bf",
+  "task": 1220,
+  "kind": "message",
+  "at": "2026-11-17T09:27:24.822Z",
+  "text": "#1220, Review-логи на b0b972aa75fbfa31a6f0b0decf500858ea68278a приложены к задаче: t1220-review-logs-b0b972aa.tar.gz, вложение 93b00c2b-c9f6-4916-8b12-92a466f550b5, sha256 7dfc9d5910aee7055e9e3ab3ddc50720e7ac76f75b4395cb78a6d7ac6ddfb1e6. Отдельной ветки доказательств нет. Внутри 16 полных журналов и manifest.json: cwd, команда, exit, итог и sha256 каждого журнала. Exit записан по записи сессии.\n\nВсе запуски по одному файлу с --maxWorkers=1 --no-file-parallelism. Дерево — чистый checkout origin/task-1220 на этом коммите, node_modules привязаны жесткими ссылками.\n- apps/server: agent-changes-migration 2, agents 29, templates 283, network-tables 6, agent-sql-permissions 34, restore 14, merge-rules 7 — exit 0.\n- head-department-control: первый прогон exit 1 — тайм-аут 20000 ms на «run its own department, and no worker has them» при нагрузке около 27, это не PASS. Повтор (-r2.log) 10 passed, exit 0.\n- templates-pipeline: первый прогон exit 1 — тайм-аут 20000 ms на «reaches a head hired from the roster…», не PASS. Повтор (-r2.log) 39 passed, exit 0.\n- apps/web: AgentCard.test.tsx 64 passed, exit 0.\n- Из корня: tsc packages/protocol exit 0. С NODE_OPTIONS=--max-old-space-size=2048: tsc apps/web/tsconfig.json --noEmit exit 0 и tsc apps/server/tsconfig.eslint.json --noEmit exit 0. eslint 19 измененных .ts/.tsx (76c4b7d5..b0b972aa) exit 0, вывод пуст.\n\nReview не запускал: браузерный agent-history.spec.ts (есть только журналы автора 12 + 8 + 4 в c039adc7) и сборку server и web (есть только final-check-statuses.json автора).",
+  "status": "read"
+}

@@ -1256,6 +1256,590 @@
       "ms": 2436
     }
   ],
+  "review": {
+    "archiveSha256": "7dfc9d5910aee7055e9e3ab3ddc50720e7ac76f75b4395cb78a6d7ac6ddfb1e6",
+    "manifest": {
+      "task": 1220,
+      "stage": "review",
+      "commit": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+      "base": "76c4b7d571aba37c5eefd12cac4eeee4945c01e5",
+      "worktree": "detached checkout of origin/task-1220 at the commit, tree clean except linked node_modules",
+      "note": "exit codes written from the session record of each run; not rerun by Tests needed for PASS lines; the two exit=1 runs are load timeouts, repeated as -r2",
+      "runs": [
+        {
+          "log": "t1220-protocol.log",
+          "cwd": ".",
+          "command": "npx --no-install tsc -p packages/protocol/tsconfig.json",
+          "exit": 0,
+          "result": "build of protocol for tests",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "log": "t1220-head-department-control.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/head-department-control.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 1,
+          "result": "1 timeout 20000 ms under load ~27, 9 passed: NOT PASS",
+          "sha256": "49295f47d46121c29fe1aa85b5e11e78c73dcdad5068158c869d47ef0df55599"
+        },
+        {
+          "log": "t1220-agent-changes-migration.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/agent-changes-migration.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "2 passed",
+          "sha256": "df8e20770d8bc75ace2d00d8fcefb590ea52fe4506aaff1ddbd1003ef860835f"
+        },
+        {
+          "log": "t1220-agents.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/agents.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "29 passed",
+          "sha256": "867e4863152e04b95bd3f1b6ec00439f018d98ec5dd9c17a020f07073874002a"
+        },
+        {
+          "log": "t1220-templates.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/templates.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "283 passed",
+          "sha256": "5f1ad1e1431dd6f2d64c4ed425ea5a2566541a0ef78c503dd9dbd1be1903b64f"
+        },
+        {
+          "log": "t1220-templates-pipeline.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/templates-pipeline.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 1,
+          "result": "1 timeout 20000 ms under load, 38 passed: NOT PASS",
+          "sha256": "303c856e9c93156e6883057e3fb66f5af774e3773c25cf5b8f04243927fe9f8f"
+        },
+        {
+          "log": "t1220-network-tables.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/network-tables.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "6 passed",
+          "sha256": "0add5ca645fd12cb2e3cf7a75f2cc889fb0e5833c0bc1d752db5922d89c88062"
+        },
+        {
+          "log": "t1220-agent-sql-permissions.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/agent-sql-permissions.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "34 passed",
+          "sha256": "d1c2d9ab434ee474e82841bbb7677945956a66b3bed104d57faa747e1989ece0"
+        },
+        {
+          "log": "t1220-restore.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/restore.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "14 passed",
+          "sha256": "326241a55263f0551d3702c4531ed11fa83ffc845d3c469f1b9f14c429a51bc2"
+        },
+        {
+          "log": "t1220-merge-rules.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/merge-rules.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "7 passed",
+          "sha256": "a76b6dc2d1e8c33be6b9d927fa78e1f8b0d5e3f5191628e8ca669b6a839ad21f"
+        },
+        {
+          "log": "t1220-head-department-control-r2.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/head-department-control.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "repeat: 10 passed",
+          "sha256": "f96e3b2830d77d47961f52d76e5a2f74d040f21921b6ad56be9551815058342d"
+        },
+        {
+          "log": "t1220-templates-pipeline-r2.log",
+          "cwd": "apps/server",
+          "command": "npx --no-install vitest run test/templates-pipeline.test.ts --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "repeat: 39 passed",
+          "sha256": "0ebec4236ad4d1518800ec714d7c21762984d223b2e29c59fcfad10117dbcd6a"
+        },
+        {
+          "log": "t1220-AgentCard.log",
+          "cwd": "apps/web",
+          "command": "npx --no-install vitest run test/AgentCard.test.tsx --maxWorkers=1 --no-file-parallelism",
+          "exit": 0,
+          "result": "64 passed",
+          "sha256": "b1c0998e59d23b40e5fad8306548a65adda5886114fefe1036da486fb04e93cf"
+        },
+        {
+          "log": "t1220-tsc-web.log",
+          "cwd": ".",
+          "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install tsc -p apps/web/tsconfig.json --noEmit",
+          "exit": 0,
+          "result": "empty output",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "log": "t1220-tsc-server.log",
+          "cwd": ".",
+          "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+          "exit": 0,
+          "result": "empty output",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "log": "t1220-eslint.log",
+          "cwd": ".",
+          "command": "npx --no-install eslint <19 changed .ts/.tsx files of 76c4b7d5..b0b972aa>",
+          "exit": 0,
+          "result": "empty output",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "notRun": "browser e2e agent-history.spec.ts not rerun by Review (author logs 12+8+4); server/web build not run by Review"
+    },
+    "passedTests": {
+      "apps/server": 424,
+      "apps/web": 64
+    },
+    "failedRunsNotPass": [
+      "t1220-head-department-control.log",
+      "t1220-templates-pipeline.log"
+    ],
+    "timings": [
+      {
+        "log": "t1220-head-department-control.log",
+        "exit": 1,
+        "runnerSeconds": 206.07,
+        "reportedOverOneSecond": [
+          {
+            "name": "run its own department, and no worker has them",
+            "ms": 21601
+          },
+          {
+            "name": "creates, renames and removes sub-units and adds and removes products of its department",
+            "ms": 8471
+          },
+          {
+            "name": "records the head and its authority person for hiring, changes, reset, team removal and firing",
+            "ms": 4232
+          },
+          {
+            "name": "moves an employee who holds work into an urgent-only sub-unit",
+            "ms": 1440
+          },
+          {
+            "name": "uses its named owner without a fresh message, and records the head and whose rights it used",
+            "ms": 1347
+          },
+          {
+            "name": "keeps the orchestrator's own department and staffing changes in its own history",
+            "ms": 1945
+          },
+          {
+            "name": "keeps a human author and refuses author fields sent in the request",
+            "ms": 1343
+          },
+          {
+            "name": "keeps its own owner when another person, assistant or employee writes into the turn",
+            "ms": 1326
+          },
+          {
+            "name": "uses the active CEO when no department owner is named, whoever opened the turn",
+            "ms": 2686
+          },
+          {
+            "name": "anything outside its own department, even on the CEO's word",
+            "ms": 1721
+          }
+        ]
+      },
+      {
+        "log": "t1220-agent-changes-migration.log",
+        "exit": 0,
+        "runnerSeconds": 46.46,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/agent-changes-migration.test.ts (2 tests)",
+            "ms": 5438
+          },
+          {
+            "name": "gives a fresh install a nullable acting agent linked to the employee table",
+            "ms": 1823
+          },
+          {
+            "name": "upgrades without attributing old changes to an agent, and can migrate again",
+            "ms": 3554
+          }
+        ]
+      },
+      {
+        "log": "t1220-agents.log",
+        "exit": 0,
+        "runnerSeconds": 157.76,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/agents.test.ts (29 tests)",
+            "ms": 117011
+          },
+          {
+            "name": "hires an employee with as many skills as a hire takes, their bodies going as files",
+            "ms": 14328
+          },
+          {
+            "name": "stores an orchestrator assignment separately from its standing identity",
+            "ms": 3429
+          },
+          {
+            "name": "opens an employee's card with its skills, prompt parts and raw text",
+            "ms": 1922
+          },
+          {
+            "name": "moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default",
+            "ms": 2685
+          },
+          {
+            "name": "sets how hard an employee thinks, from the levels its model takes, and keeps who changed it",
+            "ms": 1972
+          },
+          {
+            "name": "shows the fitted role effort on the map for Kimi unless a person picks a level",
+            "ms": 3689
+          },
+          {
+            "name": "shows a Codex employee on the map at its role effort unless set",
+            "ms": 3756
+          },
+          {
+            "name": "shows no level for a model with no known efforts, and its own default for a role without one",
+            "ms": 4909
+          },
+          {
+            "name": "refuses a model the subscription cannot run, and a subscription that cannot serve the department",
+            "ms": 5477
+          },
+          {
+            "name": "turns a skill off but never a locked one",
+            "ms": 5085
+          },
+          {
+            "name": "keeps every change with who made it",
+            "ms": 1904
+          },
+          {
+            "name": "keeps the instructions within what a turn carries, counting only what is not a skill file",
+            "ms": 3286
+          },
+          {
+            "name": "keeps both of two changes sent at once",
+            "ms": 3881
+          },
+          {
+            "name": "removes a department whose employees were removed and that had a staff proposal",
+            "ms": 3794
+          },
+          {
+            "name": "takes a prompt edit far longer than nodes before skill files took",
+            "ms": 3053
+          },
+          {
+            "name": "resets template abilities while preserving the employee assignment",
+            "ms": 1709
+          },
+          {
+            "name": "refreshes the map after resetting an effort to the role",
+            "ms": 1786
+          },
+          {
+            "name": "lets someone of a product who owns the plan change an employee, and only the whole company or the department's people remove them",
+            "ms": 4124
+          },
+          {
+            "name": "lets go of a plan whose owner lost the department or was disabled",
+            "ms": 4826
+          },
+          {
+            "name": "names the model its role asks for when an employee gets a plan and no model comes with it",
+            "ms": 5119
+          },
+          {
+            "name": "removes an employee that is not working",
+            "ms": 3053
+          },
+          {
+            "name": "changes the orchestrator's model from his card",
+            "ms": 2708
+          },
+          {
+            "name": "lists the employees of each department on the map",
+            "ms": 2549
+          },
+          {
+            "name": "lists the head first, then by hire, people hired together in the order of the roster",
+            "ms": 2665
+          },
+          {
+            "name": "replaces a checker moved into a sub-unit while retaining required Review and its question (question: false)",
+            "ms": 4688
+          },
+          {
+            "name": "replaces a checker moved into a sub-unit while retaining required Review and its question (question: true)",
+            "ms": 8021
+          },
+          {
+            "name": "keeps current and independent questions when a Review owner moves into a sub-unit (other question: false)",
+            "ms": 4815
+          },
+          {
+            "name": "keeps current and independent questions when a Review owner moves into a sub-unit (other question: true)",
+            "ms": 3781
+          },
+          {
+            "name": "keeps an executor question when moving into a sub-unit leaves its current assignment",
+            "ms": 2480
+          }
+        ]
+      },
+      {
+        "log": "t1220-templates.log",
+        "exit": 0,
+        "runnerSeconds": 73.67,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/templates.test.ts (283 tests)",
+            "ms": 3257
+          }
+        ]
+      },
+      {
+        "log": "t1220-templates-pipeline.log",
+        "exit": 1,
+        "runnerSeconds": 107.92,
+        "reportedOverOneSecond": [
+          {
+            "name": "reaches a head hired from the roster of each department, as a file and whole on a node that writes none",
+            "ms": 21079
+          }
+        ]
+      },
+      {
+        "log": "t1220-network-tables.log",
+        "exit": 0,
+        "runnerSeconds": 45.05,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/network-tables.test.ts (6 tests)",
+            "ms": 16924
+          },
+          {
+            "name": "keeps the orchestrator out of them even when it is granted them",
+            "ms": 6876
+          },
+          {
+            "name": "keeps the orchestrator out of the tables of joined machines too, even when it is granted them",
+            "ms": 2536
+          },
+          {
+            "name": "keeps the orchestrator out of computer access and its commands, even when it is granted them",
+            "ms": 2235
+          },
+          {
+            "name": "keeps the orchestrator out of the backups and the recovery keys, even when it is granted them",
+            "ms": 1640
+          },
+          {
+            "name": "lets the orchestrator read the rows of these tables but their keys, and change none of them",
+            "ms": 2023
+          },
+          {
+            "name": "lets the orchestrator read what a machine is in the network, and change none of it",
+            "ms": 1603
+          }
+        ]
+      },
+      {
+        "log": "t1220-agent-sql-permissions.log",
+        "exit": 0,
+        "runnerSeconds": 59.11,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/agent-sql-permissions.test.ts (34 tests)",
+            "ms": 33336
+          },
+          {
+            "name": "keeps program_instances writes behind the service API for both SQL roles",
+            "ms": 4246
+          },
+          {
+            "name": "keeps program_deliveries writes behind the service API for both SQL roles",
+            "ms": 1200
+          },
+          {
+            "name": "keeps program_operator_cases writes behind the service API for both SQL roles",
+            "ms": 1061
+          },
+          {
+            "name": "keeps harness_products writes behind the service API for both SQL roles",
+            "ms": 1113
+          },
+          {
+            "name": "keeps autonomous_releases writes behind the service API for both SQL roles",
+            "ms": 1032
+          },
+          {
+            "name": "keeps agent_inbox writes behind the service API for both SQL roles",
+            "ms": 1805
+          },
+          {
+            "name": "keeps turn_tokens writes behind the service API for both SQL roles",
+            "ms": 1149
+          },
+          {
+            "name": "keeps the new route_revision of a notice readable and not writable, as the rest of it",
+            "ms": 1541
+          },
+          {
+            "name": "hides undefined while both SQL roles can read metadata",
+            "ms": 1275
+          },
+          {
+            "name": "hides undefined while both SQL roles can read metadata",
+            "ms": 1111
+          }
+        ]
+      },
+      {
+        "log": "t1220-restore.log",
+        "exit": 0,
+        "runnerSeconds": 74.49,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/restore.test.ts (14 tests)",
+            "ms": 43461
+          },
+          {
+            "name": "restores only a bundle its database knows",
+            "ms": 3479
+          },
+          {
+            "name": "keeps who holds the data and the link",
+            "ms": 1195
+          },
+          {
+            "name": "applies the carry only after a committed swap",
+            "ms": 14934
+          },
+          {
+            "name": "restores a fork after newer bundles",
+            "ms": 1208
+          },
+          {
+            "name": "marks every restore",
+            "ms": 10182
+          },
+          {
+            "name": "serves nobody on a restored database that does not lead yet, and everybody on one that was not restored",
+            "ms": 5645
+          },
+          {
+            "name": "names what the restore undoes",
+            "ms": 1433
+          }
+        ]
+      },
+      {
+        "log": "t1220-merge-rules.log",
+        "exit": 0,
+        "runnerSeconds": 19.4,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/merge-rules.test.ts (7 tests)",
+            "ms": 4849
+          },
+          {
+            "name": "has a rule for every table",
+            "ms": 2095
+          },
+          {
+            "name": "never compares what the leader recomputes",
+            "ms": 1094
+          },
+          {
+            "name": "reads the catalog",
+            "ms": 1387
+          }
+        ]
+      },
+      {
+        "log": "t1220-head-department-control-r2.log",
+        "exit": 0,
+        "runnerSeconds": 50.17,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/head-department-control.test.ts (10 tests)",
+            "ms": 27160
+          },
+          {
+            "name": "run its own department, and no worker has them",
+            "ms": 10476
+          },
+          {
+            "name": "creates, renames and removes sub-units and adds and removes products of its department",
+            "ms": 3015
+          },
+          {
+            "name": "records the head and its authority person for hiring, changes, reset, team removal and firing",
+            "ms": 4089
+          },
+          {
+            "name": "moves an employee who holds work into an urgent-only sub-unit",
+            "ms": 1446
+          },
+          {
+            "name": "keeps its own owner when another person, assistant or employee writes into the turn",
+            "ms": 1054
+          },
+          {
+            "name": "uses the active CEO when no department owner is named, whoever opened the turn",
+            "ms": 1325
+          },
+          {
+            "name": "anything outside its own department, even on the CEO's word",
+            "ms": 1720
+          }
+        ]
+      },
+      {
+        "log": "t1220-templates-pipeline-r2.log",
+        "exit": 0,
+        "runnerSeconds": 37.86,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/templates-pipeline.test.ts (39 tests)",
+            "ms": 6756
+          },
+          {
+            "name": "reaches a head hired from the roster of each department, as a file and whole on a node that writes none",
+            "ms": 5898
+          }
+        ]
+      },
+      {
+        "log": "t1220-AgentCard.log",
+        "exit": 0,
+        "runnerSeconds": 25.7,
+        "reportedOverOneSecond": [
+          {
+            "name": "test/AgentCard.test.tsx (64 tests)",
+            "ms": 15196
+          },
+          {
+            "name": "names the acting head and whose rights it used, keeping human, old and automatic changes in both languages",
+            "ms": 1297
+          }
+        ]
+      }
+    ]
+  },
   "limits": [
     "Final manifest binds candidate sources; earlier run/source attribution also needs producer records.",
     "First browser part exited 143 after 12 completed cases. No whole-run PASS is inferred.",

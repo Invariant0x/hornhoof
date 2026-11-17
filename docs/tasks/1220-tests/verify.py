@@ -5,6 +5,7 @@ import itertools
 import json
 import re
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -84,6 +85,39 @@ def main() -> None:
     screenshots = [name for name in files if re.match(r"browser-remaining-[12]/.*\.png$", name)]
     assert len(screenshots) == 12
 
+    review_archive = folder / "t1220-review-logs-b0b972aa.tar.gz"
+    review_digest = hashlib.sha256(review_archive.read_bytes()).hexdigest()
+    assert review_digest == "7dfc9d5910aee7055e9e3ab3ddc50720e7ac76f75b4395cb78a6d7ac6ddfb1e6"
+    with tarfile.open(review_archive) as tar:
+        review_files = {member.name.removeprefix("./"): tar.extractfile(member).read() for member in tar.getmembers() if member.isfile()}
+    review = json.loads(review_files["manifest.json"])
+    assert review["commit"] == candidate and review["base"] == base
+    assert len(review["runs"]) == 16
+    passed_tests = {"apps/server": 0, "apps/web": 0}
+    failed_runs = []
+    review_timings = []
+    for check in review["runs"]:
+        raw = review_files[check["log"]]
+        assert hashlib.sha256(raw).hexdigest() == check["sha256"], check["log"]
+        text = raw.decode()
+        if "vitest run" in check["command"]:
+            assert "--maxWorkers=1 --no-file-parallelism" in check["command"]
+            match = re.search(r"^\s*Tests\s+(\d+) passed \((\d+)\)\s*$", text, re.MULTILINE)
+            if check["exit"] == 0:
+                assert match and match[1] == match[2], check["log"]
+                assert not re.search(r"^\s*FAIL\s", text, re.MULTILINE)
+                passed_tests[check["cwd"]] += int(match[1])
+            else:
+                assert check["exit"] == 1 and "Test timed out in 20000ms" in text, check["log"]
+                failed_runs.append(check["log"])
+            duration = re.search(r"Duration\s+([\d.]+)s", text)
+            slow = re.findall(r"^\s*[✓×]\s+(.+) (\d+)ms$", text, re.MULTILINE)
+            review_timings.append({"log": check["log"], "exit": check["exit"], "runnerSeconds": float(duration[1]), "reportedOverOneSecond": [{"name": name, "ms": int(ms)} for name, ms in slow if int(ms) > 1000]})
+        else:
+            assert check["exit"] == 0 and raw == b"", check["log"]
+    assert passed_tests == {"apps/server": 424, "apps/web": 64}
+    assert set(failed_runs) == {"t1220-head-department-control.log", "t1220-templates-pipeline.log"}
+
     audit = {
         "candidate": candidate,
         "base": base,
@@ -98,6 +132,7 @@ def main() -> None:
         "browserCases": cases,
         "retainedScreenshots": screenshots,
         "timings": timings,
+        "review": {"archiveSha256": review_digest, "manifest": review, "passedTests": passed_tests, "failedRunsNotPass": failed_runs, "timings": review_timings},
         "limits": [
             "Final manifest binds candidate sources; earlier run/source attribution also needs producer records.",
             "First browser part exited 143 after 12 completed cases. No whole-run PASS is inferred.",
@@ -107,6 +142,7 @@ def main() -> None:
     }
     (folder / "audit.json").write_text(json.dumps(audit, indent=2) + "\n")
     print("PASS records: archive SHA256, 24 source hashes, exact candidate diff, 9 final exit records, 3 behavioral REDs, 165 server + 64 card tests, 24 unique completed browser cases, 12 retained screenshots")
+    print("PASS Review records: archive SHA256, 16 log hashes, exact candidate, 424 server + 64 card tests, types and lint; 2 failed timeout runs preserved as NOT_PASS")
     print("LIMIT: record consistency does not add missing run provenance or prove a whole interrupted run passed")
 
 

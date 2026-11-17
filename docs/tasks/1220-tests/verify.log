@@ -1,0 +1,6 @@
+Command: python3 docs/tasks/1220-tests/verify.py
+Candidate: b0b972aa75fbfa31a6f0b0decf500858ea68278a
+PASS records: archive SHA256, 24 source hashes, exact candidate diff, 9 final exit records, 3 behavioral REDs, 165 server + 64 card tests, 24 unique completed browser cases, 12 retained screenshots
+PASS Review records: archive SHA256, 16 log hashes, exact candidate, 424 server + 64 card tests, types and lint; 2 failed timeout runs preserved as NOT_PASS
+LIMIT: record consistency does not add missing run provenance or prove a whole interrupted run passed
+Exit: 0
