@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { onTestFinished } from 'vitest';
+import { listenAt, listenIn } from '../../../test-support/ports.mjs';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { machines } from '../src/db/schema.js';
@@ -14,6 +15,7 @@ import { WorkerKeeper, type WorkerKeeperOptions, type WorkerStatus } from '../sr
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { fakeLease } from './fake-lease.js';
 import { as, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { appAt, fetchApp, manualTime, registerStep } from './worker-keeper-time.js';
 
 /* What the tests of a joined machine's keeper share: the company's server with its keeper, and a worker's keeper beside it. */
 
@@ -76,21 +78,23 @@ export async function doorBefore(appPort: number, intercept: Intercept): Promise
       out.end(raw);
     });
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = await listenIn(server);
   onTestFinished(() => {
     server.closeAllConnections();
     server.close();
   });
-  return (server.address() as AddressInfo).port;
+  return port;
 }
 
 /* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
-   reports the test's own address as the place to dial it at. */
-export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept) {
+   reports the test's own address as the place to dial it at. With manual time, bootstrap takes its steps directly
+   instead of waiting for recurring timers. */
+export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept, manual = manualTime()) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
   const ceo = await setUpCompany(app);
-  await app.listen({ host: '127.0.0.1', port: 0 });
+  await listenAt(port => app.listen({ host: '127.0.0.1', port }));
   const appPort = (app.server.address() as AddressInfo).port;
+  if (manual) appAt(appPort, app);
   /* Where the keeper finds its app: the app itself, unless the test answers some of it in the app's place. */
   const keeperApp = intercept ? await doorBefore(appPort, intercept) : appPort;
   const lines: string[] = [];
@@ -118,16 +122,31 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     computer: { openEveryMs: 10, closedEveryMs: 20 },
     ...extra,
   });
-  await keeper.start();
   let stopped = false;
+  let removeStep: () => void = () => undefined;
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    removeStep();
     await keeper.stop();
     await app.close();
   };
   onTestFinished(stop);
+  await keeper.start();
+  removeStep = manual ? registerStep(async () => {
+    await keeper['holder'].tick();
+    await keeper['holder'].look();
+    await keeper['identity']!['report']();
+    await keeper['peers']!['readOnce']();
+    await keeper['carrier']?.tick();
+    await keeper['backups']?.round();
+  }) : () => undefined;
+  if (manual) {
+    await until(() => keeper['identity']!.certificate() !== null);
+    await keeper['peers']!['readOnce']();
+  }
   peerPort = (await keeper.peerPorts()).peer;
+  if (manual) await keeper['identity']!['report']();
   const serverRow = async () => (await db.select().from(machines).where(eq(machines.networkId, HOST_ID)))[0];
   if (!extra.addresses) await until(async () => (await serverRow())?.peerPort === peerPort);
   const rowOf = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
@@ -137,7 +156,7 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     const said = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], ...MAC, core: true } })).json() as { machine: { id: string }; core: { ticket: string } };
     return { machine: said.machine.id, ticket: said.core.ticket };
   };
-  return { app, db, config, ceo, appPort, peerPort, keeper, lines, stop, serverRow, rowOf, joined, control };
+  return { app, db, config, ceo, appPort, peerPort, keeper, lines, stop, serverRow, rowOf, joined, control, stopped: () => stopped };
 }
 
 export type Company = Awaited<ReturnType<typeof company>>;
@@ -163,16 +182,34 @@ export async function workerOn(c: Company, config: WorkerConfig, over: Partial<W
     certificate: { retryMs: 20 },
     sessions: { everyMs: 10, helloMs: 10, connectMs: 1000, directEveryMs: 50, pingMs: 60_000 },
     computer: { openEveryMs: 10, closedEveryMs: 20 },
+    ...(manualTime() ? { fetch: fetchApp, holdMs: 0 } : {}),
     ...over,
   });
-  const { front } = await keeper.start();
   let stopped = false;
+  let removeStep: () => void = () => undefined;
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    removeStep();
     await keeper.stop();
   };
   onTestFinished(stop);
+  const { front } = await keeper.start();
+  removeStep = manualTime() ? registerStep(async () => {
+    keeper.parts().certificates['look']();
+    const link = keeper.parts().link;
+    link['look']();
+    for (const kept of link['kept']) if (kept.session) link['hello'](kept.session, kept);
+    keeper['look']();
+    await keeper['tunnel']?.['tick']();
+    if (!c.stopped() && keeper.status().leader && !keeper.status().disconnected) {
+      await keeper['doorWork'];
+      await keeper['readView']();
+      await keeper['report']();
+      await keeper['carrier'].tick();
+      await keeper['holder'].round();
+    } else await keeper['holder'].survive();
+  }) : () => undefined;
   const status = () => keeper.status();
   return { keeper, front, lines, stop, status };
 }

@@ -1,15 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, count, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { improvements, IMPROVEMENT_SCOPES, jobs, type ImprovementParts } from '../../db/schema.js';
+import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement } from './store.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
 /* What one turn may put under Improvements, so a round that goes wrong cannot flood the CEO. */
-export const TURN_IMPROVEMENTS = 10;
+const TURN_IMPROVEMENTS = 10;
 /* What each running turn put, counted before the next one goes in so parallel calls cannot both pass; the oldest turns
    are forgotten. */
 const put = new WeakMap<Ctx, Map<string, number>>();
@@ -81,7 +82,7 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
     if (!counts.has(job.id)) {
       const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
       const [before] = await db
-        .select({ n: count() })
+        .select(countOnly())
         .from(improvements)
         .where(and(eq(improvements.agentId, job.agentId), gte(improvements.updatedAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
       if (!counts.has(job.id)) counts.set(job.id, before?.n ?? 0);

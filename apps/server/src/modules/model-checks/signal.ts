@@ -1,15 +1,16 @@
 import { and, eq, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { departmentOwner } from '../departments/approval-policy.js';
 import { notificationMessage } from '../events/notifications.js';
 import { recordWaitNotice } from '../tasks/wait-notices.js';
 import type { Signal } from './lifecycle.js';
 import { reportText, type Report } from './run.js';
 
-export type SignalPlace = { companyId: string; departmentId: string; checkId: string; kind: string };
+type SignalPlace = { companyId: string; departmentId: string; checkId: string; kind: string };
 
-export const signalRecipients = (ctx: Pick<Ctx, 'db'>, place: Pick<SignalPlace, 'companyId' | 'departmentId'>) => ctx.db.select({ id: agents.id }).from(agents).where(and(
+export const signalRecipients = (ctx: Pick<Ctx, 'db'>, place: Pick<SignalPlace, 'companyId' | 'departmentId'>) => ctx.db.select(idOnly(agents)).from(agents).where(and(
   eq(agents.companyId, place.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt),
   or(eq(agents.kind, 'orchestrator'), and(eq(agents.kind, 'head'), eq(agents.departmentId, place.departmentId))),
 ));

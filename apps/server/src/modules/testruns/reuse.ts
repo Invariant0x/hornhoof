@@ -1,14 +1,14 @@
 import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
+import { testFileResults, testParts, testRuns, testSuiteMemory, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { unitKey as keyOf } from './plan-environment.js';
-import { reusableUnits } from './reuse-evidence.js';
-import { openTurnOf } from '../tasks/turn-department.js';
 
-/* Reusing green test results. A file that passed at a fingerprint need not run again at that fingerprint. Every doubt runs the
-   file: no fingerprint, no green result, a group with one file changed, a machine that sent none. The full run, which every
-   release runs on its exact commit, reuses nothing, and what it finds red that was kept green is shown. */
+/* Reusing green test results. A release runs every test file once, in its first run; a later run of the same release runs only
+   what failed or changed, as a file that passed at a fingerprint in that release need not run again there. Every doubt runs the
+   file: no fingerprint, no green result, a group with one file changed, a machine that sent none. What the full run finds red
+   that was kept green is shown. */
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -21,15 +21,6 @@ const KEPT_DAYS = 30;
 const SHOWN_FILES = 30;
 
 export const printKey = (unit: TestFileKey, fingerprint: string): string => `${keyOf(unit)}\0${fingerprint}`;
-
-/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. Only the full profile asked for
-   by name is the full run, and never one suite of it: it would stand in for the rest of its release. */
-export function chooseRunMode(manifest: TestEnvironmentV1, request: { profile?: string; suite?: string }, printed: boolean): { mode: Mode; profile: string } | null {
-  const fullRun = manifest.execution?.fullRun, profile = request.profile ?? manifest.defaultProfile;
-  if (!fullRun) return null;
-  if (!request.suite && profile === fullRun.profile) return { mode: 'full', profile: fullRun.profile };
-  return { mode: printed ? 'cached' : 'off', profile };
-}
 
 export type ReuseDecision = { reused: ReadonlySet<string>; preparation: boolean };
 const NO_REUSE: ReuseDecision = { reused: new Set(), preparation: false };
@@ -78,7 +69,7 @@ export function partFileResults(snapshot: EnvironmentSnapshot, selection: Select
 const listed = (items: string[], between: string): string => items.slice(0, SHOWN_FILES).join(between) + (items.length > SHOWN_FILES ? `, and ${items.length - SHOWN_FILES} more` : '');
 const names = (files: TestFileKey[]): string => listed([...new Set(files.map(file => file.file))], ', ');
 function modeLine(cache: TestRunFileCache, parts: Pick<Part, 'failedFiles'>[]): string[] {
-  if (cache.mode === 'full') return [`This was ${cache.turn === null || !cache.mainLine ? 'a full run' : `the full run of turn ${cache.turn}`}: nothing was reused.`];
+  if (cache.mode === 'full') return [cache.release ? `This was the first run of release ${cache.release}: every test file ran, nothing was reused.` : 'This was a full run: nothing was reused.'];
   if (cache.mode === 'off') return ['Nothing was reused: the machine that described this commit sent no fingerprints.'];
   if (!cache.reused) return [];
   return [`${cache.reused} test files kept their fingerprint and a green result, so ${parts.length ? 'they did not run again' : 'nothing had to run'}.`];
@@ -102,45 +93,52 @@ export function reuseView(cache: TestRunFileCache | null, parts: Pick<Part, 'fai
   if (!cache) return {};
   const failedFiles = [...new Set(parts.flatMap(part => part.failedFiles ?? []).map(file => file.file))];
   const fingerprints = (cache.verifiedFingerprints ?? cache.fingerprints).length;
-  return { reuse: { mode: cache.mode, turn: cache.turn, reused: cache.reused, preparationReused: cache.preparationReused, fingerprints, ...(cache.kept === undefined ? {} : { kept: cache.kept }),
+  return { reuse: { mode: cache.mode, ...(cache.release ? { release: cache.release } : {}), reused: cache.reused, preparationReused: cache.preparationReused, fingerprints, ...(cache.kept === undefined ? {} : { kept: cache.kept }),
     mismatches: cache.mismatches.map(file => file.file), failedFiles, notes: cache.notes } };
 }
 
-/* The turn a run belongs to: its task's, or the one its department runs now. */
-async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId' | 'departmentId'>): Promise<number | null> {
-  const [own] = await db.select({ number: turns.number }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(eq(tasks.id, run.taskId));
-  if (own) return own.number;
-  return (await openTurnOf(db, run.companyId, run.departmentId))?.number ?? null;
+const RELEASE = /^(turn-\d+|release-.+)$/;
+const ofRepositoryRuns = (run: Pick<Run, 'companyId'>, scope: RepositoryScope) => and(eq(testRuns.companyId, run.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), eq(testRuns.kind, 'tests'));
+/* The release a run checks: a turn's or release branch, or on the main line the release whose branch checked the same commit,
+   else that commit. */
+async function releaseOf(db: Db, run: Run, scope: RepositoryScope): Promise<string> {
+  if (run.branch && RELEASE.test(run.branch)) return run.branch;
+  const [checked] = await db.select(only(testRuns, 'branch')).from(testRuns)
+    .where(and(ofRepositoryRuns(run, scope), eq(testRuns.commitSha, run.commitSha!), sql`${testRuns.branch} ~ ${RELEASE.source}`)).orderBy(desc(testRuns.number)).limit(1);
+  return checked?.branch ?? run.commitSha!;
 }
-/* What a release relies on was proved on its own line: the repository's main branch or the turn's. A job writes its own report, so
-   what another branch says holds for that branch's work and no further, and a turn's full run is of the turn's branch. */
-async function onMainLine(db: Db, branch: string | null, scope: RepositoryScope, turn: number | null): Promise<boolean> {
-  if (turn !== null && branch === `turn-${turn}`) return true;
-  const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, scope.repositoryOwnerId));
-  return branch === (owner?.branch ?? 'main');
+/* When the release had its first whole run that ended, or null before it. */
+async function releaseStart(db: Db, run: Run, scope: RepositoryScope, release: string): Promise<Date | null> {
+  const [full] = await db.select(only(testRuns, 'createdAt')).from(testRuns)
+    .where(and(ofRepositoryRuns(run, scope), inArray(testRuns.status, ['passed', 'failed']), sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`${testRuns.fileCache}->>'release' = ${release}`))
+    .orderBy(asc(testRuns.createdAt)).limit(1);
+  return full?.createdAt ?? null;
 }
-export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
+/* A manifest that names no full run reuses nothing: each of its runs runs every test file of its profile again, so none is ever
+   left out and a later run of a release only takes longer. A repository gets reuse by naming its full run. The first run of a
+   release with no one suite runs everything; any other takes what its release proved since then. */
+export type RunMode = { mode: Mode; release: string; since: Date | null } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
-  const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
-  if (!fullRun) return null;
-  const turn = await turnOfRun(ctx.db, run), mainLine = await onMainLine(ctx.db, run.branch, scope, turn);
-  const chosen = chooseRunMode(manifest, request, printed);
-  return chosen && { ...chosen, turn, mainLine };
+  if (!manifest.execution?.fullRun) return null;
+  const release = await releaseOf(ctx.db, run, scope), since = await releaseStart(ctx.db, run, scope, release);
+  if (!since && !run.environmentRequest!.suite) return { mode: 'full', release, since };
+  return { mode: printed ? 'cached' : 'off', release, since };
 }
+/* A run that checks its release whole: in full, or taking only what that release proved. One from before releases were kept took
+   results of any time. */
+export const ofItsRelease = (cache: TestRunFileCache | null): boolean => !cache || cache.mode !== 'cached' || cache.release !== undefined;
+/* A later run of a release where every test file kept its green result runs no part, and checks the release all the same. */
+export const keptEverything = (run: Pick<Run, 'parts' | 'fileCache'>): boolean => run.parts === 0 && run.fileCache?.mode === 'cached' && run.fileCache.reused > 0;
 
 const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
-/* What was green at these fingerprints in this one repository, with what each result came to. */
+/* What was green at these fingerprints in this one repository since a time, with what each result came to. */
 type GreenSource = Pick<typeof testFileResults.$inferSelect, 'suiteId' | 'file' | 'fingerprint' | 'note' | 'runId' | 'commitSha'>;
-async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, GreenSource>> {
+async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], since: Date | null): Promise<Map<string, GreenSource>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha }).from(testFileResults)
+    .where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), since ? gte(testFileResults.createdAt, since) : undefined));
   return new Map(rows.map(row => [printKey(row, row.fingerprint), row]));
-}
-/* The profiles of a release, which take a result only from its own line. */
-function ofRelease(manifest: TestEnvironmentV1, profile: string): boolean {
-  const fullRun = manifest.execution?.fullRun;
-  return profile === fullRun?.replaces || profile === fullRun?.profile;
 }
 /* What the results a run takes over came to. */
 function sourcesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<string, GreenSource>, taken: ReuseDecision): GreenSource[] {
@@ -149,46 +147,34 @@ function sourcesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<stri
 }
 
 type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
-async function candidateGreen(ctx: Pick<Ctx, 'db'>, snapshot: EnvironmentSnapshot, known: Map<string, GreenSource>): Promise<Map<string, GreenSource>> {
-  if (!snapshot.candidate) return known;
-  const valid = new Set((await reusableUnits(ctx.db, snapshot.description.repositoryScope, [...known.values()])).map(unit => printKey(unit, unit.fingerprint)));
-  return new Map([...known].filter(([key]) => valid.has(key)));
-}
-
-function reuseCache(mode: NonNullable<RunMode>, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[], green: Map<string, GreenSource>, decision: ReuseDecision): RunReuse {
+function reuseCache(mode: NonNullable<RunMode>, units: TestUnit[], prints: UnitFingerprint[], green: Map<string, GreenSource>, decision: ReuseDecision): RunReuse {
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];
   const taken = mode.mode === 'cached' ? decision : NO_REUSE;
   const sources = sourcesOf(units, prints, green, taken), notes = sources.flatMap(source => source.note ? [{ file: source.file, note: source.note }] : []);
-  const reusedUnits = sources.map(source => ({ suiteId: source.suiteId, file: source.file, fingerprint: source.fingerprint, runId: source.runId, commitSha: source.commitSha }));
-  return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, mainLine: mode.mainLine, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation,
-    ...(snapshot.candidate ? { reusedUnits } : {}), wouldSkip, compared: 0, mismatches: [], notes } };
+  return { decision: taken, fileCache: { mode: mode.mode, release: mode.release, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation, wouldSkip, compared: 0, mismatches: [], notes } };
 }
 
-/* A full run decides as well, reuses nothing and remembers what it would have reused. */
+/* A full run decides as well, by every green result kept, reuses nothing and remembers what it would have reused. */
 export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
-  const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile));
-  const green = await candidateGreen(ctx, snapshot, known);
-  const decision = decideReuse({ units, prints, green, once });
-  return reuseCache(mode, snapshot, units, prints, green, decision);
+  const once = policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
+  const green = await greenAt(ctx.db, description.repositoryScope, prints, mode.since);
+  return reuseCache(mode, units, prints, green, decideReuse({ units, prints, green, once }));
 }
 
 const printsOf = (cache: TestRunFileCache): Map<string, string> => new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
-/* What another branch proved leaves what the main line proved as it was. */
 async function keepGreen(db: Db, run: Run, cache: TestRunFileCache, scope: RepositoryScope, green: GreenFile[]): Promise<void> {
   const prints = printsOf(cache);
   const values = green.flatMap(file => {
     const fingerprint = prints.get(keyOf(file));
-    return fingerprint ? [{ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, fingerprint, suiteId: file.suiteId, file: file.file, runId: run.id, commitSha: run.commitSha!, ms: file.ms === undefined ? null : Math.round(file.ms), note: file.note ?? null, mainLine: cache.mainLine }] : [];
+    return fingerprint ? [{ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, fingerprint, suiteId: file.suiteId, file: file.file, runId: run.id, commitSha: run.commitSha!, ms: file.ms === undefined ? null : Math.round(file.ms), note: file.note ?? null }] : [];
   });
   if (!values.length) return;
   await db.insert(testFileResults).values(values).onConflictDoUpdate({
     target: [testFileResults.companyId, testFileResults.repositoryOwnerId, testFileResults.repoUrlHash, testFileResults.fingerprint, testFileResults.suiteId, testFileResults.file],
-    set: { runId: run.id, commitSha: run.commitSha!, ms: sql`excluded.ms`, note: sql`excluded.note`, mainLine: sql`excluded.main_line`, createdAt: sql`now()` },
-    setWhere: sql`excluded.main_line or not ${testFileResults.mainLine}`,
+    set: { runId: run.id, commitSha: run.commitSha!, ms: sql`excluded.ms`, note: sql`excluded.note`, createdAt: sql`now()` },
   });
   await db.delete(testFileResults).where(and(eq(testFileResults.companyId, scope.companyId), lt(testFileResults.createdAt, new Date(Date.now() - KEPT_DAYS * 86_400_000))));
 }
@@ -258,7 +244,7 @@ const fitsOneMessage = (suiteId: string, files: KeptFile[]): boolean => KeptFile
    longer fits one message the part's own go on alone: to a tool, no memory only costs time. */
 async function mergeKept(db: Db, scope: RepositoryScope, suiteId: string, files: KeptFile[]): Promise<void> {
   await db.transaction(async tx => {
-    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
+    const [kept] = await tx.select(only(testSuiteMemory, 'files')).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
     const paths = new Set(files.map(file => file.path)), merged = [...(kept?.files ?? []).filter(file => !paths.has(file.path)), ...files];
     const value = fitsOneMessage(suiteId, merged) ? merged : files;
     await tx.insert(testSuiteMemory).values({ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, suiteId, files: value })
@@ -269,11 +255,11 @@ function allowedKept(manifest: TestEnvironmentV1, suiteId: string, files: KeptFi
   const keep = manifest.suites.find(suite => suite.id === suiteId)?.keep ?? [];
   return files.filter(file => keep.some(path => file.path === path || file.path.startsWith(`${path}/`)));
 }
-/* Keeps what a part left, only under the paths its suite's manifest names, only from a part that checked this commit, and only from
-   the main line: every later run of the repository starts from it. */
+/* Keeps what a part left, only under the paths its suite's manifest names and only from a part that checked this commit: every later
+   run of the repository starts from it. */
 export async function rememberKept(ctx: Pick<Ctx, 'db'>, run: Run, message: { commit: string | null; kept?: KeptFiles }): Promise<void> {
   const snapshot = run.environmentSnapshot;
-  if (!snapshot || !message.kept || message.commit !== run.commitSha || !run.fileCache?.mainLine) return;
+  if (!snapshot || !message.kept || message.commit !== run.commitSha || !run.fileCache) return;
   for (const { suiteId, files } of message.kept) {
     const allowed = allowedKept(snapshot.description.manifest, suiteId, files);
     if (allowed.length && fitsOneMessage(suiteId, allowed)) await mergeKept(ctx.db, snapshot.description.repositoryScope, suiteId, allowed);

@@ -1,0 +1,26 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+      Coverage enabled with v8
+
+ ✓ test/terminal-bridge.test.ts (28 tests) 732ms
+   ✓ the node's bridge to Hornhoof's tools (21)
+     ✓ hands on a task's files both ways, with their names and of any size, and nothing else under the picture address 583ms
+ ✓ test/terminal-host-live-review-returns.test.ts (30 tests) 293ms
+ ✓ test/terminal-host-secrets.test.ts (19 tests) 233ms
+ ✓ test/terminal-host-live-review.test.ts (30 tests) 286ms
+ ✓ test/terminal-host-operator.test.ts (6 tests) 180ms
+ ✓ test/terminal-bridge-outside.test.ts (14 tests) 62ms
+ ✓ test/runner.test.ts (32 tests) 62ms
+ ✓ test/terminal-tmux.test.ts (25 tests) 51ms
+ ✓ test/capture-position.test.ts (14 tests) 33ms
+ ✓ test/recording-cursor.test.ts (9 tests) 22ms
+ ✓ test/capture-tail.test.ts (4 tests) 9ms
+
+ Test Files  11 passed (11)
+      Tests  211 passed (211)
+   Start at  03:52:28
+   Duration  5.11s (tests 52%, import 32%, transform 13%, worker 3%)
+
+    Isolate  11 workers spawned · ~68ms startup each (spawn + environment, per file)
+             at least ~676ms faster with isolate: false — reuses workers across files instead of one per file
+

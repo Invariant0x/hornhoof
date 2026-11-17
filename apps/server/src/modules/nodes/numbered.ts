@@ -9,7 +9,7 @@ import { receiveNodeMessage } from './lifecycle.js';
 /* The ends of jobs and of test parts commit more than once, and their own guards make a second run safe, so one that is
    listed is handled again: what its first run did not reach still happens. Every other numbered message is skipped once
    it is listed. */
-export const AGAIN_WHEN_LISTED: ReadonlySet<string> = new Set(['job.done', 'tests.done']);
+const AGAIN_WHEN_LISTED: ReadonlySet<string> = new Set(['job.done', 'tests.done']);
 
 /* A serialization failure, a deadlock, a lock not available, and a database that cannot take connections. */
 const PASSING_CODES = new Set(['40001', '40P01', '55P03', '57P03', '53300']);

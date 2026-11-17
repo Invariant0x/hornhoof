@@ -1,0 +1,2 @@
+ALTER TABLE "outbound_setup_events" DROP CONSTRAINT "outbound_setup_events_kind";--> statement-breakpoint
+ALTER TABLE "outbound_setup_events" ADD CONSTRAINT "outbound_setup_events_kind" CHECK ("outbound_setup_events"."kind" IN ('channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released', 'contact_added', 'consent_revoked'));

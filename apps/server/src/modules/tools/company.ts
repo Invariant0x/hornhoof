@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { accessesOf } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, googleSheets, nodes, people, subscriptions, teams, type AgentOverrides } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { liveNode } from '../nodes/nodes.js';
 import { agreed } from '../subscriptions/views.js';
 import { employeeOrder } from '../agents/order.js';
@@ -67,7 +68,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         /* A person gave it text of its own over its role's, which may narrow the work it takes; the text stays on its card. */
         ownText: ownText(a.overrides),
       }));
-  const [gs] = await db.select({ id: googleSheets.id }).from(googleSheets).where(eq(googleSheets.companyId, companyId));
+  const [gs] = await db.select(idOnly(googleSheets)).from(googleSheets).where(eq(googleSheets.companyId, companyId));
   return {
     name: company?.name ?? '',
     brief: company?.brief ?? '',

@@ -7,7 +7,7 @@ import { bundleRows, setHolders, type BackupRow } from './records.js';
 import { FORK_KEEP_MS, ROOM } from './types.js';
 
 /* How many other machines keep each bundle. */
-export const HOLDERS = 3;
+const HOLDERS = 3;
 /* A machine takes a new bundle only when its keeper was heard from this lately, and keeps its place while heard from
    within a day. */
 const FRESH_MS = 2 * 60_000;

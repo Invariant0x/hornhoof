@@ -50,15 +50,13 @@ export type Shown = Omit<Report, 'v' | 'installation' | 'repeats'>;
 export const Written = z.strictObject({ kind: Kind, title: Title, text: Text, improvement: z.uuid().optional() });
 export type Written = z.infer<typeof Written>;
 
-export const isErrorCode = (code: string) => CODE.test(code);
-
 /* An issue of Hornhoof's repository on GitHub. Its page is only ever the exact one of its number there, so an answer that
    passed hornhoof.org cannot put any other link on a card. */
 export type IssueLink = { number: number; url: string };
 const ISSUE_PAGE = new RegExp(`^https://github\\.com/${ISSUE_REPOSITORY}/issues/([1-9][0-9]{0,9})$`, 'i');
 const Issue = z.object({ number: z.int().positive(), url: z.string() });
-export const issuePage = (number: number) => `https://github.com/${ISSUE_REPOSITORY}/issues/${number}`;
-export function issueLinkOf(value: unknown): IssueLink | null {
+const issuePage = (number: number) => `https://github.com/${ISSUE_REPOSITORY}/issues/${number}`;
+function issueLinkOf(value: unknown): IssueLink | null {
   const found = Issue.safeParse(value);
   const page = found.success ? ISSUE_PAGE.exec(found.data.url) : null;
   return found.success && page && Number(page[1]) === found.data.number ? { number: found.data.number, url: issuePage(found.data.number) } : null;

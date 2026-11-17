@@ -148,9 +148,16 @@ describe('one source for the values of a skin', () => {
       ":where(:root[data-cut='steps']) .btn",
       ":where(:root[data-cut='steps']) .tview .lchip",
       ":where(:root[data-cut='steps']) .tview .tv-card-edge",
+      ":where(:root[data-cut='steps']) .halo-glow > i",
       ".skin-preview[data-cut='steps'] .sp-btn",
+      ":where(:root[data-cut='steps']) .halo-ring",
     ]);
     expect(stepped[0]!.decls['clip-path']).toContain('calc(100% - 2 * var(--step)) var(--step)');
+    /* The focus ring of a framed button steps on both of its edges, its steps as big as the frame's. */
+    const ring = stepped.at(-1)!.decls;
+    expect(ring['--step']).toBe(stepped[0]!.decls['--step']);
+    expect(ring['clip-path']).toMatch(/^polygon\(evenodd, /);
+    expect(ring['clip-path']).toContain('calc(100% - var(--ring) - var(--s2)) var(--ring)');
     const last = (selector: string) => RULES.filter(rule => rule.selectors.includes(selector) && rule.decls['clip-path']).at(-1)?.decls['clip-path'];
     expect(last('.btn.ghost')).toBe('none');
     expect(last('.btn:focus-visible')).toBe('none');

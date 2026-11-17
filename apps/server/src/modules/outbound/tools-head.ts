@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders } from '../../auth/internal.js';
 import { outboundAccounts, outboundCatalogRevisions, outboundChannels } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { standingPrincipal } from '../conversation/decision-context.js';
 import type { ToolJob } from '../tools/job.js';
 import { catalogOf } from './catalog-view.js';
@@ -16,7 +17,7 @@ import { channelsOfDepartment } from './views.js';
    Account settings and secrets stay with people on their own screen. */
 
 export const WHERE_ACCOUNTS =
-  'A person who runs the department connects a mail account (SMTP) or a webhook, with its password or key, in Settings under External messaging, or on the department\'s screen under About the department, in External messaging. Never ask for a password or key in a message and never pass one on.';
+  'A person who runs the department connects a mail account (SMTP) or a webhook, with its password or key, in Settings under External messaging, or on the department\'s screen under External messaging. Never ask for a password or key in a message and never pass one on.';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const NO_PRINCIPAL = 'No active department owner or CEO is available, or input for this turn is still being recorded. Nothing was changed.';
@@ -47,7 +48,7 @@ async function ours({ ctx, job }: Head, { kind, id }: Place): Promise<boolean> {
   const own = job.departmentId;
   if (!own) return false;
   const table = TABLE[kind];
-  const [row] = await ctx.db.select({ id: table.id }).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
+  const [row] = await ctx.db.select(idOnly(table)).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
   return row !== undefined;
 }
 

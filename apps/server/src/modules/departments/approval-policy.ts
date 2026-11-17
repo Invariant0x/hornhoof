@@ -8,6 +8,7 @@ import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { approvalPolicies, departments, people, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import {
   hasAutonomousReleaseEntries,
@@ -57,7 +58,7 @@ export async function departmentOwner(ctx: Pick<Ctx, 'db'>, companyId: string, d
    neither a wait nor a refusal makes it known. */
 export async function kindKnown(db: Pick<Db, 'select'>, companyId: string, departmentId: string, channel: ApprovalChannel, kind: string): Promise<boolean> {
   const [found] = await db
-    .select({ id: requests.id })
+    .select(idOnly(requests))
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .where(and(eq(requests.companyId, companyId), eq(requests.approvalChannel, channel), eq(requests.approvalKind, kindKey(kind)), eq(requests.status, 'approved'), eq(tasks.departmentId, departmentId)))

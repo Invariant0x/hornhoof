@@ -4,6 +4,7 @@ import { canViewAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentEvents, agents, people, telegramBots, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { writeToAgent } from '../conversation/routes.js';
@@ -35,14 +36,14 @@ export async function senderOf(ctx: Pick<Ctx, 'db'>, companyId: string, from: Te
 
 /* The newest event of the agent so far: what is said after it answers what comes now. */
 async function lastSeq(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<number> {
-  const [last] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
+  const [last] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
   return last?.seq ?? 0;
 }
 
 /* The turn the message went into answers it back in the chat from the message on. */
 async function awaitAnswer(ctx: Pick<Ctx, 'db'>, bot: Bot, jobId: string, chatId: number, update: number, before: number, lang: BotLang): Promise<void> {
   const [said] = await ctx.db
-    .select({ seq: agentEvents.seq })
+    .select(only(agentEvents, 'seq'))
     .from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'telegram'->>'update' = ${String(update)}`))
     .orderBy(desc(agentEvents.seq))
@@ -119,7 +120,7 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
       notes.push(said ? `[A voice message${seconds(file)}. Its words, as speech recognition heard them: ${said}]` : `[A voice message${seconds(file)}, with no transcript: its recording is the file voice.ogg below.]`);
     }
     try {
-      ids.push((await keepMessageFile(ctx, me, agentId, bytes, name)).id);
+      ids.push((await keepMessageFile(ctx, me, agentId, { bytes, size: bytes.length }, name)).id);
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       notes.push(`[${name} did not come: Hornhoof has no room left for the company's files.]`);

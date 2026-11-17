@@ -1,9 +1,10 @@
 import { MAX_RUN_FILES, RunFile } from '@hornhoof/protocol';
-import { and, count, desc, eq, like, sql } from 'drizzle-orm';
+import { and, desc, eq, like } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { attachments } from '../../db/schema.js';
+import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { identify } from '../nodes/socket.js';
 import { checkRoom, FILE_BYTES, sendFile } from '../tasks/attachments.js';
@@ -28,14 +29,14 @@ export function partFileRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { run, task, name } = await partOf(req);
     const [file] = run.files.includes(name)
       ? await db
-          .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+          .select({ id: attachments.id, name: attachments.name, length: attachments.size })
           .from(attachments)
           .where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
     if (!file) throw new ApiError(404, 'not_found', `Task ${task.number} gives this run no file ${name}.`, 'attachment_unknown');
-    return sendFile(db, reply, file);
+    return sendFile(ctx, reply, file);
   });
 
   void app.register(async scope => {
@@ -44,7 +45,7 @@ export function partFileRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { part, run, task, name } = await partOf(req);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       const [made] = await db
-        .select({ n: count() })
+        .select(countOnly())
         .from(attachments)
         .where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `${madeName(run, part.part, '')}%`)));
       if (Number(made?.n ?? 0) >= MAX_RUN_FILES) throw new ApiError(409, 'conflict', `A part puts at most ${MAX_RUN_FILES} files on its task.`, 'attachment_invalid');

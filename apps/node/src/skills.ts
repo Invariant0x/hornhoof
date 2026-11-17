@@ -53,7 +53,7 @@ function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
 
 /* Names what the node writes in the agent's folder in its repository's excludes, one block for each kind of file in each
    folder of each checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
-export async function excludeInRepo(fs: AgentFs, workDir: string, paths: string[], what = 'skill files'): Promise<void> {
+async function excludeInRepo(fs: AgentFs, workDir: string, paths: string[], what = 'skill files'): Promise<void> {
   const repo = await repoOf(fs, workDir);
   if (!repo) return;
   const head = `# Hornhoof's ${what} in /${repo.at} of the checkout ${repo.gitDir}`;
@@ -81,12 +81,6 @@ async function placed(fs: AgentFs, workDir: string): Promise<Placed> {
   } catch {
     return { paths: [] };
   }
-}
-
-/* Everything placing these skills puts in a folder. */
-export function skillPaths(provider: ProviderId, skills: SkillFile[]): string[] {
-  const folder = skillsFolder(provider);
-  return [...skills.map(s => `${folder}/${s.name}`), PLACED];
 }
 
 /* Writes the agent's skills where its program finds them before each turn, so a changed skill reaches the program

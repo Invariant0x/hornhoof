@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { deptName } from '../departments/templates.js';
 
 const LangText = z.object({ en: z.string(), ru: z.string() });
@@ -16,7 +17,7 @@ const Party = z.object({
 export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.enum(['telegram', 'assistant']).optional(), assistant: z.object({ id: z.string(), name: z.string() }).optional() });
 export type MessageParty = z.infer<typeof Party>;
 export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
-export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
+type PartyContext = Pick<Ctx, 'db' | 'templates'>;
 
 export const HORNHOOF: MessageParty = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
 
@@ -75,7 +76,7 @@ export async function incomingEnvelope(ctx: PartyContext, companyId: string, age
   const by = field(data, 'by');
   if (field(data, 'from') === 'agent' && typeof by === 'string') return { direction: 'in', from: await agentParty(ctx, companyId, by), to };
   if (field(data, 'from') === 'orchestrator') {
-    const [agent] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
+    const [agent] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
     if (agent) return { direction: 'in', from: await agentParty(ctx, companyId, agent.id), to };
   }
   return { direction: 'in', from: HORNHOOF, to, notification: { source: 'service', tasks: [] } };

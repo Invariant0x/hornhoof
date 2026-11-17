@@ -1,10 +1,12 @@
 import { createServer, type AddressInfo } from 'node:net';
+import { onTestFinished } from 'vitest';
+import { listenIn } from '../../../test-support/ports.mjs';
 
-/* A local port that nothing listens on, since it was free a moment ago and its listener has gone. */
+/* Hold the unavailable address for the whole test, so another process cannot turn it into a live service. */
 export async function closedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const server = createServer(socket => { socket.on('error', () => undefined); socket.resetAndDestroy(); });
+  onTestFinished(() => new Promise<void>(resolve => server.close(() => resolve())));
+  await listenIn(server);
   const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
   return port;
 }

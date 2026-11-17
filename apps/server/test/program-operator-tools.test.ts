@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_PICTURE_BYTES, PROGRAM_OPERATOR_ROLE, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { agentEvents, agents, attachments, jobs, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, jobs, machines, nodes, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
@@ -17,6 +17,8 @@ import { operatorCompany } from './program-operator-company.js';
 
 type Caller = { id: string; companyId: string; agentId: string; agentKind: AgentKind; roleKey: string | null };
 const SECRET = 'sk-live-0123456789abcdef-???';
+/* Another machine's network id, whose built-in node an API key's turn can go out to. */
+const MACHINE = 'b'.repeat(32);
 
 /* An employee of Development with its program on a node, and the orchestrator, the head of Operations and the program operator,
    each in a turn of its own. The node answers as ProgramAccess does: what the screen shows, and what came of the input. */
@@ -50,6 +52,12 @@ async function onAnotherOwnersPlan(c: Awaited<ReturnType<typeof fixture>>) {
   const [plan] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'claude', kind: 'personal', label: 'Pia', ownerPersonId: owner!.id, status: 'ready' }).returning();
   await c.db.update(agents).set({ subscriptionId: plan!.id }).where(eq(agents.id, c.agent.id));
   await c.db.update(jobs).set({ subscriptionId: plan!.id }).where(eq(jobs.id, c.job.id));
+}
+
+/* A turn of the employee's made after the running one that waits in its queue: on no node yet, unless one is named. */
+async function queuedAfter(c: Awaited<ReturnType<typeof fixture>>, agentId: string, on: { subscriptionId?: string; nodeId?: string; builtinMachine?: string } = {}) {
+  const createdAt = new Date(c.job.createdAt.getTime() + 60_000);
+  await c.db.insert(jobs).values({ companyId: c.companyId, agentId, subscriptionId: on.subscriptionId ?? c.sub.id, nodeId: on.nodeId ?? null, builtinMachine: on.builtinMachine ?? null, kind: 'conversation', prompt: 'A message.', timeoutMs: 1000, status: 'queued', createdAt });
 }
 
 const tools = (c: Awaited<ReturnType<typeof fixture>>, caller: Caller) => {
@@ -86,6 +94,34 @@ it('takes Ctrl+U, then words and Enter, from the orchestrator and Operations int
   expect(journal).toHaveLength(6);
   expect(journal[0]!.operatorAction).toMatchObject({ actor: { id: c.callers.orchestrator.agentId }, operatorJobId: c.callers.orchestrator.id, keys: ['C-u'], key: 'C-u', text: null, result: 'applied', reason: c.input.reason });
   expect(journal[5]!.operatorAction).toMatchObject({ actor: { id: c.operator!.id, name: 'Operator' }, keys: ['Enter'], text: 'Go on with the task.', result: 'applied' });
+});
+
+it("asks the node of a busy employee's running turn for its screen, not a newer message that waits in its queue on no node", async () => {
+  const c = await fixture();
+  await queuedAfter(c, c.agent.id);
+  expect(await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id })).toMatchObject({ employee: c.agent.id, snapshot: c.snapshot });
+  expect(c.frames().map(({ node, frame }) => [node, frame.type, frame.agentKey])).toEqual([[{ kind: 'node', nodeId: c.identity.nodeId }, 'program.view_get', c.agent.id]]);
+});
+
+it('asks the node a newer turn went out to while it still waits there, on a plan and on an API key', async () => {
+  const c = await fixture();
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Second' }).returning();
+  const [second] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, keyHash: randomUUID(), status: 'ready', version: '0.6.1' }).returning();
+  await queuedAfter(c, c.agent.id, { nodeId: second!.id });
+  await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id });
+  const [key] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'claude', kind: 'api_key', label: 'Key', ownerPersonId: c.sub.ownerPersonId, status: 'ready' }).returning();
+  const [keyed] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Kai', kind: 'worker', roleKey: 'DEV-BE', departmentId: c.dev.id, subscriptionId: key!.id, model: '' }).returning();
+  await queuedAfter(c, keyed!.id, { subscriptionId: key!.id, builtinMachine: MACHINE });
+  await readProgramView(c.ctx, c.callers.orchestrator, { employee: keyed!.id });
+  expect(c.frames().map(({ node, frame }) => [node, frame.agentKey])).toEqual([[{ kind: 'node', nodeId: second!.id }, c.agent.id], [{ kind: 'builtin', machine: MACHINE }, keyed!.id]]);
+});
+
+it('answers no_program without asking any node for an employee whose only turn waits in its queue on no node', async () => {
+  const c = await fixture();
+  const [waiting] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Quinn', kind: 'worker', roleKey: 'DEV-BE', departmentId: c.dev.id, subscriptionId: c.sub.id, model: '' }).returning();
+  await queuedAfter(c, waiting!.id);
+  await expect(readProgramView(c.ctx, c.callers.orchestrator, { employee: waiting!.id })).rejects.toMatchObject({ status: 409, reason: 'programs_unavailable', message: 'The program screen is unavailable: no_program.' });
+  expect(c.frames()).toEqual([]);
 });
 
 it('shows and answers a question only the subscription owner may answer', async () => {

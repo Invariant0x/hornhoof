@@ -3,6 +3,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentChanges, agentEvents, agents, approvalPolicies, departments, jobs, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { company } from './department-owner-fixture.js';
 
@@ -18,8 +19,8 @@ const OUTSIDE = 'You change only your own department';
 
 const HEAD_TOOLS = ['staffing_options', 'hire', 'change_department', 'set_team_urgent_only', 'change_employee', 'reset_employee', 'fire_employee'];
 
-const teamNames = async (c: C) => (await c.db.select({ name: teams.name }).from(teams).where(eq(teams.departmentId, c.dev.id))).map(t => t.name).sort();
-const productNames = async (c: C) => (await c.db.select({ name: departments.name }).from(departments).where(eq(departments.parentId, c.dev.id))).map(d => d.name).sort();
+const teamNames = async (c: C) => (await c.db.select(only(teams, 'name')).from(teams).where(eq(teams.departmentId, c.dev.id))).map(t => t.name).sort();
+const productNames = async (c: C) => (await c.db.select(only(departments, 'name')).from(departments).where(eq(departments.parentId, c.dev.id))).map(d => d.name).sort();
 const agentRow = async (c: C, id: string) => (await c.db.select().from(agents).where(eq(agents.id, id)))[0]!;
 
 describe("a department head's tools", () => {
@@ -28,7 +29,7 @@ describe("a department head's tools", () => {
     const names = async (agent: { id: string }) => (await (await c.tools(agent)).listTools()).tools.map(t => t.name);
     const head = await names(c.head);
     expect(head).toEqual(expect.arrayContaining(HEAD_TOOLS));
-    for (const name of ['build_structure', 'view', 'invite_person', 'change_person', 'set_repository']) expect(head, name).not.toContain(name);
+    for (const name of ['build_structure', 'api', 'invite_person', 'change_person', 'set_repository']) expect(head, name).not.toContain(name);
     const worker = await names(c.worker);
     for (const name of HEAD_TOOLS) expect(worker, name).not.toContain(name);
   });

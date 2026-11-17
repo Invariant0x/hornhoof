@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-o
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines, people, personAccess, publicLinks, teams } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
@@ -15,9 +16,9 @@ import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js'
 import { ALWAYS_SHARE, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
 
 /* The machines after the leader that hold a copy: numbers 2 and 3. */
-export const COPIES = 2;
-export const RANK_EVERY_MS = 60_000;
-export const RESCORE_EVERY_MS = 86_400_000;
+const COPIES = 2;
+const RANK_EVERY_MS = 60_000;
+const RESCORE_EVERY_MS = 86_400_000;
 
 /* A machine's place. number: none for a machine that may not take the server. why: a key the card turns into words.
    clearPin: a pin ends when its machine becomes number 1. leave: it holds the data and its person no longer sees the
@@ -46,7 +47,7 @@ const scoredOrder = (group: Fit[]): Fit[] => settle([...group.filter(numbered).s
    by hand. A scoring orders them: the machines of three days and more before the newcomers, in each group the 95%
    class first, then by points, starting from the order they had, and two close ones do not swap. Without a scoring
    they keep their order. The places pinned by hand are then put where they were pinned. */
-export function rankOf(all: Candidate[], o: { leader: string; dbSize: number; link: boolean; now: Date; rescore?: boolean }): Ranked[] {
+export function rankOf(all: Candidate[], o: { leader: string; link: boolean; now: Date; rescore?: boolean }): Ranked[] {
   const left = (m: Candidate): boolean => m.role === 'data' && !seesAll(m.owner);
   const others = all.filter(m => m.id !== o.leader && !left(m));
   const fits: Fit[] = others
@@ -76,7 +77,7 @@ export function rankOf(all: Candidate[], o: { leader: string; dbSize: number; li
   });
 }
 
-export const HANDOVER_EVERY_MS = 86_400_000;
+const HANDOVER_EVERY_MS = 86_400_000;
 
 /* grant: the machines that get the company's data now. retire: the copy that gives it up now, one a run. handover: a
    grant took no free seat, so a copy is being handed from one machine to another. */
@@ -150,7 +151,7 @@ export async function candidates(db: Db, now = new Date(), opts: { shares?: bool
   const shares = opts.shares === false ? null : await onlineShares(db, now);
   return rows.map(({ machine: m, ...person }) => ({
     id: m.id, kind: m.kind, networkId: m.networkId, server: m.machineKey.startsWith(SERVER_KEY), role: m.role, createdAt: m.createdAt, reportAt: m.reportAt,
-    memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
+    memory: m.memory, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
     cores: m.cores, share: shares?.get(m.id) ?? null, linkRttMs: m.linkRttMs, linkMbps: m.linkMbps, internetRttMs: m.internetRttMs, internetMbps: m.internetMbps,
     pin: m.serverPin, number: m.serverOrder,
     owner: {
@@ -161,7 +162,7 @@ export async function candidates(db: Db, now = new Date(), opts: { shares?: bool
 }
 
 /* Whether a machine may take the server: it fits and was not kept out by hand. */
-const mayTake = (m: Candidate, o: { dbSize: number; link: boolean }): boolean => m.pin !== 'none' && unfit(m, o) === null;
+const mayTake = (m: Candidate, o: { link: boolean }): boolean => m.pin !== 'none' && unfit(m, o) === null;
 
 type Placed = { changed: number; scored: boolean; leave: Leaving[]; retire: { id: string; networkId: string | null; copyName: string | null } | null; top: string[] };
 
@@ -210,10 +211,10 @@ export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean
    ranking asks again. */
 async function hiddenName(ctx: Ctx, own: string): Promise<void> {
   const { db } = ctx;
-  const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+  const [link] = await db.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
   if (link) return;
   const [other] = await db
-    .select({ companyId: machines.companyId })
+    .select(only(machines, 'companyId'))
     .from(machines)
     .where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), ne(machines.id, own), eq(machines.kind, 'computer')))
     .limit(1);
@@ -253,9 +254,8 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     const q = queryOf(tx);
     await q('INSERT INTO net.ranking (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
     const [kept] = await q<{ rescored_at: Date | string | null; handover_at: Date | string | null }>('SELECT rescored_at, handover_at FROM net.ranking FOR UPDATE');
-    const [sized] = await q<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
-    const [link] = await tx.select({ name: publicLinks.name }).from(publicLinks).limit(1);
-    const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link) };
+    const [link] = await tx.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
+    const fit = { link: Boolean(link) };
     const all = await candidates(tx, now);
     const others = all.filter(m => m.id !== leader.id);
     /* A machine joined, left or stopped fitting, or the server moved: the order is scored whatever the day. */

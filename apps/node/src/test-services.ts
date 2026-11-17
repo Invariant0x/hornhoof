@@ -14,7 +14,7 @@ export type ServiceDefinition = ServiceBase & (
   | { driver: 'postgres'; options: { database: string; locale?: string; extensions?: string[] } }
   | { driver: 'process'; options: { start: ServiceCommand; readiness: ServiceCommand; stop: { signal: 'SIGTERM' | 'SIGINT'; graceMs: number }; statePaths: string[] } }
 );
-export interface ServicePreparation { id: string; serviceIds: string[]; commands: ServiceCommand[] }
+interface ServicePreparation { id: string; serviceIds: string[]; commands: ServiceCommand[] }
 export interface ServiceDefinitions { services: ServiceDefinition[]; prepare?: ServicePreparation[] }
 export interface ServiceContext {
   nodeOwner: JobUser; jobUser: JobUser; deadline: number; signal: AbortSignal;

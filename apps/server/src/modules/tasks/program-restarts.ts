@@ -9,7 +9,7 @@ import { agentProgramState, signInTurn } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
 
-export type RestartStatus = { allowed: boolean; reason: string | null };
+type RestartStatus = { allowed: boolean; reason: string | null };
 type Job = typeof jobs.$inferSelect;
 type Ready = { job: Job; node: NodeIdentity; minutes: number };
 type Check = { ready: Ready; reason?: never } | { ready?: never; reason: string; job?: Job };

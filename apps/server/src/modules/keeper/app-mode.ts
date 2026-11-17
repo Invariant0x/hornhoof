@@ -15,7 +15,7 @@ type Refusal = keyof typeof MESSAGES;
 type Hook = { enter: () => unknown; leave: () => unknown };
 /* One stay in lead: the hooks it entered, which are the only ones it leaves, and whether it has ended. */
 type LeadStay = { entered: Hook[]; over: boolean };
-export type AppModeOptions = {
+type AppModeOptions = {
   dir: string;
   fromKeeper: boolean;
   everyMs?: number;

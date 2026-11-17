@@ -1,7 +1,7 @@
-export type Direction = 1 | -1;
+type Direction = 1 | -1;
 export type Sort = { key: string; direction: Direction };
 type Value = string | number;
-export type SortValue = Value | readonly Value[] | null;
+type SortValue = Value | readonly Value[] | null;
 export type SortColumn<T> = { key: string; direction: Direction; value: (row: T) => SortValue };
 
 export function nextSort<T>(sort: Sort, column: SortColumn<T>): Sort {

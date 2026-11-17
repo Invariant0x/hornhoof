@@ -4,7 +4,7 @@ export const WaitOnInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('employee'), employee: z.uuid() }),
   z.object({ kind: z.literal('external'), event: z.enum(['time', 'ceo', 'machine', 'other']) }),
 ]);
-export type WaitOn = z.infer<typeof WaitOnInput>;
+type WaitOn = z.infer<typeof WaitOnInput>;
 export type RecordedWaitOn = WaitOn & { name?: string };
 /* operation: what the wait's accountable record keeps it by, the same across a restart. run: the one run whose end ends it. */
 export type ExternalWait = { reason: string; since: string; until: string; on?: RecordedWaitOn; operation?: string; run?: string };
@@ -49,7 +49,7 @@ export type WaitFinalReview = z.infer<typeof WaitFinalReview>;
 
 /* Where a plan's dates come from: a promise someone made, a version of the department's policy, or what the source itself
    says. Never a common deadline, a run's start plus its limit, or the longest a wait_for may last. */
-export const WaitPlanProvenance = z.strictObject({
+const WaitPlanProvenance = z.strictObject({
   kind: z.enum(['explicit_promise', 'department_policy', 'source_contract']),
   actor: WaitOwnerBinding,
   ref: reference,
@@ -71,7 +71,7 @@ export const WaitPlan = z.strictObject({
 export type WaitPlan = z.infer<typeof WaitPlan>;
 
 /* A run's clocks stand apart, each with its own promise; a wait_for is waiting, or has come back to be looked at. */
-export const WAIT_STAGES = ['queue', 'host_slot', 'prepare', 'execution', 'retry', 'waiting', 'check_back'] as const;
+const WAIT_STAGES = ['queue', 'host_slot', 'prepare', 'execution', 'retry', 'waiting', 'check_back'] as const;
 export const WaitSourceState = z.strictObject({
   stage: z.enum(WAIT_STAGES).optional(),
   nextActionAt: moment.optional(),

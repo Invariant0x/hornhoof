@@ -8,6 +8,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, telegramBots, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { deleteWebhook, getMe, TelegramError, type TelegramUser } from './api.js';
@@ -19,15 +20,16 @@ export type TelegramView = { username: string } | null;
 
 /* The bot an agent's card shows: its name in Telegram, never its token. */
 export async function telegramOf(db: Db, agentId: string): Promise<TelegramView> {
-  const [bot] = await db.select({ username: telegramBots.username }).from(telegramBots).where(eq(telegramBots.agentId, agentId));
+  const [bot] = await db.select(only(telegramBots, 'username')).from(telegramBots).where(eq(telegramBots.agentId, agentId));
   return bot ?? null;
 }
 
 /* People with the whole company give an agent a bot or take it off, and so does the person responsible for a head's
-   department, who runs it as the CEO does; the orchestrator is in no department. Always from their own screen. */
+   department, who runs it as the CEO does; the orchestrator is in no department. From their own screen, or through the
+   orchestrator, never a head. */
 async function requireBotKeeper(db: Db, me: Person, agent: AgentRow): Promise<void> {
   await requireDepartmentChanger(db, me, agent.kind === 'orchestrator' ? null : agent.departmentId);
-  if (me.via) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen.', 'company_scope_only');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen, or the orchestrator.', 'company_scope_only');
 }
 
 const unreachable = () => new ApiError(503, 'unavailable', 'Telegram does not answer now. Try again in a few minutes.', 'telegram_unreachable');

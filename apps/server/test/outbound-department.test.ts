@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { agents, departments, jobs, modelChecks, outboundCatalogRevisions, outboundMessages, outboundPolicies, people, requests } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { recordReview, reserveDispatch } from '../src/modules/outbound/core.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { company } from './department-owner-fixture.js';
@@ -33,7 +34,7 @@ const refused = (r: Res) => {
 const SMTP = { host: 'smtp.mkt.example', port: 465, security: 'tls', username: 'letters@mkt.example', password: PASSWORD, from: 'letters@mkt.example' };
 const AUTO: OutboundPolicyValue = { ...QUIET, accountDailyLimit: 2, autoSend: true };
 const LETTERS = { name: 'Letters', adapter: 'smtp', purpose: 'first_contact', audience: 'direct' };
-const WHERE = 'in Settings under External messaging, or on the department\'s screen under About the department';
+const WHERE = 'in Settings under External messaging, or on the department\'s screen under External messaging';
 
 /* The company of department-owner-fixture.ts with Marketing beside it: Mia its head, Max its writer on a task, and Mona,
    given Marketing alone and named its owner. Development has a working channel of its own, with a secret. */
@@ -46,7 +47,7 @@ async function marketing() {
     const head = await hire('Mia', 'head', 'MKT-HEAD');
     const writer = await hire('Max', 'worker', 'MKT-WRITE');
     const monaToken = await invitePerson(c.app, c.ceoToken, { name: 'Mona', email: 'mona@acme.com', access: { departments: [mkt!.id] } });
-    const [mona] = await c.db.select({ id: people.id }).from(people).where(eq(people.email, 'mona@acme.com'));
+    const [mona] = await c.db.select(idOnly(people)).from(people).where(eq(people.email, 'mona@acme.com'));
     await c.setOwner(c.ceoToken, mkt!.id, mona!.id);
     const task = (await createTask(c.app.ctx, { agentId: head.id }, { title: 'Spring letters', brief: '', body: '', departmentId: mkt!.id, assigneeAgentId: writer.id, executor: true })).task;
     const devChannel = (await c.app.inject({ method: 'POST', url: '/api/outbound/channels', payload: { departmentId: c.dev.id, ...LETTERS }, ...as(c.ceoToken) })).json() as { channelId: string };
@@ -129,7 +130,7 @@ describe('Marketing runs its own messages, without the orchestrator or the CEO',
     const dispatched = [];
     for (const id of sent) dispatched.push(await reserveDispatch(m.c.app.ctx, id, 1));
     expect(dispatched.map(d => d.kind === 'reserved' ? 'reserved' : d.reasonCodes)).toEqual(['reserved', 'reserved', ['daily_limit_exceeded']]);
-    const orchestratorJobs = await m.c.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.agentId, m.c.orchestrator.id));
+    const orchestratorJobs = await m.c.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.agentId, m.c.orchestrator.id));
     expect(orchestratorJobs).toEqual([]);
   }, 60_000);
 

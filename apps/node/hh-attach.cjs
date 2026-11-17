@@ -5,11 +5,11 @@
 // files to the agent's current chat reply (and Telegram reply when the turn answers Telegram); --task 12 and --chat may be
 // given together. The node puts the address and the turn's token into HH_ATTACH_URL and HH_ATTACH_PASS for each turn.
 'use strict';
-const { readFileSync } = require('node:fs');
+const { openAsBlob } = require('node:fs');
 const { basename } = require('node:path');
 
 const USAGE =
-  'Usage: hh-attach FILE... (PNG, JPEG or WebP, up to 3 MB each), hh-attach --task 12 FILE..., hh-attach --chat FILE..., or hh-attach --task 12 --chat FILE... (any file, up to 50 MB each)';
+  'Usage: hh-attach FILE... (PNG, JPEG or WebP, up to 3 MB each), hh-attach --task 12 FILE..., hh-attach --chat FILE..., or hh-attach --task 12 --chat FILE... (any file; one over 50 MB lives 30 days on one machine)';
 
 function parseArgs(args) {
   let task;
@@ -37,9 +37,10 @@ async function main() {
   if (!parsed) throw new Error(USAGE);
   const { task, chat, files } = parsed;
   for (const file of files) {
+    /* Read as it goes, so a file of any size passes. */
     let bytes;
     try {
-      bytes = readFileSync(file);
+      bytes = await openAsBlob(file);
     } catch {
       throw new Error(`Cannot read ${file}.`);
     }

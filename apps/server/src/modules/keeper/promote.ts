@@ -105,7 +105,7 @@ export async function waitForNoCopy(sql: Sql): Promise<void> {
 
 /* The record of a planned switch, under the switch's id, and the end of the request it answers, in one commit. A
    record of that id already there counts as done, and a request made since stays. */
-export type Handover = {
+type Handover = {
   id: string; from: string; term: Term; applied: string; to: string; at: Date; slots: Record<string, string>;
   /* A planned switch when left out. For a takeover and the CEO's choice: when the old leader was last heard, how far
      the new leader's own changes reached, and why the old leader stopped, when it said so. */

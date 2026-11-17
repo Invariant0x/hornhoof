@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
@@ -62,12 +63,12 @@ async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { ta
 }
 
 /* Operations' reliability engineer who is on and its head who is on, in the order they are called. */
-export async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Agent[]> {
+  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
   const staff = await ctx.db
     .select()
     .from(agents)
-    .where(and(or(inArray(agents.departmentId, ops), inArray(agents.departmentId, ctx.db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, ops)))), isNull(agents.removedAt), isNull(agents.switchedOffAt)))
+    .where(and(or(inArray(agents.departmentId, ops), inArray(agents.departmentId, ctx.db.select(idOnly(departments)).from(departments).where(inArray(departments.parentId, ops)))), isNull(agents.removedAt), isNull(agents.switchedOffAt)))
     .orderBy(asc(agents.createdAt));
   return [staff.find(a => a.kind === 'worker' && a.roleKey === 'OPS-FIX'), staff.find(a => a.kind === 'head' && a.roleKey === 'OPS-HEAD') ?? staff.find(a => a.kind === 'head')].filter(a => a !== undefined);
 }
@@ -141,7 +142,7 @@ async function runOutsideTaskAgain(ctx: Ctx, job: Job & { agentId: string }, rep
 
 async function callOperationsOutsideTask(ctx: Ctx, job: Job): Promise<void> {
   const to = await operationsOnCall(ctx, job.companyId);
-  const [agent] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId!));
+  const [agent] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId!));
   if (!to || to.id === job.agentId) return;
   const text = `Hornhoof: the node under ${agent?.name ?? 'an agent'}'s turns restarted twice in a row, so Hornhoof does not run the turn a third time. First turn ${job.retryOf}, then its retry, turn ${job.id}. Find out why the node restarts and set it right.`;
   await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: `turn ${job.id}`, ru: `ход ${job.id}` } } } });

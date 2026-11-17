@@ -24,6 +24,7 @@ import {
   supportTickets,
   tasks,
 } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { decidedByView } from '../tasks/decision-views.js';
 import { candidates, decisionOwner, departmentNames, mayOpenRequest, type Candidate, type DecisionSubject } from '../tasks/decisions.js';
@@ -294,7 +295,7 @@ async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly stri
   const [channels, accounts, activeAttempts] = await Promise.all([
     db.select().from(outboundChannels).where(and(eq(outboundChannels.companyId, companyId), inArray(outboundChannels.departmentId, [...deptIds]))),
     db.select().from(outboundAccounts).where(and(eq(outboundAccounts.companyId, companyId), inArray(outboundAccounts.departmentId, [...deptIds]))),
-    db.select({ accountId: outboundAttempts.accountId }).from(outboundAttempts).where(and(eq(outboundAttempts.companyId, companyId), inArray(outboundAttempts.status, ['sending', 'unknown']))),
+    db.select(only(outboundAttempts, 'accountId')).from(outboundAttempts).where(and(eq(outboundAttempts.companyId, companyId), inArray(outboundAttempts.status, ['sending', 'unknown']))),
   ]);
   const [authors, policies] = await Promise.all([authorsOf(db, companyId, accounts.map(a => a.id)), policiesOf(db, channels.map(c => c.id))]);
   const heldIds = new Set(activeAttempts.map(a => a.accountId));
@@ -600,5 +601,3 @@ export function outboundViewRoutes(app: FastifyInstance, ctx: Ctx): void {
     return dto;
   });
 }
-
-export const registerOutboundViewRoutes = outboundViewRoutes;
