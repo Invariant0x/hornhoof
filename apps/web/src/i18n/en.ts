@@ -2220,6 +2220,8 @@ export const en = {
     later: 'Later',
     waiting: (version: string, until: string) => `Hornhoof will update to ${version} when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`,
     calledOff: (version: string, at: string) => `The update to ${version} was called off at ${at}: the agents had not finished. Nothing was stopped.`,
+    cancelled: (version: string, at: string) => `The update to ${version} was called off at ${at}. Nothing was stopped.`,
+    notPassed: (version: string, at: string) => `The update to ${version} was called off at ${at}: Hornhoof could not pass it to the updater. Nothing was stopped.`,
     callOff: 'Call off',
     running: (version: string) => (version ? `Updating Hornhoof to ${version}` : 'Updating Hornhoof'),
     progress: 'Update progress',

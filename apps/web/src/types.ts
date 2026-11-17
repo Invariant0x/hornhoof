@@ -992,8 +992,10 @@ export type NamedTurn = { agent: string; task: number | null };
 /* An update that waits for the agents: until is when it is called off unless they finished. lost: the turns it does not
    wait for, as their node said nothing of their program for ten minutes. */
 export type UpdateWaiting = { version: string; commit?: string; since: string; until: string; turns: NamedTurn[]; lost: NamedTurn[] };
-/* An update called off as the agents had not finished by its deadline, with the turns that still ran. */
-export type UpdateCalledOff = { version: string; commit?: string; at: string; reason: 'deadline'; turns: NamedTurn[] };
+/* An update that went to nobody, with the turns that still ran and until when it waited. deadline: the agents had not
+   finished by then. cancelled: a person or the orchestrator called it off. failed: Hornhoof could not pass it to the
+   updater, error says why. */
+export type UpdateCalledOff = { version: string; commit?: string; at: string; until: string; reason: 'deadline' | 'cancelled' | 'failed'; turns: NamedTurn[]; error?: string };
 
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
