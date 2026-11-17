@@ -1,0 +1,30 @@
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+remember                       tool-privacy.PrivateValues             9  91.7%      9.0
+sensitiveEvent                 tool-privacy                           4  33.3%      8.7
+hide                           tool-privacy.PrivateValues             7 100.0%      7.0
+privateToolCall                tool-privacy                           6  85.7%      6.1
+contains                       tool-privacy.PrivateValues             6  90.0%      6.0
+privateToolEvent               tool-privacy                           6 100.0%      6.0
+observeTool                    tool-privacy.ToolPrivacy               6 100.0%      6.0
+input                          tool-privacy.ToolPrivacy               5  80.0%      5.2
+observe                        tool-privacy.ToolPrivacy               5  87.5%      5.0
+opaqueMedia                    tool-privacy                           5 100.0%      5.0
+input                          tool-privacy.PrivateValues             5 100.0%      5.0
+rememberFields                 tool-privacy.PrivateValues             4  75.0%      4.2
+result                         tool-privacy.ToolPrivacy               3  50.0%      4.1
+hiddenString                   tool-privacy.PrivateValues             4 100.0%      4.0
+execution                      tool-privacy.ToolPrivacy               4 100.0%      4.0
+hiddenText                     tool-privacy                           3  75.0%      3.1
+isSensitiveTool                tool-privacy                           2 100.0%      2.0
+parsed                         tool-privacy                           2 100.0%      2.0
+toolPrivacy                    tool-privacy                           2 100.0%      2.0
+rememberText                   tool-privacy.PrivateValues             2 100.0%      2.0
+retainedBytes                  tool-privacy.PrivateValues             1   0.0%      2.0
+text                           tool-privacy.PrivateValues             2 100.0%      2.0
+event                          tool-privacy.ToolPrivacy               1 100.0%      1.0
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/crap.edn
