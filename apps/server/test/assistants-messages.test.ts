@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { agents, attachments, companies, departments, people, requests, taskEvents } from '../src/db/schema.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -171,8 +174,42 @@ describe('files an assistant sends', () => {
       'в Hornhoof закончилось место для файлов компании.');
     expect(await c.db.select().from(attachments)).toEqual([]);
     await refused(await writeWith(c, ava.key, { agentId: c.head.id, text: 'See the file', files: [randomUUID()] }, 'ru'), 404, 'attachment_unknown',
-      'такого файла в Hornhoof нет, или вам его там не открыть.');
+      'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.');
     await refused(await upload(c, ava.key, FILES[0]!, randomUUID(), 'ru'), 404, 'agent_unknown',
       'в Hornhoof нет такого сотрудника, или его убрали.');
+  });
+
+  it('keeps a file over 50 MB on the disk of the machine that took it and out of the database, for the agent and the owner alike, and says plainly when it is not there', async () => {
+    const c = await company();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    const bytes = Buffer.alloc(FILE_BYTES + 1, 7);
+    bytes[0] = 1;
+    bytes[FILE_BYTES] = 9;
+    c.app.ctx.config.taskFilesBytes = FILE_BYTES;
+    const full = await upload(c, ava.key, { name: 'Site.zip', type: 'application/zip', bytes }, c.head.id, 'ru');
+    expect(full.json().error).toMatchObject({ reason: 'attachment_invalid', message: 'в Hornhoof закончилось место для файлов компании.' });
+    expect(readdirSync(dir)).toEqual([]);
+    c.app.ctx.config.taskFilesBytes = 2 * FILE_BYTES;
+    const got = await upload(c, ava.key, { name: 'Site.zip', type: 'application/zip', bytes }, c.head.id);
+    expect(got.statusCode).toBe(201);
+    const file = got.json().file as { id: string; name: string };
+    expect(readFileSync(join(dir, file.id)).equals(bytes)).toBe(true);
+    expect(await c.db.select({ size: attachments.size, held: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) }).from(attachments)).toEqual([{ size: FILE_BYTES + 1, held: 0 }]);
+    expect((await writeWith(c, ava.key, { agentId: c.head.id, files: [file.id] })).statusCode).toBe(202);
+    const run = await nextOf(c.builtin, 'job.run');
+    const events = (await c.app.inject({ url: `/api/agents/${c.head.id}/events`, ...as(c.ceo) })).json().events;
+    expect(events.find((e: { kind: string }) => e.kind === 'message').data.pictures).toEqual([{ ...file, file: true, big: true }]);
+    const fetched = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file.id}`, headers: { authorization: `Bearer ${run.toolToken}` } });
+    expect(fetched.headers['content-length']).toBe(String(FILE_BYTES + 1));
+    expect(fetched.rawPayload.equals(bytes)).toBe(true);
+    expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).rawPayload.equals(bytes)).toBe(true);
+    rmSync(join(dir, file.id));
+    const lost = await c.app.inject({ url: `/api/assistant/attachments/${file.id}`, headers: { authorization: `Bearer ${ava.key}`, 'accept-language': 'ru' } });
+    expect(lost.statusCode).toBe(410);
+    expect(lost.json().error).toEqual({ code: 'gone', reason: 'file_lost', message: 'большой файл хранится только на машине, которая его приняла, и сейчас Hornhoof не может его оттуда взять.' });
+    expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).json().error.reason).toBe('file_lost');
   });
 });

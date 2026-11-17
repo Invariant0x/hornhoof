@@ -53,7 +53,7 @@ function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
 
 /* Names what the node writes in the agent's folder in its repository's excludes, one block for each kind of file in each
    folder of each checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
-export async function excludeInRepo(fs: AgentFs, workDir: string, paths: string[], what = 'skill files'): Promise<void> {
+async function excludeInRepo(fs: AgentFs, workDir: string, paths: string[], what = 'skill files'): Promise<void> {
   const repo = await repoOf(fs, workDir);
   if (!repo) return;
   const head = `# Hornhoof's ${what} in /${repo.at} of the checkout ${repo.gitDir}`;

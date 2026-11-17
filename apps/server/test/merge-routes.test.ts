@@ -31,12 +31,13 @@ async function stand() {
 }
 
 describe("the CEO's conflicts of a merge", () => {
-  it('lets only the CEO pick his conflicts', async () => {
+  it('lets only the CEO pick his conflicts, by himself or through the orchestrator', async () => {
     const s = await stand();
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const inside = { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) };
-    /* A person of the whole company, the orchestrator acting for the CEO, and nobody at all. */
-    for (const [who, status] of [[as(zed), 403], [inside, 403], [{}, 401]] as const) {
+    expect(((await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] }).conflicts).toHaveLength(2);
+    /* A person of the whole company, and nobody at all. */
+    for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) {
       const [read, write] = [await s.conflictsOf(who), await s.pick({ merge: s.id, take: 'here' }, who)];
       expect([read.statusCode, write.statusCode]).toEqual([status, status]);
     }
@@ -72,12 +73,13 @@ describe("the CEO's conflicts of a merge", () => {
     /* Listed for one person, it shows only for its owner. */
     expect((await decisions({ ...as(s.ceo), query: { person: s.maria.id } } as object)).merges).toEqual([]);
     expect([mine.counts.total, mine.counts.byPerson[s.owner.id], mine.counts.byAgent[s.orchestrator.id]]).toEqual([1, 1, 1]);
-    /* Nobody else is shown it: not a person of the whole company, not a department's own, not the orchestrator acting
-       for the CEO. */
+    /* The orchestrator acting for the CEO is shown it too, and nobody else: not a person of the whole company, not a
+       department's own. */
+    expect((await decisions({ headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) })).merges).toEqual(mine.merges);
     const [sales] = await s.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning();
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const dan = await invitePerson(s.app, s.ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [sales!.id] } });
-    for (const who of [as(zed), as(dan), { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) }]) {
+    for (const who of [as(zed), as(dan)]) {
       const theirs = await decisions(who);
       expect([theirs.merges, theirs.counts.total]).toEqual([[], 0]);
     }

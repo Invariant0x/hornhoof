@@ -4,7 +4,7 @@ import { RepoHostCard } from './RepoHost';
 
 /* Every outside tool Hornhoof connects, one entry each: the address whose answer says the person may manage it, and its
    card. A new tool is one more entry here. */
-export type Integration = { id: string; probe: string; Card: ComponentType };
+type Integration = { id: string; probe: string; Card: ComponentType };
 
 export const INTEGRATIONS: readonly Integration[] = [
   { id: 'google-sheets', probe: '/api/google-sheets', Card: GoogleSheetsCard },

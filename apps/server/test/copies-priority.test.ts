@@ -140,14 +140,14 @@ describe("the CEO's choice of a machine's place", () => {
     expect((await c.put(phone.id, { pin: 'none' })).statusCode).toBe(204);
   });
 
-  it('answers the CEO alone', async () => {
+  it('answers the CEO alone, by himself or through the orchestrator', async () => {
     const c = await company();
     const p = await invitePerson(c.app, c.ceo, { name: 'Pat', email: 'pat@acme.test', access: { whole: true } });
-    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    for (const who of [as(p), { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) }]) {
-      expect(c.refusal(await c.put(c.b.id, { pin: 2 }, who)).slice(0, 2)).toEqual([403, 'not_owner_session']);
-    }
+    expect(c.refusal(await c.put(c.b.id, { pin: 2 }, as(p))).slice(0, 2)).toEqual([403, 'not_owner_session']);
     expect((await c.rowOf(c.b.id)).serverPin).toBeNull();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect((await c.put(c.b.id, { pin: 2 }, { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) })).statusCode).toBe(204);
+    expect((await c.rowOf(c.b.id)).serverPin).toBe('2');
   });
 
   it('answers try again when the ranking fails', async () => {
