@@ -19,8 +19,8 @@ const Ms = z.number().finite().min(0).max(1e10);
 const Name = z.string().min(1).max(500);
 const Count = z.number().int().min(0).max(1e7);
 
-export const SlowTestTiming = z.object({ name: Name, ms: Ms });
-export type SlowTestTiming = z.infer<typeof SlowTestTiming>;
+const SlowTestTiming = z.object({ name: Name, ms: Ms });
+type SlowTestTiming = z.infer<typeof SlowTestTiming>;
 /* One test file on one part of a run. Setup is what came before its tests (the runner, the database, the app), teardown what
    came after them. A log from before these lines tells only a file's total, so its phases are null. */
 export const TestFileTiming = z.object({

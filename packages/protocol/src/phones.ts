@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const PHONE_LEASE_MS = 30_000;
-export const PHONE_FRAME_MAX = 3 * 1024 * 1024;
+const PHONE_FRAME_MAX = 3 * 1024 * 1024;
 export const PhoneSerial = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/);
 /* The address Wireless debugging shows, an IP address on the network and a port. Never a name or an address of the node's
    own machine, where its agents' tools listen (#1140). */
@@ -13,7 +13,7 @@ export const networkEndpoint = (value: string): boolean => {
   return octets.every(n => n <= 255) && octets[0] !== 0 && octets[0] !== 127;
 };
 /* The serial number of a phone plugged by cable into the node's machine, as adb lists it; adb connects nowhere for it. */
-export const usbSerial = (value: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(value);
+const usbSerial = (value: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(value);
 export const PhoneEndpoint = z.string().max(260).refine(value => networkEndpoint(value) || usbSerial(value));
 const coordinate = z.number().int().min(0).max(32767);
 export const PhoneOperation = z.discriminatedUnion('kind', [
@@ -32,7 +32,7 @@ export const PhoneOperation = z.discriminatedUnion('kind', [
 ]);
 export type PhoneOperation = z.infer<typeof PhoneOperation>;
 
-export const PhoneHardwareKey = z.string().regex(/^[0-9a-f]{64}$/);
+const PhoneHardwareKey = z.string().regex(/^[0-9a-f]{64}$/);
 export const PhonePairing = z.strictObject({ endpoint: z.string().max(260).refine(networkEndpoint), code: z.string().regex(/^[0-9]{6}$/) });
 export const PhoneDevice = z.strictObject({ serial: PhoneSerial, status: z.enum(['device', 'offline', 'unauthorized', 'unverified']), model: z.string().max(100).nullable(), hardwareKey: PhoneHardwareKey.optional() });
 export type PhoneDevice = z.infer<typeof PhoneDevice>;

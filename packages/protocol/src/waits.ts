@@ -20,8 +20,8 @@ export type WaitSourceKind = z.infer<typeof WaitSourceKind>;
 /* A record that has come to its end stays, as what happened to the wait. An old wait stays open with what is known of it, no
    date made up for it, until someone gives it an owner and a plan. */
 export const WAIT_STATES = ['active', 'resolved', 'cancelled', 'superseded', 'legacy_needs_plan'] as const;
-export const WaitState = z.enum(WAIT_STATES);
-export type WaitState = z.infer<typeof WaitState>;
+const WaitState = z.enum(WAIT_STATES);
+type WaitState = z.infer<typeof WaitState>;
 export const WAIT_OUTCOMES = ['resolved', 'cancelled', 'superseded'] as const;
 export const WaitOutcome = z.enum(WAIT_OUTCOMES);
 export type WaitOutcome = z.infer<typeof WaitOutcome>;
