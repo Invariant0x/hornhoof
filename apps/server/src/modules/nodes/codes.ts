@@ -5,7 +5,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 
-export const NODE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+const NODE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /* core: a command that brings the company's core to its machine, and no node. */
 type Place = { companyId: string; personId: string; subscriptionIds: string[]; machineId?: string; core?: boolean };

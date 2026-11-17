@@ -9,7 +9,7 @@ import { ruleOf } from './rules.js';
    on with their last time. */
 export type CodeLine = { task: string; number: number; branch: string; machines: { name: string; at: string }[] };
 
-export type NameKeys = (q: Query, rows: (Row | null)[]) => Promise<void>;
+type NameKeys = (q: Query, rows: (Row | null)[]) => Promise<void>;
 
 /* Common source interface for Merge: streaming page-by-page for a kept or uploaded database in the leader's own
    Postgres, and a pre-read snapshot for a peer machine over the network so no network read holds a leader transaction. */
@@ -325,7 +325,7 @@ async function checkSourceReady(
 
 /* Everything a peer merge reads from its remote source, gathered before the gate of the app's writes closes and before
    the leader opens its write transaction, so no network read ever holds a transaction or delays a company write. */
-export class SourceSnapshot implements MergeReader {
+class SourceSnapshot implements MergeReader {
   constructor(
     private readonly sourceFacts: Facts,
     private readonly sourceCompanyId: string | null,

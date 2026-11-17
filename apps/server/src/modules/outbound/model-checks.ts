@@ -42,7 +42,7 @@ import type { ModelCheckPorts, SealedPayload } from './ports.js';
 type ReviewInputDto = z.infer<typeof ReviewInput>;
 type ReviewFactDto = ReviewInputDto['facts'][number];
 
-export type AuthorVendorHint = string | { readonly provider?: ProviderId | null; readonly vendorId: string };
+type AuthorVendorHint = string | { readonly provider?: ProviderId | null; readonly vendorId: string };
 
 export type FreshModelRequest = {
   readonly kind: ModelCheckKind;

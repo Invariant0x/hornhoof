@@ -24,7 +24,7 @@ function processField(field: string): number | null {
   return /^p[1-9]\d*$/.test(field) && Number.isSafeInteger(pid) ? pid : null;
 }
 
-export async function lsofPid(peer: Peer, run: Command = command): Promise<number | null> {
+async function lsofPid(peer: Peer, run: Command = command): Promise<number | null> {
   const args = ['-nP', '-a', `-iTCP:${peer.port}`, '-sTCP:ESTABLISHED', '-Fpn'];
   const output = await run('/usr/sbin/lsof', args, { timeout: 2000 }).catch(() => '');
   return ownerOf(output, peer);
