@@ -56,6 +56,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A window opened as a node restarts no longer pushes the agent's program out of its pane, so its hooks are accepted.
 - Percentages on Machines and plans use the text font, so the percent sign no longer reads like a slash and a dot.
 - Right to left, plan limits keep each phrase and number with its unit whole, and the trust stripe starts the line.
+- A head's answer to a question no longer shows "decided by the orchestrator".
+- A forged internal header with multibyte characters gets 401 instead of a server error.
+- An interrupted `hh-fetch` download keeps the earlier file whole and writes the new one only once it is complete.
 
 ### Added
 
