@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import {
+  HOLD_MS,
   firstForwarded,
   heldAnswer,
   passThrough,
@@ -29,6 +30,8 @@ const UPGRADE =
   'GET /socket HTTP/1.1\r\nHost: hornhoof.test\r\nConnection: Upgrade\r\nUpgrade: x-test\r\nX-Stays: kept\r\n\r\n';
 const EARLY_LIMIT = 64 * 1024;
 const SWITCHED = 'HTTP/1.1 101 Switching Protocols\r\nUpgrade: x-test\r\nConnection: Upgrade\r\n\r\n';
+/* Longer than any limit this hop sets: on a connect, on a hold, on the pause between two tries. */
+const PAST_EVERY_LIMIT = 60 * 60_000;
 
 /* A promise to settle from outside, since Promise.withResolvers is newer than the language level the tests compile to. */
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -37,6 +40,13 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
     resolve = settle;
   });
   return { promise, resolve };
+}
+
+/* From here on the timers and the clock this hop reads move only when the test moves them, while sockets still carry
+   their bytes as they come. Real time comes back when the test ends. */
+function virtualTime(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  onTestFinished(() => void vi.useRealTimers());
 }
 
 /* A server on a free port, taken down with every socket it has, upgraded ones too, when the test ends. */
@@ -265,14 +275,27 @@ describe('requests', () => {
     expect(await bodyOf(res)).toBe('data: 1\n\n');
   });
 
-  it('keeps a quiet stream open', async () => {
+  it.each([
+    ['passed on at once', {}],
+    ['held until the target took it', { holdMs: HOLD_MS }],
+  ])('keeps a quiet stream open past every limit of its own, %s', async (_, options) => {
+    const quiet = deferred();
     const target = await answering(async (_, res) => {
       res.write('data: 1\n\n');
-      await sleep(3000);
+      await quiet.promise;
       res.end('data: 2\n\n');
     });
-    const answer = await send(await through(target));
-    expect(answer.body).toBe('data: 1\n\ndata: 2\n\n');
+    const proxy = await through(target, options);
+    virtualTime();
+    const out = http.request({ ...proxy, agent: false });
+    out.end();
+    const [res] = (await once(out, 'response')) as [http.IncomingMessage];
+    const [first] = (await once(res, 'data')) as [Buffer];
+    expect(first.toString()).toBe('data: 1\n\n');
+    const rest = bodyOf(res);
+    await vi.advanceTimersByTimeAsync(PAST_EVERY_LIMIT);
+    quiet.resolve();
+    expect(await rest).toBe('data: 2\n\n');
   });
 
   it('passes a request that expects a 100 Continue', async () => {
@@ -1007,10 +1030,14 @@ describe('upgrades', () => {
     await closed;
   });
 
-  it('keeps a quiet WebSocket open', async () => {
-    const { open } = await webSockets();
+  it.each([
+    ['passed on at once', {}],
+    ['held until the target took it', { holdMs: HOLD_MS }],
+  ])('keeps a quiet WebSocket open past every limit of its own, %s', async (_, options) => {
+    const { open } = await webSockets(options);
+    virtualTime();
     const { client, atTarget } = await open();
-    await sleep(3000);
+    await vi.advanceTimersByTimeAsync(PAST_EVERY_LIMIT);
     const up = once(atTarget, 'message');
     client.send('still here');
     expect(String((await up)[0])).toBe('still here');
