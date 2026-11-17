@@ -35,4 +35,3 @@ Measured in PGlite on the shared review machine (load 8 to 22), each task row ab
 | 100 000 | 9.1 s | 10.0 s | 8.9 to 11.3 s |
 
 A merge of a copy with 1 000 changed rows took 4.3 to 6.6 s at 10 000 rows and 5.3 to 11.6 s at 100 000 rows, with and without fingerprints; the differences are within the noise of that machine. Real PostgreSQL was not measured.
-
