@@ -558,8 +558,8 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 
 /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, jobId));
-  if (!job || job.job.status !== 'running') return;
+  const job = await requestCancellation(ctx, jobId);
+  if (!job) return;
   const node = identityOf(job.sub, job.job.nodeId);
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db
@@ -570,6 +570,14 @@ export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   if (!ended) return;
   await publishWorking(ctx, job.job.companyId);
   await afterJob(ctx, jobId);
+}
+
+/* Keep Stop before contacting the node: a delayed stream or completion must not undo the person's request. */
+async function requestCancellation(ctx: Ctx, jobId: string) {
+  const [job] = await ctx.db.update(jobs).set({ error: 'cancelled' }).where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'))).returning();
+  if (!job) return null;
+  const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
+  return sub ? { job, sub } : null;
 }
 
 /* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of

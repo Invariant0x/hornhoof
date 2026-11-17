@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -152,9 +152,28 @@ export function deliverLive(
 ): Promise<string | null> {
   return withInputLock(ctx, agentId, async () => {
     const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
-    if (into) await keep(into, tx => inputKept(tx, into));
-    return into;
+    return into ? keepLiveInput(into, keep) : null;
   });
+}
+
+class TurnStopped extends Error {}
+
+/* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
+async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
+  const [job] = await tx.select({ id: jobs.id }).from(jobs)
+    .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('update');
+  if (!job) throw new TurnStopped();
+  await inputKept(tx, jobId);
+}
+
+async function keepLiveInput(jobId: string, keep: (jobId: string, kept: WithEvent) => Promise<void>): Promise<string | null> {
+  try {
+    await keep(jobId, tx => liveInputKept(tx, jobId));
+    return jobId;
+  } catch (error) {
+    if (error instanceof TurnStopped) return null;
+    throw error;
+  }
 }
 
 /* What is kept with a message, and the end of its turn's wait for it. */

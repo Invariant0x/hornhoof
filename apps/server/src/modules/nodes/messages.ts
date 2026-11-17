@@ -9,7 +9,7 @@ import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
-import { appendEvent, publishWorking } from '../events/store.js';
+import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
@@ -18,6 +18,8 @@ import { BUILTIN_NAME, interruptionOf } from './restarts.js';
 import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
+
+const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value} end`;
 
 /* A node may only touch the jobs sent to it; the built-in node those of API keys. */
 function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
@@ -41,7 +43,7 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
   const failed = await ctx.db
     .update(jobs)
-    .set({ status: 'failed', error, finishedAt: new Date(), ...cutOf(cut) })
+    .set({ status: 'failed', error: completionValue(error, 'cancelled'), result: completionValue(jobs.result, 'Stopped.'), finishedAt: new Date(), ...cutOf(cut) })
     .where(and(...conditions))
     .returning({ id: jobs.id, companyId: jobs.companyId });
   for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
@@ -181,12 +183,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await partDone(ctx, id, msg);
       return;
     case 'job.event': {
-      const [job] = await db
-        .select({ companyId: jobs.companyId, agentId: jobs.agentId })
-        .from(jobs)
-        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), jobsOf(id, ctx)));
-      if (!job?.agentId) return;
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: msg.jobId, kind: msg.event.kind, data: msg.event });
+      await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx));
       return;
     }
     case 'job.started':
@@ -199,10 +196,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       const finished = await db
         .update(jobs)
         .set({
-          status: msg.ok ? 'done' : 'failed',
-          result: msg.result,
+          status: completionValue(msg.ok ? 'done' : 'failed', 'failed'),
+          result: completionValue(msg.result, 'Stopped.'),
           tail: lastBytes(msg.tail),
-          error: msg.error,
+          error: completionValue(msg.error, 'cancelled'),
           ...exitOf(msg.exit),
           sessionId: msg.sessionId,
           finishedAt: now,
