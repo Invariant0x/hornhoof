@@ -111,14 +111,14 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen[1]).toMatchObject({ url: '/api/attachments', auth: 'Bearer tok-turn-2', body: 'png' });
   });
 
-  it("hands on a task's files both ways, with their names and up to 50 MB, and nothing else under the picture address", async () => {
+  it("hands on a task's files both ways, with their names and of any size, and nothing else under the picture address", async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});
     await bridge.start();
     closers.push(() => bridge.stop(), () => up.server.close());
     const a = bridge.agent('agent-1');
     bridge.setToken('agent-1', 'tok-turn-1');
-    const big = Buffer.alloc(20 * 1024 * 1024, 7);
+    const big = Buffer.alloc(60 * 1024 * 1024, 7);
     expect((await fetch(`${a.attachUrl}?task=12&name=build.tar.gz`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: big })).status).toBe(200);
     expect(up.seen[0]).toMatchObject({ method: 'POST', url: '/api/attachments?task=12&name=build.tar.gz', auth: 'Bearer tok-turn-1' });
     expect(up.seen[0]!.body.length).toBe(big.length);

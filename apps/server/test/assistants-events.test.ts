@@ -1,11 +1,15 @@
 import { createHmac } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { agents, assistantEvents, companies, departments, people, requests } from '../src/db/schema.js';
 import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
 import { cardPrincipal } from '../src/modules/conversation/decision-context.js';
+import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
 
@@ -105,13 +109,39 @@ describe("an assistant's events", () => {
     await until(async () => (await eventsOf(c, ava.key)).some(e => e.kind === 'reply_end'));
     const agent = { id: c.orchestrator.id, name: c.orchestrator.name, kind: 'orchestrator' };
     expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([
-      ['reply', { messageId: sent.id, agent, byOwnAgent: false, text: '', files: [{ id: file.id, name: 'Report May.pdf' }] }],
+      ['reply', { messageId: sent.id, agent, byOwnAgent: false, text: '', files: [{ id: file.id, name: 'Report May.pdf', url: expect.stringMatching(`^${c.app.ctx.config.publicUrl}/api/files/`) }] }],
       ['reply', { messageId: sent.id, agent, byOwnAgent: false, text: 'Here is the report.' }],
       ['reply_end', { messageId: sent.id, agent, byOwnAgent: false, answered: true, failed: false }],
     ]);
     const got = await c.app.inject({ url: `/api/assistant/attachments/${file.id}`, ...bearer(ava.key) });
     expect(got.statusCode).toBe(200);
     expect(got.rawPayload.equals(bytes)).toBe(true);
+    /* The link opens on the owner's phone, with no key. */
+    const linked = (await eventsOf(c, ava.key))[0]!.data as { files: { url: string }[] };
+    const opened = await c.app.inject({ url: new URL(linked.files[0]!.url).pathname });
+    expect(opened.statusCode).toBe(200);
+    expect(opened.rawPayload.equals(bytes)).toBe(true);
+  });
+
+  it('mark a file over 50 MB as big, and its link downloads it from the disk of the machine that took it', async () => {
+    const c = await company();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    const ava = await assistantOf(c, c.owner.id);
+    await write(c, ava.key, c.orchestrator.id, 'Send me the archive.');
+    const run = await nextOf(c.builtin, 'job.run');
+    c.builtin.send({ type: 'job.started', jobId: run.jobId });
+    const bytes = Buffer.alloc(FILE_BYTES + 1, 4);
+    const attached = await c.app.inject({ method: 'POST', url: '/api/attachments?chat=1&name=archive.zip', headers: { authorization: `Bearer ${run.toolToken}`, 'content-type': 'application/octet-stream' }, payload: bytes });
+    expect(attached.statusCode).toBe(201);
+    c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(async () => (await eventsOf(c, ava.key)).some(e => e.kind === 'reply_end'));
+    const reply = (await eventsOf(c, ava.key))[0]!.data as { files: { id: string; name: string; url: string; big?: true }[] };
+    expect(reply.files).toEqual([{ id: attached.json().id, name: 'archive.zip', url: expect.any(String), big: true }]);
+    const opened = await c.app.inject({ url: new URL(reply.files[0]!.url).pathname });
+    expect(opened.headers['content-length']).toBe(String(FILE_BYTES + 1));
+    expect(opened.rawPayload.equals(bytes)).toBe(true);
   });
 
   it('end with a failed turn as failed, and a long poll that hears nothing ends empty', async () => {

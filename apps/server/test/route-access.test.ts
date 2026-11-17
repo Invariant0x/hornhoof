@@ -39,6 +39,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'programFor', path: /^\/api\/agents\/:id\/terminal$/, rule: 'human session and the plan the program really runs on' },
   { name: 'jobOf', path: /^(?:\/mcp|\/api\/attachments(?:\/file)?|\/api\/outbound\/messages(?:\/:id)?)$/, rule: 'agent job token' },
   { name: 'openEventReceipts', path: /^\/api\/outbound\/accounts\/:id\/events$/, rule: 'body signed with the key of that account, which records what became of its messages and does nothing else' },
+  { name: 'fileByLink', path: /^\/api\/files\/\*$/, rule: 'signed link to one file, for 7 days after it was made, which downloads that file and does nothing else' },
   { name: 'openUnsubscribe', path: /^\/api\/outbound\/unsubscribe\/\*$/, rule: 'signed stop link, which opts out and does nothing else' },
   { name: 'setupOnly', path: /^\/api\/setup(?:\/names\/:name)?$/, rule: 'first setup code' },
   { name: 'withCode', path: /^\/api\/recovery(?:\/restore)?$/, rule: 'first setup code, on a server with no company yet' },

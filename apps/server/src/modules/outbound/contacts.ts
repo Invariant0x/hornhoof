@@ -1,9 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Checker } from '../../checker.js';
 import { encryptSecret } from '../../crypto/secrets.js';
+import { signedBody, signedToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { outboundChannels, outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -101,33 +101,13 @@ export async function suppressContact(ctx: Pick<Ctx, 'db'>, at: { companyId: str
 export type UnsubscribeTarget = { companyId: string; contactId: string; channelId: string; purpose: string };
 const TokenBody = z.strictObject({ c: z.uuid(), k: z.uuid(), h: z.uuid(), p: z.string().min(1) });
 
-/* Its own key, so that no other signature of this server is ever one of these. */
-const macOf = (secret: Buffer, payload: string): Buffer => createHmac('sha256', secret).update(`hornhoof outbound unsubscribe v1\n${payload}`).digest();
+/* Its own purpose, so that no other signature of this server is ever one of these. */
+const UNSUBSCRIBE = 'hornhoof outbound unsubscribe v1';
 
-export function unsubscribeToken(secret: Buffer, t: UnsubscribeTarget): string {
-  const payload = Buffer.from(JSON.stringify({ c: t.companyId, k: t.contactId, h: t.channelId, p: t.purpose })).toString('base64url');
-  return `${payload}.${macOf(secret, payload).toString('base64url')}`;
-}
-
-const parseBody = (payload: string) => {
-  try {
-    return TokenBody.safeParse(JSON.parse(Buffer.from(payload, 'base64url').toString()));
-  } catch {
-    return { success: false as const };
-  }
-};
-
-const signedBy = (secret: Buffer, payload: string, mac: string): boolean => {
-  const want = macOf(secret, payload);
-  const got = Buffer.from(mac, 'base64url');
-  return got.length === want.length && timingSafeEqual(got, want);
-};
+export const unsubscribeToken = (secret: Buffer, t: UnsubscribeTarget): string => signedToken(secret, UNSUBSCRIBE, { c: t.companyId, k: t.contactId, h: t.channelId, p: t.purpose });
 
 export function readUnsubscribeToken(secret: Buffer, token: string): UnsubscribeTarget | null {
-  const [payload, mac, ...rest] = token.split('.');
-  if (!payload || !mac || rest.length) return null;
-  if (!signedBy(secret, payload, mac)) return null;
-  const body = parseBody(payload);
+  const body = TokenBody.safeParse(signedBody(secret, UNSUBSCRIBE, token));
   return body.success ? { companyId: body.data.c, contactId: body.data.k, channelId: body.data.h, purpose: body.data.p } : null;
 }
 
