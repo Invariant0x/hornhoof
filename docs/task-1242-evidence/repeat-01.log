@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/web
+
+ ✓ test/Inbox.test.tsx (15 tests) 614ms
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  10:08:02
+   Duration  1.51s (tests 43%, environment 26%, transform 17%, setup 13%, import 1%)
+
