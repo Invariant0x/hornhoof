@@ -67,13 +67,13 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
   if (!verdict.allow) throw new Error(refusalText(verdict));
 }
 
-/* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
 /* A command that runs in the agent's own shell: the slot stays its own until the shell lets the request go. */
 const held = (res: ServerResponse) => (signal: AbortSignal) => new Promise<boolean>(resolve => {
   send(res, { type: 'slot', lease: currentCheckLease() });
   signal.addEventListener('abort', () => resolve(true), { once: true });
 });
 
+/* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
   const run = input.wait ? held(res) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
