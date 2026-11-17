@@ -15,7 +15,10 @@ const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: 
 type Store = z.infer<typeof Store>;
 type Delivery = z.infer<typeof Delivery>;
 type Instance = z.infer<typeof Instance>;
-type Options = { file: string; send(fact: OperatorEvidence): boolean; connected(): boolean; now?(): number; look?(identity: OperatorIdentity): Promise<OperatorCheck> };
+/* What a look at the program saw: what goes with the alarm, and whether the program is inside a tool call with Hornhoof's
+   words gone in, so that it records them once the call ends. */
+export type ProgramLook = OperatorCheck & { inToolCall?: boolean };
+type Options = { file: string; send(fact: OperatorEvidence): boolean; connected(): boolean; now?(): number; look?(identity: OperatorIdentity): Promise<ProgramLook> };
 type Exit = { code: number | null; signal: string | null };
 type ExitCause = 'cancelled' | 'update' | 'restart' | 'offline' | 'completed';
 type EvidenceInput<T = OperatorEvidence> = T extends OperatorEvidence ? Omit<T, 'evidenceId' | 'ordinal'> : never;
@@ -179,15 +182,19 @@ export class OperatorObserver {
     if (delivery.alarms.includes('assignment_unrecorded') || this.looking.has(delivery.id)) return;
     this.looking.add(delivery.id);
     void this.options.look(this.identity(delivery))
-      .catch((): OperatorCheck => ({ input: 'unknown', screen: null }))
-      .then(check => this.transition(() => this.alarmLooked(delivery.id, check)))
+      .catch((): ProgramLook => ({ input: 'unknown', screen: null }))
+      .then(look => this.transition(() => this.alarmLooked(delivery.id, look)))
       .catch(() => {})
       .finally(() => this.looking.delete(delivery.id));
   }
 
-  private alarmLooked(id: string, check: OperatorCheck): void {
+  /* A program inside a tool call records the words it was given once the call ends: it is looked at again a minute later. */
+  private alarmLooked(id: string, look: ProgramLook): void {
     const delivery = this.state.deliveries[id];
-    if (delivery && !this.deliveryInactive(delivery) && delivery.receiptAt === null) this.alarm(delivery, 'assignment_unrecorded', check);
+    if (!delivery || this.deliveryInactive(delivery) || delivery.receiptAt !== null) return;
+    if (!look.inToolCall) return this.alarm(delivery, 'assignment_unrecorded', { input: look.input, screen: look.screen });
+    delivery.checkAfter = this.now() + ASSIGNMENT_RECEIPT_MS;
+    this.save();
   }
 
   private deferForCheck(delivery: Delivery): boolean {

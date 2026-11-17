@@ -1,5 +1,5 @@
 {
-  "id": "7eccbf85-5d5f-4b14-b90e-b300418bb32c",
+  "id": "b81e91f7-8901-425e-8d93-e29edcba96c9",
   "prevId": "2dfb522a-e5be-4fc5-88d5-d7da785ef99d",
   "version": "7",
   "dialect": "postgresql",
@@ -224,6 +224,34 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_message_sender_window": {
+          "name": "agent_events_message_sender_window",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(\"data\"->>'by')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" = 'message'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -13672,117 +13700,6 @@
         "requests_approval_commit": {
           "name": "requests_approval_commit",
           "value": "\"requests\".\"kind\" <> 'approval' OR \"requests\".\"commit\" IS NOT NULL OR \"requests\".\"approval_channel\" IS NOT NULL"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.secret_redactions": {
-      "name": "secret_redactions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "characters": {
-          "name": "characters",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "window_hash": {
-          "name": "window_hash",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "person_id": {
-          "name": "person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "secret_redactions_fingerprint": {
-          "name": "secret_redactions_fingerprint",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "fingerprint",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "secret_redactions_company_id_companies_id_fk": {
-          "name": "secret_redactions_company_id_companies_id_fk",
-          "tableFrom": "secret_redactions",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "secret_redactions_person_id_people_id_fk": {
-          "name": "secret_redactions_person_id_people_id_fk",
-          "tableFrom": "secret_redactions",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "secret_redactions_length": {
-          "name": "secret_redactions_length",
-          "value": "\"secret_redactions\".\"characters\" > 0"
         }
       },
       "isRLSEnabled": false

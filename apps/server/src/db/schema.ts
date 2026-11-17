@@ -923,6 +923,7 @@ export const agentEvents = pgTable(
   },
   t => [
     index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
+    index('agent_events_message_sender_window').on(t.companyId, sql`(${t.data}->>'by')`, t.createdAt).where(sql`${t.kind} = 'message'`),
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
