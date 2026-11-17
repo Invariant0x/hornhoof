@@ -1,6 +1,6 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
-import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
+import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
@@ -9,6 +9,7 @@ import { producedCandidate, currentCandidate, currentHanded, requireRepairHistor
 import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
+import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
 import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
@@ -80,7 +81,7 @@ function stillOpen(task: Task): void {
 
 /* Work under a task that is still open: a task is done only once all of it is. */
 async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
-  const open = await db.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
+  const open = await db.select(only(tasks, 'number')).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
 }
 
@@ -139,7 +140,7 @@ async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<voi
   let level = ids;
   while (level.length) {
     if (level.includes(task.id)) throw refuse(400, 'task_invalid', `#${task.number} would wait for itself through what it comes after.`);
-    const rows = await db.select({ after: tasks.after }).from(tasks).where(inArray(tasks.id, level));
+    const rows = await db.select(only(tasks, 'after')).from(tasks).where(inArray(tasks.id, level));
     level = rows.flatMap(r => r.after).filter(id => !seen.has(id) && Boolean(seen.add(id)));
   }
 }
@@ -188,7 +189,7 @@ async function startAfter(tx: Tx, done: Task, actor: Actor): Promise<{ wakes: Wa
     await endAfter(tx, t, done, actor);
     if ((await openAfter(tx, t)).length) continue;
     const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
-    const before = await tx.select({ number: tasks.number }).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
+    const before = await tx.select(only(tasks, 'number')).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
     await tx.insert(taskEvents).values({ companyId: t.companyId, taskId: t.id, kind: 'started', text: `${listed(before)} ${before.length === 1 ? 'is' : 'are'} done, so it starts now.` });
     /* One that waits for a person's answer goes on with the answer. */
     if (row!.assigneeAgentId && ['open', 'working'].includes(row!.status)) wakes.push({ agentId: row!.assigneeAgentId, taskId: row!.id, why: 'assigned' });
@@ -336,8 +337,6 @@ export type NewTask = {
   productId?: string | null;
   parentId?: string | null;
   assigneeAgentId: string;
-  /* Optional distinct employee who prepares the Architecture plan before Development starts with assigneeAgentId. */
-  architectAgentId?: string;
   /* Executable work starts with this employee; coordination has no code producer. */
   executor?: boolean;
   reviewerAgentId?: string;
@@ -416,26 +415,13 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
 function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, declaration: IndependentDeclaration | null): Promise<void> {
   const urgent = parent ? parent.urgent : input.urgent === true;
   const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
-  const holders = [input.assigneeAgentId, ...(input.architectAgentId ? [input.architectAgentId] : []), ...part];
-  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, holders);
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, [input.assigneeAgentId, ...part]);
 }
 
-type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; architect: Awaited<ReturnType<typeof workingAgent>> | null; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
 
 function checkNewTaskFields(input: NewTask): void {
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
-}
-
-function inNewTaskScope(agent: typeof agents.$inferSelect, input: NewTask): boolean {
-  return agent.departmentId === input.departmentId && (!agent.productId || agent.productId === input.productId);
-}
-
-async function resolveArchitect(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask, plan: StageRoute): Promise<typeof agents.$inferSelect | null> {
-  if (!input.architectAgentId) return null;
-  const architect = await workingAgent(ctx.db, assignee.companyId, input.architectAgentId);
-  if (!inNewTaskScope(architect, input)) throw refuse(400, 'task_invalid', 'Architecture needs an employee in the task scope.');
-  const separate = architect.id !== assignee.id && !input.small && input.resultKind !== 'coordination' && plan.stages.some(step => step.stage === 'architecture');
-  return separate && (await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: assignee.id })) ? architect : null;
 }
 
 async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<NewTaskSetup> {
@@ -446,12 +432,10 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
-  const plan = await departmentStages(ctx, input.departmentId);
-  const architect = await resolveArchitect(ctx, assignee, input, plan);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  return { assignee, architect, parent, declaration, plan };
+  return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId) };
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -462,9 +446,12 @@ async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, inpu
 }
 
 async function requireNewReviewer(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask): Promise<void> {
-  if (!input.reviewerAgentId) return;
-  const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
-  if (reviewer.id === assignee.id || !inNewTaskScope(reviewer, input)) throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
+  if (input.reviewerAgentId) {
+    const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
+    if (reviewer.id === assignee.id || reviewer.departmentId !== input.departmentId || (reviewer.productId && reviewer.productId !== input.productId)) {
+      throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
+    }
+  }
 }
 
 async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
@@ -484,8 +471,7 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
-  const initialOwner = architect ?? assignee;
+function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
   return {
         companyId: assignee.companyId,
         number: position.number,
@@ -495,7 +481,7 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, pare
         title: input.title.trim(),
         brief: input.brief.trim(),
         body: input.body,
-        assigneeAgentId: initialOwner.id,
+        assigneeAgentId: assignee.id,
         executorAgentId: input.executor ? assignee.id : null,
         after: input.after ?? [],
         workKind: input.workKind,
@@ -537,7 +523,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .returning();
   const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
-    assignee: row!.assigneeAgentId,
+    assignee: assignee.id,
     after: row!.after,
     ...independentData(declaration),
     ...skippedData(skipped),
@@ -549,7 +535,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     wakes.push(made.wake);
   }
   /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-  if (!waits) wakes.push({ agentId: row!.assigneeAgentId!, taskId: row!.id, why: 'assigned' });
+  if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
   recordCause(wakes, { kind: 'created', actor }, event.id, row!);
   await keepWakes(tx, row!.companyId, wakes);
   return { task: row!, wakes, independent };
@@ -625,23 +611,22 @@ function requireSubmissionStage(task: Task, route: Route): void {
 /* The commit as it is handed in: read from the repository, inside the paths the head approved, and on top of what the
    stage received. */
 async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route, r: Submission) {
-  const prior = route.state.candidateId ? await currentCandidate(ctx.db, task, route) : null;
-  const checkerStage = route.state.stage !== 'development';
-  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, prior?.branch);
+  const input = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, input?.branch);
   const producer = await producerIdentity(ctx.db, task, agentId);
-  if (prior && checkerStage) await checkingIdentity(ctx, task, route, prior);
-  const candidate = producedCandidate(route, producer, review, prior ? new Set(prior.paths) : undefined);
-  if (prior) await requireRepairHistory(ctx, task, prior, candidate);
-  return { input: checkerStage ? prior : null, candidate, review };
+  if (input) await checkingIdentity(ctx, task, route, input);
+  const candidate = producedCandidate(route, producer, review);
+  if (input) await requireRepairHistory(ctx, task, input, candidate);
+  return { input, candidate, review };
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
-  if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
+  if (route.state.stage === 'tests') return takeMainAtTests(ctx, agentId, task, route, r, operation);
   const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
-  const next = await forwardHandoff(ctx, task, route, candidate, review ?? undefined);
+  const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
@@ -655,7 +640,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   return { task: row, wakes: next.wakes };
 }
 
-type Verdict = ReviewVerdict & { comment: string; evidence?: object[] };
+type Verdict = ReviewVerdict & { comment: string };
 
 /* One current checker owns both its verdict and its fixes. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
@@ -1053,7 +1038,7 @@ async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Pr
 /* Whoever gave the task out: the agent that made it, or the orchestrator, who runs every task. */
 async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
   if (task.createdByAgentId === agentId) return true;
-  const [agent] = await db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, agentId));
   return agent?.kind === 'orchestrator';
 }
 
@@ -1409,7 +1394,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
        is now, not as it was read before: one closed meanwhile stays closed. */
-    const [current] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    const [current] = await tx.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, task.id)).for('update');
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
@@ -1487,7 +1472,7 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
   const [job] = await ctx.db.select({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId) return;
   /* One that still waits for what it comes after is not at work, whatever turn went out on it. */
-  const [task] = await ctx.db.select({ after: tasks.after }).from(tasks).where(eq(tasks.id, job.taskId));
+  const [task] = await ctx.db.select(only(tasks, 'after')).from(tasks).where(eq(tasks.id, job.taskId));
   if (!task || (await openAfter(ctx.db, task)).length) return;
   const [row] = await ctx.db
     .update(tasks)

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { taskEvents } from '../src/db/schema.js';
 import { report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks, testsFixture } from './development-echelons-verification.js';
+import { testsFixture, verified } from './development-echelons-verification.js';
 
 const TEST_FIX = 'c'.repeat(40);
 const SRC_FIX = 'd'.repeat(40);
@@ -67,10 +67,8 @@ describe('test-only repair and src/** return at Tests without task cancellation'
       producedBy: { stage: 'tests', agentId: f.tester.id },
     });
 
-    const checks = await candidateChecks(f, afterRepair, TEST_FIX, BASE);
-    const run = await checks.run();
-    const verified = await report(f.ctx, f.tester.id, f.task.id, checks.verified([run.id]));
-    expect(verified.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    const checked = await report(f.ctx, f.tester.id, f.task.id, verified(afterRepair));
+    expect(checked.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
     expect((await f.detail()).echelons).toMatchObject({ phase: 'ready', candidateId: afterRepair.candidateId });
   });
 
@@ -162,10 +160,8 @@ describe('test-only repair and src/** return at Tests without task cancellation'
     await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Fix matches delta.', reviewedCommit: SRC_FIX });
     const finalRoute = (await f.detail()).echelons;
     expect(finalRoute).toMatchObject({ stage: 'tests', phase: 'active', candidateId: candidates[2]!.id });
-    const checks = await candidateChecks(f, finalRoute, SRC_FIX, BASE);
-    const passedRun = await checks.run();
-    const verified = await report(f.ctx, f.tester.id, f.task.id, checks.verified([passedRun.id]));
-    expect(verified.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    const checked = await report(f.ctx, f.tester.id, f.task.id, verified(finalRoute));
+    expect(checked.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
     expect((await f.detail()).echelons.phase).toBe('ready');
   });
 });

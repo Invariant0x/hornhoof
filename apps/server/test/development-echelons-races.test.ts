@@ -69,9 +69,8 @@ describe('one current assignment under retries and identity changes', () => {
   });
   it('refuses a Tests certification whose tester model changes before the report commits', async () => {
     const f = await testsFixture();
-    const run = await f.run();
     const changed = changeModelBeforeCommit(f, f.tester.id);
-    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified()).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect(changed.done).toBe(true);
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active' });
   });

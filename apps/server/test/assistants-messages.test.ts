@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, requests, taskEvents } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, people, requests, taskEvents } from '../src/db/schema.js';
+import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
 
@@ -38,6 +40,17 @@ async function assistantOf(c: Company, session: string, ownerId: string, name = 
 const write = (c: Company, key: string, agentId: string, text: string) =>
   c.app.inject({ method: 'POST', url: '/api/assistant/messages', headers: { authorization: `Bearer ${key}` }, payload: { agentId, text } });
 
+/* What a program sends: a file's bytes under the type it has for it, for the agent it writes to, in its owner's language. */
+const upload = (c: Company, key: string, file: { name: string; type: string; bytes: Buffer }, agentId?: string, lang?: string) =>
+  c.app.inject({
+    method: 'POST',
+    url: `/api/assistant/files?${new URLSearchParams({ name: file.name, ...(agentId ? { agentId } : {}) })}`,
+    headers: { authorization: `Bearer ${key}`, 'content-type': file.type, ...(lang ? { 'accept-language': lang } : {}) },
+    payload: file.bytes,
+  });
+const writeWith = (c: Company, key: string, payload: Record<string, unknown>, lang?: string) =>
+  c.app.inject({ method: 'POST', url: '/api/assistant/messages', headers: { authorization: `Bearer ${key}`, ...(lang ? { 'accept-language': lang } : {}) }, payload });
+
 describe("an assistant's message", () => {
   it("reaches the orchestrator as the CEO's own words, marked as the assistant's, with administration left to the CEO", async () => {
     const c = await company();
@@ -49,7 +62,8 @@ describe("an assistant's message", () => {
     expect(run.prompt).toContain('From Ivan (CEO) through the assistant Ava to Orchestrator:');
     expect(run.prompt).toContain('Plan the launch for next week.');
     expect(run.prompt).toContain("Ava is the personal assistant of Ivan and wrote this for Ivan, at their request. Ivan is the company's owner (the CEO).");
-    expect(run.prompt).toContain("Take these words as Ivan's own. Your answer in this window goes back to Ava as plain text");
+    expect(run.prompt).toContain("Take these words as Ivan's own. Your answer in this window goes back to Ava for Ivan to read: write it as one person to another, in the language of these words");
+    expect(run.prompt).toContain('To give Ivan a file, attach it with hh-attach --chat FILE: it goes with your answer.');
     expect(run.prompt).not.toContain('except for administration');
     expect(run.prompt).not.toContain('hiring or removing employees');
     const events = (await c.app.inject({ url: '/api/agents/orchestrator/events', ...as(c.ceo) })).json().events;
@@ -90,5 +104,75 @@ describe("an assistant's message", () => {
     const refused = await write(c, ava.key, c.head.id, 'Hello?');
     expect(refused.statusCode).toBe(409);
     expect(refused.json().error.reason).toBe('agent_not_ready');
+  });
+});
+
+describe('files an assistant sends', () => {
+  /* Files a phone gives: a photo, an archive and a video, each a type Hornhoof lists nowhere. */
+  const FILES = [
+    { name: 'IMG_0042.heic', type: 'image/heic', bytes: Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.from([0xff, 0x00, 0x80])]) },
+    { name: 'Site.zip', type: 'application/zip', bytes: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0xff, 0xfe]) },
+    { name: 'Clip.mov', type: 'video/quicktime', bytes: Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from('ftypqt  '), Buffer.from([0x0d, 0x0a, 0x00])]) },
+  ];
+
+  it('lands a .heic, a .zip and a .mov with the message where it was sent, for the agent to open with their exact bytes', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    const kept: { id: string; name: string }[] = [];
+    for (const file of FILES) {
+      const got = await upload(c, ava.key, file, c.head.id);
+      expect(got.statusCode).toBe(201);
+      expect(got.json()).toEqual({ file: { id: expect.stringMatching(/^[0-9a-f-]{36}$/), name: file.name } });
+      kept.push(got.json().file);
+    }
+    const sent = await writeWith(c, ava.key, { agentId: c.head.id, text: 'Photos and the cut for the launch.', files: kept.map(f => f.id) });
+    expect(sent.statusCode).toBe(202);
+    const run = await nextOf(c.builtin, 'job.run');
+    expect(run.prompt).toContain('Photos and the cut for the launch.');
+    for (const file of kept) expect(run.prompt).toContain(`${file.name}: hh-fetch message ${file.id}`);
+    const events = (await c.app.inject({ url: `/api/agents/${c.head.id}/events`, ...as(c.ceo) })).json().events;
+    expect(events.find((e: { kind: string }) => e.kind === 'message')).toMatchObject({
+      data: { text: 'Photos and the cut for the launch.', pictures: kept.map(f => ({ ...f, file: true })) },
+      message: { channel: 'assistant', assistant: { id: ava.id } },
+    });
+    for (const [i, file] of kept.entries()) {
+      const fetched = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file.id}`, headers: { authorization: `Bearer ${run.toolToken}` } });
+      expect(fetched.statusCode).toBe(200);
+      expect(fetched.rawPayload.equals(FILES[i]!.bytes)).toBe(true);
+      expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).rawPayload.equals(FILES[i]!.bytes)).toBe(true);
+    }
+  });
+
+  it('sends a file with no words, which the agent reads by its name', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    const file = (await upload(c, ava.key, FILES[2]!, c.orchestrator.id)).json().file;
+    expect((await writeWith(c, ava.key, { agentId: c.orchestrator.id, files: [file.id] })).statusCode).toBe(202);
+    const run = await nextOf(c.builtin, 'job.run');
+    expect(run.prompt).toContain(`Clip.mov: hh-fetch message ${file.id}`);
+    expect((await writeWith(c, ava.key, { agentId: c.orchestrator.id })).statusCode).toBe(400);
+  });
+
+  it("says in its owner's words why a file did not come, and keeps nothing of it", async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    const refused = async (got: Awaited<ReturnType<typeof upload>>, status: number, reason: string, words: string) => {
+      expect(got.statusCode).toBe(status);
+      expect(got.json().error).toMatchObject({ reason, message: words });
+    };
+    await refused(await upload(c, ava.key, { name: 'empty.heic', type: 'image/heic', bytes: Buffer.alloc(0) }, c.head.id, 'ru-RU,ru;q=0.9'), 400, 'file_empty',
+      'файл пустой.');
+    await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id, 'ru'), 413, 'file_too_big',
+      'файл больше 50 МБ.');
+    await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id), 413, 'file_too_big',
+      'the file is bigger than 50 MB.');
+    c.app.ctx.config.taskFilesBytes = 4;
+    await refused(await upload(c, ava.key, FILES[1]!, c.head.id, 'ru'), 413, 'attachment_invalid',
+      'в Hornhoof закончилось место для файлов компании.');
+    expect(await c.db.select().from(attachments)).toEqual([]);
+    await refused(await writeWith(c, ava.key, { agentId: c.head.id, text: 'See the file', files: [randomUUID()] }, 'ru'), 404, 'attachment_unknown',
+      'такого файла в Hornhoof нет, или вам его там не открыть.');
+    await refused(await upload(c, ava.key, FILES[0]!, randomUUID(), 'ru'), 404, 'agent_unknown',
+      'в Hornhoof нет такого сотрудника, или его убрали.');
   });
 });

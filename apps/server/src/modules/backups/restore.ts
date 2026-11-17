@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { and, eq, gt, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
@@ -164,7 +164,7 @@ export async function warningOf(db: Db, dumpedAt: Date): Promise<{ machines: { n
     .innerJoin(people, eq(people.id, machines.personId))
     .where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), gt(machines.createdAt, dumpedAt)))
     .orderBy(machines.createdAt);
-  const added = await db.select({ name: people.name }).from(people).where(gt(people.createdAt, dumpedAt)).orderBy(people.createdAt);
+  const added = await db.select(only(people, 'name')).from(people).where(gt(people.createdAt, dumpedAt)).orderBy(people.createdAt);
   return { machines: joined, people: added.map(person => person.name) };
 }
 
@@ -204,7 +204,7 @@ export class Restores {
   private async opens(row: BackupRow): Promise<boolean> {
     const { db, config } = this.ctx;
     if (!config.machineId) return false;
-    const [mine] = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(eq(machines.networkId, config.machineId), isNull(machines.revokedAt)));
+    const [mine] = await db.select(only(machines, 'ageKey')).from(machines).where(and(eq(machines.networkId, config.machineId), isNull(machines.revokedAt)));
     return Boolean(mine?.ageKey && row.recipients.includes(mine.ageKey));
   }
 

@@ -6,10 +6,10 @@ import { loadTask, submit } from '../src/modules/tasks/engine.js';
 import { listen, mcp } from './helpers.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
-async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author, taskId = f.task.id) {
+async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author) {
   if (!f.app.server.listening) await listen(f.app);
   const token = `echelon-tools-${actor.id}-0123456789abcdef`;
-  await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId, kind: 'conversation', prompt: 'Use the assigned stage', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
+  await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Use the assigned stage', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
   const api = await mcp(f.app, token);
   return { call: (name: string, args: Record<string, unknown>) => api.callTool({ name, arguments: args }) as Promise<{ isError?: boolean; content: { text: string }[] }> }; 
 }
@@ -17,12 +17,10 @@ async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author, 
 describe('the echelon public tools', () => {
   it('lets the assigned worker hand Architecture forward through report', async () => {
     const f = await fixture({ small: false });
-    const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
-    const { task } = await f.create({ small: false, architectAgentId: architect.id, assigneeAgentId: f.author.id });
-    const tools = await client(f, architect, task.id);
-    const result = await tools.call('report', { task: task.number, done: true, summary: 'Change logic/totals.ts and prove the boundary.' });
+    const tools = await client(f);
+    const result = await tools.call('report', { task: f.task.number, done: true, summary: 'Change logic/totals.ts and prove the boundary.' });
     expect(result.isError).not.toBe(true);
-    expect((await f.detail(task.id)).echelons.stage).toBe('development');
+    expect((await f.detail()).echelons.stage).toBe('development');
   });
   it('carries the reviewer risk addition through verdict', async () => {
     const f = await fixture();

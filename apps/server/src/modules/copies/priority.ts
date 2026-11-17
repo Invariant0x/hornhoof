@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, publicLinks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { builtinMachine } from '../nodes/nodes.js';
 import { findThisMachine } from '../network/store.js';
@@ -37,7 +37,7 @@ export async function setPriority(ctx: Ctx, machineId: string, pin: Pin): Promis
     if (ready.has(row.id) && ready.size === 1) throw onlyCopy(row.hostname);
   }
   if (typeof pin === 'number') {
-    const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+    const [link] = await db.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
     const fit = { link: Boolean(link) };
     const all = await candidates(db, now);
     const mine = all.find(m => m.id === row.id);

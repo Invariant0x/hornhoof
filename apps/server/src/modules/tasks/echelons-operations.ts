@@ -3,9 +3,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { refuse, type Moved, type Task } from './engine.js';
 
-export type Submission = { summary: string; evidence: string; review?: { baseCommit: string; branch?: string; commit?: string; cherryPick?: { baseCommit: string; commit: string } }; operationId?: string };
+export type Submission = { summary: string; evidence: string; review?: { baseCommit: string; branch?: string; commit?: string }; operationId?: string };
 
 export function submissionOperation(input: Submission): { id: string; digest: string } | null {
   if (!input.operationId) return null;
@@ -16,7 +17,7 @@ export function submissionOperation(input: Submission): { id: string; digest: st
 
 export async function replayedSubmission(db: Ctx['db'], task: Task, agentId: string, operation: ReturnType<typeof submissionOperation>): Promise<Moved | null> {
   if (!operation) return null;
-  const [event] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId),
+  const [event] = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId),
     eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'operation'->>'id' = ${operation.id}`)).limit(1);
   if (!event) return null;
   const prior = event.data.operation as { digest?: unknown };

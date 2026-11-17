@@ -5,10 +5,10 @@ import type { RepoAddress } from '../testruns/refs.js';
 import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
-import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
+import { sameChecker } from './echelons-policy.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { move, refuse, type Moved, type Task } from './engine.js';
-import { captureReview, exactComparison, type Review } from './review-context.js';
+import { captureReview, exactComparison } from './review-context.js';
 
 /* Nothing goes back to an earlier stage. A candidate whose own change passed and that only needs the main line stays at
    Tests: its owner merges the main line into the candidate's branch, hands the merge in here and checks it again. */
@@ -51,36 +51,18 @@ async function requireMainTaken(ctx: Reader, task: Task, parent: EchelonCandidat
   if (beyond.length) throw refuse(409, 'task_invalid', `The merge changes what the main line did not bring: ${beyond.join(', ')}. Take in only the main line; a failed check of the candidate's own change is reported with done false.`);
 }
 
-export async function keepCandidateAtTests(
-  ctx: Reader,
-  agentId: string,
-  task: Task,
-  route: Route,
-  parent: EchelonCandidate,
-  identity: CheckerIdentity,
-  candidate: EchelonCandidate,
-  review: Review,
-  input: Submission,
-  operation: ReturnType<typeof submissionOperation>,
-  detail: Record<string, unknown>,
-): Promise<Moved> {
-  const row = await move(ctx, task, { silent: 0 }, {
-    kind: 'submitted', actor: { agentId }, text: input.summary,
-    data: { evidence: input.evidence, candidate, ...detail, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
-  }, async tx => {
-    if (!sameChecker(await heldCheckingIdentity(tx, task, route, parent), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.');
-    await changeRoute(tx, route, { ...route.state, candidateId: candidate.id });
-  });
-  return { task: row, wakes: [] };
-}
-
 export async function takeMainAtTests(ctx: Reader, agentId: string, task: Task, route: Route, input: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const parent = await currentCandidate(ctx.db, task, route);
   const identity = await checkingIdentity(ctx, task, route, parent);
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, input.review, parent.branch);
   const candidate = producedCandidate(route, identity, review);
   await requireMainTaken(ctx, task, parent, candidate);
-  return keepCandidateAtTests(ctx, agentId, task, route, parent, identity, candidate, review, input, operation, {
-    tookMain: { from: parent.baseCommit, to: candidate.baseCommit },
+  const row = await move(ctx, task, { silent: 0 }, {
+    kind: 'submitted', actor: { agentId }, text: input.summary,
+    data: { evidence: input.evidence, candidate, tookMain: { from: parent.baseCommit, to: candidate.baseCommit }, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
+  }, async tx => {
+    if (!sameChecker(await heldCheckingIdentity(tx, task, route, parent), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.');
+    await changeRoute(tx, route, { ...route.state, candidateId: candidate.id });
   });
+  return { task: row, wakes: [] };
 }

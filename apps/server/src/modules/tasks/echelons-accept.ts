@@ -7,9 +7,8 @@ import { idOnly } from '../../db/selections.js';
 import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
 import { NO_DEPARTMENT_CHECKER } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
-import { AUTHOR_CHECK_PASSED } from './echelons-handoff.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { testedEvidence } from './echelons-tests.js';
+import { requireTestsReport } from './echelons-tests.js';
 import { requireTaskHead } from './echelons-update.js';
 import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
@@ -22,11 +21,10 @@ export type AcceptanceInput = z.infer<typeof AcceptanceInput>;
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
 
 export function requiredStagesComplete(route: Route): boolean {
-  /* Review and Tests are never skipped where the route has them, unless nobody in the department can do them or green
-     author-check cleared intermediate Review, and Security not once it is required. */
-  const clearedReview = (step: Route['state']['stages'][number]) => step.stage === 'review' && step.reason === AUTHOR_CHECK_PASSED;
+  /* Review and Tests are never skipped where the route has them, unless nobody in the department can do them, and Security
+     not once it is required. */
   const mayBeSkipped = (step: Route['state']['stages'][number]) => !(step.stage === 'security' && route.state.security.required)
-    && (step.reason === NO_DEPARTMENT_CHECKER || clearedReview(step) || (step.stage !== 'review' && step.stage !== 'tests'));
+    && (step.reason === NO_DEPARTMENT_CHECKER || (step.stage !== 'review' && step.stage !== 'tests'));
   return route.state.stages.every(step => step.status === 'complete' || (step.status === 'skipped' && mayBeSkipped(step)));
 }
 
@@ -113,15 +111,15 @@ export async function acceptCandidate(ctx: Reader, task: Task, route: Route, age
   if (!input.success) throw refuse(400, 'task_invalid', 'Acceptance needs the candidate, route revision and exact integration commit.');
   requireReady(route, input.data);
   const candidate = await currentCandidate(ctx.db, task, route);
-  const evidence = await testedEvidence(ctx.db, task, route, candidate);
+  await requireTestsReport(ctx.db, task, route, candidate);
   const { turn, integration: { autoProof, ...integration } } = await observedIntegration(ctx, task, candidate, input.data);
   const wakes = giver(task, 'done', agentId, summary);
   const row = await move(ctx, task, { status: 'done', assigneeAgentId: null, closedAt: new Date(), silent: 0, ...(turn ? { turnId: turn.id } : {}) }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { done: true, acceptedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, evidence, integration } }, returned: true,
+    kind: 'report', actor: { agentId }, text: summary, data: { done: true, acceptedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, integration } }, returned: true,
   }, async tx => {
     if (turn) await requireSameTurn(tx, task, turn, candidate.commit);
     await requireTaskHead({ db: tx }, task, agentId);
-    await testedEvidence(tx, task, route, candidate);
+    await requireTestsReport(tx, task, route, candidate);
     if (!turn) await confirmMainApprovalInTx(tx, task, integration.commit, autoProof);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
   }, wakes);

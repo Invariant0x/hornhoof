@@ -13,8 +13,6 @@ describe('trusted repository comparison', () => {
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: true, baseSha: 'b'.repeat(40), headSha: sha, paths: ['src/view.ts'], diff: '+const title = "Saved";' });
     expect(fetcher.mock.calls[0][0]).toBe('https://api.github.com/repos/acme/shop/compare/main...turn-8?per_page=250');
     expect(fetcher.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { authorization: `Bearer ${repo.token}` } });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...fixture(), commits: [{ sha, commit: { message: 'Pick\n\n(cherry picked from commit ' + 'c'.repeat(40) + ')' } }] }))));
-    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: true, commits: [{ sha, parents: [], message: expect.stringContaining('cherry picked from commit') as unknown }] });
   });
 
   it.each(['https://gitlab.com/acme/shop', 'https://github.com.evil.test/acme/shop', 'https://user:password@github.com/acme/shop', 'not a URL'])('fails closed without requesting unsupported address %s', async url => {

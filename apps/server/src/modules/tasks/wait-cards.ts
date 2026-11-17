@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
 import { tasks, taskWaits, turns, waitNotices } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ownNote, taskSpot } from './engine.js';
 import { pageAfter, type WaitPlace } from './wait-views.js';
 
@@ -64,7 +65,7 @@ export async function acknowledgeCard(ctx: Pick<Ctx, 'db'>, personId: string, id
     const [card] = await tx.select().from(waitNotices).where(and(eq(waitNotices.id, id), eq(waitNotices.personId, personId), isNotNull(waitNotices.deliveredAt))).for('update');
     if (!card) return false;
     if (card.acknowledgedAt) return true;
-    const [wait] = card.waitId ? await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
+    const [wait] = card.waitId ? await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
     await tx.update(waitNotices).set({ acknowledgedAt: now, acknowledgedByPersonId: personId }).where(eq(waitNotices.id, id));
     const taskId = wait?.taskId ?? card.guard.turn?.taskId;
     if (taskId) await ownNote(tx, { id: taskId, companyId: card.companyId }, { kind: 'wait_card', text: 'A person said they saw their card about this task.', data: { notice: id, personId, acknowledged: true } });

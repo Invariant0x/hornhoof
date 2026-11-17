@@ -1,4 +1,4 @@
-import { isTestPath, pathInScope, RepoPath } from './review-schema.js';
+import { pathInScope } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { DocumentCandidate, EchelonCandidate, type HandedCandidate } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -12,17 +12,9 @@ import type { Route } from './echelons-store.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { exactComparison, type Review } from './review-context.js';
 
-export function isTestFilePath(path: string): boolean {
-  return RepoPath.safeParse(path).success && isTestPath(path);
-}
-
-function pathWithinScope(path: string, patterns: readonly string[], allowed?: ReadonlySet<string>): boolean {
-  return RepoPath.safeParse(path).success && (allowed?.has(path) === true || pathInScope(path, patterns));
-}
-
-export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review, allowedPaths?: ReadonlySet<string>): EchelonCandidate {
+export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review): EchelonCandidate {
   if (!review.commit || !review.branch || !review.source) throw refuse(409, 'task_invalid', 'A handoff needs the exact candidate commit, branch and base comparison.');
-  const inScope = review.source.paths.every(path => pathWithinScope(path, route.paths, allowedPaths));
+  const inScope = review.source.paths.every(path => pathInScope(path, route.paths));
   if (!inScope) throw refuse(403, 'task_not_yours', 'The candidate changes paths outside the head-approved scope. Ask the head to revise the scope.');
   return EchelonCandidate.parse({ id: randomUUID(), parentId: route.state.candidateId, revision: route.revision + 1,
     baseCommit: review.source.baseCommit, commit: review.commit, branch: review.branch, paths: review.source.paths,
