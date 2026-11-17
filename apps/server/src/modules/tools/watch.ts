@@ -7,6 +7,7 @@ import { offlineMachine } from '../nodes/offline.js';
 import { worksIn } from '../departments/inside.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, reconnecting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { keepUndelivered, NOT_DELIVERED, UndeliveredRecord, undeliveredLine } from '../conversation/undelivered.js';
@@ -212,7 +213,7 @@ const waitsOf = (state: { ready: boolean; machineDrain: unknown }): Waits => (st
 
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
 async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Promise<string> {
-  const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  const [turn] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId));
   if (turn?.status !== 'queued') return `Sent to ${name}.`;
   return `Sent to ${name}. ${WAITS[waits]}`;
 }
@@ -392,7 +393,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         for (const { id, holderId, sight, ...task } of stuck) {
           /* What its holder said when it stopped, and how its last turn on it ended: enough to group causes without the task itself. */
           const [said] = await db
-            .select({ text: taskEvents.text })
+            .select(only(taskEvents, 'text'))
             .from(taskEvents)
             .where(and(eq(taskEvents.taskId, id), inArray(taskEvents.kind, ['blocked', 'report'])))
             .orderBy(desc(taskEvents.id))
@@ -527,11 +528,11 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     const by = target.kind === 'orchestrator'
       ? sql`${agentEvents.data}->>'from' = 'orchestrator'`
       : sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${target.id}`;
-    const [asked] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+    const [asked] = await db.select(only(agentEvents, 'seq')).from(agentEvents)
       .where(and(eq(agentEvents.agentId, me.id), eq(agentEvents.kind, 'message'), by, sql`${agentEvents.data}->'notification' is null`))
       .orderBy(desc(agentEvents.seq)).limit(1);
     if (!asked) return false;
-    const [answered] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+    const [answered] = await db.select(only(agentEvents, 'seq')).from(agentEvents)
       .where(and(eq(agentEvents.agentId, target.id), eq(agentEvents.kind, 'message'), gt(agentEvents.seq, asked.seq), sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${me.id}`))
       .limit(1);
     return !answered;
