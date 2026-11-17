@@ -221,9 +221,6 @@ export async function cardPrincipal(db: Reader, companyId: string, requestId: st
   return actingCeo(db, found.answeredBy);
 }
 
-/* Whether the turn answers the CEO or the CEO delegate, now. */
-export const answersCeoOrDelegate = async (db: Reader, jobId: string, find: FindPrincipal = decisionPrincipal): Promise<boolean> => (await ceoPrincipal(db, jobId, find)) !== null;
-
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
    never goes by a principal that new words changed already. Separate from the agent's queue line; nothing inside takes it
    again. The server is one process: its hub, the words waiting for the node and the agents' lines live in it too. */
