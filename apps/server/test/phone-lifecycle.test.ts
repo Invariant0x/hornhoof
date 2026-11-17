@@ -48,3 +48,19 @@ it('cancellation and a lost lease release the phone and promote the next live jo
   c.app.ctx.clock = () => now + PHONE_LEASE_MS + 1;
   expect(value(await secondTools.callTool({ name: 'phone_session', arguments: { session: queued.id } }) as Reply)).toMatchObject({ status: 'ended', reason: 'lost' });
 });
+
+it('owner Stop cancels the turns waiting for that phone and leaves those waiting for any phone in the queue', async () => {
+  const c = await phoneCompany();
+  const phone = (await c.addPhone()).json();
+  const turns = await Promise.all([c.startTurn(c.nora.id, c.task.id), c.startTurn(c.sammy.id, c.task.id), c.startTurn(c.nora.id, c.task.id)]);
+  const tools = await Promise.all(turns.map(t => mcp(c.app, t.token)));
+  await tools[0]!.callTool({ name: 'phone_acquire', arguments: {} });
+  const named = value(await tools[1]!.callTool({ name: 'phone_acquire', arguments: { phone: phone.id } }) as Reply);
+  const anyPhone = value(await tools[2]!.callTool({ name: 'phone_acquire', arguments: {} }) as Reply);
+  await c.app.inject({ method: 'POST', url: `/api/phones/${phone.id}/stop`, ...as(c.claraSession) });
+  expect(value(await tools[1]!.callTool({ name: 'phone_session', arguments: { session: named.id } }) as Reply)).toMatchObject({ status: 'cancelled', reason: 'stopped' });
+  expect(value(await tools[2]!.callTool({ name: 'phone_session', arguments: { session: anyPhone.id } }) as Reply)).toMatchObject({ status: 'queued', phoneId: null, position: 1 });
+  await until(async () => (await c.db.select().from(phoneSessions).where(eq(phoneSessions.jobId, turns[0]!.job.id)))[0]!.status === 'ended');
+  await c.app.inject({ method: 'POST', url: `/api/phones/${phone.id}/resume`, ...as(c.claraSession) });
+  expect(value(await tools[2]!.callTool({ name: 'phone_session', arguments: { session: anyPhone.id } }) as Reply)).toMatchObject({ status: 'active', phoneId: phone.id });
+});

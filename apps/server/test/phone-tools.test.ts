@@ -34,3 +34,25 @@ it('gives one agent the phone and queues the next until the first session ends',
   expect(refused.status).toBe('failed');
   expect(c.calls.filter(m => m.type === 'phone.action')).toEqual([]);
 });
+
+it('sends a turn that waits for any phone to the first phone that frees up, in one company queue', async () => {
+  const c = await phoneCompany();
+  const first = (await c.addPhone()).json();
+  const second = (await c.addPhone(c.samSession, '192.168.1.90:5555', 'Sam phone')).json();
+  const turns = await Promise.all([c.startTurn(c.nora.id, c.task.id), c.startTurn(c.sammy.id, c.task.id), c.startTurn(c.nora.id, c.task.id), c.startTurn(c.sammy.id, c.task.id)]);
+  const tools = await Promise.all(turns.map(t => mcp(c.app, t.token)));
+  const acquire = async (n: number, phone?: string) => value(await tools[n]!.callTool({ name: 'phone_acquire', arguments: phone ? { phone } : {} }) as Reply);
+  expect(await acquire(0)).toMatchObject({ status: 'active', phoneId: first.id });
+  expect(await acquire(1)).toMatchObject({ status: 'active', phoneId: second.id });
+  const anyPhone = await acquire(2);
+  expect(anyPhone).toMatchObject({ status: 'queued', phoneId: null, position: 1 });
+  const named = await acquire(3, first.id);
+  expect(named).toMatchObject({ status: 'queued', phoneId: first.id, position: 2 });
+  const listed = value(await tools[0]!.callTool({ name: 'phones', arguments: {} }) as Reply);
+  expect(listed).toMatchObject({ waitingForAny: 1, phones: [{ id: first.id, state: 'busy', queued: 1 }, { id: second.id, state: 'busy', queued: 0 }] });
+  await tools[1]!.callTool({ name: 'phone_release', arguments: { session: (await acquire(1)).id } });
+  expect(value(await tools[2]!.callTool({ name: 'phone_session', arguments: { session: anyPhone.id } }) as Reply)).toMatchObject({ status: 'active', phoneId: second.id });
+  expect(value(await tools[3]!.callTool({ name: 'phone_session', arguments: { session: named.id } }) as Reply)).toMatchObject({ status: 'queued', position: 1 });
+  await tools[0]!.callTool({ name: 'phone_release', arguments: { session: (await acquire(0)).id } });
+  expect(value(await tools[3]!.callTool({ name: 'phone_session', arguments: { session: named.id } }) as Reply)).toMatchObject({ status: 'active', phoneId: first.id });
+});

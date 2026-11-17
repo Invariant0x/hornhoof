@@ -9,8 +9,8 @@ const NODE_KEY = 'p'.repeat(40);
 
 /* A company with two departments, an employee in each, an assistant, a person of each department and a person and an agent
    of another company, with one machine whose node answers phone messages from recorded replies. */
-export async function phoneCompany() {
-  const { app, db } = await testApp({ NODE_KEY });
+export async function phoneCompany(logger?: Parameters<typeof testApp>[1]) {
+  const { app, db } = await testApp({ NODE_KEY }, logger);
   const wsUrl = await listen(app);
   const ceoSession = await setUpCompany(app);
   const [acme] = await db.select().from(companies);

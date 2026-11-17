@@ -66,19 +66,19 @@ export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person) {
 
 export async function addPhone(ctx: Ctx, me: Person, input: z.infer<typeof NewPhone>): Promise<CompanyPhone> {
   const { nodeId, devices } = await probePhone(ctx, me, input);
-  const device = devices.find(d => d.serial === input.serial && d.status === 'device');
-  if (!device?.hardwareKey) throw phoneOffline();
+  const hardwareKey = devices.find(d => d.serial === input.serial && d.status === 'device')?.hardwareKey;
+  if (!hardwareKey) throw phoneOffline();
   if (input.transport === 'network' && input.serial !== input.endpoint) throw phoneInvalid();
   return ctx.db.transaction(async tx => {
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, me.companyId)).for('update');
     const [machine] = await tx.select().from(machines).where(eq(machines.id, input.machineId)).for('update');
     if (!machine || machine.companyId !== me.companyId || machine.revokedAt) throw phoneDenied();
-    const [physical] = await tx.select().from(companyPhones).where(and(eq(companyPhones.hardwareKey, device.hardwareKey), isNull(companyPhones.removedAt))).for('update');
+    const [physical] = await tx.select().from(companyPhones).where(and(eq(companyPhones.hardwareKey, hardwareKey), isNull(companyPhones.removedAt))).for('update');
     const [onSerial] = await tx.select().from(companyPhones).where(and(eq(companyPhones.machineId, input.machineId), eq(companyPhones.serial, input.serial), isNull(companyPhones.removedAt)));
     const existing = physical ?? onSerial;
     if (existing) {
       phoneOwner(me, existing);
-      if (existing.hardwareKey !== device.hardwareKey) throw alreadyHeld();
+      if (existing.hardwareKey !== hardwareKey) throw alreadyHeld();
       const same = existing.machineId === input.machineId && existing.nodeId === nodeId && existing.serial === input.serial && existing.transport === input.transport && existing.endpoint === input.endpoint;
       if (same) return existing;
       const [held] = await tx.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, existing.id), inArray(phoneSessions.status, ['queued', 'starting', 'active', 'revoking']))).limit(1);
@@ -86,7 +86,7 @@ export async function addPhone(ctx: Ctx, me: Person, input: z.infer<typeof NewPh
       const [changed] = await tx.update(companyPhones).set({ machineId: input.machineId, nodeId, serial: input.serial, transport: input.transport, endpoint: input.endpoint, name: input.name, generation: existing.generation + 1 }).where(eq(companyPhones.id, existing.id)).returning();
       return changed!;
     }
-    const [phone] = await tx.insert(companyPhones).values({ companyId: me.companyId, personId: me.id, nodeId, machineId: input.machineId, serial: input.serial, transport: input.transport, endpoint: input.endpoint, name: input.name, hardwareKey: device.hardwareKey }).onConflictDoNothing().returning();
+    const [phone] = await tx.insert(companyPhones).values({ companyId: me.companyId, personId: me.id, nodeId, machineId: input.machineId, serial: input.serial, transport: input.transport, endpoint: input.endpoint, name: input.name, hardwareKey }).onConflictDoNothing().returning();
     if (!phone) throw phoneDenied();
     return phone;
   });
