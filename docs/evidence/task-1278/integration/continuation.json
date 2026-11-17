@@ -1,0 +1,21 @@
+{
+  "integrationCommit": "424fe1692b879a17fb43f393440bdd67d4148f99",
+  "baseCommit": "ffb944f22b09b205bcbea3e86ab4144bfbcfba2d",
+  "checkedScopeVersion": "ba9c9b97951b9f38aa18dece93b2e019147f24cd",
+  "changedNonDocumentationPaths": [
+    "apps/server/test/postgres/turn-release-races.pg.spec.ts",
+    "apps/server/test/product-run.ts",
+    "apps/server/test/turn-release-fixture.ts"
+  ],
+  "reuseReason": "The imported release-only fixtures are outside the five named tests' import closure. Server runtime sources, selected tests, their helpers and build inputs are unchanged; their passed test/build/lint receipts remain applicable to this scope version.",
+  "scopeComparison": {
+    "command": "git diff --exit-code ba9c9b97951b9f38aa18dece93b2e019147f24cd HEAD -- apps/server/src apps/server/test/tasks-tools.test.ts apps/server/test/tools.test.ts apps/server/test/computer-scope.test.ts apps/server/test/computer.test.ts apps/server/test/orchestrator-close.test.ts packages apps/node scripts package.json package-lock.json apps/server/vitest.config.ts",
+    "exitCode": 0
+  },
+  "repeatedTypes": {
+    "command": "npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+    "commit": "424fe1692b879a17fb43f393440bdd67d4148f99",
+    "exitCode": 0,
+    "log": "after-fixtures-types.log"
+  }
+}

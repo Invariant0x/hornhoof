@@ -1,0 +1,59 @@
+
+ RUN  v5.0.5 /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1278/apps/server
+
+ ✓ test/computer-scope.test.ts (19 tests) 5881ms
+   ✓ machine access scope (19)
+     ✓ opens for 1h and names its opener 1142ms
+     ✓ opens for 24h and names its opener 355ms
+     ✓ keeps owner-only opening and permits the owner, CEO and delegate to close 712ms
+     ✓ names the person who closes access or declines its request 510ms
+     ✓ offers heads and workers command tools without asking for access 432ms
+ ✓ test/tasks-tools.test.ts (30 tests) 11272ms
+   ✓ task tools (13)
+     ✓ keeps a long UTF-8 comment intact through MCP 2465ms
+     ✓ keeps a long UTF-8 submit intact through MCP 704ms
+     ✓ keeps a long UTF-8 report intact through MCP 307ms
+     ✓ keeps a long UTF-8 verdict intact through MCP and task readback 361ms
+     ✓ tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal 342ms
+     ✓ lets a head assign a current reviewer by identity only inside its department 302ms
+     ✓ refuses the eleventh task in one turn 578ms
+   ✓ asking a person (3)
+     ✓ keeps what the question is about, and takes no topic it does not know 312ms
+   ✓ a small task (2)
+     ✓ is set and read by the giver, never by its executor 492ms
+     ✓ is not small by default 307ms
+   ✓ dates through the tools (3)
+     ✓ takes a promise for one edge in create_task, and refuses what comes without one where dates are set 323ms
+     ✓ takes a promise in ask_person and request_approval, and a question with none where dates are set for others 537ms
+   ✓ dates over HTTP (1)
+     ✓ takes a promise for an edge in POST /api/tasks, and refuses without one where dates are set, with the same words 418ms
+ ✓ test/computer.test.ts (20 tests) 10550ms
+   ✓ access to the computer the server runs on (19)
+     ✓ keeps the access question as an outgoing message from the orchestrator to the CEO 1259ms
+     ✓ opens for one hour by default when the CEO clicks, and the orchestrator goes on by itself 751ms
+     ✓ tells the orchestrator a long command still runs, and gives its result when asked for it 328ms
+     ✓ keeps working on the open machine in later turns, woken by an employee's letter or by a wake, with no new word of the CEO, until access closes 615ms
+     ✓ lets the turn the CEO's click opens use the computer until a person without the right writes into it, and decide as the owner as any turn does 922ms
+     ✓ keeps computer access in a running turn when Hornhoof types improvement notices or an employee writes into it 923ms
+     ✓ keeps the computer-opening click through retries, while a plain notice retry works on the open machine 737ms
+     ✓ refuses computer on a second retry after pending input was not kept on a click retry 651ms
+     ✓ refuses computer when saved marked words are replayed via unheard after a non-CEO message 420ms
+     ✓ refuses computer when saved marked words are replayed via queued after a non-CEO message 407ms
+     ✓ refuses computer when live input lands between the unheard replay read and its store 486ms
+     ✓ refuses computer when live input lands between the queued replay read and its store 511ms
+     ✓ closes when the CEO takes it back, and the CEO can say no to a request 483ms
+     ✓ is opened and closed by the CEO, the delegate and the orchestrator, never by another person 422ms
+   ✓ a new installation (1)
+     ✓ lets the orchestrator clear another employee's inbox and work on the opened machine in a later turn, with nothing set up for it 333ms
+ ✓ test/tools.test.ts (7 tests) 3127ms
+   ✓ /mcp (7)
+     ✓ refuses a request without a token or with the token of a finished job 1910ms
+     ✓ offers the orchestrator the company view, the structure proposal, staffing and tasks 336ms
+ ✓ test/orchestrator-close.test.ts (22 tests) 2223ms
+   ✓ the orchestrator closes a task in any state (19)
+     ✓ closes a task open as done, with its reason in the log as its own act 344ms
+
+ Test Files  5 passed (5)
+      Tests  98 passed (98)
+   Start at  15:10:13
+   Duration  21.04s (tests 79%, import 18%, transform 3%)

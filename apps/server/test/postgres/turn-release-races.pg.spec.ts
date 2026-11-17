@@ -7,6 +7,7 @@ import { minuteRound } from '../../src/modules/agents/timers.js';
 import { createTask, loadTask, report, submit } from '../../src/modules/tasks/engine.js';
 import { routeOf } from '../../src/modules/tasks/echelons-store.js';
 import { until } from '../helpers-basic.js';
+import { PRODUCT_FILES, partReceipt, partSelection, productSnapshot } from '../product-run.js';
 import { appContext, backendPid, privatePostgres, type PostgresFixture } from './helpers.js';
 
 const MAIN = 'a'.repeat(40);
@@ -52,12 +53,23 @@ async function released(pg: PostgresFixture) {
   const repo: Repo = { heads: { main: RELEASE, [branch]: RELEASE }, tags: { 'v1.6.0': MAIN, 'v1.7.0': RELEASE }, holds: { [RELEASE]: [MAIN], [OWN]: [MAIN], [LATER]: [OWN, RELEASE, MAIN] } };
   serve(a.ctx, repo);
   serve(b.ctx, repo);
-  /* The release of the turn as the release tool keeps it, recorded before main moved: its release task, the full run of its
-     commit and the person's approval of it. */
+  /* The release of the turn as the release tool keeps it, recorded before main moved: its release task, the whole run of the
+     product's tests on its commit, in the full profile with a passed receipt of every part, as a release takes only such a
+     run, and the person's approval of it. */
   const [release] = await pg.db.insert(schema.tasks).values({ companyId: company!.id, number: 100, title: 'Release', status: 'open', departmentId: dept!.id, assigneeAgentId: head.id }).returning();
   const [job] = await pg.db.insert(schema.jobs).values({ companyId: company!.id, subscriptionId: plan!.id, agentId: head.id, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running' }).returning();
-  const [run] = await pg.db.insert(schema.testRuns).values({ companyId: company!.id, number: 1, taskId: release!.id, agentId: head.id, jobId: job!.id, departmentId: dept!.id, branch, commitSha: RELEASE, command: 'npm test', parts: 1, timeoutMs: 600000, status: 'passed', finishedAt: new Date() }).returning();
-  await pg.db.insert(schema.testParts).values({ companyId: company!.id, runId: run!.id, part: 1, status: 'passed', commit: RELEASE, exitCode: 0 });
+  const repositoryScope = { companyId: company!.id, repositoryOwnerId: dept!.id, repoUrlHash: 'a'.repeat(64) };
+  const snapshot = await productSnapshot(repositoryScope, RELEASE);
+  const [run] = await pg.db.insert(schema.testRuns).values({
+    companyId: company!.id, number: 1, taskId: release!.id, agentId: head.id, jobId: job!.id, departmentId: dept!.id, branch, commitSha: RELEASE, command: '', parts: PRODUCT_FILES.length, timeoutMs: 600000, status: 'passed', finishedAt: new Date(),
+    environmentRequest: { version: 1, repositoryScope, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
+    environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
+    fileCache: { mode: 'full', release: branch, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+  }).returning();
+  await pg.db.insert(schema.testParts).values(PRODUCT_FILES.map((file, index) => {
+    const selection = partSelection(RELEASE, file);
+    return { companyId: company!.id, runId: run!.id, part: index + 1, status: 'passed' as const, commit: RELEASE, exitCode: 0, finishedAt: new Date(), environmentSelection: { selection, after: [] }, environmentReceipt: partReceipt(snapshot, selection, true) };
+  }));
   const [approval] = await pg.db.insert(schema.requests).values({ companyId: company!.id, taskId: release!.id, agentId: head.id, kind: 'approval', text: 'Release turn 1.', commit: RELEASE, status: 'approved', answeredBy: person!.id, answeredAt: new Date() }).returning();
   await pg.db.insert(schema.turnReleases).values({ companyId: company!.id, turnId: turn!.id, commit: RELEASE, baseCommitSha: MAIN, runId: run!.id, tasks: [], taskId: release!.id, approvalRequestId: approval!.id, requestedByAgentId: head.id, covered: true, uncovered: [] });
   const designTask = async () => {
