@@ -302,5 +302,37 @@ No test case, protected access assertion, test/hook limit or production handler
 was removed or weakened. No full suite or `run_tests` was executed. The release
 owner retains final combined-candidate validation. There is no release to main.
 
-Status before integration: NEEDS_CONTEXT only for the independently reproduced
-baseline migration assertion; all required checks of this change are green.
+Historical status before the head's answer: NEEDS_CONTEXT only for the independently
+reproduced baseline migration assertion; all required checks of this change were green.
+
+## Integration after the head's answer
+
+On 2026-11-17 at 04:30 UTC the head authorized fast-forward with the separate
+baseline migration concern, and assigned its repair as task 1219. The earlier
+question is resolved. The current turn had advanced before integration, so
+`bf1ff1422851f4f0276d13881c42b16a0cf93eba` was merged cleanly into the task as
+`0986521a402b5680ff43a022cd8caab45ac4d120`. The upstream frozen-clock fixture
+cache and the prepared metadata are compatible; both remain in the merged helper.
+
+On this merged implementation, three separate shuffled table runs (seeds 1196,
+1197 and 1198) passed 58 of 58 each, and three separate route-access runs passed
+4 of 4 each. The shared database, metadata codec and frozen-clock fixture files
+passed together: 47 ordinary passes and two existing expected failures. All seven
+run records name the implementation SHA, command, start and machine load; they
+are attached to task 1196 as `merged-checks.log`.
+
+`HH_VITEST_MAX_WORKERS=1 npm run -s check:author -- --sha
+0986521a402b5680ff43a022cd8caab45ac4d120 --base
+bf1ff1422851f4f0276d13881c42b16a0cf93eba` executed the selected inventory:
+one node file and 51 server files. Its aggregate is 574 passed, including the
+two expected failures, and one failed. Its actual exit is 1, solely the same
+migration 0059 row comparison at line 386. Lint, server/test and node/test types,
+and dryer passed; dryer found no duplicates. There is no formatter or changed
+production function for CRAP. The other 664 reached files remain with the release
+owner. The complete latest output is attached as `author.log`.
+
+`npm run build -w @hornhoof/server` passed, exit 0, on that implementation;
+`build.log` is attached. This report update changes no executable input. No full
+suite or `run_tests` was started, and the baseline concern remains a concern,
+not an overall author-check PASS. The three one-at-a-time neighboring runs after
+fast-forward are recorded separately on the task before its completion.
