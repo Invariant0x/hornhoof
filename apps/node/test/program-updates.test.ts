@@ -155,6 +155,17 @@ describe('node-owned program updates', () => {
 });
 
 describe('a program that does not start on the machine', () => {
+  it('keeps known credentials out of the repair snapshot, including credentials learned after the check', () => {
+    const secret = 'private-install-secret';
+    const known: string[] = [];
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '2.0.0', install: async () => {} }]);
+    updates.watch(() => {}, () => known);
+    updates.repaired('claude', { state: 'broken', line: `Cannot start with ${secret}` });
+    known.push(secret);
+    expect(updates.snapshot()[0]!.reason).toBe('Cannot start with [hidden]');
+    expect(JSON.stringify(updates.snapshot())).not.toContain(secret);
+  });
+
   it('says it is installed again, then why it still does not start, and nothing once it starts', async () => {
     writeVersion('@anthropic-ai/claude-code', '2.0.0');
     const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => readInstalledVersion(tools, 'claude'), install: async () => {} }]);

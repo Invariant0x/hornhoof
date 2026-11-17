@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ProgramInfo } from '@hornhoof/protocol';
 import type { Repair } from './program-check.js';
+import { lastWords } from './program-exit.js';
 import { NPM_PACKAGES } from './providers/packages.js';
 
 type ProgramId = ProgramInfo['id'];
@@ -37,22 +38,28 @@ export class ProgramUpdates {
   private state: ProgramInfo[];
   private pending: Promise<void> | null = null;
   private told: () => void = () => {};
+  private masks: () => string[] = () => [];
 
   constructor(private readonly entries: readonly InstalledProgram[]) {
     this.state = entries.map(entry => ({ id: entry.id, version: entry.readVersion(), updating: false, failed: false }));
   }
 
   snapshot(): ProgramInfo[] {
-    return this.state.map(program => ({ ...program }));
+    return this.state.map(program => ({ ...program, ...(program.reason ? { reason: lastWords(program.reason, this.secrets()) ?? undefined } : {}) }));
   }
 
   version(id: string): string | null {
     return this.state.find(program => program.id === id)?.version ?? null;
   }
 
+  secrets(): string[] {
+    return this.masks();
+  }
+
   /* Who hears of a program installed again or not starting, which happens outside an update too. */
-  watch(changed: () => void): void {
+  watch(changed: () => void, secrets: () => string[] = () => []): void {
     this.told = changed;
+    this.masks = secrets;
   }
 
   /* What the machine says of a program that did not start; a program this node does not manage is left out. */

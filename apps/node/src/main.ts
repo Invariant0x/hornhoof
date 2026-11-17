@@ -214,6 +214,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* The node's own keys never leave in a job's output. */
   const hidden = [state.key, keyPair.identity];
   const known = new Set(hidden);
+  /* An install can finish before the node is ready to report status; its diagnostic already uses the node's masks. */
+  programs.watch(() => {}, () => [...known]);
   const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
   const log = life.log;
   /* For a program's own words, which may hold what Hornhoof must not keep: the machine's output only, secrets hidden,
@@ -419,7 +421,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       removal.refused();
     },
   });
-  programs.watch(tellStatus);
+  programs.watch(tellStatus, () => [...known]);
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
@@ -755,20 +757,21 @@ function personal(dir: string, provider: ProviderId, user: JobUser | null = null
   return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path), fs } } : adapter;
 }
 
-/* Each program is installed the first time something needs it, and checked that it starts, after an update too. A failed
-   install is tried again next time. agy comes as one file the node writes itself, and is not asked its version. */
+/* Each program is installed the first time something needs it. Claude Code, Codex and Kimi have a confirmed version
+   command and are checked after an update too. A failed install is tried again next time. agy comes as one file the node
+   writes itself, and is not asked its version. */
 const installs = new CheckedInstalls();
 function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null, programs?: ProgramUpdates): Promise<void> {
   const { bin } = programFor(provider, api);
   const path = join(tools, 'bin', bin);
   if (bin === 'agy') return existsSync(path) ? Promise.resolve() : adapter.install();
-  return installs.ensure(path, () => adapter.install(), repair => programs?.repaired(bin, repair));
+  return installs.ensure(path, () => adapter.install(), repair => programs?.repaired(bin, repair), () => programs?.secrets() ?? []);
 }
 
 function managedUpdates(tools: string, programs: { provider: ProviderId; adapter: ProviderAdapter }[]): ProgramUpdates {
   const updates: ProgramUpdates = new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
     const id = programFor(provider).bin;
-    return id === 'agy' ? [] : [{ id, install: () => installs.update(join(tools, 'bin', id), () => adapter.install(), repair => updates.repaired(id, repair)), readVersion: () => readInstalledVersion(tools, id) }];
+    return id === 'agy' ? [] : [{ id, install: () => installs.update(join(tools, 'bin', id), () => adapter.install(), repair => updates.repaired(id, repair), () => updates.secrets()), readVersion: () => readInstalledVersion(tools, id) }];
   }));
   return updates;
 }

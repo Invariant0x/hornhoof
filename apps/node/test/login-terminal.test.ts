@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoginTerminal } from '../src/login.js';
 import { withProgramExit } from '../src/program-exit.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -17,7 +17,10 @@ import { eventually } from '../../../test-support/eventually.mjs';
    tmux and the program's sign-in never run; the screens are written as Claude Code's setup-token prints them. */
 const TOKEN = 'sk-ant-oat01-' + 'Ab3_-x9q'.repeat(11);
 const CLAUDE = fileURLToPath(new URL('./fakes/claude', import.meta.url));
-const until = (check: () => boolean) => eventually(check);
+const until = async (check: () => boolean) => {
+  await vi.advanceTimersByTimeAsync(60);
+  await eventually(check);
+};
 const wrapped = (width: number) => TOKEN.match(new RegExp(`.{1,${width}}`, 'g'))!.join('\n');
 const printed = (width: number) => `✓ Long-lived authentication token created successfully!\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m${wrapped(width)}\x1b[39m\n\nStore this token securely.\n`;
 
@@ -29,9 +32,11 @@ function view(): View {
 }
 
 const stops: (() => Promise<void>)[] = [];
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] }));
 afterEach(async () => {
   for (const stop of stops.splice(0)) await stop();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function signIn(env: Record<string, string> = {}, install?: () => Promise<void>) {
@@ -132,16 +137,17 @@ describe("a plan's sign-in in a terminal on the node", () => {
   });
 
   /* The owner sees why: its code and the last line it said, with nothing in it that looks like a key. */
-  it('whose program ends at once tells Hornhoof its code and last line, through the masks', async () => {
+  it.each(['AbCdMARKER7c41EfGh1234IjKlMnOp5678', 'marker7c41abcdefghijklmnopqrstuvwxyz'])('whose program ends at once masks its code and last line, including Bearer %s', async bearer => {
     const s = signIn();
     await s.login.start(false);
     const key = 'sk-ant-api03-MARKER7c41qZ9xT2vB8nL0pW';
-    const bearer = 'AbCdMARKER7c41EfGh1234IjKlMnOp5678';
     s.ends(`Checking the account\n\x1b[31mError: the key ${key} was refused (Bearer ${bearer})\x1b[0m\n\n`, 1);
     await until(() => Boolean(s.done()));
     expect(s.done()).toEqual({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.unfinished, code: 1, line: 'Error: the key [hidden] was refused (Bearer [hidden])' });
     expect(JSON.stringify(s.sent)).not.toContain('MARKER7c41');
     expect(s.logged.join('\n')).not.toContain('MARKER7c41');
+    expect(JSON.stringify(s.sent)).not.toContain(bearer);
+    expect(s.logged.join('\n')).not.toContain(bearer);
   });
 
   it('cuts a long last line and keeps no terminal codes in it', async () => {

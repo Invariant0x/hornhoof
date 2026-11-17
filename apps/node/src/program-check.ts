@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { lastWords } from './program-exit.js';
 import { runProgram } from './providers/process.js';
 
 /* Whether an agent program the node installed starts, which a file in place does not prove: npm may leave out a part, as
    it left out Claude Code's platform-native package on a node whose network broke off. The node asks the program its
-   version, and one that does not answer with code 0 is installed again, a few times at most. */
+   version, and one that does not answer with code 0 is installed again, a few times at most. Claude Code, Codex and Kimi
+   have a confirmed version command; other programs keep the installation path without this check. */
 
 export type Started = { ok: true } | { ok: false; code: number | null; line: string | null };
 /* What the machine says of the program meanwhile: installed again, or still not starting and why; null once it starts. */
@@ -15,9 +17,10 @@ export const REINSTALLS = 2;
 /* A program that does not even tell its version in this long does not start. */
 const VERSION_LIMIT_MS = 30_000;
 
-export async function startsCheck(bin: string): Promise<Started> {
+export async function startsCheck(bin: string, secrets: string[] = []): Promise<Started> {
+  if (!['claude', 'codex', 'kimi'].includes(basename(bin))) return { ok: true };
   const done = await runProgram({ bin, args: ['--version'], env: { ...process.env }, timeoutMs: VERSION_LIMIT_MS });
-  return done.code === 0 ? { ok: true } : { ok: false, code: done.code, line: lastWords(done.output) };
+  return done.code === 0 ? { ok: true } : { ok: false, code: done.code, line: lastWords(done.output, secrets) };
 }
 
 const notStarting = (check: Extract<Started, { ok: false }>) => new Error(check.line ?? `The program ended with code ${check.code ?? 'unknown'}.`);
@@ -30,25 +33,25 @@ export class CheckedInstalls {
   /* Programs the machine was last told are being installed again or do not start. */
   private readonly troubled = new Set<string>();
 
-  constructor(private readonly starts: (bin: string) => Promise<Started> = startsCheck) {}
+  constructor(private readonly starts: (bin: string, secrets: string[]) => Promise<Started> = startsCheck) {}
 
   /* The first time something needs the program: installed when it is missing, then checked. One that is being installed
      or checked already waits for that. */
-  ensure(bin: string, install: () => Promise<void>, repair: (r: Repair) => void): Promise<void> {
+  ensure(bin: string, install: () => Promise<void>, repair: (r: Repair) => void, secrets: () => string[] = () => []): Promise<void> {
     if (this.started.has(bin)) return Promise.resolve();
     return this.pending.get(bin) ?? this.hold(bin, (async () => {
       if (!existsSync(bin)) await install();
-      await this.untilStarts(bin, install, repair);
+      await this.untilStarts(bin, install, repair, secrets);
     })());
   }
 
   /* An update: after what runs for the program now, installed anew and checked the same way. */
-  update(bin: string, install: () => Promise<void>, repair: (r: Repair) => void): Promise<void> {
+  update(bin: string, install: () => Promise<void>, repair: (r: Repair) => void, secrets: () => string[] = () => []): Promise<void> {
     const before = (this.pending.get(bin) ?? Promise.resolve()).catch(() => {});
     return this.hold(bin, before.then(async () => {
       this.started.delete(bin);
       await install();
-      await this.untilStarts(bin, install, repair);
+      await this.untilStarts(bin, install, repair, secrets);
     }));
   }
 
@@ -60,13 +63,13 @@ export class CheckedInstalls {
     return pending;
   }
 
-  private async untilStarts(bin: string, install: () => Promise<void>, say: (r: Repair) => void): Promise<void> {
+  private async untilStarts(bin: string, install: () => Promise<void>, say: (r: Repair) => void, secrets: () => string[]): Promise<void> {
     const repair = (r: Repair) => {
       if (r) this.troubled.add(bin);
       else if (!this.troubled.delete(bin)) return;
       say(r);
     };
-    let check = await this.starts(bin);
+    let check = await this.starts(bin, secrets());
     for (let n = 0; !check.ok && n < REINSTALLS; n++) {
       repair({ state: 'reinstalling' });
       try {
@@ -75,7 +78,7 @@ export class CheckedInstalls {
         repair({ state: 'broken', line: null });
         throw err;
       }
-      check = await this.starts(bin);
+      check = await this.starts(bin, secrets());
     }
     if (!check.ok) {
       repair({ state: 'broken', line: check.line });
