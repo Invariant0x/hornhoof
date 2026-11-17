@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { onTestFinished } from 'vitest';
-import { listenAt, listenIn, testPort } from '../../../test-support/ports.mjs';
+import { listenAt, listenIn } from '../../../test-support/ports.mjs';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { machines } from '../src/db/schema.js';
@@ -109,7 +109,7 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
-    ports: { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() },
+    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
     everyMs: 20,
     linkEveryMs: 50,
     peerEveryMs: 20,
@@ -122,16 +122,8 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     computer: { openEveryMs: 10, closedEveryMs: 20 },
     ...extra,
   });
-  await keeper.start();
   let stopped = false;
-  const removeStep = manual ? registerStep(async () => {
-    await keeper['holder'].tick();
-    await keeper['holder'].look();
-    await keeper['identity']!['report']();
-    await keeper['peers']!['readOnce']();
-    await keeper['carrier']?.tick();
-    await keeper['backups']?.round();
-  }) : () => undefined;
+  let removeStep: () => void = () => undefined;
   const stop = async () => {
     if (stopped) return;
     stopped = true;
@@ -140,6 +132,15 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     await app.close();
   };
   onTestFinished(stop);
+  await keeper.start();
+  removeStep = manual ? registerStep(async () => {
+    await keeper['holder'].tick();
+    await keeper['holder'].look();
+    await keeper['identity']!['report']();
+    await keeper['peers']!['readOnce']();
+    await keeper['carrier']?.tick();
+    await keeper['backups']?.round();
+  }) : () => undefined;
   if (manual) {
     await until(() => keeper['identity']!.certificate() !== null);
     await keeper['peers']!['readOnce']();
@@ -167,7 +168,7 @@ export async function workerOn(c: Company, config: WorkerConfig, over: Partial<W
     config,
     frontHost: null,
     host: '127.0.0.1',
-    ports: { front: await testPort() },
+    ports: { front: 0 },
     log: line => lines.push(line),
     visitClientFor: () => SLEEPER,
     lookEveryMs: 10,
@@ -184,9 +185,17 @@ export async function workerOn(c: Company, config: WorkerConfig, over: Partial<W
     ...(manualTime() ? { fetch: fetchApp, holdMs: 0 } : {}),
     ...over,
   });
-  const { front } = await keeper.start();
   let stopped = false;
-  const removeStep = manualTime() ? registerStep(async () => {
+  let removeStep: () => void = () => undefined;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    removeStep();
+    await keeper.stop();
+  };
+  onTestFinished(stop);
+  const { front } = await keeper.start();
+  removeStep = manualTime() ? registerStep(async () => {
     keeper.parts().certificates['look']();
     const link = keeper.parts().link;
     link['look']();
@@ -201,13 +210,6 @@ export async function workerOn(c: Company, config: WorkerConfig, over: Partial<W
       await keeper['holder'].round();
     } else await keeper['holder'].survive();
   }) : () => undefined;
-  const stop = async () => {
-    if (stopped) return;
-    stopped = true;
-    removeStep();
-    await keeper.stop();
-  };
-  onTestFinished(stop);
   const status = () => keeper.status();
   return { keeper, front, lines, stop, status };
 }

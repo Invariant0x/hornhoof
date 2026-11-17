@@ -4,11 +4,16 @@ import { agents, companies, departments, jobs, machines, nodes, people, sessions
 import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 /* A company with a phone's computer and its node answering adb from records, two employees in two departments, Clara who
    adds the phone, Sam of the other department and Olaf of another company. */
 export async function phoneCompany() {
   const { app, db } = await testApp({ NODE_KEY: 'v'.repeat(40) });
+  /* Lease expiry moves only when a scenario moves this injected clock. */
+  app.ctx.clock = () => 1_700_000_000_000;
   const wsUrl = await listen(app);
   const ceoSession = await setUpCompany(app);
   const [acme] = await db.select().from(companies);

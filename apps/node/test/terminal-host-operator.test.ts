@@ -136,3 +136,62 @@ it('types the words into a Claude Code whose start the node could not prove came
   expect(starts).toEqual([403]);
   expect(paste.mock.calls.map(([, text]) => text)).toEqual([words]);
 });
+
+/* Neo's turn b559a00c on 17.11, as recorded: the node had no receipt of its assignment (delivery 268), as it refused the
+   program's hooks, but it recorded the live words after it (delivery 269) taken at 01:50:48. The operator's case 5f366ecb
+   closed as failed at 02:06:13, and the program ran tools after that. A case that ends fails no turn whose program went on
+   past its words: the turn runs until its end comes, someone stops it or its program is gone. */
+it.each([['is stopped', true], ['loses its program', false]] as const)('runs a turn whose program took later words on after its case closed, until it %s', async (_name, alive) => {
+  vi.useFakeTimers();
+  const home = mkdtempSync(join(tmpdir(), 'hh-operator-later-'));
+  const agentKey = randomUUID(), jobId = randomUUID(), sessionId = randomUUID();
+  const workDir = join(home, 'work');
+  const file = join(home, 'sessions/2026/11/17', `rollout-${sessionId}.jsonl`);
+  const record = (line: object) => appendFileSync(file, JSON.stringify(line) + '\n');
+  const tmux = new Tmux({ env: { HOME: home } });
+  let input = '', running = true;
+  const sent: OperatorNodeMessage[] = [];
+  vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  vi.spyOn(tmux, 'launch').mockImplementation(async () => {
+    mkdirSync(dirname(file), { recursive: true });
+    record({ type: 'session_meta', payload: { id: sessionId, cwd: workDir } });
+  });
+  vi.spyOn(tmux, 'run').mockResolvedValue('80 24');
+  vi.spyOn(tmux, 'alive').mockImplementation(async () => running);
+  vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+  vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
+  vi.spyOn(tmux, 'screen').mockImplementation(async () => `OpenAI Codex\n${codexPrompt(input)}`);
+  vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => { input = text; });
+  /* The program takes its words, and nothing of that reaches the node. */
+  let entered = 0;
+  vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter') && input) { input = ''; entered++; } });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
+    operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
+  });
+  const abort = new AbortController();
+  const turn = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: randomUUID(), ordinal: 268 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 600000, instructions: null, tools: null, signal: abort.signal } });
+  let result: Awaited<typeof turn> | null = null;
+  void turn.then(done => { result = done; });
+  stops.push(async () => { running = false; await onClock(host.stop()); await onClock(turn); rmSync(home, { recursive: true, force: true }); });
+  /* The assignment went into the program, and later the live words after it, which the node recorded as taken. */
+  await untilOnClock(() => entered > 0);
+  await vi.advanceTimersByTimeAsync(200);
+  const runtime = host['operator']!, later = { id: randomUUID(), ordinal: 269 };
+  runtime.live(agentKey, later, 'Also read the review.');
+  runtime.receipt(agentKey, later, 'taken');
+  const opened = { type: 'program.operator_case' as const, ...runtime.identity(agentKey)!, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, revision: 1, reason: 'assignment_unrecorded' as const };
+  await host.operatorMessage({ ...opened, disposition: 'open' });
+  await host.operatorMessage({ ...opened, disposition: 'revoke', revision: 2, remainingMs: 0, closedBecause: 'failed' });
+  await vi.advanceTimersByTimeAsync(200);
+  expect(result).toBeNull();
+  if (!alive) {
+    running = false;
+    expect(await onClock(turn)).toMatchObject({ ok: false, error: 'agent_failed' });
+    return;
+  }
+  record({ type: 'event_msg', payload: { type: 'item_completed', turn_id: 'work', item: { type: 'CommandExecution', command: 'git diff', exit_code: 0, aggregated_output: '' } } });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(result).toBeNull();
+  abort.abort();
+  expect(await onClock(turn)).toMatchObject({ ok: false, error: 'cancelled' });
+});

@@ -9,10 +9,10 @@ import type { StageRoute } from '../templates/load.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { validScopePaths } from './review-schema.js';
 import { throughEchelons } from './turnkey.js';
-import { NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
+import { NO_DEPARTMENT_CHECKER, populateSecurityOwner, uncheckable } from './echelons-assign.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; architectAgentId?: string; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 export function checkedScopePaths(paths: string[] = []): string[] {
   if (!validScopePaths(paths)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
@@ -23,10 +23,10 @@ function routeStep(name: EchelonStep['stage'], current: EchelonStep['stage'], ow
   return { stage: name, status: name === current ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null };
 }
 
-function architectureStep(task: Task, current: EchelonStep['stage']): EchelonStep {
-  const step = routeStep('architecture', current, task.assigneeAgentId);
-  if (task.small) Object.assign(step, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
-  return step;
+function architectureStep(task: Task, archOwner: string | null, collapsed: boolean, current: EchelonStep['stage']): EchelonStep {
+  const step = routeStep('architecture', current, archOwner);
+  if (task.small) return { ...step, status: 'skipped', reason: 'small_task', ownerAgentId: null };
+  return collapsed ? { ...step, status: 'skipped', reason: 'same_executor', ownerAgentId: null } : step;
 }
 
 function securityState(task: Task, input: RouteInput, current: EchelonStep['stage']): { step: EchelonStep; security: Route['state']['security'] } {
@@ -40,7 +40,7 @@ const NO_SECURITY: Route['state']['security'] = { required: false, reason: null,
 
 /* A stage the route of the department lacks takes no owner, and Cleanup cannot be asked for where there is none. */
 function requireStages(task: Task, plan: StageRoute, input: RouteInput, cleanup: boolean): void {
-  const asked: [EchelonStep['stage'], unknown][] = [['review', input.reviewerAgentId], ['security', input.securityAgentId], ['tests', input.testsAgentId], ['cleanup', cleanup]];
+  const asked: [EchelonStep['stage'], unknown][] = [['architecture', input.architectAgentId], ['review', input.reviewerAgentId], ['security', input.securityAgentId], ['tests', input.testsAgentId], ['cleanup', cleanup]];
   const missing = asked.find(([stage, wanted]) => wanted && !plan.stages.some(step => step.stage === stage));
   if (missing) throw refuse(409, 'task_invalid', `The route of this department has no ${missing[0]} stage for #${task.number}.`);
 }
@@ -50,19 +50,51 @@ const documentStages = (plan: StageRoute): StageRoute => ({ ...plan, stages: pla
 /* The skill of the first check a document meets in a department, or null where its route checks none. */
 export const documentCheck = (plan: StageRoute): string | null => documentStages(plan).stages.find(step => step.ability)?.ability ?? null;
 
+function initialCodeStage(plan: StageRoute, small: boolean, collapsed: boolean): 'architecture' | 'development' {
+  return plan.stages.some(step => step.stage === 'architecture') && !small && !collapsed ? 'architecture' : 'development';
+}
+
+function stageAbilities(plan: StageRoute): Route['state']['abilities'] {
+  return Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : []));
+}
+
+function developmentOwner(task: Task, resultKind: 'code' | 'document'): string | null {
+  return resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
+}
+
+function stageStepMap(
+  task: Task,
+  input: RouteInput,
+  cleanup: boolean,
+  stage: EchelonStep['stage'],
+  archOwner: string | null,
+  devOwner: string | null,
+  collapsed: boolean,
+  security: EchelonStep,
+): Record<EchelonStep['stage'], EchelonStep | null> {
+  return {
+    architecture: architectureStep(task, archOwner, collapsed, stage),
+    development: routeStep('development', stage, devOwner),
+    review: routeStep('review', stage, input.reviewerAgentId ?? null),
+    cleanup: cleanup ? routeStep('cleanup', stage) : null,
+    security,
+    tests: routeStep('tests', stage, input.testsAgentId ?? null),
+  };
+}
+
 function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute, resultKind: 'code' | 'document'): Route['state'] {
   requireStages(task, plan, input, cleanup);
-  const has = (name: EchelonStep['stage']) => plan.stages.some(step => step.stage === name);
-  const stage = has('architecture') && !task.small ? 'architecture' : 'development';
+  const archOwner = input.architectAgentId ?? task.assigneeAgentId;
+  const devOwner = developmentOwner(task, resultKind);
+  const collapsed = !task.small && archOwner !== null && archOwner === devOwner;
+  const stage = initialCodeStage(plan, task.small, collapsed);
   const { step: security, security: policy } = securityState(task, input, stage);
-  const steps: Record<EchelonStep['stage'], EchelonStep | null> = {
-    architecture: architectureStep(task, stage), development: routeStep('development', stage, task.executorAgentId ?? task.assigneeAgentId),
-    review: routeStep('review', stage, input.reviewerAgentId ?? null), cleanup: cleanup ? routeStep('cleanup', stage) : null,
-    security, tests: routeStep('tests', stage, input.testsAgentId ?? null),
-  };
-  return { kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : [])),
-    security: has('security') ? policy : NO_SECURITY,
+  const steps = stageStepMap(task, input, cleanup, stage, archOwner, devOwner, collapsed, security);
+  const hasSecurity = plan.stages.some(step => step.stage === 'security');
+  return {
+    kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
+    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan),
+    security: hasSecurity ? policy : NO_SECURITY,
   };
 }
 
@@ -109,7 +141,8 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: S
   /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
   const cleanup = resultKind === 'document' ? input.cleanup ?? false : input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
   const staged = resultKind === 'document' ? stagedState(task, input, cleanup, documentStages(plan), 'document') : stagedState(task, input, cleanup, plan, 'code');
-  const { state, skipped } = await withoutUncheckable(tx, task, staged);
+  const withSecurity = await populateSecurityOwner(tx, task, staged);
+  const { state, skipped } = await withoutUncheckable(tx, task, withSecurity);
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths, state });
   return skipped;
 }

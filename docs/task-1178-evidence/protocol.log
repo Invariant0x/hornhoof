@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/packages/protocol
+      Coverage enabled with v8
+
+ ✓ test/tool-privacy.test.ts (12 tests) 202ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  03:36:34
+   Duration  5.54s (transform 64%, import 19%, tests 9%, worker 9%)
+

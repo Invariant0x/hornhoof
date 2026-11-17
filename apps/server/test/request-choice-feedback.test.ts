@@ -171,12 +171,11 @@ it('preserves delegated identity and audit and rejects stale delegation', async 
   expect((await c.db.select().from(requests).where(eq(requests.id, next.id)))[0]).toMatchObject({ status: 'open', answer: null, answeredBy: null });
 });
 
-it('does not accept delegated feedback without a verified decision context', async () => {
+it("takes the orchestrator's own feedback, with no turn of a person in it, as the owner's", async () => {
   const c = await company();
   const result = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { answer: FEEDBACK }, headers: orchestratorHeaders(c.ceo.id, c.orchestrator.id) });
-  expect(result.statusCode).toBe(403);
-  expect(result.json().error.reason).toBe('decision_context_missing');
-  expect(await c.saved()).toMatchObject({ status: 'open', answer: null, answeredBy: null });
+  expect(result.statusCode, result.body).toBe(200);
+  expect(await c.saved()).toMatchObject({ status: 'answered', answer: FEEDBACK, answeredBy: c.ceo.id });
 });
 
 it('answers once when feedback races or is retried', async () => {

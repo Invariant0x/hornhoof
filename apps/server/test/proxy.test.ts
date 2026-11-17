@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
+import { eventually } from '../../../test-support/eventually.mjs';
 import {
   firstForwarded,
   heldAnswer,
@@ -196,6 +197,41 @@ function failOnUncaught(): void {
   });
 }
 
+/* The proxy's timers and the clocks it reads, moved only by the test. Sockets and Node's own timers stay real. */
+function onTestClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+  onTestFinished(() => void vi.useRealTimers());
+}
+
+/* Longer than any limit of the proxy's own, so that this stretch on the test clock runs out whatever such a limit times. */
+const QUIET_MS = 10 * 60_000;
+
+/* The idle limits put on any socket from now on. Node counts them on a clock of its own, which no test moves. */
+function idleLimits(): () => number[] {
+  const set = vi.spyOn(net.Socket.prototype, 'setTimeout');
+  onTestFinished(() => void set.mockRestore());
+  return () => set.mock.calls.map(([ms]) => ms).filter(ms => ms > 0);
+}
+
+/* Counts the writes into an HTTP message that had no room left for them: a side that holds back while the other end does
+   not read makes none. */
+function writesWithNoRoom(): () => number {
+  const write = http.OutgoingMessage.prototype.write;
+  let count = 0;
+  const spy = vi.spyOn(http.OutgoingMessage.prototype, 'write').mockImplementation(function (
+    this: http.OutgoingMessage,
+    ...args: Parameters<typeof write>
+  ) {
+    if (this.writableNeedDrain) count++;
+    return write.apply(this, args);
+  });
+  onTestFinished(() => void spy.mockRestore());
+  return () => count;
+}
+
+/* The limit on a connect to the target is the proxy's one timer here. */
+const untilConnectLimited = () => eventually(() => vi.getTimerCount() === 1);
+
 describe('requests', () => {
   it('passes a request, its body and its answer', async () => {
     const sent = randomBytes(MiB);
@@ -266,13 +302,27 @@ describe('requests', () => {
   });
 
   it('keeps a quiet stream open', async () => {
+    const quiet = deferred();
     const target = await answering(async (_, res) => {
       res.write('data: 1\n\n');
-      await sleep(3000);
+      await quiet.promise;
       res.end('data: 2\n\n');
     });
-    const answer = await send(await through(target));
-    expect(answer.body).toBe('data: 1\n\ndata: 2\n\n');
+    const proxy = await through(target);
+    onTestClock();
+    const idle = idleLimits();
+    const out = http.request({ ...proxy, agent: false });
+    out.end();
+    const [res] = (await once(out, 'response')) as [http.IncomingMessage];
+    let body = '';
+    res.on('data', chunk => (body += chunk));
+    await eventually(() => body !== '');
+
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    expect(idle()).toEqual([]);
+    quiet.resolve();
+    await once(res, 'end');
+    expect(body).toBe('data: 1\n\ndata: 2\n\n');
   });
 
   it('passes a request that expects a 100 Continue', async () => {
@@ -325,20 +375,23 @@ describe('requests', () => {
   });
 
   it('keeps a client connection through an idle stretch that would end it at 5 s', async () => {
-    const socket = await connected(await through(await answering((_, res) => res.end('ok'))));
+    const { server, proxy } = await servedThrough(await answering((_, res) => res.end('ok')));
+    /* Node ends an idle connection on a clock of its own, which no test moves. The proxy's part is the time it gives that
+       clock: what clients have today, where Node's own would be 5 s. */
+    expect(server.keepAliveTimeout).toBe(72_000);
+    const socket = await connected(proxy);
     socket.write('GET /first HTTP/1.1\r\nHost: h\r\n\r\n');
     await readsUntil(socket, 'ok');
-    await sleep(6500);
     socket.write('GET /second HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n');
     expect((await readToEnd(socket)).split('\r\n')[0]).toBe('HTTP/1.1 200 OK');
   });
 
   it('takes no request on a connection the target closed while idle', async () => {
     const server = http.createServer((_, res) => res.end('ok'));
-    server.keepAliveTimeout = 5000;
     const proxy = await through(await listening(server));
     expect((await send(proxy)).status).toBe(200);
-    await sleep(6000);
+    /* What the target's keep-alive limit does to its idle connections once it runs out, done at once. */
+    server.closeIdleConnections();
     expect((await send(proxy)).status).toBe(200);
   });
 });
@@ -513,15 +566,20 @@ describe('neither dropped nor doubled', () => {
     });
     const chunk = randomBytes(MiB);
     const times = 128;
+    const { server, proxy } = await servedThrough(target);
+    let passing: http.IncomingMessage | undefined;
+    server.on('request', req => (passing = req));
+    const noRoom = writesWithNoRoom();
     const out = http.request({
-      ...(await through(target)),
+      ...proxy,
       agent: false,
       method: 'POST',
       headers: { 'content-length': String(times * MiB) },
     });
     const poured = { bytes: 0 };
     void pour(out, chunk, times, poured);
-    await sleep(1000);
+    /* The proxy stops reading the upload once the target's side of it is full, or else writes into it with no room. */
+    await eventually(() => passing?.isPaused() === true || noRoom() > 0);
     expect(poured.bytes).toBeLessThan(times * MiB);
     reading.resolve();
     const sent = createHash('sha256');
@@ -529,23 +587,30 @@ describe('neither dropped nor doubled', () => {
     expect(await finished.promise).toBe(sent.digest('hex'));
     const [res] = (await once(out, 'response')) as [http.IncomingMessage];
     expect(res.statusCode).toBe(200);
+    expect(noRoom()).toBe(0);
   });
 
   it('holds an answer back while the client does not read it', async () => {
     const times = 128;
     const poured = { bytes: 0 };
     const target = await answering((_, res) => void pour(res, Buffer.alloc(MiB), times, poured));
-    const out = http.request({ ...(await through(target)), agent: false });
+    const { server, proxy } = await servedThrough(target);
+    let toClient: http.ServerResponse | undefined;
+    server.on('request', (_, res) => (toClient = res));
+    const noRoom = writesWithNoRoom();
+    const out = http.request({ ...proxy, agent: false });
     out.end();
     const [res] = (await once(out, 'response')) as [http.IncomingMessage];
     res.pause();
-    await sleep(1000);
+    /* The client's side of the answer is full. */
+    await eventually(() => toClient?.writableNeedDrain === true);
     expect(poured.bytes).toBeLessThan(times * MiB);
     let arrived = 0;
     res.on('data', chunk => (arrived += chunk.length));
     res.resume();
     await once(res, 'end');
     expect(arrived).toBe(times * MiB);
+    expect(noRoom()).toBe(0);
   });
 
   it.each([
@@ -893,28 +958,40 @@ describe('a target that is down', () => {
   it('gives up on a target that does not connect within connectMs', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 }, { connectMs: 200 });
     withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy, { path: '/api/x' })).body).toBe(STARTING_JSON);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(150);
-    expect(Date.now() - started).toBeLessThan(3000);
-    expect((await exchange(proxy, UPGRADE)).split('\r\n')[0]).toBe('HTTP/1.1 502 Bad Gateway');
+    onTestClock();
+    const answer = send(proxy, { path: '/api/x' });
+    await untilConnectLimited();
+    await vi.advanceTimersByTimeAsync(199);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await answer).body).toBe(STARTING_JSON);
+    const upgraded = exchange(proxy, UPGRADE);
+    await untilConnectLimited();
+    await vi.advanceTimersByTimeAsync(200);
+    expect((await upgraded).split('\r\n')[0]).toBe('HTTP/1.1 502 Bad Gateway');
   });
 
   it('gives a connect 5 seconds unless told otherwise', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 });
     withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy)).status).toBe(502);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4800);
-    expect(Date.now() - started).toBeLessThan(7000);
+    onTestClock();
+    const answer = send(proxy);
+    await untilConnectLimited();
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await answer).status).toBe(502);
   });
 
   it('takes a connectMs of 0 at its word', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 }, { connectMs: 0 });
     withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy)).status).toBe(502);
-    expect(Date.now() - started).toBeLessThan(3000);
+    onTestClock();
+    const answer = send(proxy);
+    await untilConnectLimited();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect((await answer).status).toBe(502);
   });
 
   it('leaves no timer behind a connect that failed, so a stopping process can end', async () => {
@@ -1009,8 +1086,11 @@ describe('upgrades', () => {
 
   it('keeps a quiet WebSocket open', async () => {
     const { open } = await webSockets();
+    onTestClock();
+    const idle = idleLimits();
     const { client, atTarget } = await open();
-    await sleep(3000);
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    expect(idle()).toEqual([]);
     const up = once(atTarget, 'message');
     client.send('still here');
     expect(String((await up)[0])).toBe('still here');
