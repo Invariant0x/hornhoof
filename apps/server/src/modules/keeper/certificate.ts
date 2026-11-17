@@ -12,7 +12,7 @@ const EVERY_MS = 3_600_000;
 const NOT_FOR_THIS_KEY = "The app's answer is not a certificate for this machine's key.";
 
 export type HeldCertificate = { machine: string; role: MachineRole; certPem: string; authorityPem: string; until: string };
-export type CertificateKeeperOptions = {
+type CertificateKeeperOptions = {
   dir: string;
   key: MachineKey;
   ask: (signKey: string) => Promise<HeldCertificate>;

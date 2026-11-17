@@ -1,5 +1,5 @@
 {
-  "id": "1b6699fd-1fe7-4ae6-8dbf-f5dbee656de0",
+  "id": "2dfb522a-e5be-4fc5-88d5-d7da785ef99d",
   "prevId": "815845fd-83e2-4e4e-835c-2929d4e255ec",
   "version": "7",
   "dialect": "postgresql",
@@ -10302,7 +10302,7 @@
       "checkConstraints": {
         "outbound_setup_events_kind": {
           "name": "outbound_setup_events_kind",
-          "value": "\"outbound_setup_events\".\"kind\" IN ('channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released')"
+          "value": "\"outbound_setup_events\".\"kind\" IN ('channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released', 'contact_added', 'consent_revoked')"
         }
       },
       "isRLSEnabled": false
@@ -13672,111 +13672,6 @@
         "requests_approval_commit": {
           "name": "requests_approval_commit",
           "value": "\"requests\".\"kind\" <> 'approval' OR \"requests\".\"commit\" IS NOT NULL OR \"requests\".\"approval_channel\" IS NOT NULL"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.secret_redactions": {
-      "name": "secret_redactions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "characters": {
-          "name": "characters",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "person_id": {
-          "name": "person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "secret_redactions_fingerprint": {
-          "name": "secret_redactions_fingerprint",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "fingerprint",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "secret_redactions_company_id_companies_id_fk": {
-          "name": "secret_redactions_company_id_companies_id_fk",
-          "tableFrom": "secret_redactions",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "secret_redactions_person_id_people_id_fk": {
-          "name": "secret_redactions_person_id_people_id_fk",
-          "tableFrom": "secret_redactions",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "secret_redactions_length": {
-          "name": "secret_redactions_length",
-          "value": "\"secret_redactions\".\"characters\" > 0"
         }
       },
       "isRLSEnabled": false

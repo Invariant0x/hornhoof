@@ -46,7 +46,7 @@ async function fileLink(db: Db, config: Config) {
   return link && !link.hidden ? link : null;
 }
 
-export type ActiveRecovery = { id: string; recipient: string; madeAt: Date; madeBy: string; link: RecoveryLink | null };
+type ActiveRecovery = { id: string; recipient: string; madeAt: Date; madeBy: string; link: RecoveryLink | null };
 
 /* The company's recovery key now: the newest one not retired, when the link it was saved with is the link now. With the
    link taken, renamed or removed since, there is none, and bundles are sealed without one until a new file is saved. */

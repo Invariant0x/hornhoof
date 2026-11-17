@@ -31,7 +31,7 @@ const GONE = 'The database is not on this server any more, so nothing of it was 
 const LEFT_OUT = (at: string): string => `Left out with the database from before the restore of ${at}.`;
 
 /* How the old database of a copy on another machine is opened: through the door the keeper holds to it, by its port. */
-export type PeerDatabases = { open(port: number, label: string): Promise<MergeSource> };
+type PeerDatabases = { open(port: number, label: string): Promise<MergeSource> };
 
 /* The database set aside before a merge, or made of an upload, that is not saved as a bundle yet, for the data keeper
    to dump and seal: the oldest first. The bundle is asked for at once and the merge does not wait for it, as the
