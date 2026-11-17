@@ -240,10 +240,11 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const ownsOrCompany = (me: Person, ownerId: string) => me.id === ownerId || me.scopeKind === 'company';
 
   /* A key placed in a department, a product of it or a team in it is that department's: a person who runs it adds, changes
-     and removes it there as the CEO does, from their own screen and never through an agent. What serves the whole company
-     or the orchestrator stays with people who see the whole company, and so does every personal plan of someone else. */
+     and removes it there as the CEO does, from their own screen or through the orchestrator, never through a head. What
+     serves the whole company or the orchestrator stays with people who see the whole company, and so does every personal
+     plan of someone else. */
   async function runsPlace(me: Person, kind: string | null, id: string | null): Promise<boolean> {
-    if (me.via || !id) return false;
+    if (me.viaHead || !id) return false;
     if (kind === 'department') return runsDepartment(db, me, id);
     if (kind !== 'team') return false;
     const [team] = await db.select(only(teams, 'departmentId')).from(teams).where(and(eq(teams.id, id), eq(teams.companyId, me.companyId)));
@@ -330,7 +331,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* An API's models with a key a person gives, before the connection is saved. */
   app.post('/api/subscriptions/models', async req => {
     const me = await requirePerson(req, db);
-    if (me.scopeKind !== 'company' && (me.via || !(await accessOf(db, me)).owns?.size)) throw notTheirPlace();
+    if (me.scopeKind !== 'company' && (me.viaHead || !(await accessOf(db, me)).owns?.size)) throw notTheirPlace();
     const body = ModelsBody.parse(req.body);
     return listedModels(ctx, body.provider, body, body.apiKey);
   });
