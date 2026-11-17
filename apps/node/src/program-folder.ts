@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
-export type ProgramKind = 'claude' | 'codex' | 'kimi' | 'antigravity';
-export type FolderInput = { workDir: string };
+type ProgramKind = 'claude' | 'codex' | 'kimi' | 'antigravity';
+type FolderInput = { workDir: string };
 
 /* Codex takes AGENTS.md for a project's notes and the words that wake it for its user's, so it first hears whose words
    those are, as the instructions below name them. */

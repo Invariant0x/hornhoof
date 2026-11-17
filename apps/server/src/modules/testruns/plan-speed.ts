@@ -4,7 +4,7 @@ import { median } from './plan-statistics.js';
 /* What a test file took on one computer in an earlier part. */
 export type FileTime = FileDuration & { computer: string };
 /* How long each computer takes for the same work against the middle one, at pace 1, and what each file takes at that pace. */
-export type MachinePaces = { paces: Map<string, number>; durations: FileDuration[] };
+type MachinePaces = { paces: Map<string, number>; durations: FileDuration[] };
 
 const ROUNDS = 30;
 

@@ -31,7 +31,7 @@ WORKDIR /app
 COPY --from=manifests /app/ ./
 RUN cpu="$(case "${TARGETARCH:-}" in amd64) echo x64 ;; '') node -p process.arch ;; *) echo "$TARGETARCH" ;; esac)" \
   && npm ci --omit=dev --cpu="$cpu" --workspace apps/server --workspace packages/protocol && npm cache clean --force \
-  && rm -f node_modules/.package-lock.json && mkdir /control /harness /keeper
+  && rm -f node_modules/.package-lock.json && mkdir /control /harness /files /keeper
 
 FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
 ENV NODE_ENV=production PORT=8080
@@ -61,6 +61,8 @@ COPY --from=deps --chown=node:node /control /control
 COPY --from=deps --chown=node:node /keeper /keeper
 # What machines share of test harnesses, in a volume of its own that takes this owner too.
 COPY --from=deps --chown=node:node /harness /harness
+# Files over 50 MB, each on the machine that took it, in a volume of its own that takes this owner too.
+COPY --from=deps --chown=node:node /files /files
 USER node
 EXPOSE 8080
 CMD ["node", "apps/server/dist/main.js"]

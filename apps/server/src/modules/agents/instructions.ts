@@ -165,7 +165,7 @@ export const ORCHESTRATOR_SKILLS = [
 ] as const;
 
 /* An assistant's own agent's skills: it works in no department and leads nobody, so none of an employee's. */
-export const ASSISTANT_SKILLS = ['hh-assistant'] as const;
+const ASSISTANT_SKILLS = ['hh-assistant'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
 export function orchestratorSteady(t: Templates, assignment?: string): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
@@ -229,7 +229,7 @@ async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, ag
 /* What an assistant's own agent is told of its program's skills: how to run them while its assistant has a skills address,
    and otherwise that it has none to run, so it promises none. Its instructions differ between the two, so setting or
    clearing the address starts its program anew, with the tools it has then. */
-export const ASSISTANT_WITH_SKILLS =
+const ASSISTANT_WITH_SKILLS =
   "Your assistant's program has skills of its own, such as reminders, files or search: run one with persona_call, by the skill's name and with its arguments, as the message lists them. " +
   "Its answer says whether it worked; tell your owner what came of it. A file a skill takes goes to Hornhoof first with hh-attach --chat FILE, which prints the file's id: " +
   "give that id in the skill's arguments, and the program downloads the file by it.";

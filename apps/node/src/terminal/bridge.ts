@@ -1,15 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
 import { ToolsMemory } from './tools-memory.js';
 
-/* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
+/* Hook and tool calls are short. A file an agent sends or fetches passes as it comes, whatever its size. */
 const MAX_BODY = 4 * 1024 * 1024;
-const MAX_FILE = 51 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
 /* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
@@ -38,7 +39,7 @@ const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
 const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
-const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
    and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
@@ -233,14 +234,15 @@ export class Bridge {
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
     if (!attachmentPath(kind, event)) return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
-       caller closing its socket; it is never applied until ownership succeeds. */
-    const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
-    void reading.catch(() => {});
+       caller closing its socket; it is never applied until ownership succeeds. A file is not kept: it waits unread until
+       then, and goes on to Hornhoof as it comes. */
+    const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
+    void reading?.catch(() => {});
     if (!(await owned)) {
       if (kind === 'hook' && event) this.options.unowned?.(key, event);
       return this.refused(req, res, 403, 'owner check failed');
     }
-    const body = await reading;
+    const body = reading ? await reading : Buffer.alloc(0);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
@@ -256,14 +258,16 @@ export class Bridge {
       if (typeof v === 'string') headers[h] = v;
     }
     const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
-    const up = await this.forward(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) }, onlyReading(kind, req.method, body));
+    const sent = req.method === 'GET' || req.method === 'HEAD' ? {} : kind === 'attach' ? { body: Readable.toWeb(req) as ReadableStream<Uint8Array>, duplex: 'half' } : { body: new Uint8Array(body) };
+    const up = await this.forward(target, { method: req.method, headers, ...sent } as RequestInit, onlyReading(kind, req.method, body));
     const out: Record<string, string> = {};
     for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
       const v = up.headers.get(h);
       if (v) out[h] = v;
     }
-    const answer = Buffer.from(await up.arrayBuffer());
     res.writeHead(up.status, out);
+    if (kind === 'attach') return pipeline(up.body ? Readable.fromWeb(up.body as never) : Readable.from([]), res);
+    const answer = Buffer.from(await up.arrayBuffer());
     res.end(answer);
     if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
