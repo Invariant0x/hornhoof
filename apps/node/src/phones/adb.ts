@@ -13,9 +13,10 @@ export const ADB_MAX_BYTES = 8 * 1024 * 1024;
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
 export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written. */
-export function textScript(value: string): string {
-  if (!value || value.length > 4096 || !/^[\x20-\x7e]+$/.test(value)) throw new Error('phone_text_unsupported');
+/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written.
+   input text types plain Latin letters, digits and signs only; any other text gives null. */
+function textScript(value: string): string | null {
+  if (!/^[\x20-\x7e]+$/.test(value)) return null;
   return (value.match(/%|[^%]+/g) ?? []).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}\n`).join('');
 }
 
@@ -141,7 +142,7 @@ export class PhoneAdb {
     switch (op.kind) {
       case 'tap': return `input tap ${op.x} ${op.y}\n`;
       case 'swipe': return `input swipe ${op.x} ${op.y} ${op.toX} ${op.toY} ${op.ms}\n`;
-      case 'text': return /^[\x20-\x7e]+$/.test(op.text) ? textScript(op.text) : this.keyboardScript(serial, op.text, signal);
+      case 'text': return textScript(op.text) ?? this.keyboardScript(serial, op.text, signal);
       case 'url': return `am start -a android.intent.action.VIEW -d ${shellWord(op.url)} -p com.android.chrome\n`;
       case 'app': {
         const out = await this.call(serial, ['shell', 'cmd', 'package', 'resolve-activity', '--brief', '-c', 'android.intent.category.LAUNCHER', op.package], signal);
