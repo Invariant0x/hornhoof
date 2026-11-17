@@ -1,0 +1,58 @@
+{
+  "runs": [
+    {
+      "commit": "231dc680b020e127ddb40e60ec8bdf7c586211ce",
+      "note": "Merge metadata was subsequently corrected with the required sign-off in 289f63f541af626f242fe6e5a1d6387dfcbdafee; its tree is identical",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/tasks-tools.test.ts test/computer-scope.test.ts test/computer.test.ts test/orchestrator-close.test.ts --maxWorkers=1",
+      "exitCode": 0,
+      "passed": 91,
+      "log": "merged/tests.log"
+    },
+    {
+      "commit": "289f63f541af626f242fe6e5a1d6387dfcbdafee",
+      "phase": "RED",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/tools.test.ts --maxWorkers=1",
+      "exitCode": 1,
+      "passed": 6,
+      "failed": 1,
+      "log": "tools-red.log"
+    },
+    {
+      "version": "289f63f541af626f242fe6e5a1d6387dfcbdafee plus the test patch committed in 7262ffeba807115702c7cdbda4960ff9bf96f17d",
+      "phase": "GREEN preflight",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/tools.test.ts --maxWorkers=1",
+      "exitCode": 0,
+      "passed": 7,
+      "log": "tools-green.log"
+    },
+    {
+      "commit": "7262ffeba807115702c7cdbda4960ff9bf96f17d",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/tasks-tools.test.ts test/tools.test.ts test/computer-scope.test.ts test/computer.test.ts test/orchestrator-close.test.ts --maxWorkers=1",
+      "exitCode": 0,
+      "passed": 98,
+      "log": "final/tests.log"
+    },
+    {
+      "commit": "7262ffeba807115702c7cdbda4960ff9bf96f17d",
+      "command": "npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+      "exitCode": 0,
+      "log": "final/types.log"
+    },
+    {
+      "commit": "7262ffeba807115702c7cdbda4960ff9bf96f17d",
+      "command": "npx --no-install eslint apps/server/test/tasks-tools.test.ts apps/server/test/tools.test.ts",
+      "exitCode": 0,
+      "log": "final/lint.log"
+    },
+    {
+      "commit": "7262ffeba807115702c7cdbda4960ff9bf96f17d",
+      "command": "npm run build -w @hornhoof/server",
+      "exitCode": 0,
+      "log": "final/build.log"
+    }
+  ]
+}

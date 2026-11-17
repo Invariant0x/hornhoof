@@ -1,0 +1,34 @@
+
+ RUN  v5.0.5 /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1278/apps/server
+
+ ✓ test/computer-scope.test.ts (19 tests) 3635ms
+   ✓ machine access scope (19)
+     ✓ opens for 1h and names its opener 760ms
+     ✓ offers heads and workers command tools without asking for access 334ms
+ ✓ test/tasks-tools.test.ts (30 tests) 9260ms
+   ✓ task tools (13)
+     ✓ keeps a long UTF-8 comment intact through MCP 3711ms
+     ✓ keeps a long UTF-8 submit intact through MCP 505ms
+     ✓ refuses the eleventh task in one turn 436ms
+ ✓ test/tools.test.ts (7 tests) 1887ms
+   ✓ /mcp (7)
+     ✓ refuses a request without a token or with the token of a finished job 1001ms
+ ✓ test/computer.test.ts (20 tests) 6838ms
+   ✓ access to the computer the server runs on (19)
+     ✓ keeps the access question as an outgoing message from the orchestrator to the CEO 947ms
+     ✓ opens for one hour by default when the CEO clicks, and the orchestrator goes on by itself 595ms
+     ✓ lets the turn the CEO's click opens use the computer until a person without the right writes into it, and decide as the owner as any turn does 590ms
+     ✓ keeps computer access in a running turn when Hornhoof types improvement notices or an employee writes into it 501ms
+     ✓ keeps the computer-opening click through retries, while a plain notice retry works on the open machine 577ms
+     ✓ refuses computer on a second retry after pending input was not kept on a click retry 351ms
+     ✓ refuses computer when saved marked words are replayed via queued after a non-CEO message 354ms
+     ✓ refuses computer when live input lands between the unheard replay read and its store 302ms
+     ✓ refuses computer when live input lands between the queued replay read and its store 304ms
+ ✓ test/orchestrator-close.test.ts (22 tests) 1995ms
+   ✓ the orchestrator closes a task in any state (19)
+     ✓ closes a task open as done, with its reason in the log as its own act 301ms
+
+ Test Files  5 passed (5)
+      Tests  98 passed (98)
+   Start at  15:12:07
+   Duration  28.02s (tests 66%, import 28%, transform 6%)
