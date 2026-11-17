@@ -1,0 +1,57 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ✓ test/test-runs-wait.test.ts (49 tests) 12738ms
+   ✓ a run that ends while the one who started it waits (47)
+     ✓ run_tests (8)
+       ✓ ends the wait and wakes the agent once with the result and where to read it, when it passes 3066ms
+       ✓ wakes the agent once, after the last part, when it has several 339ms
+     ✓ tells the agent of each run that ends, also of one that ended after it waited again 310ms
+     ✓ keeps both results in the one turn that waits when two runs end before it starts 326ms
+     ✓ and its wait names which run it is for (10)
+       ✓ refuses a wait for a run that ended, one of another task or one that never was 320ms
+ ✓ test/test-runs.test.ts (40 tests) 16198ms
+   ✓ a test run (24)
+     ✓ runs on a machine that joined without a plan, as on any machine of the company 1661ms
+     ✓ leaves out a machine its owner took back, and one whose owner does not reach the repository 375ms
+     ✓ keeps a machine-queued part out of execution timeout until tests.started 303ms
+     ✓ stops on stop_tests: its parts end, their nodes stop them, and nobody is woken 591ms
+     ✓ wakes its agent when another one stopped it 346ms
+     ✓ runs a lost part again on the machine that lost it when no other machine could ever fit it 629ms
+     ✓ runs a part its machine lost in a restart again on another machine, under a new id, and says so 436ms
+     ✓ keeps a part through a 60-second disconnect and accepts its result after return 327ms
+     ✓ runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost 539ms
+     ✓ takes no end from the machine that was away once its part runs on another machine, and tells it to stop 446ms
+     ✓ does not count a turn that ended while its test run goes on as standing still 402ms
+     ✓ goes to the built-in node too, which reaches every repository 335ms
+     ✓ offers each built-in node as a place 318ms
+     ✓ gives no part to the server’s own built-in node when the computer it runs on is taken back 485ms
+     ✓ runs the parts of a machine disconnected from the company, and of a removed plan, again on another machine 564ms
+     ✓ brings its result into the turn that already waits on the task 453ms
+     ✓ is refused without a repository, without {part} in a split command, past 3 open runs, and without a task 658ms
+   ✓ pinned product environment runs (3)
+     ✓ requests metadata before parts, retains its snapshot, and runs final checks after the suite 322ms
+   ✓ refuses a successful product result with wrong-hash receipt evidence 308ms
+   ✓ selects a capable sibling volume, holds no machine to where it ran before as each has the harness, and goes on when one disappears 793ms
+   ✓ gives a part to a node of another build and processor of the class that described its run, and the Tests report accepts its receipt, but not to another system or Node major 1128ms
+   ✓ fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes 344ms
+   ✓ rechecks a persisted metadata node after revoking access 309ms
+ ✓ test/test-runs-hosts.test.ts (19 tests) 7962ms
+   ✓ parts on physical computers (19)
+     ✓ sends run_tests parts to a free machine while another waits for an update 3709ms
+     ✓ sends run_work parts to a free machine while another waits for an update 436ms
+     ✓ uses the selected node with 2 GB, even when its sibling reports 12 GB last 451ms
+     ✓ uses the selected node with 12 GB, even when its sibling reports 2 GB last 562ms
+     ✓ allows two places on one host when configured and queues the third 312ms
+ ✓ test/test-runs-work.test.ts (12 tests) 4638ms
+   ✓ a run of other work (6)
+     ✓ runs a command with no branch on a free machine, hands its node the task's files it names, and puts what it made on the task 1418ms
+     ✓ is refused a file its task lacks, a branch with no repository and a split command without {part}, and a part's files reach only the node that runs it 431ms
+   ✓ the pool of machines (6)
+     ✓ shows the orchestrator every machine with its load, the parts it runs and why each waiting part waits 398ms
+     ✓ says a part waits for a lent machine, for one its department reaches, for one that runs work, or for free memory 364ms
+
+ Test Files  4 passed (4)
+      Tests  120 passed (120)
+   Start at  12:16:24
+   Duration  58.92s (tests 85%, import 11%, transform 4%)

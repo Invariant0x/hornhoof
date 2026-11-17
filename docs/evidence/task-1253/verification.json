@@ -1,0 +1,67 @@
+{
+  "base": "4aef2458406a0706567a921b7083195686c70e65",
+  "code": "a58f10b7fe6e345600a8694095b8ccd150d68eb0",
+  "author": {
+    "command": "NODE_OPTIONS=--max-old-space-size=2048 npm run -s check:author -- --sha a58f10b7fe6e345600a8694095b8ccd150d68eb0 --base 4aef2458406a0706567a921b7083195686c70e65",
+    "exit": 0,
+    "tests": {
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lint": "passed",
+    "types": "passed",
+    "crapper": "passed",
+    "worstCrap": 8.7407,
+    "dryerFlags": 0,
+    "changedLines": {
+      "covered": 62,
+      "total": 62
+    },
+    "format": "unavailable: repo_has_no_formatter"
+  },
+  "build": {
+    "command": "npm run build -w @hornhoof/server",
+    "exit": 0
+  },
+  "neighbours": {
+    "checkedCommit": "5c16adcd3e9e59b1155c6d1212e411cd93f8defa",
+    "exit": 0,
+    "passed": 120,
+    "failed": 0,
+    "total": 120,
+    "inputFingerprintRecord": "neighbour-input-fingerprint.json"
+  },
+  "requirements": {
+    "holderAndFIFO": "test-runs-slots.test.ts: shows the current holder and ordered queue for tests / work, and updates on release; keeps multiple predecessors in their FIFO order",
+    "readOnly": "check-queue.test.ts: reads holders and FIFO waiters without admitting, releasing or changing a claim",
+    "visibility": "test-runs-slots.test.ts: keeps inaccessible holders private and refuses an unrelated reader before showing slot details",
+    "safeIdentity": "test-runs-slots.test.ts: identifies an agent check by its task with a part label / line break; does not attribute a part label claimed by another node to the part owner",
+    "missingState": "test-runs-slots.test.ts: does not mistake an unrecorded part for an empty queue during startup"
+  },
+  "sourceSha256": {
+    "apps/server/src/modules/nodes/check-slot-details.ts": "584a9ca16ef83ef5482bd0d7cb73b67da81a890e266b8dc6223f9176c2c312b0",
+    "apps/server/src/modules/nodes/check-slot-view.ts": "861e1879fbfdc18438f5d0d88a86c460285deeb74b15dac1c29db7f3ce480ff4",
+    "apps/server/src/modules/nodes/check-slots-queue.ts": "bf9213ad6f7043e28424f9dbefa14656acbf03e38d6e2cfb1d815e9d9bf9abd7",
+    "apps/server/src/modules/nodes/check-slots.ts": "40b4ef9369e28fb11754e60045ff70fc4402ff0a2982ca7d7b8b80dde2db71bb",
+    "apps/server/test/check-queue.test.ts": "756bb41a701a554eb53288306761f13d7d80b8a7d8a438e1a6664ce0f82690ed",
+    "apps/server/test/test-runs-slots.test.ts": "b3cf0f4f7db0403b7affb60de582352b330421adfb1c881f17c8269aacbc632e",
+    "docs/task-1253-check-slots.md": "b5824d43ef76e33b7a58a11ccba7e6c1d85f147ae8fb29f98eb92cb65508f792"
+  },
+  "concerns": [
+    "Prior neighbouring wait test timeouts reproduced without these changes on clean base 76a7c5da; precise setup slowness cause remains unknown.",
+    "Whole release suite is left to the release owner; it was not run on this task branch.",
+    "Optional codex review tool could not start in its sandbox; self-review and security review were performed by the task owner."
+  ],
+  "previousCode": "5c16adcd3e9e59b1155c6d1212e411cd93f8defa",
+  "integration": {
+    "branch": "turn-32",
+    "commit": "a58f10b7fe6e345600a8694095b8ccd150d68eb0",
+    "previous": "4aef2458406a0706567a921b7083195686c70e65",
+    "command": "git push origin HEAD:refs/heads/turn-32",
+    "exit": 0,
+    "force": false,
+    "observedRemoteTaskBranch": "a58f10b7fe6e345600a8694095b8ccd150d68eb0",
+    "observedRemoteTurnBranch": "a58f10b7fe6e345600a8694095b8ccd150d68eb0"
+  }
+}

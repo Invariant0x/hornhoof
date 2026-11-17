@@ -1,0 +1,12 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ✓ test/test-runs-slots.test.ts (8 tests) 3492ms
+   ✓ reading a part that waits for a machine check slot (8)
+     ✓ shows the current holder and ordered queue for tests, and updates on release 1959ms
+     ✓ shows the current holder and ordered queue for work, and updates on release 350ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  12:11:39
+   Duration  35.58s (import 58%, transform 26%, tests 16%)

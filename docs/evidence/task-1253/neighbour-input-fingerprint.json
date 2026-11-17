@@ -1,0 +1,17 @@
+{
+  "before": "5c16adcd3e9e59b1155c6d1212e411cd93f8defa",
+  "after": "a58f10b7fe6e345600a8694095b8ccd150d68eb0",
+  "changedPaths": [
+    "apps/server/test/events.test.ts"
+  ],
+  "excludedPath": "apps/server/test/events.test.ts",
+  "fingerprintSha256": "37deab4c4a28a9f326812de2bfa7e8f052bb7c28ce4ffe42cfeecf3578e490f4",
+  "method": "SHA-256 of all recursive git tree records, excluding the one unrelated test file. This covers all production source, dependency locks, selected test files, their helpers and runner config. The changed events.test.ts is not selected or imported by the named checks. TypeScript includes it and therefore is re-executed on the final candidate.",
+  "reusedCheck": {
+    "command": "npx --no-install vitest run test/test-runs.test.ts test/test-runs-work.test.ts test/test-runs-wait.test.ts test/test-runs-hosts.test.ts --maxWorkers=1",
+    "exit": 0,
+    "passed": 120,
+    "failed": 0,
+    "files": 4
+  }
+}
