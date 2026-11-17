@@ -6,6 +6,8 @@ The list at the end names every template, what it learned from and its licence. 
 
 The development templates carry Hornhoof's own T1-T11 testing policy and coding cycle with four task kinds. Product environment discovery and ownership are also project-owned procedures, shared by Development and Operations. These project-owned rules govern affected tests, the final whole-suite run, release-scoped mutation testing, deterministic evidence and the Bug, Known behaviour, Unknown path and Legacy code cycles for any company and language.
 
+The one-shot stage declarations, judge briefs and stage-owner guidance are Hornhoof's own text. They use the procedure in `skills/hh-one-shot-calls.md`.
+
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |

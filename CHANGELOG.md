@@ -13,6 +13,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - People and agents can set task priority, which appears on the task card and orders tasks within each list group.
 - The map uses squares for employees, diamonds for generalists and ghost outlines for one-shot calls, with a legend for all three.
 - Declared one-shot stages show their places before a call begins and distinguish running calls from waiting calls.
+- Every starter kit shows its one-shot places on the map before a subscription is connected.
+- Owners of one-shot stages get guidance on briefing the calls and using their answers and the judge's verdict.
 - Worker marks also appear in the department staff list, employee card and tracker, and the task route marks its one-shot stages.
 ### Changed
 - The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
