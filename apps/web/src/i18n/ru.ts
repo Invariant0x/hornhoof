@@ -2420,6 +2420,7 @@ export const ru: Messages = {
       suppressed: 'Этот человек попросил больше не писать ему. Его адрес нельзя добавить снова.',
       added: (address: string) => `${address} теперь может получать сообщения этого канала.`,
       known: (address: string) => `${address} уже есть в списке этого канала.`,
+      takenBack: (address: string) => `${address} больше не получит сообщений этого канала.`,
       listTitle: (count: number) => `Адреса с согласием: ${count}`,
       none: 'Адресов пока нет',
       statuses: { granted: 'согласие есть', revoked: 'согласие отозвано', refused: 'просили не писать' },

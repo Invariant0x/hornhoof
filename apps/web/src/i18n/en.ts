@@ -2417,6 +2417,7 @@ export const en = {
       suppressed: 'This person asked not to get messages. Their address cannot be added again.',
       added: (address: string) => `${address} can get messages of this channel now.`,
       known: (address: string) => `${address} was already on the list of this channel.`,
+      takenBack: (address: string) => `${address} will not get messages of this channel any more.`,
       listTitle: (count: number) => `Addresses with consent: ${count}`,
       none: 'No addresses yet',
       statuses: { granted: 'agreed', revoked: 'consent taken back', refused: 'asked not to be written to' },
