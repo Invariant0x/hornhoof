@@ -805,10 +805,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "packages/protocol/tsconfig.json",
             "--noEmit"
@@ -816,10 +816,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/server/tsconfig.eslint.json",
             "--noEmit"
@@ -827,10 +827,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/node/tsconfig.eslint.json",
             "--noEmit"
@@ -838,10 +838,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "packages/protocol/tsconfig.eslint.json",
             "--noEmit"
@@ -849,10 +849,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/node/tsconfig.json",
             "--noEmit"
@@ -860,10 +860,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/server/tsconfig.json",
             "--noEmit"
@@ -871,10 +871,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/web/tsconfig.json",
             "--noEmit"

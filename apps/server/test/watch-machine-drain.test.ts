@@ -47,11 +47,11 @@ async function company() {
 const agentsSeen = async (client: Client) => JSON.parse(((await client.callTool({ name: 'agents', arguments: {} })) as Result).content[0]!.text) as Row[];
 
 describe('the Task watchdog and a machine waiting for an update', () => {
-  it('sees that the machine waits, with its deadline, and the agent as ready rather than lost', async () => {
+  it('sees that the machine waits, since when, and the agent as ready rather than lost', async () => {
     const f = await company();
     await f.waitForUpdate();
     const bruno = (await agentsSeen(await mcp(f.app, TOKEN))).find(a => a.name === 'Bruno')!;
-    expect(bruno).toMatchObject({ ready: true, reason: null, machineDrain: { state: 'waiting', turnsLeft: 1, until: expect.any(String) } });
+    expect(bruno).toMatchObject({ ready: true, reason: null, machineDrain: { state: 'waiting', turnsLeft: 1, since: expect.any(String) } });
   });
 
   it('sees no wait on an agent of a machine that does not wait', async () => {

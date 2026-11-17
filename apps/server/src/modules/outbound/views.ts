@@ -601,5 +601,3 @@ export function outboundViewRoutes(app: FastifyInstance, ctx: Ctx): void {
     return dto;
   });
 }
-
-export const registerOutboundViewRoutes = outboundViewRoutes;

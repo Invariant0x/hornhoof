@@ -152,7 +152,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
   agents: ['context_used', 'timer_at'],
-  nodes: ['last_seen_at', 'status', 'version', 'boot'],
+  nodes: ['last_seen_at', 'status', 'version', 'boot', 'update_wait_since'],
   subscriptions: ['status', 'limits', 'models', 'limits_updated_at', 'lease_node_id'],
   machines: [
     'server_order', 'server_why', 'web_port', 'peer_port', 'commit', 'uptime_s', 'fsync_p99_ms', 'disk_free', 'report_at', 'addresses', 'path', 'direct_fails', 'renew_at',
