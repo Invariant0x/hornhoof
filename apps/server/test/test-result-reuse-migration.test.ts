@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { migrationsBefore } from './migrations-before.js';
-import { freshPglite } from './helpers-db.js';
+import { freshPglite, openTestDb } from './helpers-db.js';
 
 type Db = ReturnType<typeof drizzle>;
 async function open(): Promise<Db> {
@@ -40,11 +40,14 @@ it('leaves the runs of a database at the previous release as they were', async (
   await db.execute(greenRow(found, 'c'.repeat(64)));
   expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_file_results`)).rows[0]!.n).toBe(2);
   expect((await db.execute(sql`select distinct main_line from test_file_results`)).rows).toEqual([{ main_line: false }]);
-}, 60_000);
+});
 
+/* The run's own database is a fresh one with every migration applied, made once for the run, and every test's starts as
+   a copy of it. */
 it('creates what reuse needs on a fresh database, and a removed department takes its results along', async () => {
-  const db = await open();
-  await migrate(db, { migrationsFolder: MIGRATIONS });
+  const { client } = await openTestDb();
+  onTestFinished(() => client.close());
+  const db = drizzle(client);
   const found = await legacyRun(db);
   await db.execute(greenRow(found, 'b'.repeat(64)));
   await db.execute(sql`insert into test_suite_memory(company_id,repository_owner_id,repo_url_hash,suite_id,files) values(${found.company},${found.department},${'f'.repeat(64)},'unit','[]')`);
@@ -52,4 +55,4 @@ it('creates what reuse needs on a fresh database, and a removed department takes
   await db.execute(sql`delete from departments where id = ${found.department}`);
   expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_file_results`)).rows[0]!.n).toBe(0);
   expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_suite_memory`)).rows[0]!.n).toBe(0);
-}, 60_000);
+});

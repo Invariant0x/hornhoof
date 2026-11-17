@@ -5,7 +5,7 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
-## [Unreleased]
+## [0.31.0] - 2026-11-17
 
 ### Fixed
 
@@ -19,7 +19,46 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
 - The glow and focus ring of a card follow its cut corner, with no dark triangle there.
 - The map's zoom label, such as 115%, is no longer cut off.
+- Kimi attaches task files through its node when its turn has no local token.
+- A database copy's first sync survives a slow link, and its drops no longer wait on the leader.
+- The leader frees at its next sweep the slots and origins of tables whose first copy broke off.
+- No test harness build is taken from the built-in node of a machine taken off the company's checks.
+- External messaging is a button on the department screen, where whoever runs its messaging finds the channels.
+- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
+- The orchestrator and the heads get onto a node whose updater went away before stopping it, within 3 minutes.
+- `program_screen` shows a busy employee's program from its running turn, without a false `no_program`.
+- The reason `outbound_changed` reads in plain words, in English and Russian, like the server's other reasons.
+- A test run whose parts have all ended closes after a server restart, and the minute check closes runs left open.
+- `message_employee` no longer says a message did not reach an employee whose turn could not go out at once.
+- A program's idle connection to its node's bridge lasts 72 s, so tool calls no longer break with ECONNRESET.
+- External messaging keeps each sentence in its own direction in right-to-left languages.
 - A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
+- A session between machines stays open while bytes arrive and ends after 30 s of silence, so slow links keep copies.
+- A program that slept starts again for the next turn instead of waiting on turns from its old log.
+- Right-to-left: isolated phrases follow their block's alignment, and short sentences keep their period at the end.
+- An agent still gets a phone screen's elements when its picture is too large to send.
+- `npm run deps` and the author check install again when `node_modules` came from another lockfile.
+- A closed operator case no longer fails a turn whose program took later words, so a working program keeps its turn.
+- The map's agent count reads as one phrase right to left, and on a phone its hint stands above the bottom buttons.
+- An address whose consent was taken back says it gets no more messages, and the heading counts only consent in force.
+- Tests owners can repair test files or return source fixes without cancelling the task.
+- A Tests owner's repair is taken on the candidate's own base, without a new main or a full run's ids.
+- Vault values an agent uses stay out of turn records, replays, terminal recordings and phone runs.
+- A program's hooks are accepted from its own terminal even when the shell that sent them lost its parent.
+- A failed tmux lookup makes a program's hooks retry instead of refusing them for good.
+- A Claude, Codex, Kimi or Antigravity turn whose end was lost ends when its finished answer stays for two minutes.
+- Kimi's changing toolbar tips no longer restart the watch of an unchanged finished answer.
+- A job whose program exited and whose result was lost fails after two minutes, and its queue goes on.
+- An operator who looked at a program can still type within 30 seconds while Hornhoof looks at it too.
+- The orchestrator's SQL no longer reads secret tool answers, assistant event payloads or delivery addresses.
+- `send_telegram_file` sends only a file its agent may read, found by its exact id and never by its name.
+- After a node restarts, only the program it started anew counts as active, not the ones from before.
+- A window opened as a node restarts no longer pushes the agent's program out of its pane, so its hooks are accepted.
+- Percentages on Machines and plans use the text font, so the percent sign no longer reads like a slash and a dot.
+- Right to left, plan limits keep each phrase and number with its unit whole, and the trust stripe starts the line.
+- A head's answer to a question no longer shows "decided by the orchestrator".
+- A forged internal header with multibyte characters gets 401 instead of a server error.
+- An interrupted `hh-fetch` download keeps the earlier file whole and writes the new one only once it is complete.
 
 ### Added
 
@@ -28,10 +67,26 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- An employee on a personal plan at its limit goes on to a fallback plan with room, and back after the reset.
+- An employee's card shows its fallback plan, and a person sets the order of a plan's fallback plans.
 - A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
 - A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
-- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
+- Settings, Passwords keeps the company's site sign-ins, each with its login, password and one-time code.
+- Agents take a sign-in with `vault_entry`, which gives the current one-time code, and save one with `vault_save`.
+- A catalog revision opens whole, as a message would read, with its changes from the one in use marked word by word.
+- Company phones: an owner lends an Android phone to the company's assistants through Wireless debugging.
+- An owner watches a lent phone's live screen and takes it back with Stop; a task keeps its phone recordings.
+- Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
+- Who runs a department sees its channels' addresses and takes back consent on the web, logged without the address.
+- Each file in a `reply` comes with a link its owner opens on a phone for 7 days, with no sign-in.
+- Agents and assistants give files of any size; one over 50 MB stays 30 days on the disk of the machine that took it.
+- Such a file is outside copies and backups and is lost with its machine; the task card and the chat say so by name.
+- The orchestrator finds and calls any Hornhoof tool with `find_tool` and `use_tool`, and any route with `api`.
+- An agent on a lent phone presses Back and Home and types any text, Russian, emoji and new lines too.
+- A node uses a phone plugged by cable into its machine, through a socket its administrator puts in the phone folder.
+- The orchestrator searches and reads the source and logs of the very Hornhoof build that runs.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
+- `create_task` takes an `architectAgentId` that names the task's architect.
 
 ### Changed
 
@@ -49,34 +104,27 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
-- `run_tests` runs only on `main`, `turn-N` or `release-` branches; any other branch gets `tests_not_release` and a sentence why.
-- A release's first run runs every test, its later runs only what failed or changed; Tests and reviewers check locally and name no runs.
-- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
+- Subscriptions show how each is paid as a sign by its short name, with the orchestrator under it.
+- Token counts and the names of token tiles stay in one piece and read left to right in any language.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent it.
+- `run_tests` runs only on `main`, `turn-N` and `release-` branches; others get `tests_not_release` with the reason.
+- A release's first run runs every test and later runs only what failed or changed; Tests and reviewers check locally.
+- Publishing or taking back a catalog revision acts only on the revision the person was shown.
 - A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 - A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
 - `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
-
-## [0.29.3] - 2026-11-16
-
-A department's messaging is found on its screen, and a busy machine gets its turn to install the server's build.
-
-### Added
-
-- Each channel of a department to its contacts takes an address, with the person's consent to the channel's purpose.
-
-### Changed
-
+- Type checks run TypeScript 7, several times faster; the `typescript` package stays 5.9 for its API.
+- A turnkey task's independent parts run in parallel with the program's helpers, and heavy checks run one at a time.
+- `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
+- The orchestrator acting for the owner is refused nothing the CEO or an employee may do; heads keep their limits.
+- Department messaging lists a channel's addresses apart from its buttons, under a heading that counts them.
+- An agent sees each phone screen as a JPEG of at most 1568 px, so a screen with a photo reaches it whole.
+- The orchestrator's `api` reads every page `view` did, and `view` is gone.
+- The orchestrator's SQL reads every table and every column except keys; its write rights do not change.
+- A decision the orchestrator takes as the owner shows "decided by the orchestrator" in the task's questions and log.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
-
-### Fixed
-
-- External messaging is a button on the department screen, so whoever runs a department's messaging finds its channels.
-- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
-- The orchestrator and the heads get onto a node whose updater went away before stopping it, within their 3 minutes.
-- program_screen shows a busy employee's program from its running turn, without a false no_program.
-- Four tests of the keeper's lease move fake clocks instead of waiting in real time.
-- The assignment card's browser check loads the page once per test and fits its time on a busy machine.
+- Tasks skip redundant handoffs while keeping required Security checks and candidate history.
 
 ## [0.29.2] - 2026-11-16
 

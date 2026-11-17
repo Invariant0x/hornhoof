@@ -3,6 +3,7 @@ import net, { type AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CALL_BODY_MAX, CALL_LOST, CALL_NOT_SENT, CALL_PAUSED, CALL_WAITING, frontCalls } from '../src/net/front-calls.js';
 import type { Target } from '../src/net/proxy.js';
+import { until } from './helpers-basic.js';
 
 const INVOCATION = 'x-hornhoof-invocation';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -217,21 +218,28 @@ describe("front's door for tool calls", () => {
     expect(seen).toEqual([]);
   });
 
+  /* Front's pause between tries is virtual: a try begins only when the test moves the clock, so once the agent's connection
+     is gone and the pause has passed, nothing is under way and nothing is due, and no try can come any more. */
   it('stops trying for an agent that went away', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
     const { target, seen } = await keeperAnswering(cut);
-    const door = await doorTo(target);
+    const answers: http.ServerResponse[] = [];
+    const takes = frontCalls({ keeper: target, holdMs: 60_000, everyMs: 5 });
+    const door = await listening(http.createServer((req, res) => void (answers.push(res), takes(req, res))));
     const socket = net.connect(door.port, door.host);
     socket.on('error', () => {});
     const body = JSON.stringify(call(1));
     socket.write(`POST /mcp HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(1));
+    await until(() => seen.length === 1 && vi.getTimerCount() === 1);
+    await vi.advanceTimersByTimeAsync(5);
+    await until(() => seen.length === 2 && vi.getTimerCount() === 1);
     socket.destroy();
-    let tries = -1;
-    await vi.waitFor(() => {
-      const now = seen.length;
-      const settled = now === tries;
-      tries = now;
-      expect(settled).toBe(true);
-    });
+    await until(() => answers[0]!.destroyed);
+    await vi.advanceTimersByTimeAsync(5);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seen.length).toBe(2);
   });
 });

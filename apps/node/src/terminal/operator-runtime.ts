@@ -157,6 +157,8 @@ export class OperatorRuntime {
     if (phase === 'queued' || phase === 'taken') {
       this.observer.receipt(metadata.id, phase);
       if (target.assignment?.id === metadata.id) target.recorded = true;
+      /* The program took words that came after these: it went on past them, whether or not their own record came. */
+      else if (phase === 'taken' && cameAfter(metadata, target.assignment)) target.sinceWords = true;
     } else this.observer.finalize(metadata.id, phase);
     target.generation++;
   }
@@ -283,6 +285,8 @@ export class OperatorRuntime {
     return result;
   }
 }
+
+const cameAfter = (words: OperatorDelivery, assignment: OperatorDelivery | null): boolean => assignment !== null && words.ordinal > assignment.ordinal;
 
 function programWaits(source: ReturnType<Source['current']>, queued: boolean): boolean {
   return Boolean(source?.runningTool || source?.retrying || source?.wait || queued);

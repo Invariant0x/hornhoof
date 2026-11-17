@@ -800,8 +800,8 @@ interface PrepareEnvironmentModule {
 
 interface GlobalSetupModule {
   default: (
-    project: { provide: (key: 'migratedDataDir', value: string) => void },
-    options?: PgliteTemplateBoundary & { templatePath?: string },
+    project: { provide: (key: 'migratedDataDir' | 'databaseMetadataFile', value: string) => void },
+    options?: PgliteTemplateBoundary & { templatePath?: string; metadata?: (dump: Buffer) => Promise<string> | string },
   ) => Promise<() => void>;
 }
 
@@ -857,32 +857,35 @@ describe('prepared PGlite compatibility', () => {
     const bytes = readPgliteTemplate(templateDir, { root: fixture });
     expect(bytes).toEqual(RECORDED_PGLITE_DUMP);
 
-    const provided: string[] = [];
+    const provided: Record<string, string> = {};
     process.env.HH_PGLITE_TEMPLATE = templateDir;
-    const cleanup = await setup({ provide: (_, value) => { provided.push(value); } }, { root: fixture, dump: fallbackSpy });
+    const metadata = vi.fn(() => 'recorded schema metadata');
+    const cleanup = await setup({ provide: (key, value) => { provided[key] = value; } }, { root: fixture, dump: fallbackSpy, metadata });
     try {
       expect(fallbackSpy).not.toHaveBeenCalled();
-      expect(provided).toHaveLength(1);
-      expect(readFileSync(provided[0]!)).toEqual(RECORDED_PGLITE_DUMP);
-      expect(provided[0]!.startsWith(templateDir)).toBe(false);
+      expect(Object.keys(provided).sort()).toEqual(['databaseMetadataFile', 'migratedDataDir']);
+      expect(readFileSync(provided.migratedDataDir!)).toEqual(RECORDED_PGLITE_DUMP);
+      expect(readFileSync(provided.databaseMetadataFile!, 'utf8')).toBe('recorded schema metadata');
+      expect(metadata).toHaveBeenCalledWith(RECORDED_PGLITE_DUMP);
+      expect(provided.migratedDataDir!.startsWith(templateDir)).toBe(false);
     } finally {
       cleanup();
     }
-    expect(existsSync(dirname(provided[0]!))).toBe(false);
+    expect(existsSync(dirname(provided.migratedDataDir!))).toBe(false);
 
     const readyFile = join(templateDir, 'READY.json');
-    const metadata = JSON.parse(readFileSync(readyFile, 'utf8')) as {
+    const readyMetadata = JSON.parse(readFileSync(readyFile, 'utf8')) as {
       format: string; pgliteVersion: string; inputDigest: string; dumpDigest: string; inputs: Record<string, string>;
     };
-    writeFileSync(readyFile, JSON.stringify({ ...metadata, format: 'hornhoof-pglite-v0' }));
+    writeFileSync(readyFile, JSON.stringify({ ...readyMetadata, format: 'hornhoof-pglite-v0' }));
     expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
-    writeFileSync(readyFile, JSON.stringify({ ...metadata, pgliteVersion: '0.0.0' }));
+    writeFileSync(readyFile, JSON.stringify({ ...readyMetadata, pgliteVersion: '0.0.0' }));
     expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
-    writeFileSync(readyFile, JSON.stringify({ ...metadata, inputDigest: '0'.repeat(64) }));
+    writeFileSync(readyFile, JSON.stringify({ ...readyMetadata, inputDigest: '0'.repeat(64) }));
     expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
-    writeFileSync(readyFile, JSON.stringify({ ...metadata, inputs: { ...metadata.inputs, 'package-lock.json': '0'.repeat(64) } }));
+    writeFileSync(readyFile, JSON.stringify({ ...readyMetadata, inputs: { ...readyMetadata.inputs, 'package-lock.json': '0'.repeat(64) } }));
     expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
-    writeFileSync(readyFile, JSON.stringify(metadata));
+    writeFileSync(readyFile, JSON.stringify(readyMetadata));
     const migrationFile = join(fixture, 'apps/server/drizzle/0000_initial.sql');
     const migrationOriginal = readFileSync(migrationFile);
     writeFileSync(migrationFile, 'select 2;\n');
@@ -902,18 +905,19 @@ describe('prepared PGlite compatibility', () => {
     writeFileSync(join(templateDir, 'migrated.tar'), 'corrupt');
     process.env.HH_PGLITE_TEMPLATE = templateDir;
 
-    const provided: string[] = [];
+    const provided: Record<string, string> = {};
     const fallbackSpy = vi.fn(async () => STANDALONE_PGLITE_DUMP);
-    const cleanup = await setup({ provide: (_, value) => { provided.push(value); } }, { root: fixture, dump: fallbackSpy });
+    const cleanup = await setup({ provide: (key, value) => { provided[key] = value; } }, { root: fixture, dump: fallbackSpy, metadata: () => 'standalone schema metadata' });
     try {
       expect(fallbackSpy).toHaveBeenCalledTimes(1);
-      expect(provided).toHaveLength(1);
-      expect(readFileSync(provided[0]!)).toEqual(STANDALONE_PGLITE_DUMP);
-      expect(provided[0]!.startsWith(templateDir)).toBe(false);
+      expect(Object.keys(provided).sort()).toEqual(['databaseMetadataFile', 'migratedDataDir']);
+      expect(readFileSync(provided.migratedDataDir!)).toEqual(STANDALONE_PGLITE_DUMP);
+      expect(readFileSync(provided.databaseMetadataFile!, 'utf8')).toBe('standalone schema metadata');
+      expect(provided.migratedDataDir!.startsWith(templateDir)).toBe(false);
     } finally {
       cleanup();
     }
-    expect(existsSync(dirname(provided[0]!))).toBe(false);
+    expect(existsSync(dirname(provided.migratedDataDir!))).toBe(false);
 
     const failedProvided: string[] = [];
     await expect(
@@ -923,6 +927,17 @@ describe('prepared PGlite compatibility', () => {
       ),
     ).rejects.toThrow('standalone migration failed');
     expect(failedProvided).toEqual([]);
+  });
+
+  it('publishes no paths when describing the copied dump fails', async () => {
+    const { setup } = await loadPgliteEnvironment();
+    const fixture = createPgliteInputFixture(join(root, 'pglite-inputs'));
+    const provided: string[] = [];
+    await expect(setup({ provide: (_, value) => { provided.push(value); } }, {
+      root: fixture, dump: () => RECORDED_PGLITE_DUMP,
+      metadata: () => { throw new Error('schema description failed'); },
+    })).rejects.toThrow('schema description failed');
+    expect(provided).toEqual([]);
   });
 });
 
@@ -951,6 +966,7 @@ describe('manifest argv selection', () => {
   it.each([
     { id: 'node', selected: 'test/redact.test.ts', expected: 'apps/node/test/redact.test.ts' },
     { id: 'server-postgres', selected: 'test/postgres/race.pg.spec.ts', expected: 'apps/server/test/postgres/race.pg.spec.ts' },
+    { id: 'server-slow', selected: 'test/slow/release-benchmark.slow.ts', expected: 'apps/server/test/slow/release-benchmark.slow.ts' },
   ])('collects only the selected file for $id before execution', async ({ id, selected, expected }) => {
     const checkout = fileURLToPath(new URL('../../..', import.meta.url));
     const manifest = JSON.parse(readFileSync(join(checkout, '.hornhoof/test-environment.json'), 'utf8')) as { suites: { id: string; run: ServiceCommand }[] };

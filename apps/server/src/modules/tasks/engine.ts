@@ -1,7 +1,7 @@
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
-import { testsReport, type Verification } from './echelons-tests.js';
+import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
@@ -10,7 +10,6 @@ import { producedCandidate, currentCandidate, currentHanded, requireRepairHistor
 import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
-import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
 import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
@@ -340,6 +339,8 @@ export type NewTask = {
   productId?: string | null;
   parentId?: string | null;
   assigneeAgentId: string;
+  /* Optional distinct employee who prepares the Architecture plan before Development starts with assigneeAgentId. */
+  architectAgentId?: string;
   /* Executable work starts with this employee; coordination has no code producer. */
   executor?: boolean;
   reviewerAgentId?: string;
@@ -418,13 +419,34 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
 function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, declaration: IndependentDeclaration | null): Promise<void> {
   const urgent = parent ? parent.urgent : input.urgent === true;
   const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
-  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, [input.assigneeAgentId, ...part]);
+  const holders = [input.assigneeAgentId, ...(input.architectAgentId ? [input.architectAgentId] : []), ...part];
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, holders);
 }
 
-type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; architect: Awaited<ReturnType<typeof workingAgent>> | null; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
 
 function checkNewTaskFields(input: NewTask): void {
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+}
+
+function inNewTaskScope(agent: typeof agents.$inferSelect, input: NewTask): boolean {
+  return agent.departmentId === input.departmentId && (!agent.productId || agent.productId === input.productId);
+}
+
+async function stagedArchitect(ctx: Ctx, assignee: typeof agents.$inferSelect, architect: typeof agents.$inferSelect): Promise<typeof agents.$inferSelect | null> {
+  if (!(await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: assignee.id }))) return null;
+  if (!(await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: architect.id }))) {
+    throw refuse(409, 'task_invalid', 'A member of a turnkey team takes only their own whole result, never a separate Architecture stage.');
+  }
+  return architect;
+}
+
+async function resolveArchitect(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask, plan: StageRoute): Promise<typeof agents.$inferSelect | null> {
+  if (!input.architectAgentId) return null;
+  const architect = await workingAgent(ctx.db, assignee.companyId, input.architectAgentId);
+  if (!inNewTaskScope(architect, input)) throw refuse(400, 'task_invalid', 'Architecture needs an employee in the task scope.');
+  const separate = architect.id !== assignee.id && !input.small && input.resultKind !== 'coordination' && plan.stages.some(step => step.stage === 'architecture');
+  return separate ? stagedArchitect(ctx, assignee, architect) : null;
 }
 
 async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<NewTaskSetup> {
@@ -435,10 +457,12 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
+  const plan = await departmentStages(ctx, input.departmentId);
+  const architect = await resolveArchitect(ctx, assignee, input, plan);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId) };
+  return { assignee, architect, parent, declaration, plan };
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -449,12 +473,9 @@ async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, inpu
 }
 
 async function requireNewReviewer(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask): Promise<void> {
-  if (input.reviewerAgentId) {
-    const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
-    if (reviewer.id === assignee.id || reviewer.departmentId !== input.departmentId || (reviewer.productId && reviewer.productId !== input.productId)) {
-      throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
-    }
-  }
+  if (!input.reviewerAgentId) return;
+  const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
+  if (reviewer.id === assignee.id || !inNewTaskScope(reviewer, input)) throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
 }
 
 async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
@@ -474,7 +495,8 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
+function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
+  const initialOwner = architect ?? assignee;
   return {
         companyId: assignee.companyId,
         number: position.number,
@@ -484,7 +506,7 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTa
         title: input.title.trim(),
         brief: input.brief.trim(),
         body: input.body,
-        assigneeAgentId: assignee.id,
+        assigneeAgentId: initialOwner.id,
         executorAgentId: input.executor ? assignee.id : null,
         after: input.after ?? [],
         workKind: input.workKind,
@@ -526,7 +548,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .returning();
   const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
-    assignee: assignee.id,
+    assignee: row!.assigneeAgentId,
     after: row!.after,
     ...independentData(declaration),
     ...skippedData(skipped),
@@ -538,7 +560,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     wakes.push(made.wake);
   }
   /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-  if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
+  if (!waits) wakes.push({ agentId: row!.assigneeAgentId!, taskId: row!.id, why: 'assigned' });
   recordCause(wakes, { kind: 'created', actor }, event.id, row!);
   await keepWakes(tx, row!.companyId, wakes);
   return { task: row!, wakes, independent };
@@ -615,20 +637,21 @@ function requireSubmissionStage(task: Task, route: Route): void {
 /* The commit as it is handed in: read from the repository, inside the paths the head approved, and on top of what the
    stage received. */
 async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route, r: Submission) {
-  const input = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
-  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, input?.branch);
+  const prior = route.state.candidateId ? await currentCandidate(ctx.db, task, route) : null;
+  const checkerStage = route.state.stage !== 'development';
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, prior?.branch);
   const producer = await producerIdentity(ctx.db, task, agentId);
-  if (input) await checkingIdentity(ctx, task, route, input);
+  if (prior && checkerStage) await checkingIdentity(ctx, task, route, prior);
   const candidate = producedCandidate(route, producer, review);
-  if (input) await requireRepairHistory(ctx, task, input, candidate);
-  return { input, candidate, review };
+  if (prior) await requireRepairHistory(ctx, task, prior, candidate);
+  return { input: checkerStage ? prior : null, candidate, review };
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
-  if (route.state.stage === 'tests') return takeMainAtTests(ctx, agentId, task, route, r, operation);
+  if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
   const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
@@ -1372,10 +1395,11 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
-/* How an answer came: inline in words the window already delivered, or from the person's assistant, which is recorded with it. */
-type AnswerWay = { inlineText?: true; assistant?: string };
+/* How an answer came: inline in words the window already delivered, from the person's assistant, or from the orchestrator
+   of its own as the owner's, each recorded with it. */
+type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string };
 
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1405,14 +1429,14 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await endRequest(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}) }, inlineText }, ctx.config);
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}), ...(orchestrator ? { byOrchestrator: true } : {}) }, inlineText }, ctx.config);
     const back = await statusAfterWait(tx, task, current?.status);
     if (back) {
       await tx

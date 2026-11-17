@@ -44,6 +44,87 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it('reads a published ordinary cursor and refuses a private recording cursor', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-cursor', home);
+    writeFileSync(recording.file, 'hello');
+    const position = Buffer.alloc(24);
+    [2, 5, 5].forEach((value, index) => position.writeDoubleBE(value, index * 8));
+    writeFileSync(recording.position, position);
+    expect(await tmux.programCursor('a-cursor')).toEqual({ file: recording.file, offset: 5 });
+    await tmux.protectOutput('a-cursor');
+    expect(await tmux.programCursor('a-cursor')).toBeNull();
+  });
+
+  it('bounds an unpublished cursor by its controlled clock', async () => {
+    vi.useFakeTimers();
+    const { tmux, home } = recorded();
+    tmux['recordings'].create('a-cursor', home);
+    const cursor = tmux.programCursor('a-cursor');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await cursor).toBeNull();
+  });
+
+  it.each([true, false])('cleans a failed recorder stop and refuses a secret only while its session still exists: %s', async exists => {
+    const { tmux, home } = recorded(args => {
+      if (args[0] === 'pipe-pane') return new Error('pipe control failed');
+      if (args[0] === 'has-session' && !exists) return new Error('no session');
+      return '';
+    });
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-stop-failure-marker-1178');
+    const protectedOutput = tmux.protectOutput('a-private');
+    if (exists) await expect(protectedOutput).rejects.toThrow('Sensitive terminal recording could not be stopped.');
+    else await protectedOutput;
+    expect(existsSync(recording.file)).toBe(false);
+  });
+
+  it('clears the private marker when an explicitly removed session was already gone', async () => {
+    const { tmux } = recorded(args => ['kill-session', 'has-session'].includes(args[0]!) ? new Error('no session') : '');
+    await tmux.protectOutput('a-private');
+    await tmux.kill('a-private');
+    expect(tmux.outputPrivate('a-private')).toBe(false);
+  });
+
+  it('removes raw output even when its privacy marker cannot be written', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-failed-marker-1178');
+    vi.spyOn(tmux['recordings'], 'protect').mockImplementation(() => { throw new Error('No room for marker'); });
+    await expect(tmux.protectOutput('a-private')).rejects.toThrow('No room for marker');
+    expect(existsSync(recording.file)).toBe(false);
+  });
+
+  it('removes a sensitive recording and keeps recording disabled after the node restarts', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-recording-marker-1178');
+    await tmux.protectOutput('a-private');
+    expect(existsSync(recording.file)).toBe(false);
+    const restarted = new Tmux({ socket: 'hh-test', env: { HOME: home }, recordingsDir: join(home, 'recordings') });
+    vi.spyOn(restarted, 'run').mockImplementation(async args => {
+      if (args[0] === 'has-session') throw new Error('no session');
+      return '';
+    });
+    expect(restarted.outputPrivate('a-private')).toBe(true);
+    await restarted.launch('a-private', { cwd: home, command: ['claude'], cols: 80, rows: 24, outputDir: home });
+    expect(vi.mocked(restarted.run).mock.calls.some(([args]) => args[0] === 'pipe-pane' && args.length > 3)).toBe(false);
+    await restarted.kill('a-private');
+    expect(restarted.outputPrivate('a-private')).toBe(false);
+  });
+
+  it('keeps the sensitive pane out of the temporary screen file used on stop', async () => {
+    const marker = 'private-stopped-screen-marker-1178';
+    const { tmux, calls } = recorded(args => args[0] === 'capture-pane' ? marker : '');
+    vi.spyOn(tmux, 'alive').mockResolvedValue(false);
+    await tmux.protectOutput('a-private');
+    await tmux.stop('a-private');
+    const shown = calls.find(call => call.args[0] === 'respawn-pane')?.args.at(-1);
+    expect(shown).toBeDefined();
+    expect(readFileSync(shown!, 'utf8')).not.toContain(marker);
+    expect(readFileSync(shown!, 'utf8')).toMatch(/hidden/i);
+  });
+
   it('starts a new session in one command line: its options, the program, then the keys that leave watchers none', async () => {
     const { tmux, calls } = recorded(args => (args[0] === 'has-session' ? new Error("can't find session") : ''));
     await tmux.launch('a-1', { cwd: '/work', command: ['claude', '--model', 'opus'], cols: 100, rows: 30 });

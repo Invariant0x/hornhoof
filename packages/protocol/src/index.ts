@@ -1,4 +1,5 @@
 export * from './department-mode.js';
+export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
 export * from './questions.js';
@@ -223,7 +224,7 @@ export const ApiConnection = z.object({ baseUrl: ApiBaseUrl, protocol: z.enum(AP
 /* What an agent is doing while a job runs, already shortened by the node for people to watch. */
 export const AgentEvent = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().max(8000) }),
-  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300) }),
+  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300), sensitive: z.literal(true).optional(), issued: z.literal(true).optional() }),
   z.object({ kind: z.literal('tool_result'), ok: z.boolean(), summary: z.string().max(500) }),
   z.object({
     kind: z.literal('todo'),
@@ -574,6 +575,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
+  /* The node's last lines of log, as Hornhoof asked for them. */
+  z.object({ type: z.literal('node.log'), requestId: z.uuid(), log: NodeLog }),
   z.object({
     type: z.literal('job.done'),
     jobId: z.string(),
@@ -745,6 +748,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ack'), upto: z.number().int().min(0) }),
   /* Hornhoof asks which of these turns the node still runs: one it does not is over. */
   z.object({ type: z.literal('jobs.check'), jobIds: z.array(Id).min(1).max(100) }),
+  /* Hornhoof asks for the node's last lines of log. */
+  z.object({ type: z.literal('node.log.read'), requestId: z.uuid() }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),

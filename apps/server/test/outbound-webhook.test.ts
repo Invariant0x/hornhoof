@@ -3,7 +3,8 @@ import { createHmac, randomUUID } from 'node:crypto';
 import type { SealedPayload } from '../src/modules/outbound/delivery.js';
 import { isPublicAddress, webhookAdapter, type WebhookAccount, type WebhookOptions } from '../src/modules/outbound/webhook.js';
 import { until } from './helpers-basic.js';
-import { CERT, closedPort, hookReceiver, silentPort, type HookRequest } from './outbound-receivers.js';
+import { CERT, hookReceiver, silentPort, type HookRequest } from './outbound-receivers.js';
+import { closedPort } from './closed-port.js';
 
 const KEY = 'synthetic-signing-secret-9d21';
 const PAYLOAD: SealedPayload = { recipient: 'buyer@example.test', subject: 'Your order', text: 'Цена 100 ₽ שלום\n<b>inert</b>\n' };

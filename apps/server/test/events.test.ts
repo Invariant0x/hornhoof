@@ -4,6 +4,9 @@ import { agentEvents, agents, companies, departments, jobs, subscriptions } from
 import { only } from '../src/db/selections.js';
 import { appendEvent, publishEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const NODE_KEY = 'k'.repeat(40);
 /* A ping that never comes during a test, the longest a timer takes: the stream follows a change at once or not at all. */

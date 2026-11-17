@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { certificates, companies, departments, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
@@ -137,16 +137,25 @@ describe("a machine whose owner no longer sees the whole company", () => {
     state.slots = [slotOf(D_ID)];
     state.stuck = true;
     const before = { key: await c.keyOf(), secrets: await c.secrets() };
-    await expect(cutReplication(replication, [{ networkId: D_ID }], { triesMs: 200 })).rejects.toMatchObject({ status: 503, reason: 'try_again', message: 'Try again in a minute.' });
+    /* The time a cut is tried for is virtual: the test moves it by the whole of it once the first try was made. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    onTestFinished(() => void vi.useRealTimers());
+    const triedFor = async <T>(ms: number, cut: Promise<T>): Promise<T> => {
+      const ends = c.seen.length;
+      await until(() => c.seen.length > ends);
+      await vi.advanceTimersByTimeAsync(ms);
+      return cut;
+    };
+    await expect(triedFor(200, cutReplication(replication, [{ networkId: D_ID }], { triesMs: 200 }))).rejects.toMatchObject({ status: 503, reason: 'try_again', message: 'Try again in a minute.' });
     expect(CUT_TRIES_MS).toBe(5000);
-    const res = await c.patch();
+    const res = await triedFor(CUT_TRIES_MS, c.patch());
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toMatchObject({ reason: 'try_again' });
     expect(await c.personOf()).toMatchObject({ scopeKind: 'company' });
     expect(await c.rowOf(c.d.id)).toMatchObject({ serverOrder: 2, role: 'data', uploadState: null, dataLeftAt: null });
     expect({ key: await c.keyOf(), secrets: await c.secrets() }).toEqual(before);
     expect(await revokedSerials(c.db)).toEqual([]);
-  }, 30_000);
+  });
 
   it('leaves the rest alone', async () => {
     const c = await company();

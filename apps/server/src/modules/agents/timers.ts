@@ -124,7 +124,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
-    dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+    dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
@@ -142,7 +142,7 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
   await Promise.all([
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed')),
+    dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
     reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed')),
   ]);
 }

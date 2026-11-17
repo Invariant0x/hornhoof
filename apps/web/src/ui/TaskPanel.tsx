@@ -202,6 +202,7 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
           <li key={r.id}>
             <span className="tp-ev">
               {r.agent?.name ?? t.window.hornhoof}: {r.text} <small>{t.tasks.requestStates[r.status] ?? r.status}</small>
+              {r.byOrchestrator && <> <small>{t.tasks.byOrchestrator}</small></>}
             </span>
             {r.answer && <p>{r.answer}</p>}
           </li>
@@ -224,7 +225,7 @@ function LogEntry({ entry, when, task, onChanged }: { entry: TaskLogLine; when: 
   return (
     <li className={entry.kind}>
       <span className="tp-ev">
-        {eventTitle(t, entry)} <time dateTime={entry.at}>{when(entry.at)}</time>
+        {eventTitle(t, entry)} {entry.by?.byOrchestrator && <><small>{t.tasks.byOrchestrator}</small> </>}<time dateTime={entry.at}>{when(entry.at)}</time>
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />

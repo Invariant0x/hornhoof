@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Org, PersonView } from '../src/types';
@@ -97,6 +97,48 @@ async function serve(page: Page, posted: Posted[]) {
   });
 }
 
+/* Whether an English or Russian phrase is drawn in the order it reads: its first sign before the second and its closing
+   dot after its last word. In a right to left block a number that opens such a phrase and a dot that closes it jump to
+   the other end unless the phrase is isolated. */
+const readsInOrder = (phrase: Locator) =>
+  phrase.evaluate(el => {
+    const text = el.firstChild as Text;
+    const box = (from: number) => {
+      const range = document.createRange();
+      range.setStart(text, from);
+      range.setEnd(text, from + 1);
+      return range.getBoundingClientRect();
+    };
+    const last = text.data.length - 1;
+    return box(0).left < box(1).left && box(last).left > box(last - 1).left;
+  });
+
+/* Where the lines of the empty head card start, as drawn: its role line, its "No head yet." and its count. */
+const startEdges = (card: Locator) =>
+  card.evaluate(el => {
+    const rtl = getComputedStyle(el).direction === 'rtl';
+    const textBox = (node: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect();
+    };
+    const boxes = [el.querySelector('.hr')!.firstElementChild!.getBoundingClientRect(), textBox(el.querySelector('.hn')!), textBox(el.querySelector('.meta')!)];
+    return boxes.map(b => Math.round(rtl ? b.right : b.left));
+  });
+
+/* What covers the hint: the bottom buttons it meets, and whether a point of its words shows something else on top. */
+const covered = (hint: Locator) =>
+  hint.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    const meets = [...document.querySelectorAll('.dv-acts > *')].filter(b => {
+      const r = b.getBoundingClientRect();
+      return r.left < box.right && box.left < r.right && r.top < box.bottom && box.top < r.bottom;
+    }).map(b => (b.textContent ?? '').trim() || b.getAttribute('aria-label'));
+    const points = [[box.left + 8, box.top + box.height / 2], [box.left + box.width / 2, box.top + box.height / 2], [box.right - 8, box.top + box.height / 2]];
+    const hidden = points.filter(([x, y]) => !el.contains(document.elementFromPoint(x!, y!))).length;
+    return { meets, hidden, width: Math.round(box.width), inset: [Math.round(box.left), Math.round(innerWidth - box.right)] };
+  });
+
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'cyberpunk' | 'light'; width: number };
 const LOOKS: Look[] = (['cyberpunk', 'light'] as const).flatMap(theme =>
   [1440, 375].flatMap(width => [{ lang: 'en', dir: 'ltr', theme, width }, { lang: 'ru', dir: 'ltr', theme, width }, { lang: 'en', dir: 'rtl', theme, width }] as Look[]),
@@ -126,6 +168,18 @@ for (const look of LOOKS) {
     await open(page, look);
     await serve(page, posted);
     await page.goto(`/departments/${MKT}`);
+    /* The map of a department with no head and no employees: its words keep their dot at their end (Design #1186). */
+    const noHead = page.locator('.shead.empty .hn');
+    await expect(noHead).toHaveText(t.dept.noHead);
+    const hint = page.getByText(t.dept.noMembers, { exact: true });
+    const counts = page.locator('.shead.empty .meta');
+    expect(await readsInOrder(noHead)).toBe(true);
+    expect(await readsInOrder(hint)).toBe(true);
+    expect(await readsInOrder(counts)).toBe(true);
+    /* The card's lines start at one edge, and on a narrow screen the hint stands whole above the bottom buttons (#1201). */
+    expect(new Set(await startEdges(page.locator('.shead.empty'))).size).toBe(1);
+    if (look.width <= 760) await expect.poll(() => covered(hint)).toEqual({ meets: [], hidden: 0, width: look.width - 32, inset: [16, 16] });
+    await page.screenshot({ path: `${SHOTS}/map-${browserName}-${name}.png`, animations: 'disabled' });
     await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
     const panel = page.getByRole('complementary', { name: t.settings.groups.messaging });
     const part = panel.locator('.outbound-setup');
@@ -137,6 +191,15 @@ for (const look of LOOKS) {
     expect.soft(await offences(part, words)).toEqual([]);
     await shot(page, card, `channel-${browserName}-${name}`);
     await shot(page, panel.getByRole('heading', { name: s.catalogTitle }), `catalog-${browserName}-${name}`);
+
+    /* The channel's addresses are a block of their own under its buttons, with a heading that counts them (Design #1193). */
+    const addresses = card.locator('.outbound-contacts');
+    await expect(addresses.getByRole('heading', { name: c.listTitle(0), exact: true })).toBeVisible();
+    await expect(addresses.getByText(c.none, { exact: true })).toBeVisible();
+    const buttonsEnd = (await card.getByRole('button', { name: s.stop, exact: true }).boundingBox())!;
+    const blockStart = (await addresses.boundingBox())!;
+    expect(buttonsEnd.y + buttonsEnd.height).toBeLessThanOrEqual(blockStart.y);
+    await shot(page, addresses, `address-none-${browserName}-${name}`);
 
     /* The waiting revision is open at once: its subject, its words with the places a message fills in, its language and
        who proposed it, and what changed from the revision messages use. */
@@ -180,16 +243,18 @@ for (const look of LOOKS) {
     await form.getByRole('checkbox').check();
     await shot(page, form, `address-form-${browserName}-${name}`);
     await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), form.getByRole('button', { name: c.submit, exact: true }).click()]);
-    await expect(card.getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     expect(posted).toEqual([
       { path: '/api/outbound/catalog/r2/publish', body: { revision: 2, newest: 2 } },
       { path: '/api/outbound/contacts', body: { channelId: 'ch-b2c', kind: 'email', address: TEST_ADDRESS, source: 'Test address of our team', evidence: 'My own address, to try the letters' } },
     ]);
+    /* What adding said stands right under the entry it added. */
+    await expect(card.getByRole('listitem').filter({ hasText: TEST_ADDRESS }).getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     await fits(page, panel);
     await shot(page, card, `address-added-${browserName}-${name}`);
 
     /* The address is on the channel's list, agreed and added by Max; he takes its consent back there. */
-    const listed = card.getByRole('list', { name: c.listTitle });
+    await expect(addresses.getByRole('heading', { name: c.listTitle(1), exact: true })).toBeVisible();
+    const listed = addresses.getByRole('list');
     const line = listed.getByRole('listitem').filter({ hasText: TEST_ADDRESS });
     await expect(line).toContainText(c.statuses.granted);
     expect(await small(line)).toEqual([]);
@@ -200,6 +265,10 @@ for (const look of LOOKS) {
     await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), line.getByRole('button', { name: c.revoke, exact: true }).click()]);
     await expect(line).toContainText(c.statuses.revoked);
     await expect(line.getByRole('button')).toHaveCount(0);
+    /* Taking back says so in place of what adding said, and the heading counts only consent in force (#1201). */
+    await expect(line.getByRole('status')).toHaveText(c.takenBack(TEST_ADDRESS));
+    await expect(card.getByRole('status')).toHaveCount(1);
+    await expect(addresses.getByRole('heading', { name: c.listTitle(0), exact: true })).toBeVisible();
     expect(posted.at(-1)).toEqual({ path: '/api/outbound/permissions/pm1/revoke', body: {} });
     await fits(page, panel);
     expect.soft(await offences(part, { ...listWords, danger: [] })).toEqual([]);

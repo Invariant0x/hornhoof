@@ -1,0 +1,87 @@
+// Run from the repository: node --input-type=module - /tmp/task-1177-proof < docs/task-1177-series.txt
+// Records one three-file check, then twenty isolated keeper-peer runs without watch mode.
+import { createRequire } from 'node:module';
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { loadavg } from 'node:os';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+const root = process.cwd();
+const require = createRequire(resolve(root, 'package.json'));
+const { createVitest } = await import(pathToFileURL(require.resolve('vitest/node')).href);
+const output = resolve(process.argv[2]);
+const head = () => execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const candidate = head();
+let iteration = 0;
+const prefix = () => resolve(output, 'run-' + String(iteration).padStart(2, '0'));
+const csv = value => '"' + String(value).replaceAll('"', '""') + '"';
+
+function assertCandidate() {
+  const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim();
+  if (head() !== candidate || dirty) throw new Error('Candidate changed during verification.');
+}
+
+function caseLoad(test, phase) {
+  appendFileSync(prefix() + '.case-load.csv',
+    new Date().toISOString() + ',' + phase + ',' + csv(test.name) + ',' + loadavg().join(',') + '\n');
+}
+
+const reporter = {
+  onTestCaseReady(test) { caseLoad(test, 'start'); },
+  onTestCaseResult(test) {
+    caseLoad(test, 'end');
+    console.log('CASE', iteration, test.name, test.result().state, test.diagnostic()?.duration);
+  },
+  onTestRunEnd(modules, errors, reason) {
+    const files = modules.map(module => ({ file: module.moduleId, state: module.state(), diagnostic: module.diagnostic() }));
+    writeFileSync(prefix() + '.diagnostic.json', JSON.stringify({ candidate, iteration, files, errors, reason }));
+  },
+};
+
+async function recordRun(names, expectedCount, first = false) {
+  assertCandidate();
+  writeFileSync(prefix() + '.load.csv', 'utc,load1,load5,load15\n');
+  writeFileSync(prefix() + '.case-load.csv', 'utc,phase,test,load1,load5,load15\n');
+  const sample = () => appendFileSync(prefix() + '.load.csv', new Date().toISOString() + ',' + loadavg().join(',') + '\n');
+  sample();
+  const sampling = setInterval(sample, 2000);
+  let result;
+  try {
+    const specs = await ctx.getRelevantTestSpecifications(names);
+    const selected = specs.map(spec => spec.moduleId).sort();
+    const expected = names.map(name => resolve(root, name)).sort();
+    if (JSON.stringify(selected) !== JSON.stringify(expected)) throw new Error('Unexpected file selection.');
+    result = first ? await ctx.start(names) : await ctx.runTestSpecifications(specs);
+  } finally { clearInterval(sampling); sample(); }
+  copyFileSync(current, prefix() + '.json');
+  const json = JSON.parse(readFileSync(current, 'utf8'));
+  const ok = json.success && json.numTotalTests === expectedCount && json.numFailedTests === 0
+    && json.numPendingTests === 0 && json.testResults.length === names.length
+    && json.testResults.every(file => file.status === 'passed') && result.unhandledErrors.length === 0;
+  writeFileSync(prefix() + '.status', String(ok ? 0 : 1));
+  console.log('SERIES', iteration, ok ? 'PASS' : 'FAIL', json.numPassedTests, json.numFailedTests);
+  assertCandidate();
+  if (!ok) throw new Error('Verification stopped on a failed run.');
+}
+
+mkdirSync(output, { recursive: true });
+assertCandidate();
+writeFileSync(resolve(output, 'source.txt'), candidate + '\n');
+const current = resolve(output, 'current.json');
+const ctx = await createVitest({
+  root, project: ['@hornhoof/server'], watch: false, isolate: true, pool: 'forks', maxWorkers: 1,
+  reporters: ['default', 'json', reporter], outputFile: { json: current },
+});
+try {
+  const settings = ctx.projects.filter(project => project.config.root === resolve(root, 'apps/server')).map(project => ({
+    root: project.config.root, isolate: project.config.isolate,
+    testTimeout: project.config.testTimeout, hookTimeout: project.config.hookTimeout,
+  }));
+  writeFileSync(resolve(output, 'settings.json'), JSON.stringify({ watch: ctx.config.watch, settings }));
+  if (ctx.config.watch || settings.length !== 1 || settings.some(s => !s.isolate || s.testTimeout !== 20000 || s.hookTimeout !== 10000)) {
+    throw new Error('Verification requires unchanged timeouts and isolated runs without watch mode.');
+  }
+  await recordRun(['apps/server/test/fixed-clock-fixture.test.ts', 'apps/server/test/shared-test-database.test.ts', 'apps/server/test/keeper-peer.test.ts'], 74, true);
+  for (iteration = 1; iteration <= 20; iteration++) await recordRun(['apps/server/test/keeper-peer.test.ts'], 28);
+} finally { await ctx.close(); }

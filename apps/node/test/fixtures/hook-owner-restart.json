@@ -1,0 +1,8 @@
+{
+  "origin": "Synthetic sample of a node restart in the shape the node reads (tmux list-panes #{pane_pid}, the hook's x-hh-pid); no process or tmux recording of the 2026-11-17 01:39:56 UTC restart of node 3874b4e6 was available (task 1200)",
+  "agent": "6d0f1c55-3a8e-4f41-9e0c-2b7a5d9c1e01",
+  "session": "8a1f3e2c-5b7d-4c9e-a0f1-3d2c4b5a6e70",
+  "before": { "program": 48211, "hook": 48302 },
+  "after": { "program": 212, "hook": 260, "waitingScreen": 231 },
+  "foreign": 270
+}

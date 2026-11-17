@@ -27,7 +27,7 @@ const Repeats = z.strictObject({ improvement: z.uuid() });
 
 const notHere = () => new ApiError(404, 'not_found', 'Not found.');
 const humanOnly = (me: Person): void => {
-  if (me.via) throw new ApiError(403, 'forbidden', 'Only a person does this, from their own screen.', 'feedback_person_only');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only a person does this, from their own screen, or the orchestrator.', 'feedback_person_only');
 };
 
 /* The wait a refusal names, as the header a client reads. */

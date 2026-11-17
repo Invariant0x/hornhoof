@@ -50,10 +50,11 @@ export type TaskLine = {
   createdAt: string;
   updatedAt: string;
 };
-/* for: the person the orchestrator acted for, as in a request it answered for them. */
-export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
+/* for: the person the orchestrator acted for, as in a request it answered for them. byOrchestrator: the person's answer, which
+   the orchestrator gave of its own. */
+export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
 /* images: the pictures the agent showed, commitUrl: where its commit can be seen, proof: what test runs say of that very
-   commit, picked: the way a person took in a choice. */
+   commit, picked: the way a person took in a choice, byOrchestrator: the orchestrator gave the answer. */
 export type RequestView = {
   id: string;
   kind: (typeof requests.$inferSelect)['kind'];
@@ -67,6 +68,7 @@ export type RequestView = {
   picked: number | null;
   status: string;
   answer: string | null;
+  byOrchestrator: boolean;
   agent: AgentRef | null;
   at: string;
 };
@@ -74,7 +76,8 @@ export type RequestView = {
 export type AfterView = { id: string; number: number; title: string; status: Task['status'] };
 /* A file an agent put on the task, which any agent downloads by its name. */
 /* fromPerson: by is a person, the file's author, not the agent it is kept under. */
-export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string };
+/* big: the file lives on one machine's disk for 30 days, and is lost if that machine goes. */
+export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string; big?: true };
 export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
   body: string;
@@ -95,6 +98,7 @@ export type TaskDetail = TaskLine & {
 type Names = {
   route(t: Task): EchelonsSnapshot;
   agent(id: string | null): AgentRef | null;
+  isOrchestrator(id: string | null): boolean;
   place(id: string | null): Place;
   turn(id: string | null): number | null;
   after(t: Pick<Task, 'after'>): Task[];
@@ -127,7 +131,9 @@ type NamedRows = {
 };
 
 function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route'> {
+  const orchestrators = new Set<string | null>(agentRows.filter(a => a.kind === 'orchestrator').map(a => a.id));
   return {
+    isOrchestrator: id => orchestrators.has(id),
     agent: id => {
       const a = agentRows.find(r => r.id === id);
       return a ? { id: a.id, name: a.name, kind: a.kind, role: (a.roleKey && ctx.templates.roles.get(a.roleKey)?.title) || null } : null;
@@ -191,7 +197,7 @@ async function forWhom(db: Ctx['db'], data: Record<string, unknown>[]): Promise<
 /* Who wrote a line of the log: a person, or an agent with the person it acted for. */
 function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
   return (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
-    if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
+    if (personId) return { kind: 'person', id: personId, name: personName ?? '', ...(data.byOrchestrator === true ? { byOrchestrator: true as const } : {}) };
     if (!agentId) return null;
     const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
     return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
@@ -209,7 +215,7 @@ async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<type
   return files.map(f => {
     const a = n.agent(f.agentId);
     const author = authors.find(p => p.id === f.personId);
-    return { id: f.id, name: f.name, size: f.size, by: author ?? (a && { id: a.id, name: a.name }), fromPerson: Boolean(author), at: f.at.toISOString() };
+    return { id: f.id, name: f.name, size: f.size, by: author ?? (a && { id: a.id, name: a.name }), fromPerson: Boolean(author), at: f.at.toISOString(), ...(f.big ? { big: true as const } : {}) };
   });
 }
 
@@ -233,7 +239,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
-  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.flatMap(r => [r.agentId, r.answeredByAgentId]), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
   const by = byOf(n, await forWhom(db, events.map(e => e.data)));
@@ -260,6 +266,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
       picked: r.picked,
       status: r.status,
       answer: r.answer,
+      byOrchestrator: n.isOrchestrator(r.answeredByAgentId),
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),

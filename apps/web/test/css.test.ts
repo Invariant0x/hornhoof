@@ -10,6 +10,34 @@ function paddingRightPx(selector: string): number | undefined {
   return px(parts.length === 1 ? parts[0] : parts[1]);
 }
 
+/* A phrase isolated in its own direction (dir="auto") lines up with the side of the block it stands in, not with its own
+   start: on a right to left page an English description stands right like its heading (Design #1186). One rule for every
+   such phrase, with no weight of its own, so that a part that aligns its text on purpose keeps it. */
+it('lines up every isolated phrase with its block through one shared rule and no narrow copies', () => {
+  expect(decl(':where([dir="auto"])', 'text-align')).toBe('match-parent');
+  expect(RULES.filter(r => r.decls['text-align'] === 'match-parent').map(r => [r.media, r.selectors])).toEqual([[null, [':where([dir="auto"])']]]);
+});
+
+/* A channel's addresses stand apart from its buttons: a block under a line, with a heading of the panel's subheadings
+   (Design #1193). */
+it('draws the addresses of a channel as a block of their own under a line, with a heading of the display face', () => {
+  expect(decl('.outbound-contacts', 'border-block-start')).toBe('1px solid var(--line)');
+  expect(decl('.outbound-contacts > h4', 'font-family')).toBe('var(--f-display)');
+  expect(decl('.outbound-contacts > h4', 'font-weight')).toBe('600');
+  expect(decl('.outbound-contacts > h4', 'font-size')).toBe('14px');
+});
+
+/* The map of a department with nobody in it, on a narrow screen and right to left (Design #1201): the hint stands above the
+   buttons at the bottom, across the width, and the empty head card keeps its lines at one start edge. */
+it('puts the map hint above the bottom buttons on a narrow screen, across the width and wrapping by words', () => {
+  const narrow = '(max-width: 760px)';
+  expect(decl('.dv-empty', 'bottom', narrow)).toBe('calc(var(--tree-bottom, 228px) + 8px)');
+  expect([decl('.dv-empty', 'left', narrow), decl('.dv-empty', 'right', narrow)]).toEqual(['16px', '16px']);
+  expect(decl('.dv-empty', 'transform', narrow)).toBe('none');
+  expect(decl('.dv-empty', 'overflow-wrap', narrow)).toBe('break-word');
+  expect(decl('.shead.empty', 'text-align')).toBe('start');
+});
+
 it('reads container rules with the same condition as media rules', () => {
   expect(parse('@container card (min-width: 700px) { .blocks { display: grid; } }', null)).toEqual([
     { media: 'card (min-width: 700px)', selectors: ['.blocks'], decls: { display: 'grid' } },
@@ -136,6 +164,30 @@ it('lets a finger take a line of the company map and a bend on it as easily as a
   expect(decl('.bend', '-webkit-tap-highlight-color')).toBe('transparent');
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p))).toEqual(['28px', '28px', '-14px 0 0 -14px']);
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
+});
+
+it("sets the percent sign of a share on the Machines pool and on a meter in the text font at the size and weight of its figure", () => {
+  expect(decl('.pool-facts .pct', 'font-family')).toBe('var(--f-body)');
+  expect(decl('.g-f .pct', 'font-family')).toBe('var(--f-body)');
+  /* The sign has no figures to line up; the figures beside it keep their line's font and its tabular figures. */
+  expect(decl('.pool-facts .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.g-f .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.pool-facts dd', 'font-variant-numeric')).toBe('tabular-nums');
+  expect(decl('.g-f b', 'font-variant-numeric')).toBe('tabular-nums');
+  /* Its line is no taller than the figure's own, so the pool's tile and the meters keep their height. */
+  expect(decl('.pool-facts .pct', 'line-height')).toBe('1');
+  expect(decl('.g-f .pct', 'line-height')).toBe('1');
+  for (const selector of ['.pool-facts .pct', '.g-f .pct']) {
+    expect(decl(selector, 'font-size')).toBeUndefined();
+    expect(decl(selector, 'font-weight')).toBeUndefined();
+    expect(decl(selector, 'font')).toBeUndefined();
+  }
+  expect(decl('.pool-facts dd', 'font-family')).toBe('var(--f-display)');
+  expect(decl('.g-f b', 'font-family')).toBe('var(--f-display)');
+  /* The small muted unit beside a meter's figure is its own child; a share inside the figure keeps the figure's size. */
+  expect(rulesFor('.g-f span')).toEqual([]);
+  expect(decl('.g-f > span', 'font-size')).toBe('12.5px');
+  expect(decl('.g-f > span', 'color')).toBe('var(--muted)');
 });
 
 it('sizes the map scale label by its content from tokens without clipping and keeps 44 px zoom buttons', () => {

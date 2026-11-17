@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { Decrypter, Encrypter } from 'age-encryption';
 import { z } from 'zod';
 import type { HeldCertificate } from '../keeper/certificate.js';
-import type { MachineKey } from '../keeper/machine-keys.js';
+import { jsonOf, type MachineKey } from '../keeper/machine-keys.js';
 import { certFacts, issuedBy } from '../network/authority.js';
 
 /* A backup of the company as one file of three parts, so it travels as one stream and is checked before it is opened:
@@ -237,21 +237,13 @@ export async function openBundle(sealed: Readable, manifest: Manifest, identitie
   }
   const from = chunksOf(plain);
   const read = await takeLines(from, [CONTENT_LINE.length, MAX_HEAD]).catch(() => null);
-  const content = read && read.lines[0] === CONTENT_LINE ? Content.safeParse(jsonOrNull(read.lines[1]!)) : null;
+  const content = read && read.lines[0] === CONTENT_LINE ? Content.safeParse(jsonOf(read.lines[1]!)) : null;
   if (!read || !content?.success || content.data.id !== manifest.id || content.data.company !== manifest.company) {
     plain.destroy();
     sealed.destroy();
     throw new BundleRefused('content', BAD_CONTENT);
   }
   return { secrets: content.data.secrets, dump: restOf(read.left, from, plain, () => new BundleRefused('content', 'The sealed part broke off before its end.')) };
-}
-
-function jsonOrNull(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }
 
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
