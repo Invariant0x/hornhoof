@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CODE, IMAGE, SERVER, SUB_A, SUB_B, indexOf, install } from './install-script-helpers.js';
+import { isNodeRun, CODE, IMAGE, SERVER, SUB_A, SUB_B, indexOf, install } from './install-script-helpers.js';
 
 describe('install.sh', () => {
 
@@ -19,7 +19,7 @@ describe('install.sh', () => {
     expect(request).toContain('"arch":"x86_64"');
     expect(request).toContain('"hostname":"test-box"');
 
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs).toHaveLength(2);
     for (const [name, id] of [['hornhoof-claude-1c07dac4', SUB_A], ['hornhoof-codex-9f1e2d3c', SUB_B]]) {
       const run = runs.find(c => c.includes(`--name ${name} `))!;
@@ -107,7 +107,7 @@ describe('install.sh', () => {
   it('connects a machine without a plan: one node that needs no sign-in and lends itself to test runs', () => {
     const r = install({ env: { STUB_JOIN_BODY: `${SUB_A} machine node-key-mmmmmmmmmmmmmmmm\\n` } });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs).toHaveLength(1);
     expect(runs[0]).toContain(`--name hornhoof-machine-${SUB_A.slice(0, 8)} `);
     expect(runs[0]).toContain(`--label hornhoof.subscription=${SUB_A}`);
@@ -277,7 +277,7 @@ describe('install.sh', () => {
     const r = install({ env: { STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
     expect(r.code).toBe(0);
     expect(r.out).toContain('Using the local image.');
-    expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith('ghcr.io/invariant0x/hornhoof-node:latest'))).toBe(true);
+    expect(r.calls.filter(isNodeRun).every(c => c.endsWith('ghcr.io/invariant0x/hornhoof-node:latest'))).toBe(true);
   });
 
   it('stops when the pull fails and there is no local image', () => {
@@ -298,7 +298,7 @@ describe('install.sh', () => {
   it('labels each node with the server it works for', () => {
     const r = install();
     expect(r.code).toBe(0);
-    for (const run of r.calls.filter(c => c.startsWith('docker run -d'))) expect(run).toContain(`--label hornhoof.server=${SERVER}`);
+    for (const run of r.calls.filter(isNodeRun)) expect(run).toContain(`--label hornhoof.server=${SERVER}`);
   });
 
   it('surfaces a named browser launch failure in the node summary without prompting for sign-in again', () => {

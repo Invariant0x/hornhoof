@@ -572,6 +572,97 @@ restore_old_node() {
   "${DOCKER[@]}" start "$name" > /dev/null 2>&1 || true
 }
 
+PHONE_NODE_ARGS=()
+PHONE_MODE=''
+PHONE_HOST_DIR=''
+PHONE_ARCH=''
+
+# The updater in Docker keeps the host helper's original private path and architecture from the old node.
+phone_node_setup() {
+  local name=$1 fact
+  PHONE_NODE_ARGS=()
+  PHONE_MODE=linux
+  PHONE_HOST_DIR=''
+  PHONE_ARCH=''
+  if [ "$OS" = darwin ]; then
+    PHONE_MODE=mac
+    PHONE_HOST_DIR="$STATE_DIR/phones/$name"
+    PHONE_ARCH=$ARCH
+  elif [ -n "$FROM_WINDOWS" ]; then
+    PHONE_MODE=none
+  elif [ -n "$FROM_UPDATER" ]; then
+    while IFS= read -r fact; do
+      case "$fact" in
+        HORNHOOF_PHONE_MODE=mac) PHONE_MODE=mac ;;
+        HORNHOOF_PHONE_MODE=none) PHONE_MODE=none ;;
+        HORNHOOF_PHONE_HOST_DIR=*) PHONE_HOST_DIR=${fact#*=} ;;
+        HORNHOOF_PHONE_HOST_ARCH=*) PHONE_ARCH=${fact#*=} ;;
+      esac
+    done < <("${DOCKER[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2> /dev/null || true)
+  fi
+  if [ "$PHONE_MODE" = mac ]; then
+    case "$PHONE_HOST_DIR:$PHONE_ARCH" in /*:arm64 | /*:x86_64) ;; *) PHONE_MODE=none ;; esac
+  fi
+  if [ "$PHONE_MODE" = linux ]; then
+    "${DOCKER[@]}" network inspect "$name-phone" > /dev/null 2>&1 || "${DOCKER[@]}" network create "$name-phone" > /dev/null || { PHONE_MODE=none; say 'Could not prepare the USB phone helper network.'; }
+    if [ "$PHONE_MODE" = linux ]; then PHONE_NODE_ARGS+=(--network "$name-phone"); fi
+  fi
+  PHONE_NODE_ARGS+=(-e "HORNHOOF_PHONE_MODE=$PHONE_MODE")
+  if [ "$PHONE_MODE" = mac ]; then
+    PHONE_NODE_ARGS+=(-p '127.0.0.1::38997' -e "HORNHOOF_PHONE_HOST_DIR=$PHONE_HOST_DIR" -e "HORNHOOF_PHONE_HOST_ARCH=$PHONE_ARCH")
+  fi
+  if [ "$PHONE_MODE" != none ]; then PHONE_NODE_ARGS+=(-e HORNHOOF_PHONE_BRIDGE=1); fi
+}
+
+phone_host_start() {
+  local name=$1 port label uid plist
+  if [ "$PHONE_MODE" = linux ]; then
+    "${DOCKER[@]}" rm -f "$name-usb" > /dev/null 2>&1 || true
+    "${DOCKER[@]}" run -d --name "$name-usb" --label hornhoof.phone-helper=1 --label "$SERVER_LABEL=$SERVER" --restart unless-stopped \
+      --network "$name-phone" --user 0:0 --cap-drop ALL --security-opt no-new-privileges \
+      --device-cgroup-rule 'c 189:* rmw' --mount type=bind,source=/dev/bus/usb,target=/dev/bus/usb \
+      -v "$name:/node-state:ro" -v "$name-usb:/root/.android" -e "HORNHOOF_PHONE_SOCKET=ws://$name:38997/phone-bridge" \
+      --entrypoint node "$IMAGE" /app/apps/node/dist/phone-host.cjs > /dev/null || say 'The USB phone helper could not start. Network phones can still connect.'
+  elif [ "$PHONE_MODE" = mac ]; then
+    port=$("${DOCKER[@]}" port "$name" 38997/tcp 2> /dev/null | sed -n 's/^127\.0\.0\.1://p' | head -1)
+    case "$port" in '' | *[!0-9]*) say 'Could not connect the USB phone helper to this node.'; return 0 ;; esac
+    # This image can update the host files even when the installer itself runs inside the updater container.
+    "${DOCKER[@]}" run --rm --cap-drop ALL --security-opt no-new-privileges -v "$name:/node-state:ro" \
+      --mount "type=bind,source=$PHONE_HOST_DIR,target=/phone-host" --entrypoint node "$IMAGE" \
+      /app/apps/node/dist/phone-host-install.cjs "$PHONE_HOST_DIR" "$port" "$PHONE_ARCH" "$SERVER" "$IMAGE" || { say 'The USB phone helper could not be updated.'; return 0; }
+    if [ "$OS" = darwin ] && [ -z "$FROM_UPDATER" ]; then
+      label="org.hornhoof.phone.$name"
+      uid=$(id -u)
+      mkdir -p "$HOME/Library/LaunchAgents"
+      plist="$HOME/Library/LaunchAgents/$label.plist"
+      cp "$PHONE_HOST_DIR/agent.plist" "$plist" && chmod 600 "$plist" || { say 'The USB phone helper could not be registered.'; return 0; }
+      launchctl bootout "gui/$uid/$label" > /dev/null 2>&1 || true
+      launchctl bootstrap "gui/$uid" "$plist" || { say 'The USB phone helper could not start in this login.'; return 0; }
+    fi
+  fi
+}
+
+# Helpers belong to this node only; removing a node never leaves an active host bridge behind.
+phone_host_remove() {
+  local name=$1 dir='' image='' fact label uid
+  "${DOCKER[@]}" rm -f "$name-usb" > /dev/null 2>&1 || true
+  while IFS= read -r fact; do
+    case "$fact" in HORNHOOF_PHONE_HOST_DIR=*) dir=${fact#*=} ;; esac
+  done < <("${DOCKER[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2> /dev/null || true)
+  if [ "$OS" = darwin ]; then
+    label="org.hornhoof.phone.$name"
+    uid=$(id -u)
+    launchctl bootout "gui/$uid/$label" > /dev/null 2>&1 || true
+    rm -f "$HOME/Library/LaunchAgents/$label.plist"
+  elif [ -n "$dir" ]; then
+    image=$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$name" 2> /dev/null || true)
+    if [ -n "$image" ]; then
+      "${DOCKER[@]}" run --rm --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,source=$dir,target=/phone-host" \
+        --entrypoint node "$image" /app/apps/node/dist/phone-host-install.cjs --remove > /dev/null || say 'The Mac USB phone helper removal could not be confirmed.'
+    fi
+  fi
+}
+
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-} old='' started=1
@@ -582,6 +673,8 @@ start_node() {
   fi
   say "Starting $name."
   host_env "$name"
+  phone_node_setup "$name"
+  if [ "$OS" = darwin ] && [ "$PHONE_MODE" = mac ]; then mkdir -p "$PHONE_HOST_DIR" && chmod 700 "$PHONE_HOST_DIR"; fi
   prepare_node_stop "$name" "${5:-node_update}"
   if "${DOCKER[@]}" inspect --format '{{.Id}}' "$name" > /dev/null 2>&1; then
     old=$(next_old_node "$name")
@@ -603,7 +696,7 @@ start_node() {
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
-    ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || started=''
+    ${HOST_ENV[@]+"${HOST_ENV[@]}"} ${PHONE_NODE_ARGS[@]+"${PHONE_NODE_ARGS[@]}"} "$IMAGE" > /dev/null || started=''
   if [ -z "$started" ] || ! node_healthy "$name"; then
     restore_old_node "$name" "$old"
     fail "Could not start $name (docker logs $name shows why). $RETRY"
@@ -612,6 +705,7 @@ start_node() {
     "${DOCKER[@]}" rm -f "$old" > /dev/null 2>&1 || true
   fi
   STARTED="$STARTED $name"
+  phone_host_start "$name"
 }
 
 # wait_for_node <name>: the server keeps new work off the node and says when what it runs has ended. This asks from the
@@ -1254,7 +1348,11 @@ uninstall_mode() {
       return 0
       ;;
   esac
-  for name in $names; do "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true; done
+  for name in $names; do
+    phone_host_remove "$name"
+    "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+    "${DOCKER[@]}" network rm "$name-phone" > /dev/null 2>&1 || true
+  done
   if [ -n "$core" ]; then
     asked=$SERVER
     while IFS= read -r SERVER; do
@@ -1271,7 +1369,11 @@ uninstall_mode() {
   answer=$(ask "Also delete their volumes, with the sign-ins and work files? [y/N] " n)
   case "$answer" in
     y | Y | yes)
-      for name in $names; do "${DOCKER[@]}" volume rm "$name" > /dev/null 2>&1 || true; done
+      for name in $names; do
+        "${DOCKER[@]}" volume rm "$name" > /dev/null 2>&1 || true
+        "${DOCKER[@]}" volume rm "$name-usb" > /dev/null 2>&1 || true
+        if [ "$OS" = darwin ]; then rm -rf "$STATE_DIR/phones/$name"; fi
+      done
       say "The volumes are deleted."
       ;;
     *) say "The volumes stay. The next install on this machine picks them up again." ;;

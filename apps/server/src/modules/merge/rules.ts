@@ -105,6 +105,10 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
   repo_hosts: rows('access'),
   google_sheets: rows('access'),
+  company_phones: rows('protected'),
+  // Historical records follow their task. A row alone never reissues a runtime grant on the node.
+  phone_sessions: rows('protected'),
+  phone_frames: add('protected'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
