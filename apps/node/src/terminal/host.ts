@@ -461,6 +461,10 @@ export class TerminalHost {
     if (!turn) return;
     const privacy = (turn.privacy ??= new ToolPrivacy());
     privacy.input(name, input, policy);
+    this.rememberSensitiveReply(privacy, answer, policy);
+  }
+
+  private rememberSensitiveReply(privacy: ToolPrivacy, answer: unknown, policy: ToolPrivacyPolicy | undefined): void {
     if (!answer || typeof answer !== 'object') return;
     const content = (answer as { result?: { content?: { text?: string }[] } }).result?.content ?? [];
     for (const block of content) {
@@ -529,6 +533,10 @@ export class TerminalHost {
     const [cols, rows] = size.trim().split(/\s+/).map(Number);
     if (!cols || !rows) throw new Error('The existing pane size is unknown.');
     return { cols, rows, cells: a.privateOutput ? PRIVATE_TOOL_NOTE : cells };
+  }
+
+  private terminalText(agent: Agent, text: string): string {
+    return agent.privateOutput ? PRIVATE_TOOL_NOTE : text;
   }
 
   private operatorInputLine(key: string, cells: string): OperatorInputLine {
@@ -3149,7 +3157,7 @@ export class TerminalHost {
        A watcher of an agent with no program sees the waiting screen; anyone else, a loader until the program is up. */
     if (a.asleep && !a.turn) this.opts.send({ type: 'term.program', termId: m.termId, running: false, asleep: true });
     else if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
-    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), a.privateOutput ? PRIVATE_TOOL_NOTE : text);
+    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), this.terminalText(a, text));
     child.on('exit', () => {
       view.history?.stop();
       if (view.quiet) clearTimeout(view.quiet);

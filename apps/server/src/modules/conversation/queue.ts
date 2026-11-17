@@ -586,7 +586,7 @@ async function storeTypedTurn(
     .update(jobs)
     .set({ status: 'done', result: '', finishedAt: new Date() })
     .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId))).returning({ id: jobs.id });
-  for (const job of started) forgetPrivateTurn(ctx.db, job.id);
+  forgetStartupValues(ctx, started);
   const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
   if (running && running.id !== queuedFrom) return null;
@@ -1356,4 +1356,8 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     ...agentProgramState(ctx, running),
     ...await agentFailureState(ctx, agentId),
   };
+}
+
+function forgetStartupValues(ctx: Ctx, started: readonly { id: string }[]): void {
+  for (const job of started) forgetPrivateTurn(ctx.db, job.id);
 }
