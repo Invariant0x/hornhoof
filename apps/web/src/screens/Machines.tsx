@@ -5,7 +5,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
-import { Bar } from '../ui/Bar';
+import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
@@ -96,7 +96,7 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
             [t.machines.poolOnline, <bdi>{t.machines.of(online, all)}</bdi>],
             [t.machines.poolCores, cores ? <bdi>{cores}</bdi> : t.machines.unknown],
             [t.machines.poolMemory, loads.length ? <bdi>{t.machines.gbOf(gigabytes(language, sum(l => l.memFree)), gigabytes(language, sum(l => l.memTotal)))}</bdi> : t.machines.unknown],
-            [t.machines.poolBusy, cores ? <bdi>{t.machines.percent(busyShare(sum(l => l.load), cores))}</bdi> : t.machines.unknown],
+            [t.machines.poolBusy, cores ? <bdi><Share>{t.machines.percent(busyShare(sum(l => l.load), cores))}</Share></bdi> : t.machines.unknown],
           ]}
         />
       </Edge>
@@ -129,7 +129,7 @@ function Resources({ row }: { row: MachineRow }) {
   const busy = busyShare(load.load, load.cpus);
   return <>
     <div className="gauges">
-      <Gauge label={t.machines.load} figure={`${busy}%`} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
+      <Gauge label={t.machines.load} figure={<Share>{t.machines.percent(busy)}</Share>} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
       <MemoryGauge load={load} less={less} />
       <DiskGauge load={load} />
       <Gauge label={t.machines.processor} figure={load.cpus} unit={` ${t.cards.coresWord(load.cpus)}`} sub={[load.cpuModel, fewer ? t.cards.hostCores(load.hostCpus!) : null].filter(Boolean).join(', ')} />

@@ -281,14 +281,15 @@ const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) }
 /* What hh-fetch names instead of a task for a picture that came with a message. */
 const MESSAGE_FILES = 'message';
 
-/* A picture a person sent this agent, for this agent alone. Two pictures pasted from the clipboard have one name, so the
-   file's name starts with its id. */
+/* A picture sent to this agent, or an employee's own chat file. Two clipboard pictures have one name, so the download
+   name starts with its id. */
 async function messagePicture(db: Db, job: ToolJob, id: string) {
   if (!z.uuid().safeParse(id).success) return undefined;
+  const ownChat = job.agentKind === 'assistant' ? undefined : and(isNotNull(attachments.name), isNull(attachments.requestId));
   const [found] = await db
     .select({ id: attachments.id, name: attachments.name, length: attachments.size })
     .from(attachments)
-    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), or(isNotNull(attachments.personId), ownChat), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
 }
 
@@ -377,11 +378,17 @@ export async function attachmentBytesForPerson(
   };
 }
 
+/* Reads a delivery's bytes only when both its sending agent and its recipient may read the file. */
+export async function attachmentBytesForDelivery(ctx: Pick<Ctx, 'db'>, job: ToolJob, person: Person, id: string) {
+  if (!(await agentCanReadAttachment(ctx, job, id))) return null;
+  return attachmentBytesForPerson(ctx.db, person, id);
+}
+
 const PICTURE_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
 const defaultPictureName = (id: string, mediaType: string): string => `${id}${PICTURE_EXT[mediaType] ?? ''}`;
 
 /* Working employees of the company read files of any company task, never personal assistant work. */
-async function companyTaskForAgent(ctx: Ctx, job: ToolJob, ref: string): Promise<Task | null> {
+async function companyTaskForAgent(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: string): Promise<Task | null> {
   if (job.agentKind === 'assistant') return null;
   const task = await taskByRef(ctx, job.companyId, ref);
   if (!task) return null;
@@ -407,6 +414,22 @@ async function taskAttachmentForAgent(db: Db, companyId: string, taskId: string,
     .orderBy(desc(attachments.createdAt))
     .limit(1);
   return found && { ...found, name: found.name ?? defaultPictureName(found.id, found.mediaType) };
+}
+
+/* The same task and message checks as hh-fetch, by id, before another tool shares a file or gives out its link. */
+export async function agentCanReadAttachment(ctx: Pick<Ctx, 'db'>, job: ToolJob, id: string): Promise<boolean> {
+  if (!z.uuid().safeParse(id).success) return false;
+  if (await messagePicture(ctx.db, job, id)) return true;
+  const [file] = await ctx.db
+    .select({ taskId: attachments.taskId, requestTaskId: requests.taskId })
+    .from(attachments)
+    .leftJoin(requests, eq(requests.id, attachments.requestId))
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), isNull(attachments.operatorCaseId)));
+  const taskId = file?.taskId ?? file?.requestTaskId;
+  if (!taskId) return false;
+  const task = await companyTaskForAgent(ctx, job, taskId);
+  /* By id alone: a file of the task named like this id is another file, and never vouches for this one. */
+  return Boolean(task) && (await taskAttachmentForAgent(ctx.db, job.companyId, task!.id, id))?.id === id;
 }
 
 /* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */

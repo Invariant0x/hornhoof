@@ -166,6 +166,30 @@ it('lets a finger take a line of the company map and a bend on it as easily as a
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
 });
 
+it("sets the percent sign of a share on the Machines pool and on a meter in the text font at the size and weight of its figure", () => {
+  expect(decl('.pool-facts .pct', 'font-family')).toBe('var(--f-body)');
+  expect(decl('.g-f .pct', 'font-family')).toBe('var(--f-body)');
+  /* The sign has no figures to line up; the figures beside it keep their line's font and its tabular figures. */
+  expect(decl('.pool-facts .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.g-f .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.pool-facts dd', 'font-variant-numeric')).toBe('tabular-nums');
+  expect(decl('.g-f b', 'font-variant-numeric')).toBe('tabular-nums');
+  /* Its line is no taller than the figure's own, so the pool's tile and the meters keep their height. */
+  expect(decl('.pool-facts .pct', 'line-height')).toBe('1');
+  expect(decl('.g-f .pct', 'line-height')).toBe('1');
+  for (const selector of ['.pool-facts .pct', '.g-f .pct']) {
+    expect(decl(selector, 'font-size')).toBeUndefined();
+    expect(decl(selector, 'font-weight')).toBeUndefined();
+    expect(decl(selector, 'font')).toBeUndefined();
+  }
+  expect(decl('.pool-facts dd', 'font-family')).toBe('var(--f-display)');
+  expect(decl('.g-f b', 'font-family')).toBe('var(--f-display)');
+  /* The small muted unit beside a meter's figure is its own child; a share inside the figure keeps the figure's size. */
+  expect(rulesFor('.g-f span')).toEqual([]);
+  expect(decl('.g-f > span', 'font-size')).toBe('12.5px');
+  expect(decl('.g-f > span', 'color')).toBe('var(--muted)');
+});
+
 it('sizes the map scale label by its content from tokens without clipping and keeps 44 px zoom buttons', () => {
   expect(decl('.zoom', 'max-inline-size')).toBe('calc(100% - 32px)');
   expect(decl('.zbtn', 'flex')).toBe('none');
