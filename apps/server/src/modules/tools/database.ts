@@ -10,7 +10,7 @@ import { currentInvocation, keptAnswer } from './calls.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
-/* Answers longer than this are cut, as view's are. */
+/* Answers longer than this are cut, as api's are. */
 const MAX_ANSWER = 30_000;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
