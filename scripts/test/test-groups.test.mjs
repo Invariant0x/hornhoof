@@ -41,6 +41,7 @@ for (const [group, path, expected] of [
   ['the database', 'apps/server/drizzle/0075_internal_first_questions.sql', ['server']],
   ['the database schema', 'apps/server/src/db/schema.ts', ['server']],
   ['a test only the final profile runs', 'apps/server/test/postgres/locking.pg.spec.ts', []],
+  ['a slow test only the final and full runs take', 'apps/server/test/slow/harness-e2e.slow.ts', []],
   ['the selection itself', 'apps/node/src/test-impact.ts', ['node', 'release-scripts']],
   ['the fingerprints of test files', 'apps/node/src/test-fingerprint.ts', ['node', 'release-scripts']],
   ['a risky source of the node, which mutation also lists', 'apps/node/src/redact.ts', ['node']],
@@ -151,6 +152,33 @@ test('a new test only the final profile runs does not stop the check, and says w
   assert.equal(selection.unavailable, undefined);
   assert.deepEqual(suites(selection), []);
   assert.deepEqual(selection.notes, [`runs in the final profile: ${path}`]);
+});
+
+/* The tests that run whole programs end to end, by name: the final and full runs of a release candidate take them, and no
+   suite of every change's run lists their files or their tests. */
+const SLOW = [
+  ['apps/server/test/slow/harness-e2e.slow.ts', 'one harness for a product, across all its machines'],
+  ['apps/server/test/slow/multi-company-isolation.slow.ts', 'Two companies on the same two computers lead, copy, and switch leader without interfering'],
+  ['apps/server/test/slow/release-benchmark.slow.ts', 'launches the benchmark against an isolated real app and emits measured numbers'],
+];
+
+test('the slow tests run in the final and full profiles, and in no fast suite', { timeout: 60_000 }, async () => {
+  const profile = id => manifest.profiles.find(item => item.id === id).requiredSuiteIds;
+  assert.ok(profile('final').includes('server-slow') && profile('full').includes('server-slow'));
+  assert.ok(!profile('fast').includes('server-slow'));
+  const slow = ports.listTestUnits(manifest, trackedIn(root)).filter(unit => unit.suiteId === 'server-slow').map(unit => unit.file);
+  assert.deepEqual([...new Set(slow)].sort(), SLOW.map(([file]) => file));
+  const fast = fastFiles();
+  for (const [file, title] of SLOW) {
+    assert.ok(!fast.includes(file), file);
+    const listing = fast.filter(other => other.startsWith('apps/server/') && readFileSync(root + other, 'utf8').includes(`'${title}'`));
+    assert.deepEqual(listing, [], title);
+  }
+  const path = 'apps/server/test/slow/new.slow.ts';
+  const added = await select([{ path, kind: 'added' }], [{ path, mode: '100644', oid: 'a'.repeat(40) }]);
+  assert.equal(added.unavailable, undefined);
+  assert.deepEqual(suites(added), []);
+  assert.deepEqual(added.notes, [`runs in the final profile: ${path}`]);
 });
 
 test('the shared protocol takes every suite in everyReached mode unless another path asks for everything, while local author check keeps only near tests and leftToFullRun', { timeout: 60_000 }, async () => {

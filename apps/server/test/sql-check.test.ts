@@ -209,16 +209,20 @@ describe("the check on the orchestrator's SQL", () => {
   });
 
   /* Looping output has this very shape, and it fits within the tool's limit of 20,000 characters. Each one overflows the
-     parser's stack, and forty of them used to kill the parser until the app restarted. */
-  const FLOOD = 41;
+     parser's stack, and forty of them used to kill a parser that was kept, until the app restarted. Now each one costs
+     its parser and no other, so no parser meets a second one: a few in a row show it as well as forty, each a new parser
+     that takes most of a second to start. */
+  const FLOOD = 3;
   it('keeps answering after a flood of texts too deep for the parser', async () => {
     const tooDeep = `SELECT 1${'+1'.repeat(9990)}`;
-    /* One past the forty: each of them costs a new parser, which takes most of a second to start. */
-    for (let call = 0; call < FLOOD; call++) await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax' });
+    for (let call = 1; call <= FLOOD; call++) {
+      await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax' });
+      expect(warn).toHaveBeenCalledTimes(call);
+    }
     await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
     await expect(checkAgentSql('SELECT 1')).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(FLOOD);
-  }, 60_000);
+  });
 
   /* The log goes where the company's people and agents read it, and the text is what the orchestrator wrote. */
   it('logs that it replaced a parser, without the text', async () => {

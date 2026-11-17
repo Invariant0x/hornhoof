@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useT, type Messages } from '../i18n';
+import { Phrase, useT, type Messages } from '../i18n';
 import { everyVisible } from '../guard';
 
 const MINUTE = 60_000;
@@ -33,8 +33,14 @@ export function useNow(): number {
   return now;
 }
 
-export function ResetTime({ at, now }: { at: string | null; now: number }) {
+/* The words of a reset as its language writes them, the time in them one piece that reads left to right. */
+export function ResetWords({ at, now }: { at: string | null; now: number }) {
   const t = useT();
   const duration = resetDurationAt(t, at, now);
-  return <span>{duration ? t.subs.resetsIn(duration) : t.subs.resetUnknown}</span>;
+  return duration ? <Phrase words={t.subs.resetsIn} values={[<bdi dir="ltr">{duration}</bdi>]} /> : <>{t.subs.resetUnknown}</>;
+}
+
+/* A reset's line of its own: its words whole, in their own direction, so a page laid out right to left keeps their order. */
+export function ResetTime({ at, now }: { at: string | null; now: number }) {
+  return <bdi><ResetWords at={at} now={now} /></bdi>;
 }

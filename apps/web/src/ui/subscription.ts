@@ -70,12 +70,16 @@ export function planStateOnMachine(t: Messages, language: Language, on: { online
 
 const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, one_day: 1440, seven_day: 10080 };
 
-export function windowName(t: Messages, name: string): string {
-  if (name === 'month') return t.subs.month;
+/* A window's name in two parts: its number with its unit, which reads left to right as one piece in either direction, and
+   the words after it, as ", Opus". A name with no number is all words. */
+export function windowParts(t: Messages, name: string): [piece: string, words: string] {
+  if (name === 'month') return ['', t.subs.month];
   const model = /^seven_day_([a-z]+)$/.exec(name)?.[1];
-  if (model) return `${t.subs.days(7)}, ${model[0]!.toUpperCase()}${model.slice(1)}`;
+  if (model) return [t.subs.days(7), `, ${model[0]!.toUpperCase()}${model.slice(1)}`];
   const minutes = WINDOW_MINUTES[name] ?? Number(/^(\d+)_minutes$/.exec(name)?.[1]);
-  if (!minutes) return name.replaceAll('_', ' ');
-  if (minutes % 1440 === 0) return t.subs.days(minutes / 1440);
-  return minutes % 60 === 0 ? t.subs.hours(minutes / 60) : t.subs.minutes(minutes);
+  if (!minutes) return ['', name.replaceAll('_', ' ')];
+  if (minutes % 1440 === 0) return [t.subs.days(minutes / 1440), ''];
+  return [minutes % 60 === 0 ? t.subs.hours(minutes / 60) : t.subs.minutes(minutes), ''];
 }
+
+export const windowName = (t: Messages, name: string): string => windowParts(t, name).join('');
