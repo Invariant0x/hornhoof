@@ -1,6 +1,8 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agents, companies, departments, jobs, machines, people, programOperatorCases, taskEvents, tasks, waitNotices } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodes, people, programOperatorCases, taskEvents, tasks, waitNotices } from '../src/db/schema.js';
+import { startProgram, windowNode } from '../src/modules/conversation/queue.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -127,6 +129,28 @@ describe('a limit of turns at once on a machine', () => {
     expect((await c.state(lea.id)).slotWait).toBe(true);
     await c.limit(2);
     expect((await nextRun(c.mac)).prompt).toContain('Waits too');
+  });
+
+  it('opens the program for a person who opens a window at once, past the limit, and counts that start as no turn', async () => {
+    const c = await planOnOneMachine();
+    const vera = await c.hire('Vera');
+    const ida = await c.hire('Ida');
+    await c.limit(1);
+    await c.write(c.bruno.id, 'Holds the place');
+    const first = await nextRun(c.mac);
+    /* Her window puts her program on the machine, as opening it in Hornhoof does, whatever its places. */
+    const window = await windowNode(c.ctx, vera.id);
+    const [node] = await c.db.select({ id: nodes.id }).from(nodes);
+    expect(window?.node).toEqual(nodeIdentity(node!.id));
+    await startProgram(c.ctx, window!.node, vera.id);
+    const opened = await nextRun(c.mac);
+    expect(opened.prompt).toBe('');
+    expect((await c.state(vera.id)).slotWait).toBe(false);
+    await c.write(ida.id, 'Waits for Bruno alone');
+    expect((await c.state(ida.id)).slotWait).toBe(true);
+    nothingSent(c.mac);
+    await c.end(first);
+    expect((await nextRun(c.mac)).prompt).toContain('Waits for Bruno alone');
   });
 
   it('starts waiting turns first come, first served, an urgent task\'s ahead of the rest', async () => {

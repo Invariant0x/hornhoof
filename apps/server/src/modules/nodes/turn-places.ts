@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { jobs, machines, nodes, tasks } from '../../db/schema.js';
@@ -52,11 +52,12 @@ async function limitsOf(db: Reader, places: readonly NodeIdentity[]): Promise<Ma
   return found;
 }
 
-/* The agents' turns that run on the machine now, over all its nodes and its built-in one. */
+/* The agents' turns that run on the machine now, over all its nodes and its built-in one; a turn that only started the
+   program for a person's window, with no words, is none. */
 async function runningOn(db: Reader, machine: Pick<Limited, 'id' | 'networkId'>): Promise<number> {
   const onNodes = db.select(idOnly(nodes)).from(nodes).where(eq(nodes.machineId, machine.id));
   const there = machine.networkId ? or(inArray(jobs.nodeId, onNodes), eq(jobs.builtinMachine, machine.networkId)) : inArray(jobs.nodeId, onNodes);
-  const [row] = await db.select(countOnly()).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), there));
+  const [row] = await db.select(countOnly()).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), ne(jobs.prompt, ''), there));
   return Number(row?.n ?? 0);
 }
 

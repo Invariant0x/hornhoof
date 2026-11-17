@@ -1010,8 +1010,9 @@ const FULL = 'full';
 
 async function takeCurrent(tx: Tx, own: { machineId: string | null }, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | typeof FULL | null> {
   if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
-  /* Before the install hold, which only shares the machine's row: this one takes it for itself. */
-  if (await placeGone(tx, sending)) return FULL;
+  /* Before the install hold, which only shares the machine's row: this one takes it for itself. A turn that only starts
+     the program takes no place. */
+  if (job.prompt && (await placeGone(tx, sending))) return FULL;
   if ((await holdsMachine(tx, sending.nodeId)) || (await holdsBuiltin(tx, own, sending.builtinMachine))) return HELD;
   const [row] = await tx
     .update(jobs)
@@ -1149,7 +1150,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
-  if (!agent || !(await placement(ctx, agent, sub))) return;
+  /* A place on a machine is asked for below, once the turn is known: one that only opens the program needs none. */
+  if (!agent || !(await placement(ctx, agent, sub, CONVERSATION_NODE, undefined, 'any'))) return;
   if (await heldByOperator(ctx, agent)) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
@@ -1166,7 +1168,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
-  const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
+  /* A turn that types nothing only starts the program for the person who opened its window, and ends once it is up: it
+     waits for no place on its machine and takes none. */
+  const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE, undefined, job.prompt ? 'take' : 'any');
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
      Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
