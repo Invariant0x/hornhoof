@@ -21,8 +21,10 @@ const RUNNING_JOB: JobView = { id: 'j1', status: 'running', result: null, tail: 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
 const rowOf = (name: string) => screen.queryByRole('article', { name: new RegExp(`^${name}, `) }) ?? screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+/* Opens every plan's card, as clicks on each row's button do, in one act: the screen renders once for all of them. */
 const openCards = () => {
-  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+  const buttons = screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ });
+  act(() => { for (const button of buttons) fireEvent.click(button); });
 };
 const openAll = async () => {
   await screen.findByRole('table');
