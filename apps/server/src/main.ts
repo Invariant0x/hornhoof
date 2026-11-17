@@ -29,7 +29,7 @@ const app = await buildApp({
 });
 const sayRunning = async (): Promise<void> => console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
 if (config.keeper) {
-  agentSqlFollowsMode({ mode: app.ctx.mode, holder: app.ctx, open: () => openAgentSql(url) });
+  agentSqlFollowsMode({ mode: app.ctx.mode, holder: app.ctx, open: () => openAgentSql(url, config.keeper) });
   let said = false;
   app.ctx.mode.onChange(async from => {
     if (from !== 'off' || said) return;

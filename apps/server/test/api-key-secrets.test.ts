@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agentRole, grantsFor, readerGrantsFor, readerRole, type SqlMode } from '../src/db/agent-sql.js';
+import type { SqlMode } from '../src/db/agent-sql.js';
 import { companies, subscriptions } from '../src/db/schema.js';
-import { as, setUpCompany, testApp } from './helpers.js';
+import { agentSqlOn, as, setUpCompany, testApp } from './helpers.js';
 import { createTestDb } from './helpers-db.js';
 
 /* A company's API key lives encrypted in the database alone: no answer of the API, no event, no log line and no agent's
@@ -82,33 +82,29 @@ describe('a company API key', () => {
 
 describe("the agents' SQL", () => {
   async function roles() {
-    const { $client: client } = await createTestDb();
-    const names = { write: agentRole('postgres'), read: readerRole('postgres') };
-    await client.exec(`${grantsFor(names.write)};\n${readerGrantsFor(names.read)}`);
-    return (mode: SqlMode, statement: string) => client.transaction(async tx => {
-      await tx.exec(`SET LOCAL ROLE "${names[mode]}"`);
-      return tx.exec(statement);
-    });
+    const sql = agentSqlOn((await createTestDb()).$client);
+    return (mode: SqlMode, statement: string) => sql.run(statement, mode);
   }
 
-  it("shows a key to the orchestrator alone, and reads a connection's address, protocol, models and last 4 characters without changing them", async () => {
+  it("shows and changes a key for the orchestrator alone, and both read a connection's address, protocol, models and last 4 characters", async () => {
     const run = await roles();
-    await expect(run('read', 'SELECT secret_enc FROM subscriptions')).rejects.toThrow(/permission denied/);
+    await expect(run('read', 'SELECT secret_enc FROM subscriptions')).rejects.toThrow(/permission denied|read-only/);
     expect((await run('write', 'SELECT secret_enc FROM subscriptions'))[0]!.rows).toEqual([]);
-    for (const mode of ['write', 'read'] as const) {
-      await expect(run(mode, "UPDATE subscriptions SET secret_enc = 'forged' WHERE false"), mode).rejects.toThrow(/permission denied/);
-      expect((await run(mode, 'SELECT id, provider, last4, base_url, api_protocol, models FROM subscriptions'))[0]!.rows).toEqual([]);
-      await expect(run(mode, "UPDATE subscriptions SET base_url = 'https://elsewhere.example' WHERE false"), mode).rejects.toThrow(/permission denied/);
+    for (const mode of ['write', 'read'] as const) expect((await run(mode, 'SELECT id, provider, last4, base_url, api_protocol, models FROM subscriptions'))[0]!.rows).toEqual([]);
+    for (const statement of ["UPDATE subscriptions SET secret_enc = 'forged' WHERE false", "UPDATE subscriptions SET base_url = 'https://elsewhere.example' WHERE false"]) {
+      await expect(run('read', statement), statement).rejects.toThrow(/permission denied|read-only/);
+      await expect(run('write', statement), statement).resolves.toBeDefined();
     }
   });
 
-  it("reads what each turn used, and never writes it, as a forged row would change what a connection's turns cost", async () => {
+  it("lets both read what each turn used, and only the orchestrator change it", async () => {
     const run = await roles();
     for (const mode of ['write', 'read'] as const) {
       expect((await run(mode, 'SELECT job_id, agent_id, subscription_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, at FROM turn_tokens'))[0]!.rows).toEqual([]);
-      for (const statement of ['INSERT INTO turn_tokens (job_id) SELECT job_id FROM turn_tokens WHERE false', 'UPDATE turn_tokens SET total_tokens = 0 WHERE false', 'DELETE FROM turn_tokens WHERE false']) {
-        await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
-      }
+    }
+    for (const statement of ['INSERT INTO turn_tokens (job_id) SELECT job_id FROM turn_tokens WHERE false', 'UPDATE turn_tokens SET total_tokens = 0 WHERE false', 'DELETE FROM turn_tokens WHERE false']) {
+      await expect(run('read', statement), statement).rejects.toThrow(/permission denied|read-only/);
+      await expect(run('write', statement), statement).resolves.toBeDefined();
     }
   });
 });

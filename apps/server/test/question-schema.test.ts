@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
+import { readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { createTestDb, freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
@@ -33,11 +33,12 @@ const LEGACY = `
     ('00000000-0000-4000-8000-000000000012','${COMPANY}','00000000-0000-4000-8000-000000000003','Historical dismissed proposal','[]','dismissed',null,null);
 `;
 
+/* The orchestrator's SQL runs as Hornhoof itself, here PGlite's own user; Operations' under its role. */
 async function roles(client: PGlite) {
-  const names = [agentRole('postgres'), readerRole('postgres')];
-  await client.exec(`${grantsFor(names[0]!)};\n${readerGrantsFor(names[1]!)}`);
+  const names = ['orchestrator', readerRole('postgres')];
+  await client.exec(readerGrantsFor(names[1]!));
   return { names, run: (name: string, statement: string) => client.transaction(async tx => {
-    await tx.exec(`SET LOCAL ROLE "${name}"`);
+    if (name !== 'orchestrator') await tx.exec(`SET LOCAL ROLE "${name}"`);
     return tx.exec(statement);
   }) };
 }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { agentRole, HIDDEN, openAgentSql, readerRole, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
+import { HIDDEN, openAgentSql, readerRole, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
 import { privatePostgres, type PostgresFixture } from './helpers.js';
 
 const PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
@@ -7,7 +7,7 @@ const PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFEREN
 const gatewayTables = async (fixture: PostgresFixture): Promise<string[]> =>
   (await fixture.admin.query<{ tablename: string }>("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename ~ '^(outbound_|support_|model_check)' ORDER BY tablename")).rows.map(row => row.tablename);
 
-/* No right on the whole of a table: the orchestrator reads every column of it, one by one, and Operations none. */
+/* No right of Operations on a table or on any column of it. */
 async function nothingGranted(fixture: PostgresFixture, role: string, table: string, mode: SqlMode): Promise<void> {
   for (const privilege of PRIVILEGES) {
     const { rows } = await fixture.admin.query<{ has: boolean }>('SELECT has_table_privilege($1, $2, $3) AS has', [role, `public.${table}`, privilege]);
@@ -20,6 +20,7 @@ async function nothingGranted(fixture: PostgresFixture, role: string, table: str
     [role, `public.${table}`, table],
   );
   expect(columns.rows, `${role} reads ${table}`).toEqual([{ every: mode === 'write' }]);
+  /* Only Operations' role is checked here: the orchestrator runs as Hornhoof itself (Ivan's word of 17 November 2026). */
 }
 
 /* A write by the reader may be refused for its read-only transaction before its rights are looked at: both are refusals. */
@@ -44,7 +45,7 @@ async function settingsClosed(sql: AgentSql, mode: SqlMode): Promise<void> {
   }
 }
 
-it('gives the orchestrator a read of every column of the gateway and Operations none, and neither production SQL role a right on a whole table or a change, signed in as itself', { timeout: 180000 }, async () => {
+it("gives Operations' production SQL role no right on the gateway and no change, signed in as itself, and the orchestrator reads it as Hornhoof", { timeout: 180000 }, async () => {
   const fixture = await privatePostgres();
   const sql = await openAgentSql(fixture.url);
   expect(sql, 'Production openAgentSql must create both LOGIN pools').not.toBeNull();
@@ -53,14 +54,13 @@ it('gives the orchestrator a read of every column of the gateway and Operations 
   const tables = await gatewayTables(fixture);
   expect(tables.length).toBeGreaterThanOrEqual(23);
   const owners = await fixture.admin.query<{ tableowner: string }>('SELECT DISTINCT tableowner FROM pg_tables WHERE tablename = ANY($1)', [tables]);
-  for (const [mode, role] of [['write', agentRole(fixture.name)], ['read', readerRole(fixture.name)]] as const) {
-    expect(owners.rows.map(row => row.tableowner)).not.toContain(role);
-    for (const table of tables) {
-      await nothingGranted(fixture, role, table, mode);
-      await statementsRefused(sql, mode, table);
-    }
-    await settingsClosed(sql, mode);
+  const reader = readerRole(fixture.name);
+  expect(owners.rows.map(row => row.tableowner)).not.toContain(reader);
+  for (const table of tables) {
+    await nothingGranted(fixture, reader, table, 'read');
+    await statementsRefused(sql, 'read', table);
   }
+  await settingsClosed(sql, 'read');
   for (const name of ['outbound_accounts.config_enc', 'outbound_contacts.address_enc', 'outbound_message_revisions.sealed_enc', 'support_tickets.text_enc']) {
     const [table, column] = name.split('.') as [string, string];
     expect(await sql.run(`SELECT ${column} FROM ${table}`, 'write'), name).toEqual(noRowsChanged);
