@@ -26,7 +26,7 @@ import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
-import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
+import { acceptClaudeDialogs, agyTranscript, claudeToolsFile, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, writeClaudeTools, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
@@ -1098,6 +1098,7 @@ export class TerminalHost {
      after a turn called off as it started them, and the next turn opens soon after. */
   private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
     if (program.kind === 'claude') await acceptClaudeDialogs(home, input.workDir, this.fs);
+    if (program.kind === 'claude') await writeClaudeTools(input.workDir, urls.mcpUrl, this.fs);
     if (program.kind === 'kimi') await prepareKimi(home, input.workDir, urls.mcpUrl, this.fs);
     if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
     this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : this.toolsMs);
@@ -2931,6 +2932,7 @@ export class TerminalHost {
   /* Keeps the exact environment of the original launch while resuming its known session. */
   private async resumeSession(a: Agent, job: TermJob, spec: LaunchSpec, jobId: string): Promise<void> {
     const command = resumeCommand(job.program.kind, spec.command, a.sessionId!);
+    if (job.program.kind === 'claude') await writeClaudeTools(job.input.workDir, this.bridge.agent(job.key).mcpUrl, this.fs);
     a.started = deferred();
     a.instance = randomUUID();
     a.oldLogs = null;
@@ -3124,6 +3126,7 @@ export class TerminalHost {
     await this.opts.tmux.kill(a.name);
     if (await this.opts.tmux.has(a.name)) return busy('its session is still there');
     this.operator?.exited(a.key, { code: null, signal: null });
+    await this.forgetTools(a);
     if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
@@ -3140,11 +3143,17 @@ export class TerminalHost {
     await this.opts.tmux.stop(a.name);
     if (await this.opts.tmux.alive(a.name)) return busy('its program still runs');
     this.operator?.exited(a.key, { code: null, signal: null });
+    await this.forgetTools(a);
     if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programAsleep(a);
     Object.assign(a, { hash: null, instance: null, launch: null, fresh: false, started: null });
     return RETIRED;
+  }
+
+  /* The file of its tools' address goes with the program that read it; the next start writes it again. */
+  private async forgetTools(a: Agent): Promise<void> {
+    if (a.program?.kind === 'claude' && a.workDir) await this.fs.remove(claudeToolsFile(a.workDir)).catch(() => {});
   }
 
   /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
