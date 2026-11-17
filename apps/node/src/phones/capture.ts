@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { SaxesParser } from 'saxes';
-import type { PhoneCapture, PhoneElement } from '@hornhoof/protocol';
+import { PHONE_FRAME_MAX, type PhoneCapture, type PhoneElement } from '@hornhoof/protocol';
 export type { PhoneCapture, PhoneElement } from '@hornhoof/protocol';
 
 const SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
@@ -42,10 +42,11 @@ export function parsePhoneTree(raw: string): PhoneElement[] {
   return elements;
 }
 
-/* The screen as the phone shows it, as a person holding it would see it. A screen with no readable tree still shows. */
+/* The screen as the phone shows it, as a person holding it would see it. A screen with no readable tree still shows, and
+   one whose picture is too large to send, as a photo on the home screen, still gives its elements. */
 export function phoneCapture(xml: string, png: Buffer): PhoneCapture {
   let elements: PhoneElement[] = [];
   try { elements = parsePhoneTree(xml); } catch { /* No tree, the picture alone. */ }
-  const picture = png.length >= 24 && png.subarray(0, 8).equals(SIGNATURE) && png.toString('ascii', 12, 16) === 'IHDR';
+  const picture = png.length >= 24 && Math.ceil(png.length / 3) * 4 <= PHONE_FRAME_MAX && png.subarray(0, 8).equals(SIGNATURE) && png.toString('ascii', 12, 16) === 'IHDR';
   return picture ? { png: png.toString('base64'), width: png.readUInt32BE(16), height: png.readUInt32BE(20), elements } : { png: null, width: 0, height: 0, elements };
 }
