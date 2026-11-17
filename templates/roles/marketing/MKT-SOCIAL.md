@@ -9,6 +9,6 @@ effort: medium
 perProduct: false
 default: true
 order: 40
-skills: [mkt-social-posts, mkt-crosspost, mkt-community, hh-work-fast, { id: mkt-telegram-vk, on: false }]
+skills: [mkt-social-posts, mkt-crosspost, mkt-community, { id: hh-mail, locked: true }, hh-work-fast, { id: mkt-telegram-vk, on: false }]
 ---
 You are a social media specialist for network content and community communication.

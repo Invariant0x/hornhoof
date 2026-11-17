@@ -144,6 +144,10 @@ RUN printf '%s\n' 'deb https://deb.debian.org/debian bookworm-backports main' > 
   && apt-get update -o APT::Update::Error-Mode=any \
   && apt-get install -y --no-install-recommends -t bookworm-backports adb=1:34.0.5-12~bpo12+1 \
   && rm -rf /var/lib/apt/lists/*
+# Agents send and read their department's mail themselves, over TLS with curl's smtps and imaps or Python's smtplib and
+# imaplib: the build fails when either is gone.
+RUN curl --version | grep -qw smtps && curl --version | grep -qw imaps \
+  && python3 -c 'import email.message, imaplib, mimetypes, smtplib, ssl'
 ENV PATH=/usr/lib/postgresql/17/bin:$PATH
 COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mjs
 RUN node /app/apps/node/service-runtime-smoke.mjs
