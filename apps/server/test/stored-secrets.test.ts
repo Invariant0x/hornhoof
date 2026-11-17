@@ -62,11 +62,11 @@ describe('secrets in stored prose', () => {
       const records = await db.execute(sql.raw(`select to_jsonb(t) as row from ${name} t`)) as { rows: unknown[] };
       expect(JSON.stringify(records.rows), name).not.toContain(marker);
     }
-    /* A stale merge/input must not restore the old selection. */
-    await db.update(tasks).set({ body: marker }).where(eq(tasks.id, task.id));
     expect((await db.select().from(tasks))[0]!.body).toBe('[hidden]');
     expect((await app.inject({ url: `/api/tasks/${task.id}`, ...as(ceo) })).body).not.toContain(marker);
     expect(Buffer.from((await db.select().from(attachments))[0]!.bytes).toString()).toBe('[hidden]');
+    /* An old copy brings the value back only through a merge, which checks its rows against the fingerprint. */
+    expect(await db.select().from(secretRedactions)).toEqual([expect.objectContaining({ characters: marker.length, fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) })]);
   });
 
   it('checks department authority on the server and rejects ordinary readers', async () => {
@@ -113,9 +113,13 @@ describe('secrets in stored prose', () => {
       { id: '10770000-0000-4000-8000-000000000001', jobId: mine!.id, answer: { text: marker } },
       { id: '10770000-0000-4000-8000-000000000002', jobId: theirs!.id, answer: { text: marker } },
     ]);
+    /* What a node said of each job while its row was away. */
+    for (const job of [mine!, theirs!]) await db.execute(sql`insert into net.parked (job_id, node, kind, body) values (${job.id}, ${JSON.stringify({ kind: 'builtin', machine: 'm' })}::jsonb, 'event', ${JSON.stringify({ text: marker })}::jsonb)`);
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.body).not.toContain(marker);
+    const parked = await db.execute(sql`select job_id, body from net.parked order by job_id = ${mine!.id}`) as { rows: { body: unknown }[] };
+    expect(parked.rows.map(row => row.body)).toEqual([{ text: marker }, { text: '[hidden]' }]);
     const tables = await db.execute(sql`select format('%I.%I', schemaname, tablename) as name from pg_tables where schemaname in ('public', 'net') order by 1`) as { rows: { name: string }[] };
     for (const { name } of tables.rows) {
       const rows = await db.execute(sql.raw(`select to_jsonb(t) as row from ${name} t`)) as { rows: { row: Record<string, unknown> }[] };

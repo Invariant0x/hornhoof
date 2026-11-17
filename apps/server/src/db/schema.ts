@@ -1192,6 +1192,8 @@ export const secretRedactions = pgTable('secret_redactions', {
   companyId: companyId(),
   fingerprint: text('fingerprint').notNull(),
   characters: integer('characters').notNull(),
+  /* The rolling hash of the value's code points that finds a window worth a full hash, so an old copy is checked in one pass. */
+  windowHash: integer('window_hash').notNull(),
   personId: uuid('person_id').notNull().references(() => people.id),
   createdAt: createdAt(),
 }, t => [
