@@ -19,6 +19,21 @@ type SkinErrorWords = Record<SkinErrorCode | 'read_failed', (key: string, value:
 /* English is the source. Every other language has to match this shape. */
 
 export const en = {
+  phones: {
+    heading: 'Company phones', intro: 'Let your company assistants work on your Android phone, one at a time. Stop puts it back in your hands.',
+    add: 'Add phone', find: 'Find phone', cancel: 'Cancel', name: 'Phone name', computer: 'Computer', chooseComputer: 'Choose a computer', address: 'Phone address',
+    networkHint: 'Keep the phone and computer on the same network. Copy the address from Wireless debugging. For a first connection, also enter the address and code from Pair using pairing code.',
+    pairingAddress: 'Pairing address, if needed', pairingCode: 'Pairing code, if needed', pairingHint: 'This code is used once and is not saved.',
+    nameProblem: 'Give the phone a name.', computerProblem: 'Choose an online computer.', addressProblem: 'Enter the address and port shown on the phone.', codeProblem: 'Enter the six digits and the pairing address shown on the phone.',
+    loading: 'Loading phones…', working: 'Connecting…', saving: 'Adding phone…', retry: 'Try again', empty: 'No phones yet.', emptyHint: 'Add a phone from a computer connected to your company.', noComputers: 'Connect a computer to the company first.', noDevices: 'No approved phone was found. Unlock the phone, check the connection and approve this computer, then try again.',
+    device: (model: string | null, serial: string) => `${model ?? 'Android'} (${serial})`, owner: (name: string) => `Owner: ${name}`, waiting: (n: number) => `Waiting: ${n}`,
+    devices: { device: 'Ready', unauthorized: 'Approve on the phone', offline: 'Not connected', unverified: 'Could not verify this phone' },
+    states: { available: 'Available to assistants', busy: 'An assistant is using it', owner: 'In your hands', offline: 'Computer is offline' },
+    control: 'Screen and control', watch: 'Watch screen', hide: 'Hide screen', stop: 'Stop', resume: 'Lend to assistants', stopping: 'Stop requested. Waiting for the computer to confirm.',
+    live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', noPicture: 'This screen could not be read.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
+    recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
+    recordingStates: { queued: 'Waiting', starting: 'Starting', active: 'Recording', revoking: 'Stopping', ended: 'Finished', cancelled: 'Cancelled' },
+  },
   routes: {
     unavailable: 'Not found or no access',
     accessDenied: 'Insufficient permissions',
@@ -993,12 +1008,11 @@ export const en = {
     browserFailed: 'Browser failed',
     browserFailedNote: (reason: string) => `The browser for checks did not start (${reason}). Run the install command on this machine again without --join, or check the node logs.`,
     /* A machine that waits for its work to end before an update restarts it. */
-    drainMark: { waiting: 'Waiting to update', postponed: 'Update postponed', restarting: 'Updating' },
-    drainWaiting: (turns: number, parts: number, until: string) => {
+    drainMark: { waiting: 'Waiting to update', restarting: 'Updating' },
+    drainWaiting: (turns: number, parts: number, since: string) => {
       const left = [turns > 0 || parts === 0 ? `${turns} ${plural('en', turns, { one: 'turn', other: 'turns' })}` : '', parts > 0 ? `${parts} ${plural('en', parts, { one: 'run part', other: 'run parts' })}` : ''].filter(Boolean).join(' and ');
-      return `Waiting for agents to finish before the update: ${left} left, until ${until}`;
+      return `Waiting since ${since} for agents to finish before the update: ${left} left. It takes no new work until then`;
     },
-    drainPostponed: (at: string) => `The update is postponed: agents did not finish in time. Next try at ${at}`,
     drainRestarting: 'Updating now: the machine restarts and takes work again by itself',
   },
   briefing: {
@@ -2079,6 +2093,12 @@ export const en = {
     nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
   errors: {
+    phone_invalid: 'Check the phone name, computer and address.',
+    phone_unknown: 'This phone or recording is not available.',
+    phone_not_allowed: 'You do not have access to this phone or recording.',
+    phone_unavailable: 'The phone does not answer. Check its connection and the approval on its screen.',
+    phone_busy: 'This phone is already registered and busy. End its session before changing its connection.',
+    phone_session_gone: 'This phone session has ended or the owner took the phone back.',
     maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',
     read_only: 'Hornhoof only reads on this machine now, so nothing was changed.',
     not_confirmed: 'Hornhoof could not confirm this change. It may be saved; look before you try again.',

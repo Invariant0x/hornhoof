@@ -18,8 +18,7 @@ type Asked = { kind: 'answer'; answer: z.infer<typeof Answer> } | { kind: 'too_o
 function saying(drain: MachineDrain): string {
   if (drain.state === 'restarting') return '';
   const work = `${drain.turnsLeft} ${drain.turnsLeft === 1 ? 'turn' : 'turns'} and ${drain.partsLeft} test ${drain.partsLeft === 1 ? 'part' : 'parts'}`;
-  if (drain.state === 'waiting') return `Waiting for ${work} on this node to end, until ${drain.until}.`;
-  return `The wait ran out with ${work} still running. Nothing was stopped, Operations was told, and it tries again at ${drain.retryAt}.`;
+  return `Waiting for ${work} on this node to end, since ${drain.since}. It takes no new work meanwhile.`;
 }
 
 function sayOnce(io: Io, line: string, said: string): string {
