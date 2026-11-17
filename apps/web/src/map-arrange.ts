@@ -56,7 +56,6 @@ export function chipsTop(n: number, h = DEPT_H): number {
   return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2), h)[0] ?? -CORNER) - h / 2 - GAP - CHIP_H;
 }
 export const busY = (n: number, h = DEPT_H) => chipsTop(n, h) + CHIP_H + 14;
-export const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
 export const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
 
 /* A block of the map, as a person's arrangement names it. */
