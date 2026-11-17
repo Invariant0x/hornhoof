@@ -171,7 +171,8 @@ bound to the current app; restore those rows through the existing `appFixture`
 mechanism. Cache the busy company's serializable task map by that same mechanism.
 Rebind `work` and `get` to each fresh app. The row cache stores no app, connection or function; each case keeps its own app,
 guarded database handle and mutable descriptors, and it changes no production handler, access
-assertion, actor combination or timeout. Shared `helpers-db.ts` stays unchanged.
+assertion, actor combination or timeout. This first fixture version left shared
+`helpers-db.ts` unchanged.
 
 Verification required by the head: each of agent-view-table and route-access
 alone three consecutive times, with a shuffled table run proving case isolation;
@@ -186,3 +187,34 @@ shuffled table runs on `78eb832fa28d65b96589723039fd94b13eb5eebe` all passed
 58 of 58 at seeds 1196, 1197 and 1198, with start load 1m 11.91, 10.29 and 13.05.
 Their runner durations were 50.41, 25.27 and 74.14 seconds. The test inventory and
 all assertion bodies are byte-for-byte unchanged from the first checked code.
+
+## Cold database preparation
+
+On the merged `153730a14d4ea4413ee60f01c25bc10a5efd54a7` at start load 1m
+37.41, the shuffled table passed 57 of 58. The first busy-company case timed out
+at 30.018 seconds: 17.768 seconds were database/application setup, with the
+remaining 12.250 seconds including first fixture construction and requests.
+The completed row cache removes repeated work, but that first case still paid
+for both the immutable database description and the busy dataset.
+
+Prepare the immutable catalog fingerprint, planner baseline, foreign-key map and
+binary seed description alongside the migrated dump in global setup. A worker
+validates the description's version and dump hash before opening a database and
+uses that exact description for its copy. The original catalog SQL, row reset,
+planner reset, schema-change check, per-test closed handle and failure cleanup
+are retained. The new description is generated per run, not accepted as an
+unversioned persistent cache. No test or hook timeout changes.
+
+The existing global-setup boundary tests first failed because only the dump path
+was provided, without its description. They now execute three green cases:
+validated template, standalone fallback, and publishing neither path after a
+description failure. Three pure codec checks preserve binary seed bytes and
+large sequence values, and reject a foreign dump or unsupported version. The
+42 existing shared-database cases remain unchanged and green, including their
+two intentional expected-failure cases. They still detect lost rights, changed
+schema/statistics, stale rows and late writes. An omitted import during the
+extraction was caught by these checks and fixed before the candidate was sent.
+
+Because this change touches shared `helpers-db.ts`, the final checks also include
+task-files, program-operator-attachments and request-media by name, as required by
+the expanded brief. The full release suite remains with the release owner.
