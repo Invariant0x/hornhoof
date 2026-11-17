@@ -10,6 +10,8 @@ import { lastSeqOf } from './events.js';
 import { tellOwner } from './replies.js';
 import { callSkill, hasSkills } from './skills.js';
 import { registerVaultTools } from '../vault/tools.js';
+import { guardTools } from '../tools/calls.js';
+import { turnProtection } from '../tools/privacy.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, Words, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -110,6 +112,7 @@ export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: 
   let actor: Promise<Person> | undefined;
   const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
+  guardTools(server, ctx, job, null, await turnProtection(ctx, job.id));
   registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
   /* The company's vault, as for every agent of the company: the assistant's own agent, in this turn. */
   registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });

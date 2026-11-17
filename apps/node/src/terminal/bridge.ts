@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import { isSensitiveTool } from '@hornhoof/protocol';
 import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
@@ -72,7 +73,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown) => void } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -238,6 +239,8 @@ export class Bridge {
       return this.refused(req, res, 403, 'owner check failed');
     }
     const body = await reading;
+    const sensitive = kind === 'mcp' ? sensitiveCall(body) : null;
+    if (sensitive) this.options.sensitive?.(key, sensitive.name, sensitive.input);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
@@ -260,6 +263,10 @@ export class Bridge {
       if (v) out[h] = v;
     }
     const answer = Buffer.from(await up.arrayBuffer());
+    if (sensitive) {
+      try { this.options.sensitive?.(key, sensitive.name, sensitive.input, JSON.parse(answer.toString('utf8'))); }
+      catch { /* The original response still belongs to the caller, never to telemetry. */ }
+    }
     res.writeHead(up.status, out);
     res.end(answer);
     if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
@@ -381,6 +388,14 @@ export class Bridge {
     if (!this.listedSince(key, asked)) this.listedAt.set(key, asked);
     for (const heard of [...(this.listing.get(key) ?? [])]) heard(asked);
   }
+}
+
+function sensitiveCall(body: Buffer): { name: string; input: unknown } | null {
+  try {
+    const call = JSON.parse(body.toString('utf8')) as { method?: string; params?: { name?: string; arguments?: unknown } };
+    const name = call.params?.name;
+    return call.method === 'tools/call' && typeof name === 'string' && isSensitiveTool(name) ? { name, input: call.params?.arguments } : null;
+  } catch { return null; }
 }
 
 function reply(res: ServerResponse, status: number, body: string): void {

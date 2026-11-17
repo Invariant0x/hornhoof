@@ -3,13 +3,15 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { privateTurn } from '../tools/privacy.js';
+import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { countOnly, idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { appendEvent } from '../events/store.js';
+import { appendEvent, sensitiveTurn } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
@@ -381,12 +383,16 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.post('/api/attachments', { bodyLimit: FILE_BYTES }, async (req, reply) => {
       const job = await attachmentJobOf(ctx, req);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const values = privateTurn(db, job.id)?.values;
+      if (!values && await sensitiveTurn(db, job.id, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
+      const text = bytes.toString('utf8');
+      if (values && values.text(text) !== text) throw new ApiError(400, 'validation', 'This file contains a vault secret and was not saved. Remove the secret before attaching it.', 'attachment_invalid');
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
       checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
-      const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
+      const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, values?.text(raw ?? '') || raw);
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, bytes.length);

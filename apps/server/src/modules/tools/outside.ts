@@ -11,6 +11,7 @@ import { holdsMachine } from '../network/follow.js';
 import { jobsOf } from '../nodes/messages.js';
 import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { attachmentToken } from '../tasks/attachment-token.js';
+import { forgetPrivateTurn } from './privacy.js';
 export { notStep } from './steps.js';
 
 /* An agent's program talks to its tools whenever it likes: as it starts and connects, and when it goes on with work no turn
@@ -111,6 +112,7 @@ async function inStep(app: FastifyInstance, ctx: Ctx, node: NodeIdentity, call: 
     return { status: res.statusCode, body: res.body };
   } finally {
     await ctx.db.update(jobs).set({ status: 'done', result: '', finishedAt: new Date() }).where(and(eq(jobs.id, step.id), eq(jobs.status, 'running')));
+    forgetPrivateTurn(ctx.db, step.id);
   }
 }
 

@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@hornhoof/protocol';
+import { privateToolEvent, type AgentEvent } from '@hornhoof/protocol';
 import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
@@ -7,6 +7,7 @@ import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db
 import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
+import { privateTurn } from '../tools/privacy.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
@@ -64,11 +65,26 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
     if (!job?.agentId) return null;
+    const state = privateTurn(ctx.db, jobId);
+    event = privateToolEvent(event, await sensitiveTurn(tx, jobId), !state?.sensitive);
+    if (state) event = state.values.hide(event);
     const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideCodes(event), personId: null }).returning({ id: agentEvents.id });
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
   return stored !== null;
+}
+
+/* A durable marker contains no value. MCP writes it before releasing a sensitive answer, so a missing or old node
+   event cannot make the server keep that answer in the turn's raw output. */
+export async function sensitiveTurn(db: Db, jobId: string, issued = false): Promise<boolean> {
+  const [row] = await db.select({ id: agentEvents.id }).from(agentEvents)
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'tool'), sql`${agentEvents.data}->>'sensitive' = 'true'`, issued ? sql`${agentEvents.data}->>'issued' = 'true'` : undefined)).limit(1);
+  return row !== undefined;
+}
+
+export async function markSensitiveTool(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, name: string): Promise<void> {
+  await appendTurnEvent(ctx, jobId, { kind: 'tool', name, input: '', sensitive: true, issued: true }, eq(jobs.id, jobId));
 }
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */

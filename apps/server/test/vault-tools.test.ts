@@ -1,7 +1,13 @@
-import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { vaultEntries, vaultLog } from '../src/db/schema.js';
+import { agentEvents, attachments, computerRuns, jobs, tasks, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { INVOCATION } from '../src/modules/tools/calls.js';
+import { appendTurnEvent } from '../src/modules/events/store.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { ownMachine } from '../src/modules/nodes/hub.js';
+import { forgetPrivateTurn } from '../src/modules/tools/privacy.js';
 import { as, mcp } from './helpers.js';
 import { vaultCompany } from './vault-fixture.js';
 
@@ -24,7 +30,127 @@ async function setUp() {
 const call = async (c: Awaited<ReturnType<typeof setUp>>, token: string, name: string, args: Record<string, unknown> = {}) =>
   (await (await mcp(c.app, token)).callTool({ name, arguments: args })) as ToolReply;
 
+/* The keeper's retry id is trusted here, as in tool-calls.test.ts. */
+async function replay(c: Awaited<ReturnType<typeof setUp>>, token: string, name: string, args: Record<string, unknown>, id: string) {
+  c.config.tunnelHost = 'localhost';
+  const res = await c.app.inject({ method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${token}`, [INVOCATION]: id, accept: 'application/json, text/event-stream' }, payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } });
+  expect(res.statusCode).toBe(200);
+  return res.json().result as ToolReply;
+}
+
 describe('the vault for agents', () => {
+  it('keeps no secret answer in replay storage or the journal', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.nora.id);
+    expect(answer(await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID()))).toMatchObject({ password: PASSWORD, code: '081804' });
+    expect(await c.db.select().from(toolCalls)).toEqual([]);
+    const journal = await c.db.execute(sql`select * from net.journal`);
+    for (const secret of [PASSWORD, CODE, '081804']) expect(JSON.stringify(journal)).not.toContain(secret);
+  });
+
+  it('checks the entry again when the same invocation is repeated after deletion', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.nora.id);
+    const id = randomUUID();
+    expect(answer(await replay(c, token, 'vault_entry', { entry: 'Partner site' }, id))).toMatchObject({ password: PASSWORD });
+    const [entry] = await c.db.select().from(vaultEntries).where(eq(vaultEntries.name, 'Partner site'));
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/vault/${entry!.id}`, ...as(c.ceoSession) })).statusCode).toBe(204);
+    const again = await replay(c, token, 'vault_entry', { entry: 'Partner site' }, id);
+    expect(again.isError).toBe(true);
+    expect(answer(again)).toMatchObject({ error: { reason: 'vault_unknown' } });
+    expect(JSON.stringify(again)).not.toContain(PASSWORD);
+  });
+
+  it('does not retain a secret tool input or result reported by a node', async () => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.nora.id);
+    await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool', name: 'hornhoof.vault_save', input: JSON.stringify({ password: PASSWORD, code: CODE }) }, eq(jobs.id, job.id));
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool_result', ok: true, summary: JSON.stringify({ password: PASSWORD, code: '081804' }) }, eq(jobs.id, job.id));
+    const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id));
+    for (const secret of [PASSWORD, CODE, '081804']) expect(JSON.stringify(events)).not.toContain(secret);
+  });
+
+  it('hides raw completion output even when the node never reported the sensitive call', async () => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.nora.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    await handleNodeMessage(c.app.ctx, { kind: 'builtin', machine: ownMachine(c.config) }, { type: 'job.done', jobId: job.id, ok: false, sessionId: null, result: PASSWORD, tail: PASSWORD, error: 'agent_failed', failure: { kind: 'unknown', text: PASSWORD, retryable: false } });
+    const [done] = await c.db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(done).toMatchObject({ status: 'failed', tail: expect.stringMatching(/hidden/i) });
+    expect(JSON.stringify(done)).not.toContain(PASSWORD);
+  });
+
+  it('keeps vault_save arguments out of replay storage and error responses', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.nora.id);
+    const saved = await replay(c, token, 'vault_save', { name: 'Private save', site: 'https://example.com', login: 'team', password: PASSWORD, code: CODE }, randomUUID());
+    expect(saved.isError).toBeUndefined();
+    expect(await c.db.select().from(toolCalls)).toEqual([]);
+    expect(JSON.stringify(saved)).not.toContain(PASSWORD);
+    const invalid = await replay(c, token, 'vault_save', { name: 'Invalid', site: 'https://example.com', login: 'team', password: PASSWORD, code: PASSWORD }, randomUUID());
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid)).not.toContain(PASSWORD);
+  });
+
+  it('delivers reports with exact secrets hidden while keeping ordinary words and safe reports', async () => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.nora.id, c.task.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    for (const text of [`Signed in with ${PASSWORD}; code 081804.`, 'The site is ready.']) {
+      const comment = await replay(c, token, 'comment', { task: c.task.number, text }, randomUUID());
+      expect(comment.isError).toBeUndefined();
+      await appendTurnEvent(c.app.ctx, job.id, { kind: 'text', text }, eq(jobs.id, job.id));
+    }
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+    const log = JSON.stringify(task!.log);
+    expect(log).toContain('Signed in with [hidden]; code [hidden].');
+    expect(log).toContain('The site is ready.');
+    expect(log).not.toContain(PASSWORD);
+    const events = JSON.stringify(await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id)));
+    expect(events).toContain('Signed in with [hidden]; code [hidden].');
+    expect(events).toContain('The site is ready.');
+    expect(events).not.toContain(PASSWORD);
+  });
+
+  it('rejects a computer command containing a secret before recording or sending it', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.orchestrator.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    const reply = await replay(c, token, 'computer', { command: `echo ${PASSWORD}` }, randomUUID());
+    expect(reply.isError).toBe(true);
+    expect(reply.content[0]!.text).toContain('your own program');
+    expect(await c.db.select().from(computerRuns)).toEqual([]);
+    expect(JSON.stringify(await c.db.select().from(agentEvents))).not.toContain(PASSWORD);
+    expect(JSON.stringify(await c.db.select().from(toolCalls))).not.toContain(PASSWORD);
+  });
+
+  it('refuses a transcript attachment containing a value issued in this turn', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.nora.id, c.task.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    const uploaded = await c.app.inject({ method: 'POST', url: `/api/attachments?task=${c.task.number}&name=transcript.txt`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, payload: Buffer.from(`Signed in with ${PASSWORD}`) });
+    expect(uploaded.statusCode).toBe(400);
+    expect(uploaded.json().error.reason).toBe('attachment_invalid');
+    expect(await c.db.select().from(attachments)).toEqual([]);
+    expect(uploaded.body).not.toContain(PASSWORD);
+  });
+
+  it('fails closed after a restart loses the temporary masks of an issued secret', async () => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.nora.id, c.task.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    forgetPrivateTurn(c.db, job.id);
+    await appendTurnEvent(c.app.ctx, job.id, { kind: 'text', text: `Report with ${PASSWORD}` }, eq(jobs.id, job.id));
+    const refused = await replay(c, token, 'comment', { task: c.task.number, text: `Report with ${PASSWORD}` }, randomUUID());
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('End this turn and start a new one');
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+    expect(JSON.stringify(task!.log)).not.toContain('Report with');
+    expect(JSON.stringify(await c.db.select().from(agentEvents))).not.toContain(PASSWORD);
+    expect(JSON.stringify(await c.db.select().from(toolCalls))).not.toContain(PASSWORD);
+  });
+
   it('lists every entry of the company to each of its agents, with no password', async () => {
     const c = await setUp();
     for (const agent of [c.nora, c.aide, c.orchestrator]) {

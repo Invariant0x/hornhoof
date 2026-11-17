@@ -14,10 +14,7 @@ import { agents, companies, jobs, notebookNotes, people, subscriptions, toolCall
 import { listed, outsideSources } from '../src/db/sources.js';
 import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
 import { ALREADY_RAN, ANSWER_MAX, currentInvocation, guardTools, ID_TAKEN, INVOCATION, MAY_HAVE_RUN, PENDING, STARTS_FIRST, TOO_LARGE } from '../src/modules/tools/calls.js';
-import { listen, ownDatabases, setLease, setUpCompany, testApp } from './helpers.js';
-
-/* One test ends the lease, which emptying the tables does not undo. */
-ownDatabases();
+import { listen, setLease, setUpCompany, testApp } from './helpers.js';
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
 
@@ -58,13 +55,13 @@ async function mcp(app: FastifyInstance, token: string, invocation?: string): Pr
 }
 
 /* A server of the test's own with one guarded tool, called as the SDK calls a tool without arguments. */
-function guarded(ctx: Pick<Ctx, 'db'>, jobId: string, name: string, handler: () => Promise<Answer>) {
+function guarded(ctx: Pick<Ctx, 'db'>, jobId: string, name: string, handler: () => Promise<Answer>, config: object = {}) {
   return (invocation: string | null): Promise<Answer> => {
     const server = new McpServer({ name: 'test', version: '0.0.0' });
     let registered!: (extra: unknown) => Promise<Answer>;
     server.registerTool = ((_name: string, _config: unknown, cb: (extra: unknown) => Promise<Answer>) => void (registered = cb)) as never;
     guardTools(server, ctx as Ctx, { id: jobId }, invocation);
-    (server.registerTool as unknown as (name: string, config: object, cb: () => Promise<Answer>) => void)(name, {}, handler);
+    (server.registerTool as unknown as (name: string, config: object, cb: () => Promise<Answer>) => void)(name, config, handler);
     return registered({});
   };
 }
@@ -150,6 +147,17 @@ describe('a tool call with an invocation id', () => {
 });
 
 describe('a guarded tool', () => {
+  it('never replays or records any tool explicitly marked sensitive', async () => {
+    const c = await company();
+    let allowed = true;
+    const run = guarded({ db: c.db }, c.job.id, 'another_secret_tool', async () => allowed ? say('synthetic-private-marker') : say('Access removed.', true), { _meta: { sensitive: true } });
+    const id = randomUUID();
+    expect(await run(id)).toEqual(say('synthetic-private-marker'));
+    expect(await c.calls()).toEqual([]);
+    allowed = false;
+    expect(await run(id)).toEqual(say('Access removed.', true));
+  });
+
   async function standing() {
     const c = await company();
     return { ...c, ctx: { db: c.db } };
@@ -213,6 +221,9 @@ describe('a guarded tool', () => {
   /* The tool did its work. Telling the agent it failed would make the agent do it again, under a new id. */
   it('gives the agent the answer of a call that ran, even when the answer could not be kept', async () => {
     const c = await standing();
+    /* The lease is outside the emptied application rows. Restore it before the shared app/database closes, even if an
+       assertion fails, so this one fence check does not require a fresh database for every test in the file. */
+    onTestFinished(() => setLease(c.db, { until: 'infinity' }));
     const run = guarded(c.ctx, c.job.id, 'run_tests', async () => {
       await outsideSources(() => setLease(c.db, { until: '-infinity' }));
       return say('The run is r1.');

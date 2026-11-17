@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { PRIVATE_TOOLS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -35,8 +36,9 @@ export function registerVaultTools(server: McpServer, ctx: Ctx, agent: VaultAgen
       })),
   );
   server.registerTool(
-    'vault_entry',
+    PRIVATE_TOOLS.entry.name,
     {
+      _meta: PRIVATE_TOOLS.entry._meta,
       description:
         "One saved sign-in by its name: the site, the login, the password and, when the site asks for one, the current one-time code with the seconds it is still good for. " +
         'Type them into the sign-in form yourself. Never write them into a task, comment, chat, file, commit or report.',
@@ -54,8 +56,9 @@ export function registerVaultTools(server: McpServer, ctx: Ctx, agent: VaultAgen
       }),
   );
   server.registerTool(
-    'vault_save',
+    PRIVATE_TOOLS.save.name,
     {
+      _meta: PRIVATE_TOOLS.save._meta,
       description:
         'Saves a site sign-in a person gave you, so that every employee and assistant of the company can take it with vault_entry: ' +
         'adds the entry, or replaces the site, login and password of the entry of this name. Never repeat the password anywhere else.',

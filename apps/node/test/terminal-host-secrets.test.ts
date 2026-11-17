@@ -74,6 +74,21 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it('hides a sensitive tool transcript and its raw terminal completion', async () => {
+    const marker = 'private-terminal-marker-1178';
+    const t = await liveTerminal('claude', 'queued');
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'vault-call', name: 'mcp__hornhoof__vault_save', input: { password: marker } }] } });
+    t.record({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'vault-call', content: marker }] } });
+    await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
+    t.ends(`raw transcript ${marker}`, 3);
+    const result = await t.on(t.running);
+    expect(result.sensitive).toBe(true);
+    const done = jobDone('job-receipt', result, []);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+    expect(JSON.stringify(done)).not.toContain(marker);
+    expect(done.tail).toMatch(/hidden/i);
+  });
+
   it('hides a multiline secret before clipping a typed turn that ended before its acknowledgement', async () => {
     const secret = 'multiline-private-token\nprivate-suffix-0123456789';
     const t = await liveTerminal('claude', 'queued', { prompt: '', openMs: 15_000, secrets: [secret] });
