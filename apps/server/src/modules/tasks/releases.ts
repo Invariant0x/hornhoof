@@ -35,7 +35,7 @@ function versionOf(name: string): [number, number, number] | null {
   const found = VERSION.exec(name);
   return found ? [Number(found[1]), Number(found[2]), Number(found[3])] : null;
 }
-export function newerVersion(a: string, b: string): boolean {
+function newerVersion(a: string, b: string): boolean {
   const x = versionOf(a), y = versionOf(b);
   if (!x || !y) return false;
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;

@@ -1,7 +1,7 @@
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 
 /* The most a failure collector reads of what a holder said comes next. */
-export const NEXT_MAX = 500;
+const NEXT_MAX = 500;
 
 /* Where a report says what comes next: a heading named Next, or Next (steps) before a colon, bold or not. */
 const NEXT = /^[ \t]*#{1,6}[ \t]*Next(?: steps?)?[ \t]*:?[ \t]*$|(?:\*\*|__)?\bNext(?: steps?)?\b(?:\*\*|__)?[ \t]*:(?:\*\*|__)?/gm;

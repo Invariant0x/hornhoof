@@ -14,7 +14,7 @@ export type PhoneAgent = { id: string; companyId: string; jobId: string | null }
 
 const holding = ['starting', 'active', 'revoking'] as const;
 const unfinished = ['queued', ...holding] as const;
-export const phoneBinding = (p: CompanyPhone): PhoneBinding => ({ phoneId: p.id, serial: p.serial, hardwareKey: p.hardwareKey });
+const phoneBinding = (p: CompanyPhone): PhoneBinding => ({ phoneId: p.id, serial: p.serial, hardwareKey: p.hardwareKey });
 
 async function liveJob(ctx: Ctx, me: PhoneAgent) {
   if (!me.jobId) throw phoneGone();
@@ -33,7 +33,7 @@ export async function sessionFor(ctx: Ctx, me: PhoneAgent, id: string): Promise<
   return session;
 }
 
-export async function activeSession(ctx: Ctx, me: PhoneAgent, id: string): Promise<{ phone: CompanyPhone; session: PhoneSession }> {
+async function activeSession(ctx: Ctx, me: PhoneAgent, id: string): Promise<{ phone: CompanyPhone; session: PhoneSession }> {
   const session = await sessionFor(ctx, me, id);
   await liveJob(ctx, me);
   const phone = await phoneById(ctx, me.companyId, session.phoneId);
@@ -70,7 +70,7 @@ export async function acquirePhone(ctx: Ctx, me: PhoneAgent, phoneId: string, ta
   return sessionView(ctx, await sessionFor(ctx, me, session.id));
 }
 
-export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
+async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
   const next = await ctx.db.transaction(async tx => {
     const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, phoneId)).for('update');
     if (!phone?.lending || phone.removedAt || !phoneCapable(ctx, nodeIdentity(phone.nodeId))) return null;

@@ -44,7 +44,7 @@ export function markTelegramFileSent(jobId: string, chatId: number, attachmentId
   sentTelegramFiles.add(sentKey(jobId, chatId, attachmentId));
 }
 
-export const wasTelegramFileSent = (jobId: string, chatId: number, attachmentId: string): boolean =>
+const wasTelegramFileSent = (jobId: string, chatId: number, attachmentId: string): boolean =>
   sentTelegramFiles.has(sentKey(jobId, chatId, attachmentId));
 
 async function authorizedRecipient(db: Ctx['db'], bot: BotRow, chatId: number): Promise<Person | null> {

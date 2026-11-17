@@ -11,7 +11,7 @@ const PROBE_BYTES = 4096;
 const FEWEST_SAMPLES = 10;
 
 /* memory and cores: what the keeper's container sees, which on a Mac is what Docker's VM was given. */
-export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number };
+type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number };
 
 /* The rank in whole numbers first, so no error of floating point moves it. With fewer than a hundred samples the
    ninety-ninth of a hundred would be the slowest one of all, and one slow write while a machine is still being set up

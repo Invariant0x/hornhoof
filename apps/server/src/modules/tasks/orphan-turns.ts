@@ -17,10 +17,10 @@ import { afterJob } from './wake.js';
 type Job = typeof jobs.$inferSelect;
 
 /* A turn is asked about once it has run this long: by then its node has it, as the turn went out or its words were typed. */
-export const ASK_AFTER_MS = 2 * 60_000;
+const ASK_AFTER_MS = 2 * 60_000;
 /* A node reports a program that runs a turn at least once a minute. A report this fresh that the program works keeps its
    turn, whatever the node says; idle at its prompt or gone is no work. */
-export const PULSE_MS = 2 * 60_000;
+const PULSE_MS = 2 * 60_000;
 const WORKING: ReadonlySet<ProgramState> = new Set(['thinking', 'tool', 'asking', 'retrying']);
 
 const NOT_HELD = 'Hornhoof ended this turn as interrupted: its machine said it no longer runs this turn, and its program gave no sign of work for 2 minutes. The next waiting turn goes out.';
@@ -92,9 +92,9 @@ export async function turnsHeld(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMes
 
 /* How long a program may stand idle at its prompt in a turn its node still runs while the agent's next messages wait: the
    end of that turn was lost, and Hornhoof closes it. */
-export const IDLE_END_MS = 2 * 60_000;
+const IDLE_END_MS = 2 * 60_000;
 /* An agent whose turn Hornhoof closed so this long ago or less gets no second close: Operations hear of the queue instead. */
-export const RECLOSE_MS = 30 * 60_000;
+const RECLOSE_MS = 30 * 60_000;
 
 const IDLE_CLOSED = 'Hornhoof closed this turn as done: its program stood idle at its prompt for 2 minutes, with no answer coming, no tool and no question, while the next messages waited, so the end of the turn was lost. They go into the same session.';
 const SCREEN_CLOSED = 'Hornhoof closed this turn as done: two independent views of the same program showed its completed response and empty prompt at least 2 minutes apart, with no tool, question or undelivered words. The end of the turn was lost. Its next messages go into the same session.';

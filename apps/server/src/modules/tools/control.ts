@@ -49,7 +49,7 @@ const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company o
    or the CEO delegate who wrote to him, or else as the company's owner, whoever asked, an employee, a timer, a task or
    another person. What the company wants him not to do is written in its notebook. Only a company with no active owner
    leaves them to the CEO's word. */
-export const CEO_ONLY = new Set([
+const CEO_ONLY = new Set([
   'invite_person',
   'change_person',
   'invite_again',

@@ -7,12 +7,12 @@ import { assistantReplies, assistants } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 
 /* How long the program has for one skill, and how much of its answer an agent reads. */
-export const SKILL_WAIT_MS = 120_000;
-export const SKILL_ANSWER_BYTES = 100_000;
+const SKILL_WAIT_MS = 120_000;
+const SKILL_ANSWER_BYTES = 100_000;
 
 /* What a skill's call is signed with: HMAC-SHA256 of the time and the exact body under the signing secret, so the program
    tells a call heard again later from a new one. */
-export const skillSignature = (secret: string, stamp: string, body: string): string => `sha256=${createHmac('sha256', secret).update(`${stamp}.${body}`).digest('hex')}`;
+const skillSignature = (secret: string, stamp: string, body: string): string => `sha256=${createHmac('sha256', secret).update(`${stamp}.${body}`).digest('hex')}`;
 
 const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().optional() });
 

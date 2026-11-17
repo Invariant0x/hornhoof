@@ -21,7 +21,7 @@ type Handler = (...given: unknown[]) => Answer | Promise<Answer>;
 const say = (text: string, isError = false): Answer => ({ content: [{ type: 'text', text }], ...(isError ? { isError } : {}) });
 const firstLine = (text = '') => text.split(/(?<=\.)\s/)[0]!.slice(0, 300);
 export const FIND = 'find_tool';
-export const USE = 'use_tool';
+const USE = 'use_tool';
 
 /* The job a call of use_tool runs as: the orchestrator's own, in the department it names. */
 export function actingFor(job: ToolJob, body: unknown): ToolJob {

@@ -12,7 +12,7 @@ export const LONGEST_PAUSE_MS = 300_000;
 export const TRIES = 12;
 const SEND_MS = 10_000;
 
-export const pauseAfter = (failures: number): number => Math.min(FIRST_PAUSE_MS * 2 ** (failures - 1), LONGEST_PAUSE_MS);
+const pauseAfter = (failures: number): number => Math.min(FIRST_PAUSE_MS * 2 ** (failures - 1), LONGEST_PAUSE_MS);
 
 /* What waits to go: the number the events wait after, and whether an event among them is worth a turn of a model. */
 type Due = { after: number; worth: boolean };

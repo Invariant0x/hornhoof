@@ -34,7 +34,7 @@ export function phoneOwner(me: Person, phone: CompanyPhone): void {
   if (me.companyId !== phone.companyId || (!viaOrchestrator(me) && (me.via || me.id !== phone.personId))) throw phoneDenied();
 }
 
-export async function nodeForPhone(ctx: Ctx, companyId: string, machineId: string): Promise<string> {
+async function nodeForPhone(ctx: Ctx, companyId: string, machineId: string): Promise<string> {
   const [machine] = await ctx.db.select().from(machines).where(eq(machines.id, machineId));
   if (!machine || machine.companyId !== companyId) throw phoneDenied();
   if (machine.revokedAt) throw phoneOffline();

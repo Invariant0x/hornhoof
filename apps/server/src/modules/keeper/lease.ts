@@ -4,13 +4,13 @@ export const LEASE_MS = 10_000;
 /* A gap over this between two ticks, on either clock, is a tick more than 5 s late: on a disk that writes quickly. */
 export const LATE_MS = 6_000;
 /* How long one of the keeper's statements may take, on a disk that writes quickly. */
-export const QUERY_MS = 2_000;
+const QUERY_MS = 2_000;
 /* Half a lease: a renewal that cannot commit in that time leaves room for one more before the lease runs out. */
-export const QUERY_MAX_MS = LEASE_MS / 2;
+const QUERY_MAX_MS = LEASE_MS / 2;
 /* A second short of a lease, the pause between two ticks: a tick that comes later could not have renewed in time. */
-export const LATE_MAX_MS = LEASE_MS - 1_000;
+const LATE_MAX_MS = LEASE_MS - 1_000;
 /* The wall clock going back more than this. A smaller step is the clock being corrected, and a tick survives it. */
-export const BACK_MS = 1_000;
+const BACK_MS = 1_000;
 
 /* Date.now() and performance.now(). Both are kept because a machine that sleeps stops one and not the other. */
 export type Clocks = { wall: number; mono: number };

@@ -151,7 +151,7 @@ async function dropOldDisk(dir: string | undefined, cutoff: Date): Promise<void>
 /* A file as a request brings it: in memory up to FILE_BYTES, and a bigger one onto this machine's disk as it comes, never
    whole in memory. With no folder for files a bigger one is turned away. */
 export type Taken = { bytes: Buffer; size: number; disk?: string };
-export type UploadRoom = { bytes: number; full: () => ApiError };
+type UploadRoom = { bytes: number; full: () => ApiError };
 const smallerRoom = (a: UploadRoom, b: UploadRoom): UploadRoom => a.bytes <= b.bytes ? a : b;
 const fileRoom: UploadRoom = { bytes: FILE_BYTES, full: () => new ApiError(413, 'validation', `A file is at most ${FILE_BYTES / 1024 / 1024} MB here.`, 'file_too_big') };
 const pictureRoom: UploadRoom = { bytes: PICTURE_BYTES, full: () => new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid') };
@@ -265,7 +265,7 @@ function personDownloadType(found: { name: string | null; mediaType?: string }):
 export const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 /* A file's bytes a piece at a time, each read as it goes out. */
-export async function* filePieces(db: Db, id: string, length: number) {
+async function* filePieces(db: Db, id: string, length: number) {
   for (let at = 0; at < length; at += PIECE_BYTES) {
     const [piece] = await db
       .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
@@ -443,7 +443,7 @@ async function taskAttachmentForAgent(db: Db, companyId: string, taskId: string,
 }
 
 /* The same task and message checks as hh-fetch, by id, before another tool shares a file or gives out its link. */
-export async function agentCanReadAttachment(ctx: Pick<Ctx, 'db'>, job: ToolJob, id: string): Promise<boolean> {
+async function agentCanReadAttachment(ctx: Pick<Ctx, 'db'>, job: ToolJob, id: string): Promise<boolean> {
   if (!z.uuid().safeParse(id).success) return false;
   if (await messagePicture(ctx.db, job, id)) return true;
   const [file] = await ctx.db

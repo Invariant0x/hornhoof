@@ -19,7 +19,7 @@ const SECRETS = Object.values(SECRET).flat().join(', ');
 const CLOSED_AFTER_SIGN_INS =
   "invites, install codes, sealed plan sign-ins, the public link, Hornhoof's records of where changes came from, the company's certificate authority, its machines' certificates and the peer secrets, the machines' join tickets and online time, people's keys, the machines' computer access and the commands run there, and the recovery keys";
 const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
-export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
+const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 const ASSISTANTS_CLOSED = 'Personal assistants are closed to this tool.';
 const closedColumns = (table: string, columns: string[]) =>
   `${columns.join(' and ')} ${columns.length > 1 ? 'are' : 'is'} closed to this tool: name the other columns of ${table} instead of *.`;

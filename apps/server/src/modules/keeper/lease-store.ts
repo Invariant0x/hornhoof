@@ -29,7 +29,7 @@ export type LeaseStore = {
   close(): Promise<void>;
 };
 
-export const PRUNE_BATCH = 10_000;
+const PRUNE_BATCH = 10_000;
 
 /* The highest term this database has seen, 0 for one that saw none. */
 const SEEN_TERM = `SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0)::int AS number`;
