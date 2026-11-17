@@ -186,6 +186,7 @@ describe('ApprovalPolicy', () => {
       ],
       'GET /api/outbound/catalog?department=d1': [200, { entries: [] }],
       'GET /api/outbound/setup-log?department=d1': [200, { entries: [] }],
+      'GET /api/outbound/contacts?department=d1': [200, { contacts: [] }],
     });
     const { container } = render(
       <>

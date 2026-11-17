@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
+import { en } from '../src/i18n/en';
 import { Phones, type PhoneView } from '../src/ui/Phones';
 import { ME, mockApi } from './api-mock';
 import { until } from './until';
@@ -42,11 +43,11 @@ it('uses a pairing code only for the probe and removes it before saving', async 
   fireEvent.click(screen.getByRole('button', { name: 'Add phone' }));
   fireEvent.change(screen.getByLabelText('Phone name'), { target: { value: PHONE.name } });
   fireEvent.change(screen.getByLabelText('Phone address'), { target: { value: PHONE.endpoint } });
-  fireEvent.change(screen.getByLabelText('Pairing address, if needed'), { target: { value: '192.168.1.80:43111' } });
-  fireEvent.change(screen.getByLabelText('Pairing code, if needed'), { target: { value: '713924' } });
+  fireEvent.change(screen.getByLabelText(en.phones.pairingAddress), { target: { value: '192.168.1.80:43111' } });
+  fireEvent.change(screen.getByLabelText(en.phones.pairingCode), { target: { value: '713924' } });
   fireEvent.click(screen.getByRole('button', { name: 'Find phone' }));
   await until(() => screen.queryByText(/Pixel 8/));
-  expect(screen.getByLabelText('Pairing code, if needed')).toHaveValue('');
+  expect(screen.getByLabelText(en.phones.pairingCode)).toHaveValue('');
   expect(calls.find(c => c.path === '/api/phones/probe')?.body).toMatchObject({ pairing: { endpoint: '192.168.1.80:43111', code: '713924' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add phone' }));
   await until(() => screen.queryByRole('article', { name: PHONE.name }));

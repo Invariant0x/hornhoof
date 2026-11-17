@@ -60,7 +60,7 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     expect([next.conflicts.length, next.more, next.conflicts[0]!.id === first.conflicts[0]!.id]).toEqual([1, false, false]);
   });
 
-  it("keeps the CEO's conflicts and secrets from the orchestrator", async () => {
+  it("keeps secrets from the orchestrator and lists only its own conflicts, while it settles the CEO's it names", async () => {
     const s = await stand();
     const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'company' }).returning();
     await s.db.insert(sessions).values({ tokenHash: 'a'.repeat(64), personId: maria!.id, expiresAt: new Date('2026-12-01T00:00:00Z') });
@@ -81,12 +81,12 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     expect(JSON.stringify(conflicts)).not.toContain(hashToken('there'));
     for (const table of ['people', 'sessions']) expect((await listed(s.tools, { table })).conflicts).toEqual([]);
     const person = all.find(conflict => conflict.tbl === 'people')!;
-    const refused = text(await call(s.tools, 'merge_pick', { ids: [person.id], take: 'there' }));
-    expect(refused).toBe(`Settled 0: kept here 0, took there 0.\nRefused 1: ${person.id}: This one is the CEO's (people); it waits on his screen.`);
+    /* Named, one of the CEO's he settles too. */
+    expect(text(await call(s.tools, 'merge_pick', { ids: [person.id], take: 'there' }))).toBe('Settled 1: kept here 0, took there 1.');
     /* In bulk he settles his own alone, and is not told of the others. */
     expect(text(await call(s.tools, 'merge_pick', { merge: id, take: 'here' }))).toBe('Settled 1: kept here 1, took there 0.');
-    expect((await s.picked()).map(row => [row.tbl, row.picked])).toEqual([['jobs', 'here'], ['people', null], ['sessions', null]]);
-    expect((await s.db.select().from(people).where(eq(people.id, maria!.id)))[0]!.name).toBe('Maria Here');
+    expect((await s.picked()).map(row => [row.tbl, row.picked])).toEqual([['jobs', 'here'], ['people', 'there'], ['sessions', null]]);
+    expect((await s.db.select().from(people).where(eq(people.id, maria!.id)))[0]!.name).toBe('Maria There');
   });
 
   it('settles one or many', async () => {
@@ -137,7 +137,7 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     expect((await s.db.select().from(departments).where(eq(departments.id, s.dev.id)))[0]!.about).toBe('There');
   });
 
-  it('writes a value of his own only where his own SQL could', async () => {
+  it('writes a value of his own wherever the CEO could', async () => {
     const s = await stand();
     const fork = await s.fork();
     await fork.db.update(tasks).set({ urgent: true, title: 'There' }).where(eq(tasks.id, s.one.id));
@@ -147,13 +147,9 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     const { id } = await s.merge(fork);
     const { conflicts } = await listed(s.tools, { merge: id });
     const repo = conflicts.find(conflict => conflict.table === 'departments')!;
-    /* How urgent work is and where a department pushes change only through the CEO's routes: he takes a side, and writes
-       no value of his own there. */
-    expect(text(await call(s.tools, 'merge_pick', { ids: [repo.id], take: 'value', value: { repo_url: 'https://github.com/evil/fork' } }))).toBe(
-      `Settled 0: kept here 0, took there 0.\nRefused 1: ${repo.id}: Hornhoof keeps repo_url of departments to its own routes: keep here or take there.`,
-    );
-    expect((await s.db.select().from(departments).where(eq(departments.id, s.dev.id)))[0]!.repoUrl).toBe('https://github.com/acme/here');
-    expect(text(await call(s.tools, 'merge_pick', { ids: [repo.id], take: 'there' }))).toContain('Settled 1');
+    /* Where a department pushes changes only through the CEO's routes, and the orchestrator acts as the CEO. */
+    expect(text(await call(s.tools, 'merge_pick', { ids: [repo.id], take: 'value', value: { repo_url: 'https://github.com/acme/both' } }))).toBe('Settled 1: kept here 0, took there 1.');
+    expect((await s.db.select().from(departments).where(eq(departments.id, s.dev.id)))[0]!.repoUrl).toBe('https://github.com/acme/both');
   });
 
   it('runs what the merge tried', async () => {

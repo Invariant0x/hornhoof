@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import { runsDepartment } from '../../auth/departments.js';
-import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentFallbacks, agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
@@ -64,10 +64,10 @@ function connectionRules(body: { provider: ApiProvider; baseUrl?: string; protoc
 export const ApiKeyFields = z.object({ kind: z.literal('api_key'), ...Connection, label, apiKey, target: Target, models: ConnectionModels.optional() });
 
 /* Company API keys only. Personal subscriptions are connected by their owner through a machine. */
-export const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
+const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
 
 /* An API's models, asked before its connection is saved. */
-export const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
+const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
 
 /* The plans its employees go on to at its limit, in order, each once, with the model to run there or none for their role's. */
 const Fallbacks = z
@@ -77,7 +77,7 @@ const Fallbacks = z
 
 /* What a subscription's owner or company scope changes: the share of its limits and its fallbacks, and of an API connection
    its name, models and the place it serves. */
-export const SubscriptionPatch = z
+const SubscriptionPatch = z
   .object({ budget: Budget.optional(), fallbacks: Fallbacks.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'Say what to change.');
 
@@ -124,7 +124,7 @@ export const ConnectBody = z.object({
 const IdParams = z.object({ id: z.uuid() });
 
 /* A key the owner pasted and sealed in their browser to the plan's nodes. Claude and Codex sign in on a machine. */
-export const CredentialBody = z.object({
+const CredentialBody = z.object({
   kind: z.enum(['kimi_key', 'glm_key']),
   version: z.number().int().min(1),
   envelopes: z.array(z.object({ nodeId: z.uuid(), sealed: Sealed })).min(1).max(20),
@@ -429,7 +429,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/subscriptions/:id/recipients', async req => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (me.via || sub.ownerPersonId !== me.id) throw notOwner();
+    if (!viaOrchestrator(me) && (me.via || sub.ownerPersonId !== me.id)) throw notOwner();
     const rows = await db
       .select({ nodeId: nodes.id, publicKey: nodes.publicKey, hostname: machines.hostname })
       .from(nodes)
@@ -438,11 +438,11 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { version: sub.credVersion, recipients: rows.map(r => ({ nodeId: r.nodeId, publicKey: r.publicKey!, hostname: r.hostname })) };
   });
 
-  /* Only the owner pastes a plan's key, never the orchestrator for them. */
+  /* Only the owner pastes a plan's key, or the orchestrator. */
   app.post('/api/subscriptions/:id/credential', async req => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (me.via || sub.ownerPersonId !== me.id) throw notOwner();
+    if (!viaOrchestrator(me) && (me.via || sub.ownerPersonId !== me.id)) throw notOwner();
     const body = CredentialBody.parse(req.body);
     if (sub.kind !== 'personal' || CRED_KIND[sub.provider] !== body.kind) throw new ApiError(400, 'validation', `kind: This plan does not sign in with a ${body.kind === 'kimi_key' ? 'Kimi' : 'GLM'} key.`, 'wrong_kind');
     const kept = await storeEnvelopes(db, sub, body.kind, body.version, body.envelopes);

@@ -29,7 +29,7 @@ const ONLINE_MS = 2 * 60_000;
 const KEEPER_STEPS: readonly RestoreStep[] = ['fetch', 'check', 'open'];
 const CALLED_OFF = 'The restore was called off.';
 
-export type NotRestorable = 'newer_build' | 'not_held' | 'needs_recovery_file';
+type NotRestorable = 'newer_build' | 'not_held' | 'needs_recovery_file';
 
 /* How many migrations this build knows: a backup of a database with more was made by a newer one. Read once, as a
    build's migrations never change while it runs. */

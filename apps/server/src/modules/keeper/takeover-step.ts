@@ -70,7 +70,7 @@ export type WatchSample = {
   now: number; started: number; window: Window; held: boolean; leader: string | null; heard: number | null; linkAnswered: number | null; syncBeat: number | null;
   record: SyncRecord | null; routeGeneration: number | null; self: string; ready: boolean; holds: boolean; ceo: number | null;
 };
-export type WatchAction = { do: 'none' } | { do: 'take'; kind: 'takeover' | 'ceo' } | { do: 'ask' } | { do: 'unask' };
+type WatchAction = { do: 'none' } | { do: 'take'; kind: 'takeover' | 'ceo' } | { do: 'ask' } | { do: 'unask' };
 
 /* The copy takes the server over only when the leader has been silent both ways, the name free and the relay steady
    long enough, and the relay's record, at the route's generation, names this copy as the one that holds every
@@ -109,7 +109,7 @@ export type EntrySample = {
   route: { state: 'held' | 'empty'; client: string | null; generation: number; sent: Clocks } | null;
   registering: number | null; client: string; tunnel: boolean; flag: boolean; gaveUp: boolean;
 };
-export type EntryAction =
+type EntryAction =
   | { do: 'wait'; why: string } | { do: 'take'; sent: Clocks; term: Term } | { do: 'ask'; term: Term }
   | { do: 'register'; generation: number | null } | { do: 'stop' } | { do: 'follow' };
 

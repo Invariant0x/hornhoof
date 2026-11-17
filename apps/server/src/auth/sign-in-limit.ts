@@ -54,7 +54,7 @@ export function addressKey(address: string): string {
   return isIpv4Mapped(groups) ? asIpv4(groups.slice(6)) : `${groups.slice(0, 4).map(hexGroup).join(':')}::/64`;
 }
 
-export interface FullLimit {
+interface FullLimit {
   oldest: Date;
   windowMs: number;
 }
@@ -99,7 +99,7 @@ async function fullLimits(db: Db, hashes: Hashes): Promise<{ full: FullLimit[]; 
   return { full, now: new Date(rows[0]!.now) };
 }
 
-export type SignInTry = { allowed: true; id: string } | { allowed: false; retryAfterS: number; windowMs: number };
+type SignInTry = { allowed: true; id: string } | { allowed: false; retryAfterS: number; windowMs: number };
 
 /* Writes the try before the password is checked, only while all three counts are under their limit, so a burst counts. */
 export async function signInTry(db: Db, email: string, address: string): Promise<SignInTry> {
