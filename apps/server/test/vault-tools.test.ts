@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { agentEvents, attachments, computerRuns, jobs, tasks, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { agentEvents, attachments, computerRuns, jobs, taskEvents, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { INVOCATION } from '../src/modules/tools/calls.js';
 import { appendTurnEvent } from '../src/modules/events/store.js';
-import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ownMachine } from '../src/modules/nodes/hub.js';
-import { forgetPrivateTurn } from '../src/modules/tools/privacy.js';
+import { forgetPrivateTurn, privateTurn } from '../src/modules/tools/privacy.js';
+import { cancelJob } from '../src/modules/tasks/wake.js';
 import { as, mcp } from './helpers.js';
 import { vaultCompany } from './vault-fixture.js';
 
@@ -102,8 +103,7 @@ describe('the vault for agents', () => {
       expect(comment.isError).toBeUndefined();
       await appendTurnEvent(c.app.ctx, job.id, { kind: 'text', text }, eq(jobs.id, job.id));
     }
-    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
-    const log = JSON.stringify(task!.log);
+    const log = JSON.stringify(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id)));
     expect(log).toContain('Signed in with [hidden]; code [hidden].');
     expect(log).toContain('The site is ready.');
     expect(log).not.toContain(PASSWORD);
@@ -145,10 +145,19 @@ describe('the vault for agents', () => {
     const refused = await replay(c, token, 'comment', { task: c.task.number, text: `Report with ${PASSWORD}` }, randomUUID());
     expect(refused.isError).toBe(true);
     expect(refused.content[0]!.text).toContain('End this turn and start a new one');
-    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
-    expect(JSON.stringify(task!.log)).not.toContain('Report with');
+    expect(JSON.stringify(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id)))).not.toContain('Report with');
     expect(JSON.stringify(await c.db.select().from(agentEvents))).not.toContain(PASSWORD);
     expect(JSON.stringify(await c.db.select().from(toolCalls))).not.toContain(PASSWORD);
+  });
+
+  it.each(['cancelled', 'node lost'])('drops temporary values when a turn ends as %s without a node receipt', async ending => {
+    const c = await setUp();
+    const { token, job } = await c.startTurn(c.nora.id);
+    await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
+    expect(privateTurn(c.db, job.id)?.values.text(PASSWORD)).toBe('[hidden]');
+    if (ending === 'cancelled') await cancelJob(c.app.ctx, job.id);
+    else expect(await failOpenJobs(c.app.ctx, eq(jobs.id, job.id), 'machine_offline')).toContain(job.id);
+    expect(privateTurn(c.db, job.id)).toBeUndefined();
   });
 
   it('lists every entry of the company to each of its agents, with no password', async () => {

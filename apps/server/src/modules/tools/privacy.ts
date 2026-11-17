@@ -13,6 +13,7 @@ export async function turnProtection(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string
   const lost = !privateTurn(ctx.db, jobId)?.sensitive && await sensitiveTurn(ctx.db, jobId, true);
   return {
     lost,
+    input: value => privateTurn(ctx.db, jobId)?.values.input(value) ?? value,
     hide: value => privateTurn(ctx.db, jobId)?.values.hide(value) ?? value,
     async sensitive(name, policy, input, answer) {
       let state = privateTurn(ctx.db, jobId);

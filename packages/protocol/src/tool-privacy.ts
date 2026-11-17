@@ -19,7 +19,8 @@ export const isSensitiveTool = (name: string): boolean => toolPrivacy(name)?.sen
 
 /* Routing and typed discriminants are identities, not report text. A one-character password must not change a task
    reference or turn an event's kind into a different protocol message. */
-const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider)$|(?:Id|Ids|Sha|Commit)$/;
+const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider|wait)$|(?:Id|Ids|Sha|Commit|Kind|Class|Type|State|Status)$/;
+const PROSE = new Set(['text', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql']);
 
 /* Values live only in the current turn's memory, for text that must still reach people. Short passwords and OTPs count
    too. JSON-escaped forms cover text nested in tool replies without putting a value in a persistent redactor. */
@@ -48,6 +49,14 @@ export class PrivateValues {
     if (typeof value === 'string') return this.text(value) as T;
     if (Array.isArray(value)) return value.map(item => this.hide(item)) as T;
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, IDENTITY.test(key) ? item : this.hide(item)])) as T;
+    return value;
+  }
+
+  /* Tool arguments also carry UUID references, classifications, model names and other routing choices. Only prose is
+     rewritten before a handler runs; a short password must not change the operation it was asked to perform. */
+  input<T>(value: T): T {
+    if (Array.isArray(value)) return value.map(item => this.input(item)) as T;
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, PROSE.has(key) ? this.hide(item) : this.input(item)])) as T;
     return value;
   }
 }

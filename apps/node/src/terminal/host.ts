@@ -3021,7 +3021,7 @@ export class TerminalHost {
     if (a.turn) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
-    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, tail: null, fresh: false, started: null });
+    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, tail: null, fresh: false, started: null, privateOutput: false });
     return RETIRED;
   }
 

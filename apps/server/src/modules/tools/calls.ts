@@ -61,6 +61,7 @@ type Answer = { content: { type: 'text'; text: string }[]; isError?: boolean; [m
 export type ToolProtection = {
   lost?: boolean;
   sensitive(name: string, policy: ToolPrivacyPolicy, input: unknown, answer?: Answer): Promise<void>;
+  input<T>(value: T): T;
   hide<T>(value: T): T;
 };
 const say = (text: string): Answer => ({ content: [{ type: 'text', text }], isError: true });
@@ -152,7 +153,7 @@ export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: s
     });
     const run = async (...given: unknown[]) => {
       if (given.length > 1 && protection) {
-        const hidden = protection.hide(given[0]);
+        const hidden = protection.input(given[0]);
         if (config._meta?.secretCommand && JSON.stringify(hidden) !== JSON.stringify(given[0])) return say(PRIVATE_COMMAND_REFUSED);
         given[0] = hidden;
       }

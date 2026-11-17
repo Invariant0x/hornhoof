@@ -178,6 +178,7 @@ export async function closeCheck(ctx: Ctx, node: NodeIdentity, msg: ToolsChecked
 /* Steps Hornhoof ended while their node may still run a check command in them: the node hears to stop it now. */
 export async function stopSteps(ctx: Ctx, steps: { id: string; subscriptionId: string; nodeId: string | null; builtinMachine: string | null }[]): Promise<void> {
   for (const step of steps) {
+    forgetPrivateTurn(ctx.db, step.id);
     const [sub] = await ctx.db.select({ kind: subscriptions.kind }).from(subscriptions).where(eq(subscriptions.id, step.subscriptionId));
     const node = sub ? identityOf(sub, step.nodeId, step.builtinMachine, ownBuiltin(ctx.config)) : null;
     if (node) ctx.hub.send(node, { type: 'job.cancel', jobId: step.id });
