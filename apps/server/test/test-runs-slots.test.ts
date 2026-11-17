@@ -72,16 +72,17 @@ describe('reading a part that waits for a machine check slot', () => {
     expect(await other.call('test_run', { run: 3 })).toMatchObject({ error: true, text: expect.stringContaining('There is no test run 3') });
   });
 
-  it('identifies an agent check by its task without treating its label as a run', async () => {
+  it.each(['part label', 'line break'])('identifies an agent check by its task with a %s', async labelKind => {
     const s = await stand();
     await s.release(0); await s.release(1); await s.release(2);
     await s.c.db.update(jobs).set({ nodeId: s.node!.id }).where(eq(jobs.id, s.turn.job.id));
-    const local = { type: 'check.acquire' as const, id: randomUUID(), jobId: s.turn.job.id, agentId: s.c.bruno.id, label: 'eslint\ncheck' };
+    const label = labelKind === 'part label' ? `Run part ${s.parts[0]!.id}` : 'eslint\ncheck';
+    const local = { type: 'check.acquire' as const, id: randomUUID(), jobId: s.turn.job.id, agentId: s.c.bruno.id, label };
     await receiveCheckRequest(s.c.app.ctx, s.id, local, eq(jobs.id, s.turn.job.id));
     await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
     await new Promise<void>(resolve => setImmediate(resolve));
     const part = (await s.read()).parts[0];
-    expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', task: s.c.task.number, agent: 'Bruno', label: 'eslint check', since: expect.any(String) }]);
+    expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', task: s.c.task.number, agent: 'Bruno', label: label.replace('\n', ' '), since: expect.any(String) }]);
     expect(part.waiting).not.toMatch(/[\r\n]/);
   });
 
@@ -99,10 +100,13 @@ describe('reading a part that waits for a machine check slot', () => {
   it('does not mistake an unrecorded part for an empty queue during startup', async () => {
     const s = await stand();
     closeCheckQueue(s.c.app.ctx);
+    const unknown = (await s.read()).parts[0];
+    expect(unknown.checkSlot).toMatchObject({ state: 'not_recorded', capacity: null, queued: null, position: null });
+    expect(unknown.waiting).toContain('Queue state is not recorded by this server');
     await checkQueueLoad(s.c.app.ctx, s.id);
     await receiveCheckRequest(s.c.app.ctx, s.id, { type: 'check.acquire', id: randomUUID(), label: 'another check' }, sql`false`);
     const part = (await s.read()).parts[0];
-    expect(part.checkSlot).toMatchObject({ state: 'not_recorded', capacity: 0, queued: 1 });
+    expect(part.checkSlot).toMatchObject({ state: 'not_recorded', capacity: 0, queued: 1, position: null });
     expect(part.waiting).not.toContain('Queue is empty');
   });
 });

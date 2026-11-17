@@ -21,28 +21,36 @@ const partNode = (ctx: Ctx, part: Pick<Part, 'builtin' | 'builtinMachine' | 'nod
   ? part.builtinMachine ? builtinOf(part.builtinMachine) : ownBuiltin(ctx.config)
   : part.nodeId ? nodeIdentity(part.nodeId) : null;
 
-/* Labels identify existing run parts; neither a label nor a machine claim grants access to that part. */
+function onClaimNode(ctx: Ctx, claim: CheckClaim, part: Pick<Part, 'builtin' | 'builtinMachine' | 'nodeId'>): boolean {
+  const node = partNode(ctx, part);
+  return node !== null && keyOf(node) === claim.node;
+}
+
+async function runActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, partId: string): Promise<Actor | null> {
+  const [row] = await ctx.db.select({ part: testParts, run: testRuns, task: tasks }).from(testParts)
+    .innerJoin(testRuns, eq(testRuns.id, testParts.runId)).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
+    .where(and(eq(testParts.companyId, viewer.companyId), eq(testRuns.companyId, viewer.companyId), eq(tasks.companyId, viewer.companyId), eq(testParts.id, partId)));
+  if (!row || !onClaimNode(ctx, claim, row.part)) return null;
+  if (row.run.agentId !== viewer.agentId && !onTask(viewer, row.task)) return null;
+  return { kind: row.run.kind, run: row.run.number, task: row.task.number, part: row.part.part };
+}
+
+async function jobActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, jobId: string): Promise<Actor | null> {
+  const [row] = await ctx.db.select({ job: jobs, task: tasks, name: agents.name }).from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId)).leftJoin(tasks, eq(tasks.id, jobs.taskId))
+    .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.id, jobId)));
+  if (!row || !onClaimNode(ctx, claim, { ...row.job, builtin: row.job.nodeId === null })) return null;
+  if (row.job.agentId !== viewer.agentId && !(row.task && onTask(viewer, row.task))) return null;
+  return { kind: 'check', task: row.task?.number ?? null, agent: oneLine(row.name), label: oneLine(claim.request.label) };
+}
+
+/* An authenticated job takes precedence over a text label. Neither source grants the reader any extra access. */
 async function actorOf(ctx: Ctx, viewer: ToolJob, claim: CheckClaim): Promise<Actor> {
+  const hidden: Actor = { kind: 'unavailable' };
+  if (claim.request.jobId) return await jobActor(ctx, viewer, claim, claim.request.jobId) ?? hidden;
   const partId = /^Run part (.+)$/.exec(claim.request.label)?.[1];
-  if (partId && z.uuid().safeParse(partId).success) {
-    const [row] = await ctx.db.select({ part: testParts, run: testRuns, task: tasks }).from(testParts)
-      .innerJoin(testRuns, eq(testRuns.id, testParts.runId)).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
-      .where(and(eq(testParts.companyId, viewer.companyId), eq(testRuns.companyId, viewer.companyId), eq(tasks.companyId, viewer.companyId), eq(testParts.id, partId)));
-    const node = row && partNode(ctx, row.part);
-    if (row && node && keyOf(node) === claim.node && (row.run.agentId === viewer.agentId || onTask(viewer, row.task))) {
-      return { kind: row.run.kind, run: row.run.number, task: row.task.number, part: row.part.part };
-    }
-  }
-  if (claim.request.jobId) {
-    const [row] = await ctx.db.select({ job: jobs, task: tasks, name: agents.name }).from(jobs)
-      .innerJoin(agents, eq(agents.id, jobs.agentId)).leftJoin(tasks, eq(tasks.id, jobs.taskId))
-      .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.id, claim.request.jobId)));
-    const node = row && partNode(ctx, { ...row.job, builtin: row.job.nodeId === null });
-    if (row && node && keyOf(node) === claim.node && (row.job.agentId === viewer.agentId || (row.task && onTask(viewer, row.task)))) {
-      return { kind: 'check', task: row.task?.number ?? null, agent: oneLine(row.name), label: oneLine(claim.request.label) };
-    }
-  }
-  return { kind: 'unavailable' };
+  if (!partId || !z.uuid().safeParse(partId).success) return hidden;
+  return await runActor(ctx, viewer, claim, partId) ?? hidden;
 }
 
 async function claimView(ctx: Ctx, job: ToolJob, claim: CheckClaim): Promise<Claim> {
@@ -56,12 +64,17 @@ function claimLine(claim: Claim): string {
   return `${who}, since ${claim.since}${claim.releasing ? ', releasing' : ''}`;
 }
 
+function queueNote(slot: Slot, recorded: boolean): string {
+  if (!recorded) return ' Queue state is not recorded by this server.';
+  if (slot.state !== 'not_recorded') return '';
+  return slot.queued === 0 && !slot.holders.length ? ' Queue is empty; no matching request is recorded.' : ' No matching request is recorded.';
+}
+
 function waitingLine(slot: Slot, recorded: boolean): string {
   const state = { running: 'Machine check slot granted', queued: 'Waiting for a machine check slot', not_recorded: 'Machine check request is not recorded' }[slot.state];
   const holders = slot.holders.length ? slot.holders.map(claimLine).join('; ') : 'none';
   const ahead = slot.ahead.length ? slot.ahead.map(claim => `${claim.position}: ${claimLine(claim)}`).join('; ') : 'nobody';
-  const empty = recorded && slot.queued === 0 && !slot.holders.length && slot.state === 'not_recorded' ? ' Queue is empty; no matching request is recorded.' : '';
-  return `${state} on ${slot.machine}. Position ${slot.position ?? 'unknown'}. Capacity ${slot.capacity ?? 'unknown'}. Queued ${slot.queued ?? 'unknown'}. Holders: ${holders}. Ahead: ${ahead}.${empty}${recorded ? '' : ' Queue state is not recorded by this server.'}`;
+  return `${state} on ${slot.machine}. Position ${slot.position ?? 'unknown'}. Capacity ${slot.capacity ?? 'unknown'}. Queued ${slot.queued ?? 'unknown'}. Holders: ${holders}. Ahead: ${ahead}.${queueNote(slot, recorded)}`;
 }
 
 /* This result is read live for each caller; a stored waiting line cannot keep showing a holder that already released. */
@@ -72,11 +85,11 @@ export async function partCheckWait(ctx: Ctx, job: ToolJob, part: Part): Promise
   const waiting = snapshot?.queue.find(mine), running = snapshot?.holders.find(mine);
   const reported = /^Waiting for a machine check slot\. Position ([1-9][0-9]*)\.$/.exec(part.tail)?.[1];
   if (!reported && !waiting && !running) return null;
-  const position = waiting?.position ?? (running ? 0 : reported ? Number(reported) : null);
+  const position = waiting?.position ?? (running ? 0 : null);
   const slot: Slot = {
     machine: oneLine(part.machineName ?? 'a machine'), state: waiting ? 'queued' : running ? 'running' : 'not_recorded', capacity: snapshot?.capacity ?? null, queued: snapshot?.queue.length ?? null, position,
     holders: await Promise.all((snapshot?.holders ?? []).map(claim => claimView(ctx, job, claim))),
     ahead: await Promise.all((waiting ? snapshot!.queue.filter(claim => claim.position < waiting.position) : []).map(claim => claimView(ctx, job, claim))),
   };
-  return { queuePosition: position, checkSlot: slot, waiting: waitingLine(slot, snapshot !== null) };
+  return { queuePosition: position ?? (reported ? Number(reported) : null), checkSlot: slot, waiting: waitingLine(slot, snapshot !== null) };
 }
