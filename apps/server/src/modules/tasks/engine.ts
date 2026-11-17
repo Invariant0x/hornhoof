@@ -46,7 +46,7 @@ import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 import { stuckRecipient } from './stuck-route.js';
-import { leavingEmployee, notifyUnfilledStages, replaceFutureOwners, type UnfilledStage } from './echelons-future.js';
+import { removedEmployee, notifyUnfilledStages, replaceFutureOwners, type UnfilledStage } from './echelons-future.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -870,7 +870,7 @@ export async function leaveWork(ctx: Ctx, actor: Actor, agent: Leaver): Promise<
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [], handed: string[] = [];
   const missing: UnfilledStage[] = [];
-  const leaving = await leavingEmployee(ctx, agent.companyId, agent.id);
+  const leaving = await removedEmployee(ctx, agent.companyId, agent.id);
   for (const row of rows) await onFresh(ctx, row, async task => {
     const route = await routeOf(ctx.db, task);
     const current = task.assigneeAgentId === agent.id;

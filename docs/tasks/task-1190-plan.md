@@ -14,7 +14,7 @@ A small future-stage helper resolves the relevant producer: the immutable curren
 
 ## Removal and notification
 
-Only unfinished future stages owned by the leaving employee are replaced. Their status remains pending. Their replacement does not become the current assignee, receive a turn, or gain any right to approve a result. Handoff revalidates its owner and the actual producer as it already does.
+Only unfinished future stages owned by a removed employee are replaced. Switching an employee off or moving it into a team retains the existing leaveWork behavior; those actions are outside this removal change. Their status remains pending. Their replacement does not become the current assignee, receive a turn, or gain any right to approve a result. Handoff revalidates its owner and the actual producer as it already does.
 
 Collect all stages for which no replacement exists and send one ordinary Hornhoof notification to the live department head for the employee's removal, naming task numbers and stage names. Use the existing conversation/inbox path so it is an actual letter, not only a task event. Keep the current owner and task status intact for future-only changes. Repeated handling of a route with no remaining assignment to the employee produces no extra letter. Existing current-stage wakes stay separate. A missing department head uses the existing internal fallback route to the orchestrator.
 

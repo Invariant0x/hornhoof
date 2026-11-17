@@ -1,5 +1,5 @@
 import type { EchelonStage } from '@hornhoof/protocol/echelons';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
@@ -66,7 +66,7 @@ export async function notifyUnfilledStages(ctx: Ctx, leaving: Agent, missing: Un
   await enqueueTurn(ctx, { companyId: leaving.companyId, agentId: recipient.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'switched', tasks } } });
 }
 
-export async function leavingEmployee(ctx: Reader, companyId: string, agentId: string): Promise<Agent | null> {
-  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, agentId)));
+export async function removedEmployee(ctx: Reader, companyId: string, agentId: string): Promise<Agent | null> {
+  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, agentId), isNotNull(agents.removedAt)));
   return agent ?? null;
 }
