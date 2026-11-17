@@ -1,11 +1,12 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
-import { OPERATOR_PICTURE_BYTES } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_PICTURE_BYTES, type ProgramView } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agents, attachments, programOperatorCases, subscriptions, vaultEntries } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
+import { settleAnsweredQuestions } from './cases.js';
 import { requestProgramView } from './rpc.js';
 import { PainterError } from './painter.js';
 import { renderOperatorScreen } from './screen.js';
@@ -14,15 +15,21 @@ import { operatorTransaction } from './transactions.js';
 type Case = typeof programOperatorCases.$inferSelect;
 
 /* A picture of a case belongs to the case. It is never a company-wide task file or an attachment the operator supplies. The
-   last picture stays when the program or its node has just gone away. */
-export async function refreshCasePicture(ctx: Ctx, row: Case): Promise<void> {
+   last picture stays when the program or its node has just gone away. What the fresh screen shows comes back, null when there
+   is none; a question it no longer shows closes its case. */
+export async function refreshCasePicture(ctx: Ctx, row: Case): Promise<ProgramView | null> {
   const view = await requestProgramView(ctx, { agentId: row.agentId, node: nodeIdentity(row.nodeId) });
-  if (!view || view.result !== 'ok') return;
+  if (!view || view.result !== 'ok') return null;
   const { rendered } = await renderPicture(view, await pictureSecrets(ctx, row.companyId));
-  await operatorTransaction(ctx, async tx => {
-    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
-    await storeCasePicture(tx, row, rendered.png);
-  });
+  await operatorTransaction(ctx, (tx, inside) => keepLook(tx, inside, row, view, rendered.png));
+  return view;
+}
+
+/* A case its look closed already has that picture. */
+async function keepLook(tx: Tx, inside: Ctx, row: Case, view: ProgramView, png: Buffer): Promise<void> {
+  await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
+  const settled = await settleAnsweredQuestions(inside, row.agentId, view, png);
+  if (!settled.includes(row.id)) await storeCasePicture(tx, row, png);
 }
 
 type Tx = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];

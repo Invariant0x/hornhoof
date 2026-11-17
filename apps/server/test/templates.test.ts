@@ -59,7 +59,8 @@ describe('templates', () => {
     const operator = body('ops-program-operator');
     expect(operator).toMatch(/no cursor takes no Enter yet: press an arrow key, look again[\s\S]*then press Enter alone/);
     expect(operator).toMatch(/offer of the program itself[\s\S]*never Escape[\s\S]*compact and go on in the same session/);
-    expect(operator).toMatch(/no_hold answer on an open case lifts and closes nothing[\s\S]*tell_orchestrator/);
+    expect(operator).toMatch(/no_hold[\s\S]*at work with no question[\s\S]*tell_orchestrator with outcome cleared[\s\S]*tells no one[\s\S]*failed only for a screen that really stands/);
+    expect(operator).toMatch(/already closed[\s\S]*how it closed/);
     expect(body('ops-failure-review')).toMatch(/reasons Hornhoof recorded, the end of each blocked reason/);
   });
 

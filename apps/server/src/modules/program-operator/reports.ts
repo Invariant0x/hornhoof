@@ -1,45 +1,94 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { OperatorQuestion } from '@hornhoof/protocol/program-operator';
+import { OperatorQuestion, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, programOperatorCases } from '../../db/schema.js';
+import { agentEvents, agents, jobs, programOperatorCases } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
+import { ApiError } from '../../errors.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeOperator, operatorRefused, type OperatorCaller } from './authorization.js';
-import { escalateCase, syncOperatorCases } from './cases.js';
+import { escalateCase, resolveCase, syncOperatorCases, takesLateDenial } from './cases.js';
 import { refreshCasePicture } from './pictures.js';
 import { operatorTransaction } from './transactions.js';
 import { agentParty } from '../events/parties.js';
 import { operatorNotification } from './notifications.js';
 
-export type ReportInput = { case: string; outcome: 'needs_owner' | 'failed' | 'denied'; text: string };
+type Case = typeof programOperatorCases.$inferSelect;
+export type ReportInput = { case: string; outcome: 'cleared' | 'needs_owner' | 'failed' | 'denied'; text: string };
+type ReportResult = { outcome: string; case: string; pictureId: string | null; closed?: string };
 
-export async function reportOperatorCase(ctx: Ctx, caller: OperatorCaller, input: ReportInput): Promise<{ outcome: string; case: string; pictureId: string | null }> {
+export async function reportOperatorCase(ctx: Ctx, caller: OperatorCaller, input: ReportInput): Promise<ReportResult> {
+  const earlier = await closedBefore(ctx, caller, input);
+  if (earlier) return closedAnswer(earlier);
   const checked = await authorizeOperator(ctx, caller, input.case);
   if (checked.row.escalationJobId) return { outcome: checked.row.resolution!.outcome, case: checked.row.id, pictureId: checked.row.pictureId };
-  if (checked.row.status === 'open') {
-    try { await refreshCasePicture(ctx, checked.row); }
-    catch { /* The last picture remains useful if the program or its node has just gone away. */ }
-  }
-  const result = await operatorTransaction(ctx, (tx, inside) => recordReport(tx, inside, caller, input, checked.target.id));
-  await syncOperatorCases(ctx, result.agentId);
-  return { outcome: result.resolution?.outcome ?? result.status, case: result.id, pictureId: result.pictureId };
+  const seen = await lookAgain(ctx, checked.row);
+  const result = await operatorTransaction(ctx, (tx, inside) => recordReport(tx, inside, caller, input, checked.target.id, seen));
+  await syncOperatorCases(ctx, result.row.agentId);
+  return result.closed ? closedAnswer(result.row) : reported(result.row);
+}
+
+/* A fresh screen of an open case before its report. The last picture remains useful if the program or its node has just gone
+   away. */
+async function lookAgain(ctx: Ctx, row: Case): Promise<ProgramView | null> {
+  if (row.status !== 'open') return null;
+  try { return await refreshCasePicture(ctx, row); }
+  catch { return null; }
+}
+
+const reported = (row: Case): ReportResult => ({ outcome: row.resolution?.outcome ?? row.status, case: row.id, pictureId: row.pictureId });
+
+/* A case of this operator that closed by itself before the report came, from any turn of the operator's: the report changes
+   nothing, and the answer says how the case closed. */
+async function closedBefore(ctx: Ctx, caller: OperatorCaller, input: ReportInput): Promise<Case | null> {
+  const [found] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases)
+    .innerJoin(jobs, and(eq(jobs.id, caller.id), eq(jobs.agentId, caller.agentId), eq(jobs.companyId, caller.companyId), eq(jobs.status, 'running')))
+    .where(and(eq(programOperatorCases.id, input.case), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorAgentId, caller.agentId)));
+  return found && alreadyClosed(found.row, input) ? found.row : null;
+}
+
+const alreadyClosed = (row: Case, input: ReportInput) => row.status === 'resolved' && !takesLateDenial(row, input.outcome);
+
+/* Every resolved case carries how it closed. */
+function closedAnswer(row: Case): ReportResult {
+  const { outcome, text } = row.resolution!;
+  return { outcome, case: row.id, pictureId: row.pictureId, closed: `Case ${row.id} is already closed (${outcome}): ${text} Your report changes nothing and goes to no one.` };
+}
+
+/* cleared closes a case on what the program shows now: at work, asking nothing. */
+function refuseUnlessCleared(seen: ProgramView | null): void {
+  if (seen?.state === 'working' && !seen.question) return;
+  const shows = !seen ? 'no screen Hornhoof can read' : seen.question ? 'a question it waits on' : `the program ${seen.state}`;
+  throw new ApiError(409, 'conflict', `Not cleared: the program's fresh screen shows ${shows}. Clear what stops it and look again, or report failed with what the screen shows.`, 'agent_not_ready');
 }
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: ReportInput, targetId: string) {
+type Checked = Awaited<ReturnType<typeof authorizeOperator>>;
+
+async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: ReportInput, targetId: string, seen: ProgramView | null): Promise<{ row: Case; closed: boolean }> {
   await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, targetId)).for('update');
   const current = await authorizeOperator(inside, caller, input.case, undefined, true);
-  if (current.row.escalationJobId) return current.row;
-  const decision = input.outcome === 'denied' ? await deniedDecision(inside, caller, current.row) : null;
-  if (input.outcome === 'denied' && !decision) throw operatorRefused();
-  const resolution = { outcome: input.outcome, text: input.text, image: current.row.pictureId, actor: await agentParty(inside, caller.companyId, current.me.id), ...(decision ? { question: decision.question } : {}) };
+  if (current.row.escalationJobId) return { row: current.row, closed: false };
+  if (alreadyClosed(current.row, input)) return { row: current.row, closed: true };
+  const resolution = await reportedResolution(inside, caller, input, current, seen);
   await logTurnFact(inside, current.job, `${current.me.name} reported ${input.outcome}: ${input.text}`, { notification: await operatorNotification(inside, current.job), actor: resolution.actor, from: 'agent', by: current.me.id, name: current.me.name, operatorReport: { case: current.row.id, ...resolution } });
-  await escalateCase(inside, current.row, input.outcome, new Date(), resolution);
-  return (await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, current.row.id)))[0]!;
+  await closeAs(inside, current.row, input.outcome, resolution);
+  return { row: (await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, current.row.id)))[0]!, closed: false };
 }
+
+/* What the report says, once Hornhoof may take it: cleared on a fresh screen at work asking nothing, denied on a denial made. */
+async function reportedResolution(ctx: Ctx, caller: OperatorCaller, input: ReportInput, current: Checked, seen: ProgramView | null) {
+  if (input.outcome === 'cleared') refuseUnlessCleared(seen);
+  const decision = input.outcome === 'denied' ? await deniedDecision(ctx, caller, current.row) : null;
+  if (input.outcome === 'denied' && !decision) throw operatorRefused();
+  return { outcome: input.outcome, text: input.text, image: current.row.pictureId, actor: await agentParty(ctx, caller.companyId, current.me.id), ...(decision ? { question: decision.question } : {}) };
+}
+
+/* cleared closes the case and reaches no one; every other outcome escalates as before. */
+const closeAs = (ctx: Ctx, row: Case, outcome: ReportInput['outcome'], resolution: NonNullable<Case['resolution']>) =>
+  outcome === 'cleared' ? resolveCase(ctx, row, resolution) : escalateCase(ctx, row, outcome, new Date(), resolution);
 
 async function deniedDecision(ctx: Ctx, caller: OperatorCaller, row: typeof programOperatorCases.$inferSelect) {
   const [fact] = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.companyId, caller.companyId), eq(agentEvents.jobId, row.jobId), sql`${agentEvents.data}->'operatorAction'->>'case' = ${row.id}`, sql`${agentEvents.data}->'operatorAction'->>'operatorJobId' = ${caller.id}`, sql`${agentEvents.data}->'operatorAction'->'actor'->>'id' = ${caller.agentId}`, sql`${agentEvents.data}->'operatorAction'->>'decision' = 'denied'`, sql`${agentEvents.data}->'operatorAction'->>'result' = 'applied'`)).limit(1);

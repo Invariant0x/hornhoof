@@ -37,12 +37,12 @@ async function fixture() {
     return { id: job!.id, companyId: c.companyId, agentId: agent.id, agentKind: agent.kind, roleKey: agent.roleKey };
   };
   const callers = { orchestrator: await turn(orchestrator!), opsHead: await turn(opsHead!), operator: await turn(c.operator!), developer: await turn(developer!), watcher: await turn(c.watcher) };
-  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', cols: 80, rows: 24, question: null as OperatorQuestion | null, tool: null as string | null, input: 'applied' as 'applied' | 'refused', answers: true };
+  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', cols: 80, rows: 24, state: 'idle' as 'working' | 'idle', question: null as OperatorQuestion | null, tool: null as string | null, input: 'applied' as 'applied' | 'refused', answers: true };
   const snapshot = randomUUID();
   const frames = () => c.sent.mock.calls.map(([node, frame]) => ({ node, frame: frame as OperatorServerMessage })).filter((sent): sent is { node: typeof sent.node; frame: Extract<OperatorServerMessage, { type: 'program.view_get' | 'program.input_send' }> } => sent.frame.type === 'program.view_get' || sent.frame.type === 'program.input_send');
   c.sent.mockImplementation((node, frame) => {
     if (!screen.answers) return false;
-    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: screen.cols, rows: screen.rows, cells: screen.cells }));
+    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: screen.state, tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: screen.cols, rows: screen.rows, cells: screen.cells }));
     if (frame.type === 'program.input_send') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.input_result', agentKey: frame.agentKey, action: frame.action, result: screen.input, reason: screen.input === 'refused' ? 'snapshot_stale' : null, jobId: c.job.id, instance: c.fact.instance, question: screen.question, text: frame.text?.replaceAll(SECRET, '[hidden]') ?? null, auditReason: frame.auditReason.replaceAll(SECRET, '[hidden]') }));
     return true;
   });
@@ -385,4 +385,103 @@ it('routes a permission denial to the orchestrator when the target department he
   const result = await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'Outside the working folder.' });
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   expect((await c.turnsOf(orchestrator!.id)).filter(job => job.prompt.includes(result.case))).toHaveLength(1);
+});
+
+type WithCase = Awaited<ReturnType<typeof withCase>>;
+const caseRow = async (c: WithCase) => (await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, c.incident.id)))[0]!;
+/* Who heard of the case besides its operator: the orchestrator, the head of Operations or the target's head. */
+async function toldOf(c: WithCase): Promise<string[]> {
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const turns = await Promise.all([orchestrator!.id, c.callers.opsHead.agentId, c.head.id].map(id => c.turnsOf(id)));
+  return turns.flat().filter(job => job.prompt.includes(c.incident.id)).map(job => job.prompt);
+}
+const revoked = (c: WithCase, closedBecause: string) => expect(c.sent.mock.calls).toContainEqual([expect.anything(), expect.objectContaining({ type: 'program.operator_case', case: c.incident.id, disposition: 'revoke', closedBecause })]);
+const atWork = (c: WithCase) => { c.screen.state = 'working'; c.screen.question = null; };
+
+it("closes a question case by itself once a fresh screen shows the program at work asking nothing, before its operator looked, and tells no one", async () => {
+  const c = await withCase(true);
+  atWork(c);
+  await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id });
+  const closed = await caseRow(c);
+  expect(closed).toMatchObject({ status: 'resolved', escalationJobId: null, recoveryHold: false, resolution: { outcome: 'question_gone', image: closed.pictureId } });
+  expect(closed.pictureId).toEqual(expect.any(String));
+  expect(await toldOf(c)).toEqual([]);
+  revoked(c, 'question_gone');
+});
+
+it('keeps a question case open while the screen still asks it or the program stands idle', async () => {
+  const c = await withCase(true);
+  c.screen.state = 'working';
+  await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id });
+  c.screen.state = 'idle'; c.screen.question = null;
+  await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id });
+  expect(await caseRow(c)).toMatchObject({ status: 'open', resolution: null });
+});
+
+it.each([
+  ['its question cleared', (c: WithCase) => c.record({ type: 'program.question', ...c.identity, evidenceId: randomUUID(), ordinal: 0, phase: 'cleared', question: c.request, questionOrdinal: 1, elapsedMs: 30010 })],
+  ['its own next event', (c: WithCase) => c.record({ ...c.fact, phase: 'activity', elapsedMs: 30010 })],
+])('closes a question case as gone on %s, with no escalation', async (_, event) => {
+  const c = await withCase(true);
+  await event(c);
+  expect(await caseRow(c)).toMatchObject({ status: 'resolved', escalationJobId: null, resolution: { outcome: 'question_gone' } });
+  expect(await toldOf(c)).toEqual([]);
+  revoked(c, 'question_gone');
+});
+
+it("turns a failed report on a question that went away into the case's own close: the fresh screen shows the program at work", async () => {
+  const c = await withCase(true);
+  atWork(c);
+  const answer = await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'failed', text: 'The case shows no question.' });
+  expect(answer).toMatchObject({ outcome: 'question_gone', case: c.incident.id, closed: expect.stringContaining('already closed') });
+  expect(await caseRow(c)).toMatchObject({ status: 'resolved', escalationJobId: null, resolution: { outcome: 'question_gone' } });
+  expect(await toldOf(c)).toEqual([]);
+});
+
+it('closes an open case on a cleared report with its fresh picture and the operator named, and tells no one', async () => {
+  const c = await withCase(false);
+  atWork(c);
+  const result = await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'cleared', text: 'The program works on its words.' });
+  const closed = await caseRow(c);
+  expect(result).toEqual({ outcome: 'cleared', case: c.incident.id, pictureId: closed.pictureId });
+  expect(closed.pictureId).toEqual(expect.any(String));
+  expect(closed).toMatchObject({ status: 'resolved', escalationJobId: null, recoveryHold: false, resolution: { outcome: 'cleared', text: 'The program works on its words.', image: closed.pictureId, actor: { id: c.operator!.id } } });
+  expect(await toldOf(c)).toEqual([]);
+  revoked(c, 'cleared');
+});
+
+it.each([
+  ['stands idle', (c: WithCase) => { c.screen.state = 'idle'; c.screen.question = null; }, 'the program idle'],
+  ['still asks', (c: WithCase) => { c.screen.state = 'working'; }, 'a question'],
+  ['cannot be seen', (c: WithCase) => { c.screen.answers = false; }, 'no screen'],
+])('refuses cleared while the program %s, and the case stays open', async (_, screen, shows) => {
+  const c = await withCase(true);
+  screen(c);
+  await expect(reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'cleared', text: 'Looks fine.' })).rejects.toMatchObject({ status: 409, message: expect.stringContaining(shows) });
+  expect(await caseRow(c)).toMatchObject({ status: 'open', resolution: null });
+  expect(await toldOf(c)).toEqual([]);
+});
+
+it('still escalates a failed report on a screen that stands, to the orchestrator once', async () => {
+  const c = await withCase(true);
+  const result = await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'failed', text: 'The question stays after Enter.' });
+  expect(result).toEqual({ outcome: 'failed', case: c.incident.id, pictureId: expect.any(String) });
+  expect(await caseRow(c)).toMatchObject({ status: 'escalated', resolution: { outcome: 'failed', text: 'The question stays after Enter.' } });
+  expect(await toldOf(c)).toHaveLength(1);
+});
+
+it('answers a late report on a case that closed by itself plainly with how it closed, from any turn of its operator, and records nothing', async () => {
+  const c = await withCase(false);
+  await c.record({ ...c.fact, phase: 'queued', elapsedMs: 60010 });
+  const closed = await caseRow(c);
+  expect(closed).toMatchObject({ status: 'resolved', resolution: { outcome: 'received' } });
+  const reported = () => c.db.select().from(agentEvents).then(rows => rows.filter(row => (row.data as { operatorReport?: unknown }).operatorReport));
+  const late = await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'failed', text: 'Nothing moves.' });
+  expect(late).toEqual({ outcome: 'received', case: c.incident.id, pictureId: closed.pictureId, closed: `Case ${c.incident.id} is already closed (received): ${closed.resolution!.text} Your report changes nothing and goes to no one.` });
+  /* Its notice was taken off the queue when the case closed; the operator reports from a turn of its own. */
+  const [other] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.operator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Round.', timeoutMs: 1000, status: 'running' }).returning();
+  expect(await reportOperatorCase(c.ctx, { ...c.caller, id: other!.id }, { case: c.incident.id, outcome: 'cleared', text: 'Works.' })).toEqual(late);
+  expect(await reported()).toEqual([]);
+  expect(await toldOf(c)).toEqual([]);
+  await expect(reportOperatorCase(c.ctx, c.callers.developer, { case: c.incident.id, outcome: 'failed', text: 'Not mine.' })).rejects.toMatchObject({ status: 403 });
 });
