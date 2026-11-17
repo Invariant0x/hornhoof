@@ -89,6 +89,7 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (shelf) registerOrchestratorTools(server, ctx, app, job, reading);
+  else registerComputerTools(server, ctx, job);
   /* A department's own tools go for the department the orchestrator names. */
   shelf?.shelve(true);
   registerBriefingTool(server, ctx, job);

@@ -20,8 +20,7 @@ built in parallel on the contract below; the contract changes only with Neo's co
 
 ## API contract (for #1115)
 
-`GET /api/machines/access` answers `{ views: AccessView[], durations: ['1h', '8h', '24h'] }`. The first duration is
-the default.
+`GET /api/machines/access` answers `{ views: AccessView[] }`. There is no durations field: the web already owns the three choices. The same view is returned in `GET /api/machines` and is covered in `computer-machines.test.ts`.
 
 ```ts
 type AccessScope = 'orchestrator' | 'all_agents';
@@ -78,7 +77,7 @@ with the same defaults.
     it. `readGrant` and the signed payload stay as they are (v 1), so the keeper on each machine needs no change.
   - `open(me, machineId, { grant, scope, duration })` writes `scope` with `until`, `openedBy`, `openedAt`.
   - `states` and `views` add `scope`, `openedBy` (joined name from `people`) and `openedAt`, all null when closed.
-  - `start(job, machineId, command, timeout)` takes the job's agent kind and, in the same transaction that reads the
+  - `start(job, machineId, command, timeout)` reads the actual job and agent kind from the database and, in the same transaction that reads the
     access row: an assistant gets `'closed'` always; any kind but the orchestrator gets `'closed'` unless
     `scope = 'all_agents'`. The machine is looked up under `job.companyId` as today, so another company's agent never
     reaches it.
@@ -89,19 +88,19 @@ with the same defaults.
 - `apps/server/src/modules/computer/expiry.ts` (new): `expireAccess(ctx)` calls `ctx.computer.expire()`, writes for
   each a line in the orchestrator's window (`kind: 'computer'`, `{ state: 'expired', machine }`, no person) and
   publishes `{ type: 'computer' }`. The line helper moves here from `routes.ts`, so both share it.
-- `apps/server/src/app.ts`: in lead mode, `expireAccess` every 60 s (`EXPIRE_EVERY_MS`), cleared on close, like
+- `apps/server/src/app.ts`: in lead mode, `expireAccess` every 60 s , cleared on close, like
   `holdersTimer`. Tests never wait for it: they build `Computers` with their own `now` and call `expireAccess` directly.
 - `apps/server/src/modules/computer/routes.ts`: the open body above with `confirm`; the opened line carries `scope`
-  and `until`; `durations` in `GET /api/machines/access`.
+  and `until`, and `confirm: true` for company access; no durations field is added.
 - `apps/server/src/modules/computer/tools.ts`:
   - `registerComputerTools(server, ctx, job)` registers `machines`, `ask_computer_access`, `computer`,
     `computer_result` for the orchestrator, as today.
-  - New `registerAgentComputerTools` for workers and heads: `machines`, `computer` and `computer_result` only. Their
+  - The same registration gives workers and heads: `machines`, `computer` and `computer_result` only. Their
     `computer` says, when the machine is not open to all agents, that only its owner opens it to all agents and that the
     agent asks the orchestrator (no `ask_computer_access` for them).
   - The rule of whose last words may direct a command (`machinePrincipal`: the owner, the CEO, the CEO delegate, or no
-    person) holds for every agent, unchanged.
-- `apps/server/src/modules/tools/mcp.ts`: registers the agents' computer tools in the non-orchestrator branch. Assistants
+    person) holds for every agent. Only the machine path admits a worker, and only for an active all_agents machine in the same company; decisionPrincipal and standingPrincipal keep ANSWERS_PEOPLE.
+- `apps/server/src/modules/tools/mcp.ts`: uses the shared computer registration in the non-orchestrator branch, preserving the integrated iv-orchestrator-all shelf. Assistants
   use `assistantAgentTools` and get none.
 - `apps/server/src/modules/backups/restore.ts`: a restore resets `scope` to `orchestrator` with the other fields.
 - `apps/server/src/errors.ts`: reason `confirm_needed`.
@@ -132,8 +131,35 @@ Server tests, written first and red on origin/turn-31:
 - Named neighbours: `computer`, `computer-machines`, `orchestrator-control`, `decisions`, `network-tables`,
   `migrations`; `tsc` of the server with tests; `eslint` of the changed files. No `run_tests`.
 
-## Migration number
+## Migration number and repeated openings
 
-turn-31 ends at `0129_builtin_node_connections`. Planned before this one: #1076 `0130_vault`, #1079 `0131` and `0132`,
-#1113 `0133`. This task plans `0134_machine_access_scope`; the number is whatever comes next in turn-31's journal at
-hand-in, generated with drizzle-kit on that journal.
+The current turn-31 base ends at `0136_outbound_contact_log`. The head reserved 0137 for task 1077 and confirmed
+`0138_machine_access_scope.sql` and `meta/0138_snapshot.json` here. Generate with Drizzle, preserve existing snapshots,
+and recheck the journal before hand-in. At integration, its `when` must exceed the latest applied entry, and the snapshot
+must follow the already integrated 0137. If 0139 enters first, ask the head to renumber before integration.
+
+Every opening starts a new window. As the head confirmed, end the previous waiting queue with exit 126 in the same
+transaction before the new grant is written, also after an expired window. Never touch or claim to have stopped commands
+already taken by the keeper. RED/GREEN covers both downgrade from all_agents to orchestrator and an expired old window.
+
+The plan's executable changes remain in task-1119. Task 1220 is a separate turn-32 document and is not part of this branch.
+
+## Development evidence
+
+The observed RED is in `task-1119-red-ready.log`: missing opener/scope fields, unchanged daily default, absent confirmation,
+unchecked grant span, employee admission under orchestrator access and another employee reading a run. The new expiry
+module was not present on that base. `task-1119-reopen-red-fresh.log` separately proves both old waiting queues cross into
+a new window before the fix. The expired test queues its command one second before expiry so the unrelated ten-minute
+stale-command rule cannot make it pass.
+
+The named local run in `task-1119-green-covered.log` passed 237 tests in ten files: computer-scope,
+computer-scope-migration, computer, computer-machines, orchestrator-control, decision-context, decisions, network-tables,
+migrations and restore. After extracting the access-request registration, its four caller files passed 120 tests again
+in `task-1119-green-tools-refactor.log`. Nine other source fingerprints remained identical; their measured coverage was
+reused, replacing only computer/tools coverage from that final run. No full suite or run_tests ran.
+
+Server test types passed. The unchanged repository judge found no new or grown function at CRAP 10 or above, with
+worst counted CRAP 9.648. registerComputerTools is now CC 7 and registerAccessRequest CC 6. Dryer found no duplicates.
+Final exact-commit author-check output, lint and build records accompany the Development hand-in. An unavailable
+formatter or a selector requiring the release suite must stay explicitly unavailable. Review, independent Security and
+Tests have not been performed by this author. No integration is authorized by these local checks.

@@ -24,7 +24,7 @@ import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 /* A wait for a command's answer that no test outlasts, for commands that are answered. */
 const NEVER_MS = 2_147_483_647;
 /* The server's own machine, with no name its keeper told yet, which the CEO owns. */
@@ -172,7 +172,10 @@ describe('access to the computer the server runs on', () => {
     expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Restart the nodes outside AppArmor.' }, message: { direction: 'out', from: { kind: 'agent', id: orchestrator.id, agentKind: 'orchestrator' }, to: { kind: 'person', id: ceo!.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
   });
 
-  it('opens for a day with one click of the CEO when the orchestrator asks, and the orchestrator goes on by itself', async () => {
+  it('opens for one hour by default when the CEO clicks, and the orchestrator goes on by itself', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-17T12:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
     const c = await company();
     const { app, db, ceo, orchestrator } = c;
     const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
@@ -184,14 +187,13 @@ describe('access to the computer the server runs on', () => {
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     expect(opened.statusCode).toBe(200);
     const until_ = Date.parse(opened.json().until);
-    expect(until_).toBeGreaterThanOrEqual(before + DAY_MS - 1000);
-    expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
+    expect(until_).toBe(before + HOUR_MS);
     expect(await accessOf(c)).toMatchObject({ until: new Date(until_), askedReason: null, askedAt: null, grant: null });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true, machineId: c.machine });
     /* The server's own machine told no name, so the log names none, and each screen names it in its reader's language. */
     expect(await lines(db, orchestrator.id)).toEqual([
       { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
-      { state: 'opened', until: opened.json().until },
+      { state: 'opened', scope: 'orchestrator', until: opened.json().until },
     ]);
     /* The note that it is open is the CEO's order, so the turn it starts may use the computer. */
     const [note] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
@@ -560,7 +562,7 @@ describe('access to the computer the server runs on', () => {
     await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) });
     expect(await lines(db, orchestrator.id)).toEqual([
       { state: 'asked', reason: 'Clean Docker images.', machine: 'debian-box' },
-      { state: 'opened', until: expect.any(String), machine: 'debian-box' },
+      { state: 'opened', scope: 'orchestrator', until: expect.any(String), machine: 'debian-box' },
       { state: 'closed', machine: 'debian-box' },
     ]);
   });

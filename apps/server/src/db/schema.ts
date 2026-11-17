@@ -2735,6 +2735,7 @@ export const machineAccess = pgTable(
       .primaryKey()
       .references(() => machines.id),
     companyId: companyId(),
+    scope: text('scope', { enum: ['orchestrator', 'all_agents'] }).notNull().default('orchestrator'),
     until: timestamp('until', { withTimezone: true }),
     askedReason: text('asked_reason'),
     askedAt: timestamp('asked_at', { withTimezone: true }),
@@ -2742,7 +2743,7 @@ export const machineAccess = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
   },
-  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
+  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`), check('machine_access_scope', sql`scope IN ('orchestrator', 'all_agents')`)],
 ).enableRLS();
 
 /* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO
