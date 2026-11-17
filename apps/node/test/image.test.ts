@@ -86,6 +86,14 @@ describe('the node image', () => {
     }
   });
 
+  it("lets agents send and read a mailbox's mail with the image's curl and Python, and fails the build when either loses its mail protocols", () => {
+    for (const name of ['ca-certificates', 'curl', 'python3']) expect(installed).toContain(name);
+    const check = runtime.slice(runtime.indexOf('RUN curl --version'));
+    expect(check).toMatch(/^RUN curl --version \| grep -qw smtps && curl --version \| grep -qw imaps \\\n {2}&& python3 -c 'import email\.message, imaplib, mimetypes, smtplib, ssl'\n/);
+    expect(runtime.indexOf('RUN curl --version')).toBeGreaterThan(runtime.indexOf('RUN apt-get update'));
+    expect(runtime.indexOf('RUN curl --version')).toBeLessThan(runtime.indexOf('USER node'));
+  });
+
   it('installs the GitHub CLI in the runtime stage at a pinned version with verified per-arch SHA-256 and checks gh --version', () => {
     const version = runtime.match(/ARG GH_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
     const amd64Sha = runtime.match(/ARG GH_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];

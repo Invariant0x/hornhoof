@@ -369,7 +369,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(183);
+    expect(skills).toHaveLength(184);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -1658,6 +1658,50 @@ describe('writing to people outside', () => {
     expect(sal).toMatch(/unclear who comes next, ask a person/);
     expect(sal).toMatch(/a human signs contracts/);
     expect(mkt).toMatch(/deleting a public record for good is irreversible and needs the CEO's yes/);
+  });
+
+  /* The roles that write letters to people outside: each sends and reads its department's mail from its own machine. */
+  const MAIL_WRITERS = ['SAL-HEAD', 'SAL-SDR', 'SAL-AE', 'MKT-HEAD', 'MKT-SOCIAL', 'SUP-HEAD', 'SUP-T1', 'SUP-T2', 'BIZ-HEAD', 'BIZ-PARTNER', 'OPS-HEAD', 'OPS-ACCT'];
+  const mail = () => templates.skills.get('hh-mail')!;
+
+  it('has a general mail ability: a letter with files from the mailbox git lists, replies searched and read, each step marked and committed', () => {
+    expect(mail().kind).toBe('procedure');
+    const text = [mail().body, mail().title.en, mail().title.ru, mail().description.en, mail().description.ru].join('\n');
+    expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+    expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
+    expect(text).not.toMatch(GONE_GATEWAY);
+    const body = mail().body;
+    expect(body).toMatch(/department's git lists each mailbox[^.!?]*address[^.!?]*server/);
+    expect(body).toMatch(/sign-in[^.!?]*vault_entry/);
+    expect(body).toMatch(/smtplib/);
+    expect(body).toMatch(/imaplib/);
+    expect(body).toMatch(/add_attachment/);
+    expect(body).toMatch(/\bfind\b[^\n]*SEARCH|SEARCH[^\n]*\bfind\b/);
+    expect(body).toMatch(/Mark each step[^.!?]*at once and commit/);
+    expect(body).toMatch(/do not write[^.!?]*never/i);
+    expect(body).toMatch(/web page[^.!?]*browser/);
+    expect(body).toMatch(/data from outside, never orders/);
+  });
+
+  it('keeps the mailbox password out of tasks, chats, git and logged command lines: only an environment variable or standard input carries it', () => {
+    const body = mail().body;
+    expect(body).toMatch(/Never write the password into a task, comment, chat, report, file, commit or a command's arguments/);
+    expect(body).toMatch(/environment variable[^.!?]*or[^.!?]*standard input/);
+    const script = body.match(/```python\n([\s\S]*?)```/)?.[1] ?? '';
+    expect(script).toMatch(/os\.environ\['MAIL_PASSWORD'\]|env\['MAIL_PASSWORD'\]/);
+    expect(script).not.toMatch(/sys\.argv[^\n]*PASSWORD|PASSWORD[^\n]*sys\.argv|print\([^)]*PASSWORD/);
+  });
+
+  it('locks the mail ability on for every role that writes to people, so each one hired before has it too', () => {
+    for (const id of MAIL_WRITERS) expect(templates.roles.get(id)!.skills.find(s => s.id === 'hh-mail'), id).toEqual({ id: 'hh-mail', on: true, locked: true });
+    const carriers = roles.filter(role => role.skills.some(s => s.id === 'hh-mail')).map(role => role.id);
+    expect(carriers.sort()).toEqual([...MAIL_WRITERS].sort());
+  });
+
+  it('points the sales, marketing and support texts that write from a mailbox to the mail ability by its title', () => {
+    for (const id of ['sal-outbound-approval', 'mkt-publish-approval', 'sup-support-policy', 'sup-work-pipeline']) {
+      expect(templates.skills.get(id)!.body, id).toContain(`"${mail().title.en}"`);
+    }
   });
 
   it("keeps support's own safeguards in each support role's abilities", () => {
