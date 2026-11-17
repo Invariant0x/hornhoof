@@ -4,7 +4,7 @@ import { decryptSecret } from '../src/crypto/secrets.js';
 import { outboundContactFields, outboundContacts } from '../src/db/schema.js';
 import { workbook } from './outbound-contact-workbook.js';
 import { as } from './helpers.js';
-import { dispatched, published, world } from './outbound-world.js';
+import { aChannelOf, dispatched, published, world } from './outbound-world.js';
 
 const ROWS = [['address', 'consent', 'name', 'organization'], ['import-ann@shop.example', 'yes', 'Ann', 'The shop'], ['no@shop.example', '', 'No consent', ''], ['', 'yes', 'No address', ''], ['extra@shop.example', 'yes', 'Extra', 'Shop', 'surplus']];
 
@@ -57,6 +57,31 @@ describe('a consented contact table', () => {
     }
     expect(await w.c.db.select().from(outboundContacts)).toHaveLength(1);
     expect(await w.c.db.select().from(outboundContactFields)).toEqual([]);
+  });
+
+  it('refuses a malformed table with a clear reason, no private diagnostics and no writes', async () => {
+    const w = await world();
+    const data = Buffer.from('address,consent,name,name\nprivate@shop.example,yes,Private cell,Private cell').toString('base64');
+    const response = await w.c.app.inject({ method: 'POST', url: '/api/outbound/contacts/import', ...as(w.c.ceoToken), payload: { channelId: w.channel.id, filename: 'contacts.csv', data, source: 'Signup', evidence: 'Consent' } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { reason: 'outbound_import_invalid' } });
+    expect(response.body).not.toContain('Private cell');
+    expect(response.body).not.toContain('private@shop.example');
+    expect(await w.c.db.select().from(outboundContacts)).toHaveLength(1);
+    expect(await w.c.db.select().from(outboundContactFields)).toEqual([]);
+  });
+
+  it('uses the channel adapter for direct addresses rather than treating every address as email', async () => {
+    const w = await world();
+    const channel = await aChannelOf(w.c, { adapter: 'webhook' });
+    const data = Buffer.from('address,consent,name\npartner-1,yes,Ann').toString('base64');
+    const response = await w.c.app.inject({ method: 'POST', url: '/api/outbound/contacts/import', ...as(w.c.ceoToken), payload: { channelId: channel.id, filename: 'contacts.csv', data, source: 'Signup', evidence: 'Consent' } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({ added: 1, updated: 0, skipped: [] });
+    const [added] = await w.c.db.select().from(outboundContacts).where(eq(outboundContacts.kind, 'direct'));
+    expect(added).toBeDefined();
+    const [saved] = await w.c.db.select().from(outboundContactFields).where(eq(outboundContactFields.contactId, added!.id));
+    expect(JSON.parse(decryptSecret(saved!.fieldsEnc, w.ctx.config.secret))).toEqual({ name: 'Ann' });
   });
 
   it('keeps a suppressed contact suppressed while importing another consenting row', async () => {
