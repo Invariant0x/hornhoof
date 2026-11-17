@@ -1,17 +1,27 @@
-import { PhoneCapture, PhoneServerMessage, type PhoneFrame, type PhoneReply, type PhoneGrant } from '@hornhoof/protocol';
+import { PhoneCapture, PhoneServerMessage, networkEndpoint, type PhoneFrame, type PhoneOperation, type PhoneReply, type PhoneGrant } from '@hornhoof/protocol';
 import type { PhoneAdb } from './adb.js';
 import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
 
 export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act'>;
 export type PhoneExecutorDeps = { adb: PhoneDriver; send(message: PhoneReply | PhoneFrame): void };
-const noFrame = (): PhoneCapture => ({ png: null, width: 0, height: 0, elements: [] });
+const noFrame = (): PhoneCapture => ({ jpeg: null, width: 0, height: 0, elements: [] });
 const FRAME_MS = 1500;
+
+/* The agent taps and swipes in the pixels of the picture it sees, adb in the phone's. */
+function onPhone(op: PhoneOperation, scale: number): PhoneOperation {
+  const at = (n: number) => Math.round(n * scale);
+  if (op.kind === 'tap') return { ...op, x: at(op.x), y: at(op.y) };
+  if (op.kind === 'swipe') return { ...op, x: at(op.x), y: at(op.y), toX: at(op.toX), toY: at(op.toY) };
+  return op;
+}
 
 export class PhoneExecutor {
   readonly #sessions = new PhoneSessions();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #sequences = new Map<string, number>();
+  /* How many of each phone's pixels make one pixel of the picture its agent sees. */
+  readonly #scales = new Map<string, number>();
   readonly #seen = new Map<string, { at: number; done: Promise<PhoneReply> }>();
 
   constructor(private readonly deps: PhoneExecutorDeps) {}
@@ -53,7 +63,7 @@ export class PhoneExecutor {
       const { adb } = this.deps;
       const stop = new AbortController();
       if (m.pairing && await adb.pair(m.pairing.endpoint, m.pairing.code, stop.signal) !== 'paired') return reply('needs_person');
-      if (await adb.connect(m.endpoint, stop.signal) !== 'connected') return reply('needs_person');
+      if (networkEndpoint(m.endpoint) && await adb.connect(m.endpoint, stop.signal) !== 'connected') return reply('needs_person');
       const devices = (await adb.devices(stop.signal)).filter(d => d.serial === m.endpoint);
       const verified = await Promise.all(devices.map(async device => {
         if (device.status !== 'device') return device;
@@ -68,7 +78,7 @@ export class PhoneExecutor {
       try {
         await this.#sessions.use(grant.sessionId, grant.generation, async state => {
           const { adb } = this.deps;
-          if (await adb.connect(grant.binding.serial, state.signal) !== 'connected') throw new Error('phone_needs_person');
+          if (networkEndpoint(grant.binding.serial) && await adb.connect(grant.binding.serial, state.signal) !== 'connected') throw new Error('phone_needs_person');
           if (!(await adb.devices(state.signal)).some(d => d.serial === grant.binding.serial && d.status === 'device')) throw new Error('phone_needs_person');
           await this.assertDevice(state);
         });
@@ -82,7 +92,11 @@ export class PhoneExecutor {
     try {
       const capture = await this.#sessions.use(m.sessionId, m.generation, async state => {
         await this.assertDevice(state);
-        if (m.operation.kind !== 'capture') await this.deps.adb.act(state.grant.binding.serial, m.operation, state.signal);
+        const serial = state.grant.binding.serial;
+        if (m.operation.kind !== 'capture') {
+          if (!this.#scales.has(serial)) await this.capture(state);
+          await this.deps.adb.act(serial, onPhone(m.operation, this.#scales.get(serial)!), state.signal);
+        }
         return this.capture(state);
       });
       const state = this.#sessions.view(m.sessionId, m.generation);
@@ -94,7 +108,8 @@ export class PhoneExecutor {
   private async capture(state: PhoneSessionView): Promise<PhoneCapture> {
     const serial = state.grant.binding.serial;
     await this.assertDevice(state);
-    const capture = phoneCapture(await this.deps.adb.tree(serial, state.signal), await this.deps.adb.screenshot(serial, state.signal));
+    const { capture, scale } = phoneCapture(await this.deps.adb.tree(serial, state.signal), await this.deps.adb.screenshot(serial, state.signal));
+    this.#scales.set(serial, scale);
     return PhoneCapture.safeParse(capture).success ? capture : noFrame();
   }
 
