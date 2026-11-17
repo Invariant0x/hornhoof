@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-o
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines, people, personAccess, publicLinks, teams } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
@@ -210,10 +211,10 @@ export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean
    ranking asks again. */
 async function hiddenName(ctx: Ctx, own: string): Promise<void> {
   const { db } = ctx;
-  const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+  const [link] = await db.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
   if (link) return;
   const [other] = await db
-    .select({ companyId: machines.companyId })
+    .select(only(machines, 'companyId'))
     .from(machines)
     .where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), ne(machines.id, own), eq(machines.kind, 'computer')))
     .limit(1);
@@ -253,7 +254,7 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     const q = queryOf(tx);
     await q('INSERT INTO net.ranking (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
     const [kept] = await q<{ rescored_at: Date | string | null; handover_at: Date | string | null }>('SELECT rescored_at, handover_at FROM net.ranking FOR UPDATE');
-    const [link] = await tx.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+    const [link] = await tx.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
     const fit = { link: Boolean(link) };
     const all = await candidates(tx, now);
     const others = all.filter(m => m.id !== leader.id);

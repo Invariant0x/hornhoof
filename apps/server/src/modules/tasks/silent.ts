@@ -3,7 +3,7 @@ import { TOOL_QUIET_ALARM_MS, type TurnAlarm, type TurnAlarmReason, type TurnPro
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
 import { operationsStaff } from '../program-operator/access.js';
 import { headOf } from './failures.js';
@@ -272,7 +272,7 @@ export async function operationsWatchers(ctx: Ctx, companyId: string): Promise<A
 
 async function busyAgentIds(ctx: Ctx): Promise<Set<string>> {
   const rows = await ctx.db
-    .select({ agentId: jobs.agentId })
+    .select(only(jobs, 'agentId'))
     .from(jobs)
     .where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
   return new Set(rows.map(r => r.agentId!));

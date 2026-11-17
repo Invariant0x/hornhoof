@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, jobs, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { expireOperatorCases } from '../src/modules/program-operator/cases.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
@@ -261,7 +262,7 @@ it('tells what became of the words in the window and on the task', async () => {
   await c.unrecorded(c.agent.id, first!.id);
   await c.failedTurn(first!.id);
   const [next] = await c.continuationsOf(first!.id);
-  const facts = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.jobId, first!.id), sql`${agentEvents.data}->>'continuation' = ${next!.id}`));
+  const facts = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.jobId, first!.id), sql`${agentEvents.data}->>'continuation' = ${next!.id}`));
   expect(facts).toHaveLength(1);
   expect(JSON.stringify(facts[0]!.data)).toContain('did not record these words');
 });

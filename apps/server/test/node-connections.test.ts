@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import type { Db } from '../src/db/client.js';
 import { companies, departments, machines, nodeConnections, nodes, people } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { dropOldConnections, nodeConnected, nodeDisconnected } from '../src/modules/nodes/connections.js';
 import { NodeHub, type NodeIdentity } from '../src/modules/nodes/hub.js';
@@ -379,7 +380,7 @@ describe('what a node says of a drop when it is back', () => {
     const node = await connectNode(url, keys[0]!);
     node.send(REPORT);
     node.send({ type: 'hello', version: '0.5.1', loggedIn: true, running: [] });
-    await until(async () => (await db.select({ version: nodes.version }).from(nodes)).some(n => n.version === '0.5.1'));
+    await until(async () => (await db.select(only(nodes, 'version')).from(nodes)).some(n => n.version === '0.5.1'));
     expect((await stored(db)).map(r => r.report)).toEqual([null]);
   });
 
@@ -444,7 +445,7 @@ describe('the server log of node connections', () => {
     expect(parsed.filter(l => l.msg === 'A node lost its connection.')).toEqual([expect.objectContaining({ level: 30, machine: 'dev-mac', node: ids[0], cause: 'node_closed', code: 1000, reason: 'Going.' })]);
     const all = lines.join('\n');
     for (const key of keys) expect(all).not.toContain(key);
-    const hashes = (await db.select({ keyHash: nodes.keyHash }).from(nodes)).map(n => n.keyHash!);
+    const hashes = (await db.select(only(nodes, 'keyHash')).from(nodes)).map(n => n.keyHash!);
     for (const hash of hashes) expect(all).not.toContain(hash);
   });
 
@@ -581,7 +582,7 @@ describe('who gets the history of a machine', () => {
     const body = (await history(app, ceo, machineId)).body;
     expect(body).not.toContain(keys[0]);
     expect(body).not.toContain('mac-0001-abcd');
-    expect(body).not.toContain((await db.select({ keyHash: nodes.keyHash }).from(nodes))[0]!.keyHash);
+    expect(body).not.toContain((await db.select(only(nodes, 'keyHash')).from(nodes))[0]!.keyHash);
   });
 });
 

@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Ctx } from '../../app.js';
 import { assistants } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import type { StreamMessage } from '../events/bus.js';
 import { eventsAfter, sweepEvents, type AssistantEventView } from './events.js';
@@ -118,7 +119,7 @@ export class Assistants {
     this.sweeper = setInterval(() => this.sweep(), SWEEP_MS);
     this.sweeper.unref();
     try {
-      const rows = await this.ctx.db.selectDistinct({ companyId: assistants.companyId }).from(assistants);
+      const rows = await this.ctx.db.selectDistinct(only(assistants, 'companyId')).from(assistants);
       for (const { companyId } of rows) this.collect(companyId);
     } catch (err) {
       this.ctx.log.error({ error: loggable(err) }, 'Could not start passing on what assistants wait for.');

@@ -1,4 +1,5 @@
 import { taskRoute } from './task-route';
+import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -174,6 +175,8 @@ describe('Department view', () => {
     const pointer = within(about).getByRole('region', { name: 'External messaging' });
     expect(within(pointer).queryByRole('heading', { name: 'B2C Email Outreach' })).toBeNull();
     expect(calls.filter(c => c.path === '/api/outbound/catalog?department=d2')).toHaveLength(1);
+    /* Its words keep their own direction right to left (Design #1176, M1). */
+    expect(unisolated(pointer)).toEqual([]);
     await user.click(within(pointer).getByRole('button', { name: 'Open External messaging' }));
     expect(await within(screen.getByRole('complementary', { name: 'External messaging' })).findByRole('heading', { name: 'B2C Email Outreach' })).toBeInTheDocument();
   });

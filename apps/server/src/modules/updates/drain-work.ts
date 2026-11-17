@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { enqueueTurn } from '../conversation/queue.js';
 import { ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
@@ -28,10 +28,10 @@ async function machineName(ctx: Ctx, node: NodeIdentity): Promise<string> {
   if (node.kind === 'builtin') {
     if (node.machine === ownMachine(ctx.config)) return 'the built-in node';
     /* The built-in node of another machine that holds the data goes by that machine's name. */
-    const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.networkId, node.machine), isNull(machines.revokedAt)));
+    const [machine] = await ctx.db.select(only(machines, 'hostname')).from(machines).where(and(eq(machines.networkId, node.machine), isNull(machines.revokedAt)));
     return `the built-in node of ${machine?.hostname || 'a machine'}`;
   }
-  const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
+  const [machine] = await ctx.db.select(only(machines, 'hostname')).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
   return machine?.hostname || 'a machine';
 }
 

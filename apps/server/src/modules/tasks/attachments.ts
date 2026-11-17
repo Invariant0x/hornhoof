@@ -10,7 +10,7 @@ import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
@@ -508,7 +508,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const file = await attachmentForPerson(db, me, id);
     if (file && !file.picture) return sendFile(ctx, reply, file, true);
-    const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
+    const [picture] = await db.select(only(attachments, 'operatorCaseId')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     if (!file) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
     if (!file.mediaType.startsWith('image/')) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(file.name ?? 'file')}`);
