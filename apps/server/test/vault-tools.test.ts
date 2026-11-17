@@ -64,10 +64,25 @@ describe('the vault for agents', () => {
     expect(JSON.stringify(again)).not.toContain(PASSWORD);
   });
 
-  it('does not retain a secret tool input or result reported by a node', async () => {
+  it('keeps the orchestrator shelf outside replay for a sensitive target', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.orchestrator.id);
+    const id = randomUUID();
+    const args = { name: 'vault_entry', arguments: { entry: 'Partner site' } };
+    expect(answer(await replay(c, token, 'use_tool', args, id))).toMatchObject({ password: PASSWORD });
+    expect(await c.db.select().from(toolCalls)).toEqual([]);
+    const [entry] = await c.db.select().from(vaultEntries).where(eq(vaultEntries.name, 'Partner site'));
+    await c.app.inject({ method: 'DELETE', url: `/api/vault/${entry!.id}`, ...as(c.ceoSession) });
+    const again = await replay(c, token, 'use_tool', args, id);
+    expect(again.isError).toBe(true);
+    expect(JSON.stringify(again)).not.toContain(PASSWORD);
+  });
+
+  it.each([false, true])('does not retain a secret tool input or result reported by a node, delegated: %s', async delegated => {
     const c = await setUp();
     const { token, job } = await c.startTurn(c.nora.id);
-    await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool', name: 'hornhoof.vault_save', input: JSON.stringify({ password: PASSWORD, code: CODE }) }, eq(jobs.id, job.id));
+    const input = { password: PASSWORD, code: CODE };
+    await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool', name: delegated ? 'hornhoof.use_tool' : 'hornhoof.vault_save', input: JSON.stringify(delegated ? { name: 'vault_save', arguments: input } : input) }, eq(jobs.id, job.id));
     await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
     await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool_result', ok: true, summary: JSON.stringify({ password: PASSWORD, code: '081804' }) }, eq(jobs.id, job.id));
     const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id));
