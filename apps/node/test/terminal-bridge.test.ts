@@ -109,6 +109,18 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(forward).toHaveBeenCalledOnce();
   });
 
+  it('refuses a sensitive call when private output cleanup fails, without exposing the error', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: async () => { throw new Error('private-cleanup-error-marker'); } });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const response = await fetch(bridge.agent('agent-1').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: toolCall('vault_entry') });
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain('private-cleanup-error-marker');
+    expect(up.seen).toEqual([]);
+  });
+
   /* The bridge's pauses between tries, taken on no clock: each one is only written down. */
   async function bridgeTo(statuses: number[]) {
     const up = await outage(statuses);
