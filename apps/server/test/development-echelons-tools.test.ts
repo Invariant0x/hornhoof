@@ -32,7 +32,7 @@ describe('the echelon public tools', () => {
   it("keeps the tracker's pipeline stage apart from the future echelon stage in one update_task call", async () => {
     const f = await fixture();
     const next = await f.hire('Next reviewer', 'worker', 'DEV-REV', f.claude.id, 'claude-opus-5-5');
-    const pipe = await createPipeline(f.ctx, f.task.companyId, { agentId: f.head.id }, async () => {}, f.task.departmentId, { name: 'Releases', why: '', stages: [
+    const pipe = await createPipeline(f.ctx, f.task.companyId, { agentId: f.head.id }, async () => {}, f.task.departmentId!, { name: 'Releases', why: '', stages: [
       { key: 'build', parent: null, name: 'Build', ownerRole: 'DEV-BE' },
       { key: 'check', parent: 'build', name: 'Check', ownerRole: 'DEV-HEAD' },
     ] });
