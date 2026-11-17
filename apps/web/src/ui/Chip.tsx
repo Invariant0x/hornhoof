@@ -33,7 +33,7 @@ export function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 
-export const agentWorking = ({ id, program, alarm, held, retry }: Employee): AgentLive => ({ id, program, alarm, held, retry });
+export const agentWorking = ({ id, program, alarm, held, retry, slotWait }: Employee): AgentLive => ({ id, program, alarm, held, retry, slotWait });
 
 export function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) {
   const t = useT();

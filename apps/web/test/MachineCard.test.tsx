@@ -162,3 +162,70 @@ describe("the lower part of a machine's card", () => {
     expect(block(card, 'Settings and actions')).toBeInTheDocument();
   });
 });
+
+/* How many agents' turns a machine runs at once (#1212): its owner, the CEO or the CEO delegate types it into the third
+   block and it is kept on Enter or on leaving the field; anyone else reads it. */
+describe("a machine's limit of turns at once", () => {
+  const NAMES = { en: 'Turns at once on dev-laptop, empty for no limit', ru: 'Ходов одновременно на dev-laptop, пусто значит без предела' };
+  const puts = (calls: ReturnType<typeof show>) => calls.filter(c => c.method === 'PUT' && c.path === '/api/machines/m1/turn-limit').map(c => c.body);
+
+  it.each(['en', 'ru'] as const)('is set as a whole number, kept on Enter and on leaving the field, and emptied for no limit (%s)', async language => {
+    const calls = show(language, { ...LAPTOP, turnLimit: null, turnsWaiting: 0 } as MachineView, { 'PUT /api/machines/m1/turn-limit': (body: unknown) => [200, { turnLimit: (body as { limit: number | null }).limit }] });
+    const owner = block(await open(), LOWER[language][2]);
+    const field = within(owner).getByRole('spinbutton', { name: NAMES[language] });
+    expect(field).toHaveValue(null);
+    expect(within(owner).getByText(language === 'en' ? /^Empty for no limit\. Kept on Enter/ : /^Пусто значит без предела\. Сохраняется по Enter/)).toHaveAttribute('dir', 'auto');
+    const user = userEvent.setup();
+    await user.type(field, '2{Enter}');
+    await screen.findByDisplayValue('2');
+    await user.clear(field);
+    await user.type(field, '3');
+    await user.tab();
+    await user.clear(field);
+    await user.type(field, '{Enter}');
+    expect(puts(calls)).toEqual([{ limit: 2 }, { limit: 3 }, { limit: null }]);
+  });
+
+  it.each([['0'], ['1.5'], ['-2']])('sends nothing for %s and says what it takes', async typed => {
+    const calls = show('en', { ...LAPTOP, turnLimit: 4 } as MachineView);
+    const owner = block(await open(), 'Settings and actions');
+    const field = within(owner).getByRole('spinbutton', { name: NAMES.en });
+    expect(field).toHaveValue(4);
+    const user = userEvent.setup();
+    await user.clear(field);
+    await user.type(field, `${typed}{Enter}`);
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(within(owner).getByText('A whole number of 1 or more, or empty for no limit. Nothing was changed.')).toBeInTheDocument();
+    expect(puts(calls)).toEqual([]);
+  });
+
+  it('shows how many turns wait for a place there, and lets a person who is neither its owner nor the CEO only read it, in either direction', async () => {
+    document.documentElement.dir = 'rtl';
+    try {
+      localStorage.setItem('hh-lang', 'ru');
+      mockApi({
+        'GET /api/subscriptions': [200, { subscriptions: SUBS }],
+        'GET /api/machines': [200, { machines: [{ ...LAPTOP, turnLimit: 2, turnsWaiting: 3 }], builtin: null, priority: false }],
+        'GET /api/machines/m1/connections': [200, QUIET],
+      });
+      const wes = { ...ME, person: { ...ME.person, id: 'p9', name: 'Wes', title: 'Lead', isOwner: false } };
+      render(<LanguageProvider><Machines me={wes} /></LanguageProvider>);
+      const owner = block(await open(), LOWER.ru[2]);
+      expect(within(owner).queryByRole('spinbutton')).toBeNull();
+      expect(within(owner).getByText('Ждут места: 3')).toBeInTheDocument();
+      expect(owner.textContent).toContain('Ходов одновременно');
+    } finally {
+      document.documentElement.dir = '';
+    }
+  });
+
+  it('keeps the field a touch high, its colours from the theme and its sides logical, so it reads the same right to left', () => {
+    expect(decl('.turn-limit input', 'min-block-size')).toBe('44px');
+    expect(decl('.turn-limit input', 'inline-size')).toBe('7em');
+    expect(decl('.turn-limit input', 'background-color')).toBe('var(--surface)');
+    expect(decl('.turn-limit input', 'color')).toBe('var(--ink)');
+    expect(decl('.turn-limit .bad', 'color')).toBe('var(--pink-ink)');
+    expect(decl('.turn-limit input', 'width')).toBeUndefined();
+    expect(decl('.turn-limit', 'margin-left')).toBeUndefined();
+  });
+});

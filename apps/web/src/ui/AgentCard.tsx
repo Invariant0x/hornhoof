@@ -150,8 +150,8 @@ function LastObsolete({ obsolete }: { obsolete: AgentCardView['obsolete'] }) {
 
 function liveState(card: AgentCardView, live: AgentLive | undefined): AgentLive {
   return live
-    ? { ...live, retry: live.retry === undefined ? card.retry : live.retry }
-    : { id: card.id, program: card.program ?? null, alarm: card.alarm ?? null, held: card.held, retry: card.retry };
+    ? { ...live, retry: live.retry === undefined ? card.retry : live.retry, slotWait: live.slotWait ?? card.slotWait }
+    : { id: card.id, program: card.program ?? null, alarm: card.alarm ?? null, held: card.held, retry: card.retry, slotWait: card.slotWait };
 }
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */

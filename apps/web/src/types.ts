@@ -174,6 +174,8 @@ export type Employee = {
   alarm: TurnAlarm | null;
   /* The oldest turn its plan holds, and why. */
   held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
+  /* Its turn waits for a place on a machine that runs as many turns at once as its limit takes. */
+  slotWait?: boolean;
   /* Hornhoof's waiting retry after a failed turn, or null. */
   retry: TurnRetry | null;
   /* Its latest failed turn, or null. */
@@ -274,7 +276,7 @@ export type Briefing = {
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean; planned?: boolean } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; slotWait?: boolean; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean; planned?: boolean } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
@@ -299,6 +301,8 @@ export type OrchestratorState = {
   machineDrain?: MachineDrain | null;
   /* Its machine is short of free memory for its program to start; its turns wait and go on by themselves after. */
   memoryWait?: boolean;
+  /* Its machine runs as many turns at once as its limit takes; its turn waits for a place there and starts by itself. */
+  slotWait?: boolean;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   browserError?: string | null;
   busy: boolean;
@@ -348,6 +352,7 @@ export type AgentCardView = {
   program?: ProgramView | null;
   alarm?: TurnAlarm | null;
   held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
+  slotWait?: boolean;
   retry: TurnRetry | null;
   failure: TurnFailure | null;
   obsolete?: TurnObsolete | null;
@@ -799,6 +804,10 @@ export type MachineView = {
   load: NodeLoad | null;
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
+  /* How many agents' turns it runs at once at most, null for no limit, and how many wait for a place there now; older
+     servers omit both. */
+  turnLimit?: number | null;
+  turnsWaiting?: number;
   running: Running;
   /* Older servers omit program snapshots. */
   programs?: ProgramInfo[] | null;

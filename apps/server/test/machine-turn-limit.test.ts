@@ -162,7 +162,7 @@ describe('a limit of turns at once on a machine', () => {
     for (const token of [wide, devPerson]) {
       const refused = await c.limit(3, token);
       expect(refused.statusCode).toBe(403);
-      expect(refused.json().error.reason).toBe('not_machine_owner');
+      expect(refused.json().error.reason).toBe('turn_limit_not_yours');
     }
     expect((await c.db.select({ limit: machines.turnLimit }).from(machines))[0]!.limit).toBeNull();
     for (const wrong of [0, -1, 1.5, '2']) expect((await c.app.inject({ method: 'PUT', url: `/api/machines/${c.box.id}/turn-limit`, payload: { limit: wrong }, ...as(c.ceo) })).statusCode).toBe(400);
@@ -182,7 +182,7 @@ describe('a limit of turns at once on a machine', () => {
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const inside = (agentId: string, limit: number) => c.app.inject({ method: 'PUT', url: `/api/machines/${c.box.id}/turn-limit`, payload: { limit }, headers: orchestratorHeaders(owner!.personId, agentId) });
     const byHead = await inside(head.id, 6);
-    expect([byHead.statusCode, byHead.json().error.reason]).toEqual([403, 'not_machine_owner']);
+    expect([byHead.statusCode, byHead.json().error.reason]).toEqual([403, 'turn_limit_not_yours']);
     expect((await inside(orchestrator!.id, 7)).json()).toEqual({ turnLimit: 7 });
   });
 

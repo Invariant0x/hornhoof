@@ -432,7 +432,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { limit } = TurnLimitBody.parse(req.body);
     const [machine] = await db.select({ personId: machines.personId }).from(machines).where(and(eq(machines.id, id), eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
-    if (me.viaHead || (machine.personId !== me.id && !actsAsCeo(me))) throw new ApiError(403, 'forbidden', "Only the machine's owner, the CEO or the orchestrator sets how many turns it runs at once.", 'not_machine_owner');
+    if (me.viaHead || (machine.personId !== me.id && !actsAsCeo(me))) throw new ApiError(403, 'forbidden', "Only the machine's owner, the CEO or the orchestrator sets how many turns it runs at once.", 'turn_limit_not_yours');
     const [now] = await db.update(machines).set({ turnLimit: limit }).where(eq(machines.id, id)).returning({ turnLimit: machines.turnLimit });
     await placeFreed(ctx, id);
     return now;

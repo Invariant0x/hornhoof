@@ -301,6 +301,7 @@ function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: bo
       {!state.limitUntil && state.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
       {state.machineDrain && <p className="t-why">{t.window.machineDrain}</p>}
       {state.memoryWait && <p className="t-why">{t.window.memoryWait}</p>}
+      {state.slotWait && <p className="t-why">{t.window.slotWait}</p>}
     </>
   );
 }

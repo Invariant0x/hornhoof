@@ -4,8 +4,9 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { FailureKind, ProgramRetry, ProgramView, TurnRetry } from '../src/types';
+import type { Employee, FailureKind, ProgramRetry, ProgramView, TurnRetry } from '../src/types';
 import { AgentState, programLine, type AgentLive } from '../src/ui/AgentState';
+import { agentWorking } from '../src/ui/Chip';
 
 const clock = (hours: number, minutes: number) => new Date(2026, 10, 3, hours, minutes).getTime();
 const NOW = clock(14, 0);
@@ -241,5 +242,23 @@ describe('AgentState', () => {
     expect(shown('en', pastBoundary)?.className).toBe('ast calm');
     expect(shown('ru', pastBoundary)?.textContent).toBe(ruText);
     expect(shown('ru', pastBoundary)?.className).toBe('ast calm');
+  });
+});
+
+/* A turn past its machine's limit of turns at once (#1212) waits for a place there and says so on the map, in the tree and
+   on the agent's card, calm: it has not hung. */
+describe('a turn that waits for a place on its machine', () => {
+  it.each([['en', 'waiting for a place on its machine'], ['ru', 'ждет место на машине']] as const)('says so in %s, calm, in place of the queue line', (lang, text) => {
+    const agent: AgentLive = { id: 'b1', program: null, alarm: null, retry: null, status: 'queued', slotWait: true };
+    const el = shown(lang, agent);
+    expect(el?.textContent).toBe(text);
+    expect(el).toHaveClass('calm');
+  });
+
+  it('gives way to an alarm and to a running program, and the map passes it from an employee to the line', () => {
+    expect(shown('en', { id: 'b1', program: null, alarm: { reason: 'node_silent', since: NOW - 5 * 60_000 }, slotWait: true })?.className).toContain('alarm');
+    expect(shown('en', { id: 'b1', program: program('thinking', 2), alarm: null, slotWait: true })?.textContent).toBe('thinking 2 min');
+    const employee = { id: 'b1', program: null, alarm: null, held: null, retry: null, slotWait: true } as unknown as Employee;
+    expect(agentWorking(employee)).toMatchObject({ id: 'b1', slotWait: true });
   });
 });

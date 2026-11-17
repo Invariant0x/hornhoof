@@ -53,7 +53,7 @@ export type ErrorReason =
   | 'models_bad_answer'
   | 'models_refused'
   | 'not_owner'
-  | 'not_machine_owner'
+  | 'turn_limit_not_yours'
   | 'wrong_kind'
   | 'orchestrator_only'
   | 'not_company_level'

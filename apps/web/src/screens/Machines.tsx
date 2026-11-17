@@ -263,6 +263,7 @@ type MachineControls = {
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
   keepBackups: (machine: MachineView, value: boolean) => unknown;
+  limitTurns: (machine: MachineView, limit: number | null) => Promise<unknown>;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
   fail: (err: unknown) => void;
@@ -270,7 +271,7 @@ type MachineControls = {
 
 /* What the machine's owner lets the company use it for: its test runs, and, on a machine with the company's core,
    keeping its backups. The owner, or someone who sees the whole company, ticks them; anyone else reads them. */
-function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: MachineView; editable: boolean; onLend: (value: boolean) => void; onKeep: (value: boolean) => void }) {
+function OwnerSettings({ machine, editable, limitable, onLend, onKeep, onLimit }: { machine: MachineView; editable: boolean; limitable: boolean; onLend: (value: boolean) => void; onKeep: (value: boolean) => void; onLimit: (limit: number | null) => Promise<unknown> }) {
   const t = useT();
   const lends = editable ? (
     <label className="lend">
@@ -278,7 +279,7 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
       <span aria-hidden="true">{t.machines.lend}</span>
     </label>
   ) : <span className="muted">{machine.lendsTests ? t.machines.lent : t.machines.notLent}</span>;
-  const items: [string, React.ReactNode][] = [[t.tables.tests, lends]];
+  const items: [string, React.ReactNode][] = [[t.tables.tests, lends], [t.machines.turnLimit, <TurnLimit machine={machine} limitable={limitable} onLimit={onLimit} />]];
   if (typeof machine.keepsBackups === 'boolean') {
     const keeps = editable ? (
       <label className="lend">
@@ -289,6 +290,37 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
     items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
   }
   return <Facts items={items} />;
+}
+
+/* How many agents' turns the machine runs at once: its owner, the CEO or the CEO delegate types a whole number, or leaves
+   it empty for no limit, and it is kept on Enter or on leaving the field, as the ticks beside it are on a click; anyone
+   else reads it. A number that is not whole or under 1 is not sent and says so. The turns that wait for a place there are
+   counted under it. */
+function TurnLimit({ machine, limitable, onLimit }: { machine: MachineView; limitable: boolean; onLimit: (limit: number | null) => Promise<unknown> }) {
+  const t = useT();
+  const shown = machine.turnLimit === null || machine.turnLimit === undefined ? '' : String(machine.turnLimit);
+  const [draft, setDraft] = useState(shown);
+  const [bad, setBad] = useState(false);
+  useEffect(() => setDraft(shown), [shown]);
+  const waiting = machine.turnsWaiting ? <span className="muted">{t.machines.turnsWaiting(machine.turnsWaiting)}</span> : null;
+  if (!limitable) return <span className="muted">{shown || t.machines.noTurnLimit}{waiting && <> · {waiting}</>}</span>;
+  const keep = (input: HTMLInputElement) => {
+    const text = draft.trim();
+    if (text === shown) return;
+    const limit = text === '' ? null : Number(text);
+    const whole = limit === null || (input.validity.valid && Number.isInteger(limit) && limit >= 1);
+    setBad(!whole);
+    if (whole) void onLimit(limit);
+  };
+  const note = `turn-limit-${machine.id}`;
+  return (
+    <div className="turn-limit">
+      <input type="number" inputMode="numeric" min={1} step={1} value={draft} placeholder={t.machines.noTurnLimit} aria-label={t.machines.turnLimitLabel(machine.hostname)} aria-describedby={note} aria-invalid={bad || undefined}
+        onChange={e => setDraft(e.target.value)} onBlur={e => keep(e.currentTarget)} onKeyDown={e => { if (e.key === 'Enter') keep(e.currentTarget); }} />
+      <span id={note} className={bad ? 'bad' : 'hint'} dir="auto">{bad ? t.machines.turnLimitBad : t.machines.turnLimitHint}</span>
+      {waiting}
+    </div>
+  );
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -347,11 +379,11 @@ function OwnerActions({ actions }: { actions: OwnerAction[] }) {
 
 /* The third block: what the owner lets the company use the machine for, then what they can do with it, the question
    before Disconnect standing under the buttons. */
-function OwnerBlock({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
+function OwnerBlock({ machine: m, editable, limitable, addable, busy, controls }: { machine: MachineView; editable: boolean; limitable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return (
     <CardBlock title={t.cards.ownerBlock}>
-      <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
+      <OwnerSettings machine={m} editable={editable} limitable={limitable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} onLimit={limit => controls.limitTurns(m, limit)} />
       <OwnerActions actions={ownerActions(t, m, editable, addable, busy, controls)} />
       {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
     </CardBlock>
@@ -653,6 +685,8 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const m = row.source;
   const mine = m?.owner.id === me.person.id;
   const editable = me.person.scopeKind === 'company' || mine;
+  /* How many turns it runs at once is its owner's to set, or the CEO's and the CEO delegate's. */
+  const limitable = mine || (me.canDecideCompany ?? (me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company')));
   const addable = addablePlans(m, subs, me.person.id);
   const shown = liveCommand(controls.addCommands[row.id], now);
   const core = liveCommand(controls.coreCommands[row.id], now);
@@ -680,7 +714,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
       <div className="mc-blocks">
         <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
         <SystemBlock row={row} editable={editable} controls={controls} />
-        {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
+        {m && <OwnerBlock machine={m} editable={editable} limitable={limitable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
@@ -806,6 +840,12 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
     });
 
+  const limitTurns = (m: MachineView, limit: number | null) =>
+    run(async () => {
+      const now = await api.put<{ turnLimit: number | null }>(`/api/machines/${m.id}/turn-limit`, { limit });
+      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, turnLimit: now.turnLimit } : x)) ?? null);
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -861,7 +901,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={{ placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, limitTurns, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )}

@@ -16,6 +16,8 @@ export type AgentLive = {
   retry?: TurnRetry | null;
   status?: EmployeeStatus;
   held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
+  /* Its turn waits for a place on a machine that runs as many turns at once as its limit takes. */
+  slotWait?: boolean;
 };
 type Tone = 'alarm' | 'work' | 'person' | 'calm';
 type Line = { tone: Tone; text: string };
@@ -38,10 +40,11 @@ function heldLine(say: Messages['dept']['now'], held: NonNullable<AgentLive['hel
   return { tone: 'calm', text: held.reason === 'budget' ? say.taskShareUntil(at) : say.planLimitUntil(at) };
 }
 
-/* The server's alarm first, in red with its cause; else a long plan hold; else what the program does; else Hornhoof's
-   waiting retry; else what the turn waits for. */
+/* The server's alarm first, in red with its cause; else a long plan hold; else what the program does; else a place on its
+   machine; else Hornhoof's waiting retry; else what the turn waits for. */
 function waitingLine(t: Messages, a: AgentLive): Line | null {
   const say = t.dept.now;
+  if (a.slotWait) return { tone: 'calm', text: say.slotWait };
   if (a.retry) return { tone: 'calm', text: say.turnRetry(a.retry.attempt, a.retry.max, clockAt(a.retry.at), t.failures[a.retry.kind]) };
   if (a.status === 'idle') return { tone: 'calm', text: say.waitsForTask };
   return a.status === 'queued' ? { tone: 'calm', text: say.queued } : null;
