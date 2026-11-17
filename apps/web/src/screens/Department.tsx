@@ -15,7 +15,6 @@ import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
 import { DeptBranchesIfKept } from '../ui/DeptBranches';
-import { DepartmentMessaging, useRunsMessaging } from '../ui/OutboundSetup';
 import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
@@ -153,38 +152,10 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
   );
 }
 
-/* What the department sends outside has a panel of its own on the screen; here it is only a way there, for the people the
-   server lets run the department's messages. */
-function DeptMessaging({ shown, onOpen }: { shown: boolean; onOpen(): void }) {
-  const t = useT();
-  const id = useId();
-  if (!shown) return null;
-  return (
-    <section aria-labelledby={`${id}-messaging`}>
-      <h3 id={`${id}-messaging`}>{t.settings.groups.messaging}</h3>
-      <p className="muted" dir="auto">{t.dept.messagingHere}</p>
-      <div className="entry-actions">
-        <button className="btn ghost" type="button" onClick={onOpen}>{t.dept.openMessaging}</button>
-      </div>
-    </section>
-  );
-}
-
-/* The way to the department's External messaging beside its other panels, for the people the server lets run it. */
-function MessagingButton({ shown, open, onToggle }: { shown: boolean; open: boolean; onToggle(): void }) {
-  const t = useT();
-  if (!shown) return null;
-  return (
-    <button className={`hbtn glass${open ? ' on' : ''}`} type="button" aria-expanded={open} onClick={onToggle}>
-      {t.settings.groups.messaging}
-    </button>
-  );
-}
-
-type Drawer = 'tasks' | 'about' | 'speed' | 'hire' | 'messaging';
+type Drawer = 'tasks' | 'about' | 'speed' | 'hire';
 
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
-  ({ speed: t.dept.speed, tasks: t.dept.tasksButton, hire: t.dept.hiring, about: t.dept.about, messaging: t.settings.groups.messaging })[drawer ?? 'about'];
+  ({ speed: t.dept.speed, tasks: t.dept.tasksButton, hire: t.dept.hiring, about: t.dept.about })[drawer ?? 'about'];
 
 function Wire({ l }: { l: Line }) {
   const d = toD(l.pts);
@@ -329,8 +300,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   /* Everyone given the department runs it as the whole company does, its named owner among them: its people, sub-units and
      repository. A team in it alone is not the department. */
   const runs = canGive;
-  /* Its External messaging is the server's to give: a whole-company person runs it only as the CEO, its delegate or its owner. */
-  const messaging = useRunsMessaging(d.id, runs);
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
@@ -613,7 +582,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
           {t.dept.about}
         </button>
-        <MessagingButton shown={messaging} open={drawer === 'messaging'} onToggle={() => setDrawer(drawer === 'messaging' ? null : 'messaging')} />
         {/* The orchestrator's window is the whole company's; the owner hires from the roster here. */}
         {runs && (
           <button className="btn" type="button" onClick={company ? onHire : () => setDrawer('hire')}>
@@ -628,7 +596,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
             {drawer === 'tasks' && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
-            {drawer === 'messaging' && <DepartmentMessaging departmentId={d.id} />}
             {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
               <>
@@ -643,7 +610,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                   </section>
                 )}
                 {runs && <Repositories department={d} />}
-                <DeptMessaging shown={messaging} onOpen={() => setDrawer('messaging')} />
                 <DeptBranchesIfKept department={d} shown={runs} />
                 {d.products.length > 0 && (
                   <section aria-labelledby={`${id}-products`}>

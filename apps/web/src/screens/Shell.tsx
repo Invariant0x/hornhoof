@@ -56,14 +56,14 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
 
 /* The window of the account menu open over the page. The groups of Settings are one window, so switching between them
    keeps the window and its focus. */
-function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onOpenTask, onClose, onHome }: {
+function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onClose, onHome }: {
   route: Route | null; me: Me; updates: Updates; inbox: boolean; onRenamed: (name: string) => void;
-  onGroup: (group?: SettingsGroup) => void; onOpenTask: (id: string) => void; onClose: () => void; onHome: () => void;
+  onGroup: (group?: SettingsGroup) => void; onClose: () => void; onHome: () => void;
 }) {
   if (route?.kind === 'about') return <About inbox={inbox} onClose={onClose} />;
   if (route?.kind === 'versions') return <Versions updates={updates} onClose={onClose} onHome={onHome} />;
   if (route?.kind !== 'settings') return null;
-  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onOpenTask={onOpenTask} onClose={onClose} />;
+  return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onClose={onClose} />;
 }
 
 /* For a person who sits at a machine of the company that is theirs to open and closed: a group of the menu, its line
@@ -147,7 +147,7 @@ function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }:
 /* The short account menu as Design's reference draws it: the person and the version, then rows in groups with a line
    between them: giving the orchestrator access to this machine, Settings, the pages of the whole company, About and Log
    out. onImprovements, onInbox and onVersions: only for people who see the whole company, onInbox only on Hornhoof's own
-   installation. Themes, the language and External messaging live in Settings, feedback in About. */
+   installation. Themes and the language live in Settings, feedback in About. */
 function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, ...company }: MenuProps) {
   const t = useT();
   const version = useVersion();
@@ -442,7 +442,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onOpenTask={openTask} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </AgentWindowContext>

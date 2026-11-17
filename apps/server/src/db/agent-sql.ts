@@ -20,10 +20,9 @@ export type SqlCall = { invocation: string; jobId: string; answer: (results: Sql
 export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
-   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made
-   by a model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on.
-   The outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt,
-   a consent, a day's count or a line of who set it up, even from a turn of the orchestrator answering the CEO. Waits'
+   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. The tables
+   the outbound gateway and its checks made by a model left behind too: nothing uses them, and they hold a mailbox's
+   sign-in, contacts and private words until a later release drops them. Waits'
    owners, dates and policies too: a row written by hand could move a promise or quiet an alarm, and they name private
    work. The link's certificate too: it holds the sealed keys, and its mode decides how the link runs. And the count of
    failed sign-ins, as a row taken out of it would give a guesser more tries. The keys of git hosts Hornhoof creates

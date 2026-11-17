@@ -55,15 +55,6 @@ export default [
     languageOptions: { parserOptions: { project: [`./${workspace}/${tsconfig}`] } },
   })),
   {
-    /* Outbound and the model checks it runs are an extension: the rest of the server comes in by its one door. The
-       table types of the schema are the exception, as every table lives in one file. */
-    files: ['apps/server/src/**/*.ts'],
-    ignores: ['apps/server/src/modules/outbound/**', 'apps/server/src/modules/model-checks/**', 'apps/server/src/db/schema.ts'],
-    rules: {
-      'no-restricted-imports': ['error', { patterns: [{ regex: '/(outbound|model-checks)/(?!extension\\.js$)', message: 'Import outbound and model checks only through modules/outbound/extension.js.' }] }],
-    },
-  },
-  {
     /* Postgres specs have private databases of their own. */
     files: ['apps/server/test/**/*.ts'],
     ignores: ['apps/server/test/postgres/**'],

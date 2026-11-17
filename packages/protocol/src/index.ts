@@ -8,8 +8,6 @@ export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type 
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
-export * from './model-check.js';
-export * from './outbound.js';
 export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';

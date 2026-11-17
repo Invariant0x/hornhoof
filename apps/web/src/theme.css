@@ -436,7 +436,7 @@ select:disabled { opacity: .55; }
 .settings-window .settings-part { gap: 12px; }
 .settings-part :is(h3, h4, p) { overflow-wrap: break-word; }
 /* Every field, list and button of the groups is a 44 px target, Save and the other actions on the end edge of the
-   column. External messaging keeps its own. */
+   column. */
 .settings-window :is(.settings-group, .integrations) .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
 .settings-window :is(.settings-group, .integrations) :is(.field input, .field select, .link-input input) { height: 44px; }
 .settings-window :is(.settings-group, .integrations) :is(.settings-actions, .repo-actions) { justify-content: flex-end; justify-self: stretch; }
@@ -467,8 +467,7 @@ select:disabled { opacity: .55; }
 }
 /* Integrations: one record for each outside tool, a line between them: its name and whether it is connected, then what it
    gives, what it holds and its actions. */
-.integrations, .messaging { display: grid; gap: 16px; min-width: 0; }
-.integrations { gap: 0; }
+.integrations { display: grid; gap: 0; min-width: 0; }
 .integration { display: grid; gap: 8px; min-width: 0; padding-block: 16px; border-block-start: 1px solid var(--line); }
 .integration:first-child { padding-block-start: 0; border-block-start: 0; }
 .integration p { margin: 0; overflow-wrap: break-word; }
@@ -482,49 +481,14 @@ select:disabled { opacity: .55; }
 .integration-state::before, .skin-state::before { content: ''; flex: none; inline-size: 8px; block-size: 8px; border: 1px solid currentColor; border-radius: 50%; }
 .integration-state[data-connected='true'] { border-color: var(--ok); color: var(--ok); }
 .integration-state[data-connected='true']::before { background: currentColor; }
-.messaging > p { margin: 0; overflow-wrap: break-word; }
-/* A department's own outbound setup: its channels and accounts, its catalog and its log. */
-.outbound-setup { display: grid; gap: 16px; min-width: 0; }
-.outbound-setup > p, .outbound-setup .settings-part h4 { margin: 0; overflow-wrap: break-word; }
-.outbound-setup .settings-part h4 { font-family: var(--f-display); font-weight: 600; font-size: 15px; line-height: 1.15; }
-/* A name with its status beside it, and a card's caption: how and to whom on one line, its limits on the next. */
-.outbound-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.outbound-title > :is(h3, b) { min-width: 0; overflow-wrap: break-word; }
-.outbound-meta { display: grid; gap: 4px; margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: break-word; }
-/* Lists with nothing of the browser's; revisions and log entries stand 16px apart, with a line from the second on. */
-.outbound-list { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; list-style: none; }
-.outbound-list.outbound-entries { gap: 16px; }
-.outbound-entries > li + li { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
-.outbound-entry { display: grid; gap: 4px; min-width: 0; overflow-wrap: break-word; }
-.outbound-entry small { color: var(--muted); font-size: 12px; }
-.outbound-entry > .entry-actions { margin-block-start: 4px; }
-.outbound-address { overflow-wrap: anywhere; }
-/* A channel's addresses: a block of their own after its buttons, under a line, with a subheading of the panel. */
-.outbound-contacts { display: grid; gap: 8px; min-width: 0; margin-block-start: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
-.outbound-contacts > h4 { margin: 0; font-family: var(--f-display); font-weight: 600; font-size: 14px; line-height: 1.15; overflow-wrap: break-word; }
-.outbound-setup .form-foot { margin-block-start: 8px; }
-/* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
-.outbound-setup .field :is(input, select) { height: 44px; }
-.outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
-.outbound-added { margin: 0; overflow-wrap: anywhere; }
-/* A revision as a person reads it before publishing it: its facts, its words with the places a message fills in marked,
-   and what changed: words put in in the text's own colour over a 2px line of success, words taken out struck through,
-   the colour only repeating it; spaces stand outside both (Design #1181). */
-.outbound-view { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface2); overflow-wrap: break-word; }
-.outbound-facts { display: grid; gap: 4px; min-width: 0; margin: 0; }
-.outbound-facts dt { font-size: 12px; font-weight: 600; color: var(--muted); }
-.outbound-facts dd { display: grid; gap: 4px; min-width: 0; margin: 0; }
-.outbound-words { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
-.outbound-slot { display: inline-block; padding: 0 6px; border: 1px solid currentColor; color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.6; white-space: normal; }
-.outbound-changes { display: grid; gap: 4px; min-width: 0; padding-block-start: 8px; border-block-start: 1px solid var(--line); }
-.outbound-changes ins { color: var(--ink); text-decoration-line: underline; text-decoration-thickness: 2px; text-decoration-color: var(--ok); }
-.outbound-changes del { color: var(--pink-ink); text-decoration: line-through; }
-.outbound-note { margin: 0; color: var(--muted); overflow-wrap: break-word; }
-.outbound-view > .entry-actions { margin-block-start: 4px; }
-/* The groups of the limits form share .field-group, standing 8px below what precedes them and 10px between their fields. */
-.outbound-numbers { margin-block-start: 8px; }
-.outbound-numbers > .field-group-body { gap: 10px; }
-/* The box of sending without a yes stands at the first line of its words. */
+/* The passwords of the vault and an entry's log: lists with nothing of the browser's, entries 16px apart with a line from
+   the second on. */
+.vault-list { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.vault-list > li + li { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.vault-entry { display: grid; gap: 4px; min-width: 0; overflow-wrap: break-word; }
+.vault-entry small { color: var(--muted); font-size: 12px; }
+.vault-site { overflow-wrap: anywhere; }
+/* A tick box stands at the first line of its words. */
 .check-card > .tick-box { margin-block-start: 2px; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }

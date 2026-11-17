@@ -14,15 +14,9 @@ test('checked Markdown invalidates preparation and its real consumers', async ()
   }
 });
 
-test('the real outbound fixture invalidates both mutation consumers', async () => {
-  const changed = await changedBy('apps/server/test/outbound-fixture.ts');
-  assert.ok(changed.has('mutation:apps/server/src/modules/outbound/checks.ts'));
-  assert.ok(changed.has('mutation:apps/server/src/modules/outbound/render.ts'));
-});
-
 test('all risky sources retain mode-bound judges at both reuse levels', async () => {
   const { mutation } = manifest, suite = manifest.suites.find(item => item.id === 'mutation');
-  assert.equal(mutation.sourcePaths.length, 10);
+  assert.equal(mutation.sourcePaths.length, 7);
   const judges = fingerprint.mutationJudgesOf(input, mutation, suite, mutation.sourcePaths);
   const selected = fingerprint.fastTestsOf(input, mutation, mutation.sourcePaths);
   const tests = new Set(mutation.sourcePaths.map(source => selected.get(source)[0]));
