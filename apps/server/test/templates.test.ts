@@ -2064,6 +2064,10 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
     expect(skill('dev-ci-release')).toMatch(/release_turn[^.]*the commit of the turn branch its whole run checked/);
   });
 
+  it("counts a turnkey holder's own checks as covering its work under autonomous release, in the lead and release skills", () => {
+    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[^.]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
+  });
+
   it('gives the proof of checks in the report, never as files committed for it', () => {
     expect(skill('hh-task-flow')).toMatch(/Logs and other proof of checks are no result/);
     expect(skill('hh-task-flow')).toMatch(/never commit them, and make no commit only to record proof or a note/);

@@ -5,13 +5,14 @@ import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { prepareTemplates } from './templates-once.js';
-import { releasing } from './turn-release-fixture.js';
+import { joinedAfterR, releasing, turnkeyAfterR } from './turn-release-fixture.js';
 
 await prepareSharedDatabase();
 prepareTemplates();
 
 const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
+const STRAY = '2'.repeat(40);
 
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
 type Part = typeof testParts.$inferSelect;
@@ -285,6 +286,64 @@ describe('the release step with autonomous release on', () => {
     const result = await f.recordRelease({ runId: run.id });
     expect(result.isError).toBe(false);
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true, uncovered: [], left: [late.number] });
+  });
+
+  it("says in its description that a turnkey holder's own checks cover its work under autonomous release", async () => {
+    const f = await releasing();
+    const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
+    expect(tool.description).toMatch(/with autonomous release on, a release every commit of which was checked, by an independent checker or, for turnkey work, by its holder's own review, security check and tests, needs none/);
+  });
+
+  /* A member of a turnkey team does its task whole with its own review, security check and tests, and calls no checker:
+     those cover its work, and the merge that joined it to the turn branch with it. */
+  it('approves by itself a release that brings turnkey work its holder checked itself, and logs the holder with the checkers', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const work = await turnkeyAfterR(f);
+    const run = await f.fullRun({ commit: work.head });
+    const result = await f.recordRelease({ commit: work.head, runId: run.id });
+    expect(result).toMatchObject({ isError: false });
+    expect(recorded(result.text)).toMatchObject({
+      commit: work.head, approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true, uncovered: [], left: [],
+      tasks: [expect.objectContaining({ number: f.task.number }), expect.objectContaining({ number: work.task.number, commit: work.own })],
+    });
+    expect(await journal(f)).toEqual([expect.objectContaining({ commitSha: work.head, testRunId: run.id, reviewerName: `${f.reviewer.name}, ${work.holder.name}`, verdictStage: 'review, turnkey' })]);
+  });
+
+  it.each([
+    ['took in from the turn branch', true],
+    ['was made on, under the merge that joined it', false],
+  ])('still asks a person for a commit pushed straight to the turn branch that turnkey work %s, and logs nothing', async (_how, taken) => {
+    const f = await releasing();
+    await autonomous(f);
+    const work = await turnkeyAfterR(f, { sha: STRAY, taken });
+    const run = await f.fullRun({ commit: work.head });
+    const result = await f.recordRelease({ commit: work.head, runId: run.id });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(result.text.split('this one brings what was not: ')[1]).toBe(`${STRAY} came in with no accepted candidate.`);
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('still asks a person when the holder of turnkey work was switched off since, and logs nothing', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const work = await turnkeyAfterR(f);
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, work.holder.id));
+    const run = await f.fullRun({ commit: work.head });
+    expect(await f.recordRelease({ commit: work.head, runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`#${work.task.number}`) as unknown });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('still asks a person for work that is not turnkey and joined the turn branch with no checked candidate', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const { task } = await f.create({ title: 'Unchecked change' });
+    const joined = joinedAfterR(f, task.number);
+    await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
+    await f.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'report', agentId: f.author.id, text: 'Done.', data: { done: true, integration: { branch: f.branch, commit: joined.own, from: `task-${task.number}` } } });
+    const run = await f.fullRun({ commit: joined.head });
+    expect(await f.recordRelease({ commit: joined.head, runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`#${task.number}`) as unknown });
+    expect(await journal(f)).toEqual([]);
   });
 
   it("takes a person's approval of the commit where there is one, and logs nothing", async () => {
