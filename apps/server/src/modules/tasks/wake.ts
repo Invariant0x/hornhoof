@@ -24,7 +24,7 @@ import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
-import { callEnded } from '../calls/calls.js';
+import { callEnded, oneShotStageNote } from '../calls/calls.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -339,7 +339,9 @@ const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblo
 async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {
   const notice = await wakeNotice(ctx, task, w);
   const route = routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId);
-  const prompt = notice.action + wakePrompt(agent, task, w, route.resultKind) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
+  /* The owner of a one-shot stage hears how the route runs it. */
+  const stageCalls = w.why === 'review' || w.why === 'assigned' ? oneShotStageNote(task, route, w.agentId) : null;
+  const prompt = notice.action + wakePrompt(agent, task, w, route.resultKind) + (stageCalls ? ` ${stageCalls}` : '') + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
   const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }, route.resultKind) : undefined;
   return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w, route), ...notice, reportContext };
 }

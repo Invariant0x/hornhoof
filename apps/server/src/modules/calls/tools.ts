@@ -1,11 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { Branch } from '@hornhoof/protocol';
+import { CALLS_PER_START } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { TEST_MINUTES, TEST_MINUTES_MAX } from '../testruns/runs.js';
 import type { ToolJob } from '../tools/job.js';
-import { callsView, MAX_CALLS, startCalls, stopCalls } from './calls.js';
+import { callsView, startCalls, stopCalls } from './calls.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const answer = (fn: () => Promise<string>) =>
@@ -30,11 +31,11 @@ export function registerCallTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         'A call has no inbox and no memory and nobody answers its questions midway, so the brief says everything it needs. ' +
         'They suit work that splits into independent pieces or wants several tries at once: a review or security pass by several calls with a judge, strings into many languages, a check of many files, research fanned out, variants. ' +
         "They take their turns in the machine's check queue. When the whole batch has ended you are woken on the task with every answer; calls shows them before that. " +
-        `inputs: one call per input. count: copies of the brief when there are no inputs, 1 by default. At most ${MAX_CALLS} calls per start_calls.`,
+        `inputs: one call per input. count: copies of the brief when there are no inputs, 1 by default. At most ${CALLS_PER_START} calls per start_calls. At a one-shot stage of a task's echelons that you hold, count and judge come from the stage when you leave them out.`,
       inputSchema: {
         brief: z.string().trim().min(1).max(100_000).describe('Everything a call needs to do its work: the goal, where to look, what to return and in what form.'),
-        inputs: z.array(z.string().max(100_000)).min(1).max(MAX_CALLS).optional().describe("Each call's own part: a file, a text, a language, a question."),
-        count: z.number().int().min(1).max(MAX_CALLS).optional().describe('How many calls run the same brief, when there are no inputs.'),
+        inputs: z.array(z.string().max(100_000)).min(1).max(CALLS_PER_START).optional().describe("Each call's own part: a file, a text, a language, a question."),
+        count: z.number().int().min(1).max(CALLS_PER_START).optional().describe('How many calls run the same brief, when there are no inputs.'),
         task: TaskRef,
         branch: Branch.optional().describe("A branch of the task's repository each call gets a fresh clone of. Left out, a call starts in an empty folder."),
         verdict: z.boolean().optional().describe('true: each call ends its answer with a verdict, pass or not, and why.'),

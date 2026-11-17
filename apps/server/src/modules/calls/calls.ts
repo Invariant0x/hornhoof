@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { modelsFor, repoFolder, type Workspace } from '@hornhoof/protocol';
+import type { EchelonOneShot, EchelonStage, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { and, asc, eq, inArray, TransactionRollbackError } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, oneShotCalls, subscriptions, taskRoutes, tasks, type CallVerdict } from '../../db/schema.js';
@@ -20,8 +21,6 @@ type Call = typeof oneShotCalls.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 type Repo = NonNullable<Workspace['repo']>;
 
-/* The most calls one start_calls sends, so one request stays a size a tool call carries; another start_calls sends more. */
-export const MAX_CALLS = 100;
 /* How much of each answer the caller's wake and the task's history carry; calls gives it whole. */
 const SHOWN_CHARS = 6000;
 
@@ -52,10 +51,27 @@ async function placeOf(ctx: Ctx, job: ToolJob): Promise<Place> {
   return at(node.id, null);
 }
 
-/* The stage of the task's echelons it is at now, if any. */
-async function stageOf(ctx: Ctx, task: Task): Promise<string | null> {
+/* The stage of the task's echelons it is at now, if any, and how its route runs it as one-shot calls when the caller holds it. */
+async function stageOf(ctx: Ctx, task: Task, agentId: string): Promise<{ stage: EchelonStage | null; oneShot: EchelonOneShot | null }> {
   const [route] = await ctx.db.select({ state: taskRoutes.state }).from(taskRoutes).where(eq(taskRoutes.taskId, task.id));
-  return route && ['active', 'waiting'].includes(route.state.phase) ? route.state.stage : null;
+  const stage = route && ['active', 'waiting'].includes(route.state.phase) ? route.state.stage : null;
+  return { stage, oneShot: (stage && heldOneShot(route!.state, agentId)) || null };
+}
+
+/* The one-shot stage the agent holds now on this route, if it holds one. */
+function heldOneShot(state: Pick<EchelonsSnapshot, 'stage' | 'stages' | 'oneShot'>, agentId: string): EchelonOneShot | null {
+  const at = state.stage && state.stages.find(step => step.stage === state.stage);
+  return at && at.status === 'active' && at.ownerAgentId === agentId ? (state.oneShot?.[at.stage] ?? null) : null;
+}
+
+/* What the owner of a one-shot stage is told when the stage comes to them. */
+export function oneShotStageNote(task: Pick<Task, 'number'>, state: Pick<EchelonsSnapshot, 'stage' | 'stages' | 'oneShot'>, agentId: string): string | null {
+  const one = heldOneShot(state, agentId);
+  if (!one) return null;
+  const calls = `${one.fanOut} ${one.fanOut === 1 ? 'call' : 'calls'}`;
+  return one.judge
+    ? `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief, then a judge call that reads every answer. Write a brief that holds everything a call needs, the branch to check included, and decide the stage once you have read the judge's verdict.`
+    : `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief. Write a brief that holds everything a call needs, the branch to check included, and decide the stage once you have read their answers.`;
 }
 
 const VERDICT_ASK = 'End your answer with one line of its own: VERDICT: {"pass": true or false, "reason": "<one sentence>"}';
@@ -137,8 +153,10 @@ export async function startCalls(ctx: Ctx, job: ToolJob, input: CallsInput, sign
   const found = input.branch ? await repoAt(ctx, [task.productId, task.departmentId]) : null;
   if (input.branch && !found) throw refuse(409, 'repo_invalid', `#${task.number} has no repository to clone ${input.branch} from: its department has none set. Leave out branch to run in an empty folder.`);
   const repo = found && input.branch ? { ...found.repo, branch: input.branch } : null;
-  const inputs: (string | null)[] = input.inputs?.length ? input.inputs : Array.from({ length: input.count ?? 1 }, () => null);
-  const stage = await stageOf(ctx, task);
+  /* At a one-shot stage its owner holds, the route says how many calls run it and what the judge reads them for. */
+  const { stage, oneShot } = await stageOf(ctx, task, job.agentId);
+  const judgeBrief = input.judge ?? oneShot?.judge ?? null;
+  const inputs: (string | null)[] = input.inputs?.length ? input.inputs : Array.from({ length: input.count ?? oneShot?.fanOut ?? 1 }, () => null);
   const batch = randomUUID();
   const timeoutMs = (input.minutes ?? TEST_MINUTES) * 60_000;
   const made = await ctx.db.transaction(async tx => {
@@ -151,7 +169,7 @@ export async function startCalls(ctx: Ctx, job: ToolJob, input: CallsInput, sign
         .returning();
       const [call] = await tx
         .insert(oneShotCalls)
-        .values({ companyId: job.companyId, batch, number: i + 1, jobId: row!.id, callerAgentId: job.agentId, callerJobId: job.id, taskId: task.id, departmentId: task.productId ?? task.departmentId, stage, ...values, judgeBrief: input.judge ?? null })
+        .values({ companyId: job.companyId, batch, number: i + 1, jobId: row!.id, callerAgentId: job.agentId, callerJobId: job.id, taskId: task.id, departmentId: task.productId ?? task.departmentId, stage, ...values, judgeBrief })
         .returning();
       out.push({ call: call!, job: row!, place, repo });
     }
@@ -162,7 +180,7 @@ export async function startCalls(ctx: Ctx, job: ToolJob, input: CallsInput, sign
   for (const one of made) await send(ctx, one);
   if (answered) return answered;
   const n = made.length;
-  const judged = input.judge ? ' Once they have all ended, a judge call reads every answer and gives its verdict.' : '';
+  const judged = judgeBrief ? ' Once they have all ended, a judge call reads every answer and gives its verdict.' : '';
   return `Started ${n} one-shot ${n === 1 ? 'call' : 'calls'} on #${task.number} in batch ${batch}. Each runs once on your plan's machine, as its check queue lets it, and answers.${judged} When the whole batch has ended you are woken on #${task.number} with every answer; calls with batch ${batch} shows how they go before that.`;
 }
 

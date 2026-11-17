@@ -2,7 +2,9 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { jobs, taskEvents } from '../src/db/schema.js';
+import { jobs, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { keepWakes } from '../src/modules/tasks/outbox.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, mcp, nextOf, until, type FakeNode } from './helpers.js';
 import { company } from './test-runs-company.js';
@@ -113,6 +115,27 @@ describe('one-shot calls', () => {
     mac.node.close();
     await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(mac.nodeId)));
     expect(await call('start_calls', { brief: 'Count the words.' })).toEqual({ error: true, text: expect.stringMatching(/^No machine of your plan is online to run one-shot calls/) });
+  });
+
+  it('run a one-shot stage of the echelons: its owner hears so, and start_calls takes its fan-out and judge', async () => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    const [route] = await c.db.select().from(taskRoutes).where(eq(taskRoutes.taskId, c.task.id));
+    const stages = route!.state.stages.map(s => (s.stage === 'review' ? { ...s, status: 'active' as const, ownerAgentId: c.bruno.id } : s.stage === 'development' ? { ...s, status: 'complete' as const } : s));
+    const oneShot = { review: { fanOut: 3, judge: 'Keep only the findings that are real.' } };
+    await c.db.update(taskRoutes).set({ state: { ...route!.state, stage: 'review', stages, oneShot } }).where(eq(taskRoutes.taskId, c.task.id));
+    await c.db.update(tasks).set({ status: 'review', assigneeAgentId: c.bruno.id }).where(eq(tasks.id, c.task.id));
+    const wakes = [{ agentId: c.bruno.id, taskId: c.task.id, why: 'review' as const }];
+    await keepWakes(c.db, c.task.companyId, wakes);
+    await wakeAll(c.app.ctx, wakes);
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/This stage of #1 is one-shot: start_calls runs it as 3 calls of your plan on your brief, then a judge call that reads every answer\./);
+    const call = await callerOn(c, c.bruno, mac);
+    expect((await call('start_calls', { brief: 'Review the change on branch task-1 for bugs.' })).text).toMatch(/^Started 3 one-shot calls on #1 [\s\S]*a judge call reads every answer/);
+    const runs = [await nextOf(mac.node, 'job.run'), await nextOf(mac.node, 'job.run'), await nextOf(mac.node, 'job.run')];
+    for (const run of runs) answer(mac.node, run, 'Nothing found.');
+    expect((await nextOf(mac.node, 'job.run')).prompt).toContain('Keep only the findings that are real.');
+    expect((await callLines(c)).map(l => l.data.stage)).toEqual(['review', 'review', 'review']);
   });
 
   it('show on the map in their department while they run, and leave it when they end', async () => {
