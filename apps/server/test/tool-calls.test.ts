@@ -15,6 +15,9 @@ import { listed, outsideSources } from '../src/db/sources.js';
 import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
 import { ALREADY_RAN, ANSWER_MAX, currentInvocation, guardTools, ID_TAKEN, INVOCATION, MAY_HAVE_RUN, PENDING, STARTS_FIRST, TOO_LARGE } from '../src/modules/tools/calls.js';
 import { listen, setLease, setUpCompany, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
 

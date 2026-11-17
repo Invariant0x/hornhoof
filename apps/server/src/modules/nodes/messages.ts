@@ -31,7 +31,7 @@ import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
-import { privateTurn, forgetPrivateTurn } from '../tools/privacy.js';
+import { privateTurn } from '../tools/privacy.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
@@ -462,7 +462,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await fallBackIfHeld(ctx, refused);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
-      if (finished.length) forgetPrivateTurn(ctx.db, msg.jobId);
       return;
     }
     case 'turn.open': {

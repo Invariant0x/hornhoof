@@ -3,6 +3,9 @@ import { agents, companies, departments, jobs, people, sessions, subscriptions }
 import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 /* A company with an employee, an assistant, the orchestrator, a person who sees one department only and a person and an
    agent of another company, for the vault's people API and its tools. */

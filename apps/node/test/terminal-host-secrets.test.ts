@@ -74,6 +74,20 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it('shows a clean screen after the sensitive program and its tmux session were removed', async () => {
+    const t = await liveTerminal('claude', 'queued');
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'secret-call', name: 'mcp__hornhoof__vault_save', input: { password: 'private-screen-marker' } }] } });
+    await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
+    t.finish('Ready.');
+    await t.on(t.running);
+    vi.mocked(t.tmux.has).mockResolvedValue(false);
+    await t.on(t.host['closeProgram'](t.host['agents'].get('receipt')!));
+    vi.mocked(t.tmux.has).mockResolvedValue(true);
+    await t.on(t.host.open({ type: 'term.open', termId: 'clean-view', agentKey: 'receipt', cols: 100, rows: 30, write: true }));
+    t.views[0]!.view.stdout.write('Clean restarted screen.\n');
+    await t.until(() => frames(t.sent, 'clean-view').includes('Clean restarted screen.'));
+  });
+
   it('hides a sensitive tool transcript and its raw terminal completion', async () => {
     const marker = 'private-terminal-marker-1178';
     const t = await liveTerminal('claude', 'queued');
