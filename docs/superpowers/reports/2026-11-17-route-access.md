@@ -61,3 +61,85 @@ base: the table listed these eleven missing routes, and the route audit reported
 after executing both checks. Its other cases were excluded by the name selector.
 An earlier broad baseline run was stopped without a result. The original-base
 server build passed. Final checks must use the merged candidate.
+
+## Checked result
+
+Status: BLOCKED on the required green result of the whole agent-view table file.
+Checked code: `8e77035fe905f9860440bcbb91059b53d707e5ea`.
+The change remains on `task-1196`; it has not been pushed to `turn-31`.
+
+Executed checks on that code:
+
+- `npm run build -w @hornhoof/server`: exit 0.
+- `npm run -s check:author -- --sha 8e77035fe905f9860440bcbb91059b53d707e5ea --base 734fe6637056b022d506c8049a7d1c6e07dd8afe`:
+  lint passed, server types including tests passed, dryer passed with no duplicate
+  candidates. The selected tests executed: route-access passed 4 of 4;
+  attachment-token passed 9 of 9, including own-task upload and foreign-task and
+  foreign-company 403 responses. Agent-view-table passed 55 of 58, with three
+  20-second timeouts: table completeness, GET agent and PATCH agent. Thus the
+  author's check exited 1; it is not an overall PASS.
+- `npx --no-install vitest run test/agent-view-table.test.ts --maxWorkers=1`,
+  alone after the other own checks ended: exit 1, 43 passed, 15 failed, all
+  20-second timeouts. Table completeness passed in 10.606 seconds and the new
+  phone list passed in 10.193 seconds. The failures were twelve existing agent
+  detail/actions and the turns, current-turn and subscriptions lists. Start:
+  2026-11-17 02:38:53 UTC, shared machine load averages 16.09 / 19.76 / 27.68;
+  total runner duration 882.41 seconds. Full output: task attachment
+  `table-alone.log`.
+- `git diff --exit-code 734fe6637056b022d506c8049a7d1c6e07dd8afe 8e77035fe905f9860440bcbb91059b53d707e5ea -- apps/server/src apps/server/test/task-files.test.ts apps/server/test/request-media.test.ts apps/server/test/program-operator-attachments.test.ts apps/server/test/helpers-db.ts`:
+  exit 0, empty output. The neighboring runtime and tests match the base.
+
+## Neighboring checks
+
+Command: `npx --no-install vitest run test/task-files.test.ts test/request-media.test.ts test/program-operator-attachments.test.ts --maxWorkers=1`.
+Exit 1 on the checked code, 21 passed and 14 failed. Every test failure was
+`Test timed out in 20000ms`; there was no content assertion or server error.
+Full output and stacks are attached to task 1196 as `neighbors-merged.log`.
+
+`task-files.test.ts`, one timeout:
+
+- `downloads a file of several megabytes whole`: 26.329 seconds, limit 20
+  seconds, at line 100. This is a base failure unrelated to the declaration
+  change. Its stack is also attached as `task-files-timeout.log`.
+
+`program-operator-attachments.test.ts`, six timeouts:
+
+- `downloads the case PNG for its assigned operator, actual report recipient and current orchestrator after resolution`
+- `refuses the target, workers outside the program operator and the head of Operations, and foreign jobs with the same generic 404`
+- `checks the operator current role, Operations department and enabled state, and lets Operations read a case given to another`
+- `checks the report recipient is still the target department head and rejects removed or switched off readers`
+- `accepts only the exact case and PNG attachment identity with bounded bytes`
+- `shows pictures of a program on an API key and refuses those of login and test turns`
+
+`request-media.test.ts`, seven timeouts:
+
+- `takes a picture from a running turn and refuses anything else`
+- `refuses a picture a person sent the agent: it stays in that conversation`
+- `shows the pictures of a question to the people who reach its task, and to nobody else`
+- `refuses another agent's picture and one already shown`
+- `never shows a file put on a task as a picture`
+- `lets a person pick one of a few ways, and wakes the agent with the pick`
+- `refuses a choice with one way, or with a commit`
+
+The first request-media case also had a 10-second `onTestFinished` hook timeout
+in `helpers-db.ts`, line 280. That file is a fixture helper, not another test
+file. None of these fourteen base failures is caused by this change.
+
+## Limits and next step
+
+The head authorized fast-forward only after all three changed test files are
+green, accepting the neighboring timeout report because its code is unchanged.
+That condition remains unmet after the single-file table check. No limits were
+raised and no access checks were removed or weakened. A decision from the head
+is needed before further work or integration. The requested one-at-a-time checks
+of task-files, program-operator-attachments and request-media remain after the
+fast-forward; they have not been run yet.
+
+The selector reported an unavailable import graph and left its remaining
+inventory to the release owner's full run; no full suite or `run_tests` was
+started here. Format was unavailable because the repository has no formatter;
+CRAP was not applicable because no production source changed. The first author
+check invocation had a mistyped SHA and was refused before executing checks;
+the corrected invocation above checked the actual candidate. `codex review`
+could not read the diff because bwrap could not create a namespace. Manual diff
+and access review were completed; there is no automated review PASS.
