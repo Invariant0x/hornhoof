@@ -417,6 +417,17 @@ export const en = {
       faint_line: (key, value) => `Borders in “${key}” are hard to see on “${value}”. Change one of the colors and add the file again.`,
     } satisfies SkinErrorWords as SkinErrorWords,
   },
+  workers: {
+    legend: 'Worker kinds',
+    employee: 'Employee',
+    generalist: 'Generalist: does a task whole',
+    ghost: 'Ghost: a one-shot call, appears for one task and is gone',
+    slot: (stage: string, number: number) => `${stage}, call ${number}`,
+    judge: (stage: string) => `${stage}, judge call`,
+    idle: 'Idle',
+    running: 'Running',
+    waiting: 'Waiting',
+  },
   map: {
     leaders: 'Company leaders',
     person: 'Person',
@@ -427,8 +438,8 @@ export const en = {
     deptAgents: 'Agents at work out of all',
     /* One-shot calls of a department while they wait or run: short runs of an employee's program that each answer once. */
     calls: (running: number, waiting: number) => `One-shot calls: ${running} running, ${waiting} waiting for free memory on ${waiting === 1 ? 'its' : 'their'} machine`,
-    call: (n: number, task: number, by: string) => `Call ${n} on #${task}, started by ${by}`,
-    judgeCall: (task: number, by: string) => `Judge call on #${task}, started by ${by}`,
+    call: (n: number, task: number, by: string) => `Call ${n} on #${task}${by ? `, started by ${by}` : ''}`,
+    judgeCall: (task: number, by: string) => `Judge call on #${task}${by ? `, started by ${by}` : ''}`,
     /* What a department's open turn holds: every result accepted into its branch. */
     readyForRelease: (n: number) => `Ready for release: ${n}`,
     orchestrator: 'Orchestrator',

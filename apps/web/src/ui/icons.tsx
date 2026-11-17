@@ -11,6 +11,22 @@ export function AgentIcon({ label }: { label?: string }) {
   );
 }
 
+export function EmployeeMarkIcon() {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" /></svg>;
+}
+
+export function GeneralistMarkIcon() {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 8 8 15 1 8Z" /></svg>;
+}
+
+export function GhostMarkIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 14V7a6 6 0 0 1 12 0v7l-3-2-3 2-3-2zM6 7h.2m3.6 0h.2" />
+    </svg>
+  );
+}
+
 export function PersonIcon({ label }: { label?: string }) {
   return (
     <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>

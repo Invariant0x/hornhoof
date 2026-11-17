@@ -335,7 +335,6 @@ The tracker uses the approved list reference and the existing skin roles. Tracke
 | `--tracker-mark-ink`, `--tracker-mark-strength` | Dark uses the page background as text on a full-strength fill. Light uses ink on a fill mixed at 30 percent over the panel surface |
 | `--tracker-working-ring`, `--tracker-waiting-ring` | Accent and warning on dark, their text variants on light |
 
-
 | Class | What it is | Source |
 |---|---|---|
 | `.tracker`, `.tr-main`, `.tr-top`, `.tr-menu`, `.tr-where`, `.tr-view-as`, `.tr-search` | A left panel from 220 to 280 px and a main area with the breadcrumb, View as and search. At 760 px and under the page has one column and the Lists button opens the left panel | `screens/Tasks.tsx` |
@@ -347,6 +346,20 @@ The tracker uses the approved list reference and the existing skin roles. Tracke
 | `.acard.at-end` | The card at the end side over the tracker from 761 px, the tracker leaving 432 px for it from 1100 px | `ui/SidePanels.tsx`, `screens/Shell.tsx` |
 | `.tp-path`, `.tp-type`, `.tp-state`, `.tp-why`, `.tp-leads`, `.tp-materials`, `.tr-form`, `.tr-stages`, `.tr-stage` | The card's path, kind, state, why, ways on, materials and edit forms | `ui/TaskPanel.tsx`, `ui/GoalPanel.tsx`, `ui/TrackerForms.tsx` |
 | `.tp-late`, `.tr-wait`, `.tr-relation` | Late dates and wait details use attention text in list rows and warning text on cards. Related tasks use outlined labels | `ui/TrackerViews.tsx`, `ui/TaskPanel.tsx` |
+
+### Worker marks
+
+Cyberpunk, Light, Matrix, Pixel and custom skins use the same aliases. Each resolves to the selected skin's role in the current mode.
+
+| Token | Light | Dark | Mark |
+|---|---|---|---|
+| `--worker-employee-fill` | `--muted` | `--muted` | Filled square for employees |
+| `--worker-generalist-fill` | `--cyan-ink` | `--cyan` | Filled diamond for generalists |
+| `--worker-ghost-ink` | `--muted` | `--muted` | Outlined ghost for a one-shot stage or an idle call place |
+| `--worker-ghost-running` | `--cyan-ink` | `--cyan` | Lit ghost for a running call |
+| `--worker-ghost-waiting` | `--amber-ink` | `--amber` | Warning outline for a waiting call |
+
+Map staff squares and diamonds use employee status colors, with `--line2` for idle staff. The tracker keeps the program fill and initials and adds a diamond in the mark's own ink for a generalist. The map legend has a row outside the canvas so opening it leaves the cards clear.
 
 ## 5. Languages
 

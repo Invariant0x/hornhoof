@@ -1,3 +1,4 @@
+import { ghostSlots } from './ghost-slots';
 import { workingTurns } from './hub-turns';
 import { peopleLayout, rowCenters, wirePeople, type PeopleLayout, type PersonChip, type PersonRoute } from './map-people';
 import { joinRoads, roadForks, type Way } from './map-roads';
@@ -25,13 +26,24 @@ export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point
 
 /* How far above or below the hub each row's middle sits. */
 function rowOffsets(rows: number, h: number): number[] {
-  if (rows <= 2) return [-CORNER, CORNER].slice(0, rows);
+  if (rows <= 2) {
+    const offset = Math.max(CORNER, (h + ROW_GAP) / 2);
+    return [-offset, offset].slice(0, rows);
+  }
   const step = Math.max(ROW, h + ROW_GAP);
   return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * step);
 }
 
-/* How tall the cards of the map are: taller for the turn strip while any department works in the turn. */
-const cardHeight = (org: Org): number => (workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H);
+/* The marks wrap inside the card's 246 px content: twenty 9 px staff marks or sixteen 12 px ghosts per row. */
+function cardHeight(org: Org): number {
+  const base = workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H;
+  const rooms = org.departments.map(d => {
+    const staffRows = Math.ceil(d.employees.length / 20);
+    const ghostRows = Math.ceil(ghostSlots(d).length / 16);
+    return Math.max(0, staffRows - 1) * 12 + (ghostRows ? 8 + ghostRows * 15 : 0);
+  });
+  return base + Math.max(0, ...rooms);
+}
 
 /* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others
    run out under the hub, turn up or down beside it and come into the near side of their card, all at right angles. */
