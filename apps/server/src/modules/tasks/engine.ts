@@ -17,7 +17,7 @@ import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
 import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, endRoutes, skippedData, type Route } from './echelons-store.js';
-import { isStaged } from '@hornhoof/protocol/echelons';
+import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
@@ -46,6 +46,7 @@ import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 import { stuckRecipient } from './stuck-route.js';
+import { removedEmployee, notifyUnfilledStages, replaceFutureOwners, type UnfilledStage } from './echelons-future.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -891,7 +892,7 @@ export async function closeTask(ctx: Live, actor: Actor, taskId: string, close: 
   return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
 }
 
-export type TaskChange = { ownerAgentId?: string; cleanup?: boolean; cleanupForTurn?: boolean; paths?: string[]; title?: string; brief?: string; body?: string; executor?: string; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
+export type TaskChange = { echelonStage?: EchelonStage; ownerAgentId?: string; cleanup?: boolean; cleanupForTurn?: boolean; paths?: string[]; title?: string; brief?: string; body?: string; executor?: string; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Retrying a task CAS never bypasses its current route or owner checks. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -914,20 +915,24 @@ function releasedRoute(route: Route, agentId: string, current: boolean): Route['
 }
 
 /* Leaving an assignment never skips the stage or erases an immutable candidate. */
-export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[] }> {
+export async function leaveWork(ctx: Ctx, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[] }> {
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [], handed: string[] = [];
+  const missing: UnfilledStage[] = [];
+  const leaving = await removedEmployee(ctx, agent.companyId, agent.id);
   for (const row of rows) await onFresh(ctx, row, async task => {
     const route = await routeOf(ctx.db, task);
     const current = task.assigneeAgentId === agent.id;
     const future = route.state.stages.some(step => step.status === 'pending' && step.ownerAgentId === agent.id);
     if (!current && !future) return null;
-    const state = releasedRoute(route, agent.id, current);
+    const replacements = leaving ? await replaceFutureOwners(ctx, task, route, leaving) : { state: route.state, set: {}, missing: [] };
+    const state = releasedRoute({ ...route, state: replacements.state }, agent.id, current);
     const due = current ? giver(task, 'switched', agent.id, `${agent.name} is no longer available. Assign the current stage to an eligible employee.`) : [];
-    await move(ctx, task, current ? { assigneeAgentId: null, status: 'waiting' } : {}, { kind: 'updated', actor, text: `${agent.name} left the assignment.`, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), due);
-    handed.push(task.id); wakes.push(...due);
+    await move(ctx, task, { ...replacements.set, ...(current ? { assigneeAgentId: null, status: 'waiting' as const } : {}) }, { kind: 'updated', actor, text: `${agent.name} left the assignment.`, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), due);
+    handed.push(task.id); wakes.push(...due); missing.push(...replacements.missing);
     return task;
   });
+  if (leaving) await notifyUnfilledStages(ctx, leaving, missing);
   return { wakes, handed };
 }
 
@@ -1009,13 +1014,17 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     await changeRoute(tx, route, revised.state, revised.paths);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, set.after), c.afterPlans, { agentId });
     independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
-    await wakeUpdatedHolder(tx, task, row, set, holder, wakes);
+    await wakeUpdatedHolder(tx, task, row, set, holder, wakes, c);
     await endFormerOwnerTurns(tx, task, set);
     if (tracker) edited = await writeEdit(tx, { agentId }, row, tracker);
   }, wakes, tracker ? [task.pipelineId, tracker.pipelineId ?? null] : []);
   if (independent) published(ctx, independent);
   publishRouteChanges(ctx, changed);
   return { task: edited ?? row, wakes };
+}
+
+function futureAssignmentOnly(change: TaskChange): boolean {
+  return change.echelonStage !== undefined && Object.keys(change).every(key => ['echelonStage', 'ownerAgentId'].includes(key));
 }
 
 function copyChangedFields(change: TaskChange, set: Partial<Task>): void {
@@ -1073,7 +1082,8 @@ async function insertIndependentChange(tx: Tx, row: Task, agentId: string, chang
   return made.child;
 }
 
-async function wakeUpdatedHolder(tx: Tx, task: Task, row: Task, set: Partial<Task>, holder: string | null, wakes: Wake[]): Promise<void> {
+async function wakeUpdatedHolder(tx: Tx, task: Task, row: Task, set: Partial<Task>, holder: string | null, wakes: Wake[], change: TaskChange): Promise<void> {
+  if (futureAssignmentOnly(change)) return;
   if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
 }
 
