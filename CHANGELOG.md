@@ -50,6 +50,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Kimi's changing toolbar tips no longer restart the watch of an unchanged finished answer.
 - A job whose program exited and whose result was lost fails after two minutes, and its queue goes on.
 - An operator who looked at a program can still type within 30 seconds while Hornhoof looks at it too.
+- The orchestrator's SQL no longer reads secret tool answers, assistant event payloads or delivery addresses.
+- `send_telegram_file` sends only a file its agent may read, found by its exact id and never by its name.
+- After a node restarts, only the program it started anew counts as active, not the ones from before.
+- A window opened as a node restarts no longer pushes the agent's program out of its pane, so its hooks are accepted.
+- Percentages on Machines and plans use the text font, so the percent sign no longer reads like a slash and a dot.
+- Right to left, plan limits keep each phrase and number with its unit whole, and the trust stripe starts the line.
 
 ### Added
 
