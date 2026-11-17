@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { agents, departments, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+import { prepareTemplates } from './templates-once.js';
 import { releasing } from './turn-release-fixture.js';
+
+await prepareSharedDatabase();
+prepareTemplates();
 
 const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
