@@ -1,0 +1,50 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+
+ ❯ test/terminal-host-secrets.test.ts (19 tests | 1 failed) 826ms
+   ✓ a view of an agent at work (5)
+     ✓ hides a token learned after the view opened, without another turn 122ms
+     ✓ shows people the live screen without a known secret, even one that comes in two pieces 42ms
+     ✓ gives the history first without a known secret 26ms
+     ✓ gives a watcher who may not type a read-only view, and takes none of its keys 44ms
+     ✓ passes what a person who may type types to the program 50ms
+   ❯ what a turn tells Hornhoof (14)
+     × restores private output after a node restart, resuming the secret turn: true 80ms
+     ✓ restores private output after a node restart, resuming the secret turn: false 19ms
+     ✓ learns vault_entry through the bridge when the program emits no tool transcript 56ms
+     ✓ learns vault_save through the bridge when the program emits no tool transcript 49ms
+     ✓ learns custom_secret through the bridge when the program emits no tool transcript 50ms
+     ✓ keeps the retained terminal tail private in a later typed turn, completed: false 27ms
+     ✓ keeps the retained terminal tail private in a later typed turn, completed: true 49ms
+     ✓ shows a clean screen after the sensitive program and its tmux session were removed 14ms
+     ✓ hides a sensitive tool transcript and its raw terminal completion 41ms
+     ✓ hides a multiline secret before clipping a typed turn that ended before its acknowledgement 21ms
+     ✓ hides a known secret in what a program said as it ended during a turn 22ms
+     ✓ hides a known secret in the name of a tool the program calls, mcp__fixture__sk-fake-0123456789abcdef, before it clips it 11ms
+     ✓ hides a known secret in the name of a tool the program calls, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxsk-fake-0123456789abcdef, before it clips it 41ms
+     ✓ never lets a known secret into the words of a person it keeps for them 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/terminal-host-secrets.test.ts > what a turn tells Hornhoof > restores private output after a node restart, resuming the secret turn: true
+AssertionError: expected '[{"type":"job.program","jobId":"job-p…' not to contain 'private-node-restart-marker-1178'
+
+Expected: "private-node-restart-marker-1178"
+Received: "[{"type":"job.program","jobId":"job-private","state":"thinking","since":1794885611945,"screenAt":1794885611945,"signAt":1794885611935,"session":"c3b66b04-872b-4fbe-a3a4-058a026ef20a"},{"type":"job.done","jobId":"job-private","ok":true,"sessionId":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","result":"Report with private-node-restart-marker-1178.","tail":"Sensitive tool data and raw terminal output hidden.","error":null,"tokens":null}]"
+
+ ❯ test/terminal-host-secrets.test.ts:88:40
+     86|     const result = await t.on(t.running);
+     87|     const done = jobDone(jobId, result, []);
+     88|     expect(JSON.stringify(t.sent)).not.toContain(marker);
+       |                                        ^
+     89|     expect(JSON.stringify(done)).not.toContain(marker);
+     90|     expect(done.result).toBe(resumed ? 'Sensitive tool data and raw te…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 passed (19)
+   Start at  03:20:08
+   Duration  4.18s (transform 59%, tests 22%, import 18%, worker 1%)
+
