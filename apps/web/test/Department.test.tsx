@@ -566,7 +566,7 @@ describe('Department view', () => {
     await flyIn(user);
     await drawer(user, 'Department tasks');
     expect(location.pathname + location.search).toBe('/tasks?department=d2');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Development' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Development / List' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
