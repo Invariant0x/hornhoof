@@ -7,6 +7,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 ### Fixed
+- Tracker boards keep all columns in one row when they fit and stack every column in order when space runs short.
+- The task lists panel sits against the start edge below app navigation and fills the available height.
+- Tracker goal links get more room and underline on hover or keyboard focus.
 - The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 ### Added

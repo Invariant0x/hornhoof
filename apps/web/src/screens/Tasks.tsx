@@ -480,7 +480,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
 
   return (
-    <div className="tracker">
+    <div className="tracker fit">
       <TrackerSide
         id={sideId}
         place={place}

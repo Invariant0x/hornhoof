@@ -106,7 +106,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
         <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>
           {goal ? (
-            <a className="linkish tr-goal-link" href={routePath({ kind: 'tasks', card: 'goal', id: goal.id })} onClick={e => {
+            <a className="linkish tr-goal-link" dir="auto" href={routePath({ kind: 'tasks', card: 'goal', id: goal.id })} onClick={e => {
               if (!rows.onOpenGoal || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
               e.preventDefault();
               rows.onOpenGoal(goal.id);
@@ -217,21 +217,35 @@ function Column({ column, rows }: { column: BoardColumn; rows: Rows }) {
   const t = useT();
   const name = column.stage ? column.stage.name : t.tracker.statuses[column.status!];
   return (
-    <section className={`tr-col${column.stage ? ' stage' : ''}`} aria-label={name}>
+    <section className="tr-col" aria-label={name}>
       <h2 className="tr-col-head">{name} <span className="tr-count">{column.cards.length}</span></h2>
       {column.cards.length ? column.cards.map(card => <BoardCard key={card.task.id} tree={card} rows={rows} stage={!!column.stage} />) : <p className="muted">{t.tracker.board.empty}</p>}
     </section>
   );
 }
 
-/* The board: a column per state, or per stage of a chosen pipeline, as many side by side as the width holds, one under
-   another where it is narrow, each card's subtasks counted over all the work. The engine moves the cards; nobody drags them. */
+/* The board keeps its state or stage columns together, in one row when they fit and in order down the page otherwise. */
 export function TrackerBoard({ tasks, all, pipeline, cancelled, rows }: { tasks: TaskLine[]; all: TaskLine[]; pipeline: Pipeline | null; cancelled: boolean; rows: Rows }) {
   const t = useT();
   const columns = boardColumns(tasks, pipeline, { cancelled, all }, rows.asksYou);
+  const group = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const element = group.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    setWidth(element.clientWidth);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const layout = width >= columns.length * 160 + (columns.length - 1) * 8 ? 'row' : 'stack';
   return (
     <section className="tr-board" aria-label={t.tracker.views.board}>
-      <div className="tr-columns">{columns.map(column => <Column key={column.id} column={column} rows={rows} />)}</div>
+      <div className="tr-columns" ref={group} data-layout={layout} style={{ '--tr-column-count': columns.length } as CSSProperties}>
+        {columns.map(column => <Column key={column.id} column={column} rows={rows} />)}
+      </div>
     </section>
   );
 }
