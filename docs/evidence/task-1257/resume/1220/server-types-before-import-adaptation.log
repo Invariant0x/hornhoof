@@ -1,1 +1,0 @@
-apps/server/src/modules/assistants/setup.ts(139,99): error TS2304: Cannot find name 'changedBy'.
