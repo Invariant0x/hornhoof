@@ -3,6 +3,7 @@ import type { LeaseKind, Term } from '../../db/net.js';
 import { PEER_PATHS, type Peer } from '../../net/peer-server.js';
 import type { Clocks } from './lease.js';
 import { TermShape } from './sql-words.js';
+import { Ticker } from './ticker.js';
 
 /* The machines that keep the company's data tell each other each second where they stand: which one leads and under
    which term, which follow it, and which is about to take the server. Each keeper sends its beat to every other one it
@@ -71,8 +72,7 @@ export type BeatsOptions = {
 const REFUSED = (status: 400 | 403): { status: number; body: unknown } => ({ status, body: { ok: false } });
 
 export class Beats {
-  private timer: NodeJS.Timeout | null = null;
-  private stopped = false;
+  private readonly ticks: Ticker;
   private readonly lasts = new Map<string, Heard>();
   private readonly answers = new Map<string, Heard>();
   private readonly flying = new Set<string>();
@@ -80,23 +80,20 @@ export class Beats {
 
   constructor(private readonly opts: BeatsOptions) {
     this.clocks = opts.now ?? (() => ({ wall: Date.now(), mono: performance.now() }));
+    this.ticks = new Ticker(() => this.tick(), opts.everyMs ?? BEAT_MS);
   }
 
   start(): void {
-    if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => void this.tick(), this.opts.everyMs ?? BEAT_MS);
-    this.timer.unref();
+    this.ticks.start();
   }
 
   stop(): void {
-    this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.ticks.stop();
   }
 
   /* One round: a beat to each machine that has none on its way. It ends once each of them was answered or given up. */
   async tick(): Promise<void> {
-    if (this.stopped) return;
+    if (this.ticks.stopped) return;
     await Promise.all(this.opts.peers().map(peer => this.beat(peer.networkId)));
   }
 
