@@ -160,6 +160,15 @@ for (const look of LOOKS) {
     await shot(page, card, `channel-${browserName}-${name}`);
     await shot(page, panel.getByRole('heading', { name: s.catalogTitle }), `catalog-${browserName}-${name}`);
 
+    /* The channel's addresses are a block of their own under its buttons, with a heading that counts them (Design #1193). */
+    const addresses = card.locator('.outbound-contacts');
+    await expect(addresses.getByRole('heading', { name: c.listTitle(0), exact: true })).toBeVisible();
+    await expect(addresses.getByText(c.none, { exact: true })).toBeVisible();
+    const buttonsEnd = (await card.getByRole('button', { name: s.stop, exact: true }).boundingBox())!;
+    const blockStart = (await addresses.boundingBox())!;
+    expect(buttonsEnd.y + buttonsEnd.height).toBeLessThanOrEqual(blockStart.y);
+    await shot(page, addresses, `address-none-${browserName}-${name}`);
+
     /* The waiting revision is open at once: its subject, its words with the places a message fills in, its language and
        who proposed it, and what changed from the revision messages use. */
     const shown = panel.getByRole('region', { name: s.revision(2) });
@@ -202,16 +211,17 @@ for (const look of LOOKS) {
     await form.getByRole('checkbox').check();
     await shot(page, form, `address-form-${browserName}-${name}`);
     await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), form.getByRole('button', { name: c.submit, exact: true }).click()]);
-    await expect(card.getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     expect(posted).toEqual([
       { path: '/api/outbound/catalog/r2/publish', body: { revision: 2, newest: 2 } },
       { path: '/api/outbound/contacts', body: { channelId: 'ch-b2c', kind: 'email', address: TEST_ADDRESS, source: 'Test address of our team', evidence: 'My own address, to try the letters' } },
     ]);
+    /* What adding said stands right under the entry it added. */
+    await expect(card.getByRole('listitem').filter({ hasText: TEST_ADDRESS }).getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     await fits(page, panel);
     await shot(page, card, `address-added-${browserName}-${name}`);
 
     /* The address is on the channel's list, agreed and added by Max; he takes its consent back there. */
-    const listed = card.getByRole('list', { name: c.listTitle });
+    const listed = card.getByRole('list', { name: c.listTitle(1), exact: true });
     const line = listed.getByRole('listitem').filter({ hasText: TEST_ADDRESS });
     await expect(line).toContainText(c.statuses.granted);
     expect(await small(line)).toEqual([]);
