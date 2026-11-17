@@ -7,7 +7,7 @@ import { useGoal, useGoals, useTasks } from '../tasks';
 import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
 import { Progress } from './TaskBoard';
-import { CardPath, Fact, goalChain, useEscapeCloses } from './TaskPanel';
+import { CardPath, DueDay, Fact, goalChain, useEscapeCloses } from './TaskPanel';
 import { GoalForm } from './TrackerForms';
 import { dueText, momentText, trackerLine } from './tracker-words';
 
@@ -128,7 +128,7 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
       <GoalProgress goal={goal} />
       <dl className="facts tp-facts" aria-label={words.facts}>
         <Fact name={words.responsible}>{goal.responsible.name}</Fact>
-        {due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined}>{due.text}</span></Fact>}
+        {due && <Fact name={words.due}><DueDay due={due} /></Fact>}
       </dl>
       {(onGraph || (mayEdit && !editing)) && (
         <div className="entry-actions tp-leads">
