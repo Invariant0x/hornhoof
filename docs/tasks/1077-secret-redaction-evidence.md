@@ -81,3 +81,21 @@ Completed static checks on the final executable sources:
 The final browser repeat started at 02:10:00 UTC. Four Chromium cases timed out before the panel or page finished opening; the author interrupted the two active cases at 02:14:00 UTC. Result: 6 failed (including two interrupted cases), 42 did not run, command exit 130. The run never reached the secret action or new punctuation assertion. The prior 48-case passed receipt does not prove the final bidi edit. The temporary preview-server and clock experiments were reverted; no timeout or selection assertion changed.
 
 The earlier combined server test-type command started at 01:38:24 UTC and returned 143 without compiler output, observed around 01:40 UTC. That is not PASS. The head relayed the interruption to Operations. The separate package commands above preserve completed results; the server command is recorded separately below.
+
+Server types with tests (`npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit`) completed at 02:18:19 UTC with six TS18046 errors in stored-secrets.test.ts: raw SQL execute results were unknown. Explicit result shapes were added without changing any assertions. The repeated command completed at 02:20:07 UTC with exit 0.
+
+Separate stored-secrets command: `npx --no-install vitest run test/stored-secrets.test.ts --maxWorkers=1 --reporter=verbose`, 02:11:44–02:20:58 UTC, exit 1. Seven passed, including complete marker removal, archived text, stable masks, preserved service state, rights and company isolation. The first test, “masks tasks and comments before storing their copies”, hit the existing 20 s test limit (reported 29.485 s). Its assertions and timeout are unchanged. Total duration was 527.16 s, including transform and import. This receipt is not an all-pass result.
+
+After the SQL result type annotations, `npx --no-install eslint test/stored-secrets.test.ts` also passed with exit 0 at 02:23:05 UTC.
+
+Separate merge command: `npx --no-install vitest run test/secret-redaction-merge.test.ts --maxWorkers=1 --reporter=verbose`, 02:21:24–02:26:57 UTC, exit 1. Four tests exceeded the unchanged 20 s limit (42.752, 36.512, 25.759 and 27.424 s); the first two also exceeded the existing 10 s teardown hook limit at merge-fixture.ts:15. No failed value comparison was printed. This result leaves final merge execution unproved; the earlier interrupted five-file run printed four passes in 21.117 s for these same SQL helper sources before the migration-only renumbering, but is not an all-pass receipt.
+
+Separate migration command: `npx --no-install vitest run test/secret-redaction-migration.test.ts --maxWorkers=1 --reporter=verbose`, 02:27:15–02:31:22 UTC, exit 1. The upgrade/repeat migration test exceeded the unchanged 20 s limit (reported 35.405 s); no value-comparison failure was printed. Total duration 235.18 s. Renumbered migration execution remains a concern, not PASS.
+
+Separate rights command: `npx --no-install vitest run test/secret-redaction-rights.test.ts --maxWorkers=1 --reporter=verbose`, 02:31:38–02:34:33 UTC, exit 0. One passed: agents cannot select or delete suppression records or call the privileged text/row scrub functions. Duration 168.34 s including transform/import, test 15.409 s.
+
+Separate outbound-grants command: `npx --no-install vitest run test/outbound-grants.test.ts --maxWorkers=1 --reporter=verbose`, 02:34:48–02:37:06 UTC, exit 0. All 60 passed, including protected-table grants and absence of privileged public-schema functions. All five requested server files have now completed individually; none was left running.
+
+The final browser configuration builds the current checkout before starting Vite preview. This avoids on-demand module compilation inside the interaction's 30 s runner limit, and prevents a stale dist directory from supplying the tested UI. Server ownership, timeouts, selection assertions and API fixture checks are preserved. The earlier preview-only experiment did not build current sources and was reverted; the final build-first run is reported below.
+
+After the final bidi markup change, `npx --no-install vitest run test/TaskPanel.test.tsx --maxWorkers=1` passed all 45 checks, exit 0 at 02:40:18 UTC. The environment printed its existing “HTMLCanvasElement getContext() not implemented” diagnostic; no test failed. Total duration 108.72 s.
