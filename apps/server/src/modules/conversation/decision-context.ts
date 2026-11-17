@@ -344,11 +344,16 @@ async function hasClickGrant(db: Reader, jobId: string): Promise<boolean> {
 
 /* The turn of the orchestrator or a head answers this person from now on, or nobody: marked once as long as it does. The
    mark goes by the words of the turn, not by the owner the orchestrator acts as when no CEO wrote. */
+async function keepSpeaker(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
+  await appendEvent(ctx, { companyId: turn.companyId, agentId: turn.agentId, jobId: turn.id, kind: 'typed', data: {}, personId });
+}
+
 async function answersFromNow(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
+  if (turn.agentKind === 'worker') return keepSpeaker(ctx, turn, personId);
   if (!ANSWERS_PEOPLE.includes(turn.agentKind)) return;
   const current = (await wordsPrincipal(ctx.db, turn.id))?.personId ?? null;
   if (current === personId && (personId !== null || !(await hasClickGrant(ctx.db, turn.id)))) return;
-  await appendEvent(ctx, { companyId: turn.companyId, agentId: turn.agentId, jobId: turn.id, kind: 'typed', data: {}, personId });
+  await keepSpeaker(ctx, turn, personId);
 }
 
 type Typing = Pick<Ctx, 'db' | 'bus' | 'templates' | 'terminals'>;
