@@ -405,25 +405,34 @@ describe('moving a session from before the switch to __Host-hh_session', () => {
     expect(res.cookies).toHaveLength(0);
   });
 
+  /* What the move set is read against the clock just before and just after the request, whatever the time it took: the new
+     session lasts 30 days from the move and the old one a minute from it, by the server's clock or the database's. A cookie
+     says its end to the second. */
   it('gives the new cookie the link attributes and the usual 30 days, and takes the old row to a minute at most', async () => {
     const { app, db, token } = await olderSession();
+    const before = Date.now();
     const res = await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    const after = Date.now();
     const fresh = res.cookies.find(c => c.name === '__Host-hh_session')!;
     expect(fresh).toMatchObject({ httpOnly: true, sameSite: 'Lax' });
-    expect(Math.abs(fresh.expires!.getTime() - (Date.now() + 30 * DAY))).toBeLessThan(60_000);
-    expect(Math.abs((await rowOf(db, fresh.value))!.expiresAt.getTime() - (Date.now() + 30 * DAY))).toBeLessThan(60_000);
-    const left = (await rowOf(db, token))!.expiresAt.getTime() - Date.now();
-    expect(left).toBeGreaterThan(50_000);
-    expect(left).toBeLessThanOrEqual(60_000);
+    expect(fresh.expires!.getTime()).toBeGreaterThanOrEqual(before + 30 * DAY - 1000);
+    expect(fresh.expires!.getTime()).toBeLessThanOrEqual(after + 30 * DAY);
+    const row = (await rowOf(db, fresh.value))!.expiresAt.getTime();
+    expect(row).toBeGreaterThanOrEqual(before + 30 * DAY);
+    expect(row).toBeLessThanOrEqual(after + 30 * DAY);
+    const old = (await rowOf(db, token))!.expiresAt.getTime();
+    expect(old).toBeGreaterThanOrEqual(before + 60_000);
+    expect(old).toBeLessThanOrEqual(after + 60_000);
   });
 
   it('does not lengthen an old session that ends sooner than a minute', async () => {
     const { app, db, token } = await olderSession();
-    await db.update(sessions).set({ expiresAt: new Date(Date.now() + 10_000) }).where(eq(sessions.tokenHash, hashToken(token)));
-    await app.inject({ url: '/api/me', ...withOldCookie(token) });
-    const left = (await rowOf(db, token))!.expiresAt.getTime() - Date.now();
-    expect(left).toBeGreaterThan(0);
-    expect(left).toBeLessThanOrEqual(10_000);
+    /* Half a minute: longer than a test may run, so the session still lives when it is moved, however slow the machine. */
+    const soon = new Date(Date.now() + 30_000);
+    await db.update(sessions).set({ expiresAt: soon }).where(eq(sessions.tokenHash, hashToken(token)));
+    expect((await app.inject({ url: '/api/me', ...withOldCookie(token) })).statusCode).toBe(200);
+    expect(await db.select().from(sessions)).toHaveLength(2);
+    expect((await rowOf(db, token))!.expiresAt.getTime()).toBe(soon.getTime());
   });
 
   it("leaves another person's session alone", async () => {

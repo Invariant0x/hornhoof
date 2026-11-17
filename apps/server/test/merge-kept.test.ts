@@ -11,6 +11,7 @@ import { CHOICE_FILE, type KeptDatabases } from '../src/modules/merge/kept.js';
 import { forkWanted, MERGE_EVERY_MS, Merger, RETRY_MAX_MS } from '../src/modules/merge/merger.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
+import { until } from './helpers-basic.js';
 import { openTestDb } from './helpers-db.js';
 import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
 
@@ -375,7 +376,7 @@ describe('the databases a restore set aside', () => {
     expect((await s.merges()).map(row => row.status)).toEqual(['merged', 'merged']);
     await s.keep('hornhoof_before_t3');
     writeKeeperState(control, { mode: 'read', at: new Date().toISOString(), link: null });
-    await vi.waitFor(() => expect(s.app.ctx.mode.current()).toBe('read'));
+    await until(() => s.app.ctx.mode.current() === 'read');
     await s.merger.tick();
     expect(await s.merges()).toHaveLength(2);
   });
