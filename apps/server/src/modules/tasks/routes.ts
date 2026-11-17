@@ -17,7 +17,7 @@ import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { answer, cancel, closeTask, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { editTask } from '../tracker/edit.js';
 import { mayPlan, placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
@@ -484,6 +484,18 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
     const moved = await cancel(ctx, actorOf(me), (await changed(me, id)).id, why);
     await stopTurns(ctx, moved.closed);
+    await wakeAll(ctx, moved.wakes);
+    return { task: await detail(me, moved.task) };
+  });
+
+  /* The orchestrator closes a task past its route, in any state; the engine checks that it is the orchestrator. */
+  app.post('/api/tasks/:id/close', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { status, why } = z.object({ status: z.enum(['done', 'cancelled']), why: z.string().trim().min(1).max(1000) }).strict().parse(req.body ?? {});
+    if (!viaOrchestrator(me)) throw new ApiError(403, 'forbidden', 'Only the orchestrator closes a task past its route. Cancel it instead.', 'orchestrator_only');
+    const moved = await closeTask(ctx, actorOf(me), (await changed(me, id)).id, { status, why });
+    await stopTurns(ctx, moved.closed, me.via);
     await wakeAll(ctx, moved.wakes);
     return { task: await detail(me, moved.task) };
   });
