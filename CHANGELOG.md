@@ -59,6 +59,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A head's answer to a question no longer shows "decided by the orchestrator".
 - A forged internal header with multibyte characters gets 401 instead of a server error.
 - An interrupted `hh-fetch` download keeps the earlier file whole and writes the new one only once it is complete.
+- A file upload stops once it passes the remaining quota instead of being read in full, and leaves no partial file.
 
 ### Added
 
