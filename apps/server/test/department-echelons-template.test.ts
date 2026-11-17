@@ -19,6 +19,28 @@ function withRoute(key: string, stages: string): string {
 }
 
 describe('the route of every department template', () => {
+  it('loads one default and two to five complete alternatives for every department', () => {
+    for (const department of TEMPLATE_KEYS) {
+      const catalog = templates.catalogs?.get(department);
+      expect(catalog, department).toBeDefined();
+      expect(catalog!.pipelines.length).toBeGreaterThanOrEqual(3);
+      expect(catalog!.pipelines.length).toBeLessThanOrEqual(6);
+      expect(catalog!.pipelines.filter(p => p.key === catalog!.default)).toHaveLength(1);
+      for (const pipeline of catalog!.pipelines) {
+        expect(pipeline.why).not.toBe('');
+        expect(pipeline.stages.length).toBeGreaterThan(1);
+        for (const stage of pipeline.stages) expect(templates.roles.get(stage.ownerRole)?.department).toBe(department);
+      }
+    }
+  });
+
+  it('lists exactly the available pipelines and their uses in the orchestrator skill', () => {
+    const body = templates.skills.get('orch-pipelines')?.body ?? '';
+    const entries = [...body.matchAll(/^- `([a-z-]+)` (.+)$/gm)].map(([, key, line]) => [key, line]);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.sort()).toEqual([...templates.catalogs.values()].flatMap(catalog => catalog.pipelines.map(p => [p.key, `${p.name}. ${p.why}`])).sort());
+  });
+
   it('keeps the stages of Development and the skill of each of its checks', () => {
     expect(templates.stagesOf('development').stages.map(({ stage, ability }) => ({ stage, ability }))).toEqual([
       { stage: 'architecture', ability: null }, { stage: 'development', ability: null }, { stage: 'review', ability: 'dev-review-diff' },

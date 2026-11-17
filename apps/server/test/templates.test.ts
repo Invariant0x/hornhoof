@@ -388,7 +388,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(187);
+    expect(skills).toHaveLength(188);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -558,7 +558,7 @@ describe('templates', () => {
   it('names where every template comes from and under which licence', () => {
     const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
     const files = readdirSync(DIR, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && f !== 'SOURCES.md');
-    expect(files.length).toBe(roles.length + skills.length + templates.teams.size + templates.echelons.size);
+    expect(files.length).toBe(roles.length + skills.length + templates.teams.size + templates.echelons.size + templates.catalogs.size);
     for (const file of files) expect(sources, file).toContain(`| \`${file}\` |`);
     /* Every repository a skill learned from has its licence in the table of sources. */
     const repos = new Set([...sources.matchAll(/^\| ([\w.-]+\/[\w.-]+(?:, [\w.-]+\/[\w.-]+)*) \|/gm)].flatMap(m => m[1]!.split(', ')));
