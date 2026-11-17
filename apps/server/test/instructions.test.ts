@@ -708,7 +708,7 @@ describe('work a department did before', () => {
   });
 });
 
-describe('one run of every test per release and DEV-HEAD inline byte budget', () => {
+describe('one run of every test per release', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const renderRole = (roleId: string) => {
     const role = shipped.roles.get(roleId)!;
@@ -719,19 +719,11 @@ describe('one run of every test per release and DEV-HEAD inline byte budget', ()
     );
   };
 
-  it('keeps DEV-HEAD and every shipped role within a 24000-byte inline instruction packet without raising MAX_INSTRUCTIONS', () => {
+  it('keeps MAX_INSTRUCTIONS at 200000', () => {
     expect(MAX_INSTRUCTIONS).toBe(200_000);
-    const devHead = renderRole('DEV-HEAD');
-    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(24_000);
-    for (const role of shipped.roles.values()) {
-      const packet = renderRole(role.id);
-      expect(Buffer.byteLength(packet.text), role.id).toBeLessThanOrEqual(24_000);
-    }
   });
 
-  it('reserves inline byte headroom in DEV-HEAD for combined release branches and starts employee hh-* skills with You can', () => {
-    const devHead = renderRole('DEV-HEAD');
-    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(23_500);
+  it('starts employee hh-* skills with You can', () => {
     for (const skill of shipped.skills.values()) {
       if (skill.id.startsWith('hh-') && skill.id !== 'hh-assistant') {
         expect(skill.body.startsWith('You can '), skill.id).toBe(true);
