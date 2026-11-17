@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { privateTurn } from '../tools/private-turns.js';
-import { privateUpload } from '../tools/private-upload.js';
+import { privateFilename, privateUpload } from '../tools/private-upload.js';
 import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
@@ -466,7 +466,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
       const taken = await received(ctx.config.filesDir, privateUpload(req.body, values));
       const row = await keepTaken(ctx.config.filesDir, taken, async () => {
-        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, values?.text(raw ?? '') || raw);
+        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, privateFilename(values, raw));
         await checkAttachmentSpace(ctx, job.companyId, task, toChat, taken.size);
         const [kept] = await db
           .insert(attachments)

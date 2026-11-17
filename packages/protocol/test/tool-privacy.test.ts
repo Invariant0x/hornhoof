@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { PRIVATE_TOOL_NOTE, PrivateValues, ToolPrivacy, isSensitiveTool } from '../src/tool-privacy.js';
+import { PRIVATE_TOOL_NOTE, PrivateValues, ToolPrivacy, isSensitiveTool, privateToolEvent } from '../src/tool-privacy.js';
 
 describe('sensitive tool telemetry', () => {
+  it('hides text and todos only when an issued turn has lost its temporary masks', () => {
+    const text = { kind: 'text' as const, text: 'private-restart-marker' };
+    expect(privateToolEvent(text, true)).toEqual(text);
+    expect(privateToolEvent(text, true, true)).toEqual({ ...text, text: PRIVATE_TOOL_NOTE });
+    expect(privateToolEvent({ kind: 'todo', items: [{ text: 'private-restart-marker', state: 'todo' }] }, true, true)).toEqual({ kind: 'todo', items: [] });
+    expect(privateToolEvent({ kind: 'tool_result', ok: true, summary: 'private-restart-marker' }, true, true)).toMatchObject({ summary: PRIVATE_TOOL_NOTE });
+  });
   it('masks short secrets in reports without changing identifiers or event discriminants', () => {
     const values = new PrivateValues();
     values.remember('text');
