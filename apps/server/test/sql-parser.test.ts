@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import ts from 'typescript';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { ThrowawayParser, type ParserAnswer } from '../src/db/sql-parser.js';
 
 class FakeWorker extends EventEmitter {
@@ -183,21 +183,33 @@ describe('a parser that can be thrown away', () => {
 
 describe('the check as the built server runs it', () => {
   const serverRoot = fileURLToPath(new URL('..', import.meta.url));
-  const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
+  const src = join(serverRoot, 'src');
 
+  /* The probe ends by itself, or the test's own limit ends it: nothing here counts the time it takes. */
   const run = (args: string[], cwd: string): Promise<string> =>
     new Promise((resolve, reject) => {
-      execFile(process.execPath, args, { cwd, timeout: 45_000 }, (err, stdout, stderr) => (err ? reject(new Error(`${err.message}\n${stdout}\n${stderr}`)) : resolve(stdout)));
+      const child = execFile(process.execPath, args, { cwd }, (err, stdout, stderr) => (err ? reject(new Error(`${err.message}\n${stdout}\n${stderr}`)) : resolve(stdout)));
+      onTestFinished(() => void child.kill());
     });
 
-  function writeBuildConfig(dir: string): void {
-    const config = {
-      extends: join(serverRoot, 'tsconfig.json'),
-      compilerOptions: { outDir: dir, rootDir: join(serverRoot, 'src') },
-      include: [],
-      files: [join(serverRoot, 'src/db/sql-check.ts')],
-    };
-    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify(config));
+  /* The check and every file of the server it imports, as tsc emits each of them into dist: the server builds with
+     isolatedModules, so a file comes out the same alone. Written one by one here, no type check is run that the server's
+     own build does not run anyway. */
+  function build(dir: string): void {
+    const waiting = [join(src, 'db/sql-check.ts')];
+    const built = new Set<string>();
+    for (let file = waiting.pop(); file; file = waiting.pop()) {
+      if (built.has(file)) continue;
+      built.add(file);
+      const out = join(dir, relative(src, file).replace(/\.ts$/, '.js'));
+      const source = readFileSync(file, 'utf8');
+      const { outputText } = ts.transpileModule(source, { fileName: file, compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext } });
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(out, outputText);
+      for (const { fileName } of ts.preProcessFile(source).importedFiles) {
+        if (fileName.startsWith('.')) waiting.push(join(dirname(file), fileName.replace(/\.js$/, '.ts')));
+      }
+    }
   }
 
   /* Ends by itself, as the server's process must be free to. A call still waiting must hold the process, or it would die
@@ -218,13 +230,12 @@ describe('the check as the built server runs it', () => {
     mkdirSync(join(serverRoot, 'dist'), { recursive: true });
     const dir = mkdtempSync(join(serverRoot, 'dist', '.sql-parser-test-'));
     try {
-      writeBuildConfig(dir);
-      await run([tsc, '-p', join(dir, 'tsconfig.json')], serverRoot);
+      build(dir);
       writeFileSync(join(dir, 'probe.js'), PROBE);
       const kinds = await run(['--stack-size=3900', 'probe.js'], dir);
       expect(kinds.trim().split('\n')).toEqual(['passed', 'passed', 'syntax', 'syntax', 'passed', 'statement']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 90_000);
+  });
 });

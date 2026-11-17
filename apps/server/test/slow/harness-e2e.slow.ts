@@ -1,3 +1,5 @@
+/* One harness for a product across its machines: the real server and the real node code, with real git, builds in
+   processes of their own and HTTP between them. It runs with the slow tests, apart from every change's run. */
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,16 +17,16 @@ vi.mock('node:child_process', async original => {
 });
 vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>(), chownSync: () => {} }));
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
-vi.mock('../../node/src/isolation.js', async original => {
+vi.mock('../../../node/src/isolation.js', async original => {
   const module = await original<{ prepareFolder: (path: string, user: null) => string }>();
   return { ...module, userFor: () => ({ uid: ids.builderUid, gid: ids.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
 });
-import { departments, harnessBuilds, harnessProducts, jobs, testParts, testRuns } from '../src/db/schema.js';
-import { only } from '../src/db/selections.js';
-import { hashToken } from '../src/crypto/tokens.js';
-import { harnessRound } from '../src/modules/testruns/harness.js';
-import { until, type FakeNode } from './helpers.js';
-import { company } from './test-runs-company.js';
+import { departments, harnessBuilds, harnessProducts, jobs, testParts, testRuns } from '../../src/db/schema.js';
+import { only } from '../../src/db/selections.js';
+import { hashToken } from '../../src/crypto/tokens.js';
+import { harnessRound } from '../../src/modules/testruns/harness.js';
+import { until, type FakeNode } from '../helpers.js';
+import { company } from '../test-runs-company.js';
 
 /* The node's own modules, by a name the server's types do not follow. */
 type Done = Extract<NodeMessage, { type: 'tests.done' }>;
@@ -33,7 +35,7 @@ type Run = Extract<ServerMessage, { type: 'tests.run' }>;
 type Sync = Extract<ServerMessage, { type: 'tests.harness' }>;
 type Describe = Extract<ServerMessage, { type: 'tests.describe' }>;
 type NodeOptions = { dir: string; proc: string; user: { uid: number; gid: number }; hidden: string[]; prepareRepoBrowser: () => Promise<void>; harness: unknown };
-const from = (path: string) => new URL(`../../node/src/${path}`, import.meta.url).href;
+const from = (path: string) => new URL(`../../../node/src/${path}`, import.meta.url).href;
 const { runTests, syncHarness } = await import(/* @vite-ignore */ from('tests.ts')) as { runTests: (message: Run, options: NodeOptions) => Promise<Done>; syncHarness: (message: Sync, options: NodeOptions) => Promise<Synced> };
 type Claim = { state: string; afterMs?: number };
 type Remote = { claim: (unit: unknown, signal: AbortSignal) => Promise<Claim> };
