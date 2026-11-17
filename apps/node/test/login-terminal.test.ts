@@ -137,7 +137,7 @@ describe("a plan's sign-in in a terminal on the node", () => {
   });
 
   /* The owner sees why: its code and the last line it said, with nothing in it that looks like a key. */
-  it.each(['AbCdMARKER7c41EfGh1234IjKlMnOp5678', 'marker7c41abcdefghijklmnopqrstuvwxyz'])('whose program ends at once masks its code and last line, including Bearer %s', async bearer => {
+  it.each(['AbCdMARKER7c41EfGh1234IjKlMnOp5678', 'marker7c41abcdefghijklmnopqrstuvwxyz', 'prefix~marker7c41abcdefghijklmnopqrstuvwxyz'])('whose program ends at once masks its code and last line, including Bearer %s', async bearer => {
     const s = signIn();
     await s.login.start(false);
     const key = 'sk-ant-api03-MARKER7c41qZ9xT2vB8nL0pW';
@@ -148,6 +148,16 @@ describe("a plan's sign-in in a terminal on the node", () => {
     expect(s.logged.join('\n')).not.toContain('MARKER7c41');
     expect(JSON.stringify(s.sent)).not.toContain(bearer);
     expect(s.logged.join('\n')).not.toContain(bearer);
+  });
+
+  it('keeps a named OAuth credential out of the early-exit message and machine log', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends('Error: access_token=securitymarker7lowercase was refused', 1);
+    await until(() => Boolean(s.done()));
+    expect(s.done()).toMatchObject({ code: 1, line: 'Error: access_token=[hidden] was refused' });
+    expect(JSON.stringify(s.sent)).not.toContain('securitymarker7lowercase');
+    expect(s.logged.join('\n')).not.toContain('securitymarker7lowercase');
   });
 
   it('cuts a long last line and keeps no terminal codes in it', async () => {

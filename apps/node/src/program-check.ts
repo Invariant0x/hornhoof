@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { lastWords } from './program-exit.js';
-import { runProgram } from './providers/process.js';
+import { runInstaller } from './providers/process.js';
 
 /* Whether an agent program the node installed starts, which a file in place does not prove: npm may leave out a part, as
    it left out Claude Code's platform-native package on a node whose network broke off. The node asks the program its
@@ -19,7 +19,7 @@ const VERSION_LIMIT_MS = 30_000;
 
 export async function startsCheck(bin: string, secrets: string[] = []): Promise<Started> {
   if (!['claude', 'codex', 'kimi'].includes(basename(bin))) return { ok: true };
-  const done = await runProgram({ bin, args: ['--version'], env: { ...process.env }, timeoutMs: VERSION_LIMIT_MS });
+  const done = await runInstaller({ bin, args: ['--version'], timeoutMs: VERSION_LIMIT_MS });
   return done.code === 0 ? { ok: true } : { ok: false, code: done.code, line: lastWords(done.output, secrets) };
 }
 
