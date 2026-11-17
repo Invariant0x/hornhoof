@@ -18,7 +18,6 @@ async function open(page: Page, language: typeof extremes[number], skin: typeof 
   const errors = watchProblems(page);
   const posts: unknown[] = [];
   await page.clock.install({ time: new Date('2026-11-17T11:00:00Z') });
-  await page.clock.pauseAt(new Date('2026-11-17T12:00:00Z'));
   await page.setViewportSize({ width, height: 1000 });
   await page.addInitScript(({ language, skin }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', skin); }, { language: language.id, skin: skin.id });
   await serveRoutes(page);
@@ -33,6 +32,8 @@ async function open(page: Page, language: typeof extremes[number], skin: typeof 
     throw new Error(`Unhandled route ${path}`);
   });
   await page.goto('/settings/messaging');
+  await expect(page.getByRole('button', { name: c.add, exact: true })).toBeVisible();
+  await page.clock.pauseAt(new Date('2026-11-17T12:00:00Z'));
   return { c, errors, posts };
 }
 
