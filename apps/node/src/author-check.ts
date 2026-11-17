@@ -18,7 +18,8 @@ const Record = z.object({ version: z.literal(1), submissionCommit: z.string(), c
 function matchingRecord(record: z.infer<typeof Record>, request: AuthorCheckRequest): boolean {
   return record.submissionCommit === request.commit && record.checkCommit === request.commit
     && JSON.stringify([...record.scope.paths].sort()) === JSON.stringify([...request.paths].sort())
-    && new Set(record.stages.map(stage => stage.name)).size === 6;
+    && new Set(record.stages.map(stage => stage.name)).size === 6
+    && record.stages.every(stage => stage.status !== 'failed' && (stage.status !== 'passed' || stage.exitCode === 0));
 }
 
 function measuredCrap(record: z.infer<typeof Record>, request: AuthorCheckRequest): AuthorCheckCrap {

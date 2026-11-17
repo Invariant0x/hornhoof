@@ -148,4 +148,10 @@ describe('author check execution owned by the node', () => {
     const docs = { ...request, paths: ['guide/install.md'] };
     expect(parseAuthorCheckOutput(output({ numbers: missing, scope: { kind: 'changed', paths: docs.paths } }), docs)).toEqual({ kind: 'no_functions' });
   });
+
+  it('refuses a failed stage even when a document result claims exit zero', () => {
+    const docs = { ...request, paths: ['guide/install.md'] };
+    const stages = record.stages.map(stage => stage.name === 'tests' ? { ...stage, status: 'failed', exitCode: 1 } : stage);
+    expect(parseAuthorCheckOutput(output({ stages, numbers: { ...record.numbers, worstCrap: null }, scope: { kind: 'changed', paths: docs.paths } }), docs)).toBeNull();
+  });
 });

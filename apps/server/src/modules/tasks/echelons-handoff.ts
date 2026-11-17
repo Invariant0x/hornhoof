@@ -39,17 +39,17 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
 /* skipped: the checks passed over on the way, as nobody in the department can do them. */
 type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[]; authorCheckSkip?: { reason: string; receiptId: string } };
 
-export async function forwardHandoff(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config'>>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+export async function authorCheckedHandoff(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config'>>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const parsed = EchelonCandidate.safeParse(candidate);
   const receiptId = parsed.success ? await authorReceiptFor(ctx, task, route, parsed.data) : null;
-  if (!receiptId) return nextHandoff(ctx, task, route, candidate);
+  if (!receiptId) return forwardHandoff(ctx, task, route, candidate);
   const stages = route.state.stages.map(step => step.stage === 'review'
     ? { ...step, status: 'skipped' as const, reason: AUTHOR_CHECK_PASSED, ownerAgentId: null, inputCandidateId: candidate.id } : step);
-  const next = await nextHandoff(ctx, task, { ...route, state: { ...route.state, stages } }, candidate);
+  const next = await forwardHandoff(ctx, task, { ...route, state: { ...route.state, stages } }, candidate);
   return { ...next, authorCheckSkip: { reason: AUTHOR_CHECK_PASSED, receiptId } };
 }
 
-async function nextHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
   if (!ahead.length && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
