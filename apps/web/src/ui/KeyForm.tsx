@@ -5,6 +5,7 @@ import { PROVIDER_NAMES } from '../providers';
 import type { SubView } from '../types';
 import { BusyLabel } from './BusyLabel';
 import { Field } from './Field';
+import { SecretInput } from './SecretInput';
 
 /* Plans that sign in with a key pasted once, and where their owner gets one. */
 const KEY_PLANS = {
@@ -53,7 +54,7 @@ export function KeyForm({ sub, onDone, onCancel }: { sub: SubView & { provider: 
   return (
     <form className="key-form form-grid" onSubmit={e => void save(e)}>
       <Field label={t.subs.keyField(provider)} hint={hint}>
-        {p => <input {...p} className="mono" type="password" autoComplete="off" spellCheck={false} value={key} onChange={e => setKey(e.target.value)} />}
+        {p => <SecretInput {...p} className="mono" value={key} onChange={e => setKey(e.target.value)} />}
       </Field>
       {problem && <p className="alert" role="alert">{problem}</p>}
       <div className="form-foot">

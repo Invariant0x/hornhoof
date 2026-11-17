@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A browser or password manager no longer fills the Hornhoof email and password into Add phone or any other form with a key, token or site password: the pairing code is a field for six digits, keys and tokens are masked text, and only Log in, an invite, Setup and the password question offer the saved Hornhoof sign-in.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed

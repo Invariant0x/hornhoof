@@ -631,7 +631,8 @@ describe('Department view', () => {
     expect(repo).toHaveTextContent('Token ending in 1234');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
     expect(within(repo).getByLabelText('Address')).toHaveValue('https://github.com/acme/app.git');
-    expect(within(repo).getByLabelText('Token')).toHaveAttribute('type', 'password');
+    expect(within(repo).getByLabelText('Token')).toHaveAttribute('type', 'text');
+    expect(within(repo).getByLabelText('Token')).toHaveClass('secret-masked');
     expect(within(repo).getByLabelText('Token')).toHaveValue('');
     const branch = within(repo).getByLabelText('Branch');
     await user.clear(branch);
@@ -772,7 +773,8 @@ describe('Department view', () => {
     await user.type(within(form).getByLabelText('Address'), 'https://github.com/acme/mobile-app.git');
     expect(within(form).getByLabelText('Name')).toHaveValue('mobile-app');
     await user.type(within(form).getByLabelText('Token'), 'ghp_mobile9999');
-    expect(within(form).getByLabelText('Token')).toHaveAttribute('type', 'password');
+    expect(within(form).getByLabelText('Token')).toHaveAttribute('type', 'text');
+    expect(within(form).getByLabelText('Token')).toHaveClass('secret-masked');
     await user.click(within(form).getByRole('button', { name: 'Add' }));
     await vi.waitFor(() =>
       expect(calls.find(c => c.method === 'POST' && c.path === '/api/departments/d2/repositories')?.body).toEqual({ name: 'mobile-app', url: 'https://github.com/acme/mobile-app.git', branch: 'main', token: 'ghp_mobile9999' }),

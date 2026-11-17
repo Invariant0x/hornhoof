@@ -5,6 +5,7 @@ import type { GoogleSheetsConfig } from '../types';
 import { Field } from './Field';
 import { Idents } from './Idents';
 import { IntegrationCard } from './IntegrationCard';
+import { NOT_A_LOGIN } from './SecretInput';
 
 type Mode = 'view' | 'edit' | 'remove';
 type Change = (action: () => Promise<GoogleSheetsConfig | null>) => void;
@@ -42,6 +43,7 @@ function GoogleSheetsForm({ google, busy, change, onCancel }: { google: GoogleSh
         {p => (
           <input
             {...p}
+            {...NOT_A_LOGIN}
             type="email"
             autoComplete="off"
             value={shareEmail}

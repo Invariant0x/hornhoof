@@ -29,7 +29,7 @@ export function Login({ onDone }: { onDone: () => void }) {
       <h1>{t.login.heading}</h1>
       <form onSubmit={e => void submit(e)}>
         <Field label={t.common.email}>
-          {p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoFocus required />}
+          {p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" autoFocus required />}
         </Field>
         <Field label={t.common.password}>
           {p => <input {...p} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />}
