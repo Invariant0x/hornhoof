@@ -6,7 +6,7 @@ import { bundleName, packBundle, unpackBundle } from './test-bundle.js';
 import { checkCacheContext, fileDigest, type CacheContext, type CacheEntry, type CacheReady, type CacheShare } from './test-cache.js';
 
 /* Hornhoof's registry of what is built: one machine builds a unit, every other takes it. */
-export type HarnessLease = Pick<Extract<HarnessClaim, { state: 'build' }>, 'companyId' | 'attempt'>;
+type HarnessLease = Pick<Extract<HarnessClaim, { state: 'build' }>, 'companyId' | 'attempt'>;
 export type HarnessRemote = {
   claim(unit: HarnessUnit, signal: AbortSignal): Promise<HarnessClaim>;
   upload(key: string, file: string, digest: string, size: number, partBytes: number, signal: AbortSignal, lease: HarnessLease): Promise<void>;

@@ -1,10 +1,10 @@
 import type { TestUnit } from '@hornhoof/protocol';
 import type { ImpactGraph } from './test-impact.js';
 
-export interface ImpactRow { project: string; file: string }
+interface ImpactRow { project: string; file: string }
 export interface ImpactCollection { projects: string[]; all: ImpactRow[]; selected: ImpactRow[] }
 export interface VitestImpactInput { inventory: TestUnit[]; projectSuites: Record<string, string[]>; changed: string[]; requiredSuiteIds?: string[] }
-export type RelatedCollector = (changed: string) => Promise<ImpactCollection>;
+type RelatedCollector = (changed: string) => Promise<ImpactCollection>;
 export interface PytestImpactResult { status: string; selected: string[]; reason: string | null }
 
 const unitKey = (unit: TestUnit): string => `${unit.suiteId}\0${unit.file}`;
