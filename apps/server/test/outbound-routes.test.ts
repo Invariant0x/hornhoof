@@ -247,12 +247,11 @@ describe('the catalog', () => {
     expect(row).toMatchObject({ publishedBy: w.c.ids.ceo, createdByKind: 'person' });
   });
 
-  it('never lets the orchestrator publish, even for the person its turn answers', async () => {
+  it('lets the orchestrator publish for the owner, as the owner does', async () => {
     const w = await world();
     const { id } = (await propose(w, aClaim(), w.c.ceoToken)).json();
-    const refused = await w.c.app.inject({ method: 'POST', url: `/api/outbound/catalog/${id}/publish`, payload: {}, headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
-    expect(refused.statusCode).toBe(403);
-    expect(refused.json().error.reason).toBe('outbound_not_allowed');
+    const published = await w.c.app.inject({ method: 'POST', url: `/api/outbound/catalog/${id}/publish`, payload: {}, headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
+    expect(published.json()).toMatchObject({ status: 'published' });
   });
 
   it('a person takes back what was published; what was only proposed has nothing to take back', async () => {

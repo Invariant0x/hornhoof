@@ -17,13 +17,18 @@ const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
 
 /* A Hornhoof that answers each picture with an id and remembers what it got. It hands out one file of task 12. */
 async function hub(status = 201) {
-  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; bytes: Buffer }[] = [];
+  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; length: string | undefined; bytes: Buffer }[] = [];
   const server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on('data', c => parts.push(c));
     req.on('end', () => {
-      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], bytes: Buffer.concat(parts) });
+      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], length: req.headers['content-length'], bytes: Buffer.concat(parts) });
       if (req.method === 'GET') {
+        if (req.url === '/api/attachments/file?task=12&file=archive.zip') {
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'x-file-name': 'archive.zip' });
+          res.end(got.find(g => g.url?.endsWith('name=archive.zip'))?.bytes);
+          return;
+        }
         if (req.url === '/api/attachments/file?task=message&file=4f0c8b7e-1111-4222-8333-444455556666') {
           res.writeHead(200, { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('4f0c8b7e-screen.png') });
           res.end('a picture');
@@ -85,6 +90,27 @@ describe('hh-attach', () => {
     expect(refused.code).toBe(1);
     expect(refused.err).toContain('No Hornhoof turn is running');
     expect(got).toHaveLength(1);
+  });
+
+  it('gives a file over 50 MB through the bridge as it reads it, whole and with its length, and fetches it back the same way', async () => {
+    const { url, got } = await hub();
+    const bridge = new Bridge(url.replace('/api/attachments', ''), () => {});
+    await bridge.start();
+    onTestFinished(() => bridge.stop());
+    const { attachUrl } = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'turn-token');
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-big-'));
+    const bytes = Buffer.alloc(60 * 1024 * 1024, 3);
+    bytes[bytes.length - 1] = 9;
+    writeFileSync(join(dir, 'archive.zip'), bytes);
+    const env = { HH_ATTACH_URL: attachUrl, HH_ATTACH_PASS: 'bridge' };
+    const sent = await attach(['--chat', join(dir, 'archive.zip')], env);
+    expect(sent.code, sent.err).toBe(0);
+    expect(got.map(g => [g.url, g.auth, g.length, g.bytes.equals(bytes)])).toEqual([['/api/attachments?chat=1&name=archive.zip', 'Bearer turn-token', String(bytes.length), true]]);
+    mkdirSync(join(dir, 'back'));
+    const back = await fetchFile(['12', 'archive.zip', join(dir, 'back')], env);
+    expect(back.code, back.err).toBe(0);
+    expect(readFileSync(join(dir, 'back', 'archive.zip')).equals(bytes)).toBe(true);
   });
 
   it('sends each file with the turn token and prints the id to pass on', async () => {

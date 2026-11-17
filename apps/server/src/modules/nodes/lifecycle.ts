@@ -13,6 +13,7 @@ import { acceptOperatorEvidence } from '../program-operator/evidence.js';
 import { receiveOperatorReply } from '../program-operator/rpc.js';
 import { restoreOperatorNode } from '../program-operator/health.js';
 import { phoneNodeMessage } from '../phones/rpc.js';
+import { nodeLogArrived } from '../tools/logs.js';
 import { recordPhoneFrame } from '../phones/recording.js';
 
 async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'node.stopping' }>): Promise<void> {
@@ -35,6 +36,7 @@ async function receiveOperatorFrame(ctx: Ctx, id: NodeIdentity, msg: OperatorNod
 
 async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>): Promise<void> {
   if ((msg.type === 'hello' || msg.type === 'phone.reply') && await hasCurrentKey(ctx, id) && phoneNodeMessage(ctx, id, msg)) return;
+  if (nodeLogArrived(id, msg)) return;
   if (msg.type === 'phone.frame') {
     if (await hasCurrentKey(ctx, id)) await recordPhoneFrame(ctx, id, msg);
     return;

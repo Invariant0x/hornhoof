@@ -207,6 +207,7 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/assistant/requests': 'assistants-events.test.ts: the requests that wait for its owner',
   'POST /api/assistant/requests/:id/answer': 'assistants-events.test.ts: what its owner may answer, 403 otherwise',
   'POST /api/assistant/files': "assistants-messages.test.ts, assistants-rights.test.ts: a file of any type for an agent its owner may write to, kept as its owner's own; 403 for one the owner does not write to, 404 for none",
+  'GET /api/files/*': "assistants-files.test.ts, assistants-events.test.ts: the one file a signed link in a reply to an assistant names, with no key or sign-in, for 7 days; 410 after them, and the same 404 for a link changed, signed for anything else or of a file that is gone",
   'GET /api/assistant/attachments/:id': "assistants-files.test.ts, assistant-agent.test.ts: a file its owner may download in the interface, by the assistant's key alone; 401 otherwise, and the same 404 for a file its owner may not see, another company's or none",
   'POST /api/assistant/mcp': "assistants-mcp.test.ts: the same reads and writes over MCP, by the assistant's key and with its owner's rights",
   'GET /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',

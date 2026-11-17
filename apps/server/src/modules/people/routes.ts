@@ -61,7 +61,7 @@ function telegramChange(input: string | null | undefined, now: TelegramColumns):
 /* A Telegram account speaks to the bots as the person it is set for, so it is set from a person's own screen: for
    themselves, or by whoever changes that person, and for the CEO or the CEO delegate only by the CEO. */
 function guardTelegram(me: Person, target: Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>): void {
-  if (me.via) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen.');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen, or by the orchestrator.');
   if (target.id !== me.id && (target.isOwner || target.isCeoDelegate) && !me.isOwner) {
     throw new ApiError(403, 'forbidden', 'Only the CEO sets who the CEO or the CEO delegate is in Telegram.', 'owner_locked');
   }
@@ -370,11 +370,11 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { person: await personView(db, person) };
   });
 
-  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off: only from the CEO's own
-     screen, never the orchestrator's tool. The mark needs an active person with the whole company. */
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off, by himself or through the
+     orchestrator. The mark needs an active person with the whole company. */
   app.put('/api/people/:id/ceo-delegate', async req => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
+    if (!me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
     const { id } = IdParams.parse(req.params);
     const { isCeoDelegate } = DelegateBody.parse(req.body);
     const target = await delegateTarget(db, me, id, isCeoDelegate);

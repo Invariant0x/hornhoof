@@ -269,6 +269,40 @@ describe('a task', () => {
     }
   });
 
+  it("marks, in each language, an owner's answer that the orchestrator gave, in the log and under the question", async () => {
+    const given = {
+      ...TASK_DETAIL,
+      requests: [{ id: 'r1', kind: 'question' as const, text: 'Is tax in scope?', commit: null, status: 'answered', answer: 'Yes, with tax.', byOrchestrator: true, agent: null, at: '2026-10-30T08:00:00.000Z' }],
+      log: [{ kind: 'answered', text: 'Yes, with tax.', data: { byOrchestrator: true }, by: { kind: 'person' as const, id: 'p1', name: 'Ivan', byOrchestrator: true as const }, at: '2026-10-30T09:00:00.000Z' }],
+    };
+    for (const [lang, line, mark] of [
+      ['en', 'Ivan answered', 'decided by the orchestrator'],
+      ['ru', 'Ivan ответил', 'решил оркестратор'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      mockApi({
+        'GET /api/org': [200, DEV_ORG],
+        'GET /api/requests': [200, decisions([])],
+        'GET /api/turns': [200, { turns: [TURN] }],
+        'GET /api/tasks?status=all': [200, { tasks: TASKS }],
+        'GET /api/tasks/t12': [200, { task: given }],
+      });
+      const { unmount } = render(
+        <LanguageProvider>
+          <Shell me={ME} onSignOut={() => {}} />
+        </LanguageProvider>,
+      );
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await openFromTracker(user, 12);
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      expect(panel).toHaveTextContent(line);
+      expect(within(panel).getAllByText(mark)).toHaveLength(2);
+      unmount();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('says in its log, in each language, that the machine of a turn is out of reach, and that it is back', async () => {
     const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
     const job = 'aaaaaaaa-0000-4000-8000-000000000001';
