@@ -44,6 +44,7 @@ import { cancelUnsentDelivery, reserveDelivery } from '../program-operator/deliv
 import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
+import { nodesOnHold } from '../program-operator/not-started.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 import { fallbackMove } from '../subscriptions/fallback.js';
 import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
@@ -829,8 +830,11 @@ async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 
     return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
   }
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need, roomy)));
+  /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
+  const onHold = await nodesOnHold(ctx, all.map(n => n.id));
+  const open = all.filter(n => !onHold.has(n.id));
+  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, need, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
