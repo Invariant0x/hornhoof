@@ -128,7 +128,7 @@ describe('tasks for people', () => {
     expect(turns[0]!.prompt).toContain('Not now.');
   });
 
-  it('keeps a current owner and clears a removed future owner without dropping Review', async () => {
+  it('keeps a current owner and gives a removed future owner\'s Review to an eligible checker of the same role', async () => {
     const { app, ctx, db, ceo, head, bruno, dev, hire } = await company();
     const rita = await hire('Rita', 'worker', 'DEV-REV');
     const ira = await hire('Ira', 'worker', 'DEV-REV');
@@ -144,7 +144,8 @@ describe('tasks for people', () => {
     expect(refused.json().error.message).toContain('#1');
     expect((await remove(rita.id)).statusCode).toBe(204);
     const [now] = await db.select().from(tasks).where(eq(tasks.id, task.id));
-    expect(routeSnapshot(await routeOf(db, now!), now!.assigneeAgentId).stages).toContainEqual(expect.objectContaining({ stage: 'review', status: 'pending', ownerAgentId: null }));
+    /* #1190: the stage of a removed employee goes to an eligible employee of the same role at once, not at the handoff. */
+    expect(routeSnapshot(await routeOf(db, now!), now!.assigneeAgentId).stages).toContainEqual(expect.objectContaining({ stage: 'review', status: 'pending', ownerAgentId: ira.id, reason: null }));
     const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
     expect(sent.task.assigneeAgentId).toBe(ira.id);
     expect(routeSnapshot(await routeOf(db, sent.task), ira.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: ira.id });
