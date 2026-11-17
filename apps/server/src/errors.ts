@@ -122,6 +122,7 @@ export type ErrorReason =
   | 'pipeline_unknown'
   | 'pipeline_changed'
   | 'pipeline_invalid'
+  | 'stage_gone'
   | 'responsible_invalid'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'

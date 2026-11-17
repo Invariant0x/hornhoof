@@ -622,14 +622,15 @@ class TaskTools {
       const { agent, task } = await this.find(ref);
       const tracker = { goal, responsible, why, due, pipeline, stage };
       /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
-         either is written, so a refused part leaves the other as it was. */
+         either is written, so a refused part leaves the other as it was. With a change of the work, what the tracker
+         keeps is written in the same move, checked again there: both are in, or neither. */
       const works = after !== undefined || Object.values(changes).some(v => v !== undefined);
       const edit = hasTrackerFields(tracker) ? await trackerInputOf(this.ctx, this.job.companyId, tracker) : null;
       if (!works) await requireTaskHead(this.ctx, task, agent.id);
       if (edit) await trackerSet(this.ctx, task, edit);
-      const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }) : undefined;
+      const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }, edit ?? undefined) : undefined;
       let row = moved?.task ?? task;
-      if (edit) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, seenOf(row));
+      if (edit && !works) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, seenOf(row));
       return { text: `Updated. ${await this.where(row)}`, moved };
     }));
   }

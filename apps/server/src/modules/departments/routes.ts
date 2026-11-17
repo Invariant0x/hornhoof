@@ -34,6 +34,7 @@ import { checkFolderFree, repoView } from './repository.js';
 import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
+import { nextRevision } from '../tracker/edit.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
@@ -315,6 +316,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!dept) continue;
         if (item.remove) {
           const inside = [dept.id, ...(await tx.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
+          /* Its pipelines before any of its tasks, as every change that puts a task on a stage takes them. */
+          const itsPipelines = (await tx.select({ id: pipelines.id }).from(pipelines).where(inArray(pipelines.departmentId, inside)).orderBy(asc(pipelines.id)).for('update')).map(p => p.id);
           /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
           await tx
             .update(agents)
@@ -328,9 +331,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
           /* Its goals stay as the company's, with their history; its pipelines go, and the tasks on them leave them. */
           await tx.update(goals).set({ departmentId: null }).where(inArray(goals.departmentId, inside));
-          const itsPipelines = (await tx.select({ id: pipelines.id }).from(pipelines).where(inArray(pipelines.departmentId, inside))).map(p => p.id);
           if (itsPipelines.length) {
-            await tx.update(tasks).set({ pipelineId: null, pipelineStageId: null }).where(inArray(tasks.pipelineId, itsPipelines));
+            await tx.update(tasks).set({ pipelineId: null, pipelineStageId: null, trackerRevision: nextRevision() }).where(inArray(tasks.pipelineId, itsPipelines));
             await tx.delete(pipelineStages).where(inArray(pipelineStages.pipelineId, itsPipelines));
             await tx.delete(pipelines).where(inArray(pipelines.id, itsPipelines));
           }

@@ -1,7 +1,8 @@
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
-import { followedStage } from '../tracker/pipelines.js';
+import { writeEdit, type TaskEdit } from '../tracker/edit.js';
+import { followedStage, holdPipelines, holdPlace } from '../tracker/pipelines.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
@@ -250,8 +251,9 @@ async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promis
 const statusNoted = (n: Note, from: Task['status'], to: Task['status']): Note => (from === to ? n : { ...n, data: { ...n.data, fromStatus: from, toStatus: to } });
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
-/* wakes: the turns the move needs, kept with it until they are queued. */
-export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
+/* wakes: the turns the move needs, kept with it until they are queued. hold: the pipelines what goes with the move puts
+   the task on, held before any task. */
+export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = [], hold: (string | null)[] = []): Promise<Task> {
   let started: Task[] = [];
   let lit: Task | null = null;
   let unstuck = false;
@@ -262,11 +264,14 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* A result joins a turn as a release closes the turn: the company goes first, then the task rows, as in every move of
        turns, so the release sees it or it sees the release. */
     if (n.data?.turnCleanup || n.data?.independentPart || set.turnId) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+    /* Its pipelines before any task, as a change of a pipeline takes them: the stage the task follows its holder to, or
+       one what goes with the move names, stays until the move is in. */
+    await holdPipelines(tx, hold);
+    const followed = await followedStage(tx, task, set);
     if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
     await lockClosingParent(tx, task, set);
-    const followed = await followedStage(tx, task, set);
     const [row] = await tx
       .update(tasks)
       .set({ externalWait: null, ...set, ...followed, ...(set.status && CLOSED.includes(set.status) ? { paused: null } : {}), version: task.version + 1, updatedAt: new Date() })
@@ -520,6 +525,9 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   const wakes: Wake[] = [];
   /* Numbers go up one by one per company, so creating tasks waits on the company row. */
   await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('no key update');
+  /* Its pipeline before any task, as a change of the pipeline takes it: a stage taken off it since it was checked is a
+     conflict. */
+  await holdPlace(tx, setup.tracker);
   /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
@@ -896,13 +904,14 @@ async function cleanupTurn(db: Db, task: Task): Promise<string> {
   return turn.id;
 }
 
-export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+/* tracker: an edit of what the tracker keeps that goes with the change, written in the same move or not at all. */
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange, tracker?: TaskEdit): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   await requireTaskHead(ctx, task, agentId);
   requireTurnCleanupDecision(c);
   const route = await routeOf(ctx.db, task);
-  if (c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
+  if (!tracker && c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
   const set = revised.set;
   copyChangedFields(c, set);
@@ -916,6 +925,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
   const wakes: Wake[] = [];
   const policy = c.cleanupForTurn ? { turnId: await cleanupTurn(ctx.db, task), departmentId: task.departmentId, enabled: c.cleanup } : undefined;
+  let edited: Task | null = null;
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields: Object.keys(c), ...independentData(declaration), ...(policy ? { turnCleanup: policy } : {}) } }, async (tx, row) => {
     if (policy) changed = await applyTurnCleanup(tx, task, policy.turnId, agentId, c.cleanup!, wakes);
     await changeRoute(tx, route, revised.state, revised.paths);
@@ -923,10 +933,11 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
     await wakeUpdatedHolder(tx, task, row, set, holder, wakes);
     await endFormerOwnerTurns(tx, task, set);
-  }, wakes);
+    if (tracker) edited = await writeEdit(tx, { agentId }, row, tracker);
+  }, wakes, tracker ? [task.pipelineId, tracker.pipelineId ?? null] : []);
   if (independent) published(ctx, independent);
   publishRouteChanges(ctx, changed);
-  return { task: row, wakes };
+  return { task: edited ?? row, wakes };
 }
 
 function copyChangedFields(change: TaskChange, set: Partial<Task>): void {

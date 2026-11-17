@@ -21,6 +21,24 @@ type PipelineView = { id: string; department: { id: string; name: string }; name
 
 export const MAX_STAGES = 40;
 const invalid = (message: string) => refuse(400, 'pipeline_invalid', message);
+/* A change checked a stage that someone took off its pipeline before the change was written. */
+export const stageGone = () => refuse(409, 'stage_gone', 'Someone took this stage off its pipeline meanwhile. Look at the pipeline again and choose another stage.');
+
+/* The pipelines a change of tasks puts them on, held for that change before any task, as a change of a pipeline holds it
+   before the tasks on it. So a stage goes only once no change that puts a task on it is under way, and a change after
+   that finds the stage gone. */
+export async function holdPipelines(tx: Tx, ids: (string | null | undefined)[]): Promise<void> {
+  const held = [...new Set(ids.filter((id): id is string => Boolean(id)))].sort();
+  if (held.length) await tx.select({ id: pipelines.id }).from(pipelines).where(inArray(pipelines.id, held)).orderBy(asc(pipelines.id)).for('share');
+}
+
+/* The place a new task takes on a pipeline, its pipeline held: its stage must still be there. */
+export async function holdPlace(tx: Tx, place: { pipelineId: string | null; pipelineStageId: string | null }): Promise<void> {
+  await holdPipelines(tx, [place.pipelineId]);
+  if (!place.pipelineId || !place.pipelineStageId) return;
+  const [stage] = await tx.select({ id: pipelineStages.id }).from(pipelineStages).where(and(eq(pipelineStages.id, place.pipelineStageId), eq(pipelineStages.pipelineId, place.pipelineId)));
+  if (!stage) throw stageGone();
+}
 
 /* Stages depth first, each level by its position: the order a board's columns and a map read them in. */
 function inTreeOrder<S extends { id: string; parentStageId: string | null; position: number }>(stages: S[]): S[] {
@@ -180,13 +198,15 @@ async function stageFor(db: Tx | Live['db'], pipelineId: string, holderId: strin
    of the new holder, and stays where it was when none is theirs. */
 export async function followedStage(tx: Tx, task: Pick<Task, 'pipelineId' | 'assigneeAgentId'>, set: Partial<Task>): Promise<Partial<Task>> {
   if (!task.pipelineId || set.pipelineStageId !== undefined || !set.assigneeAgentId || set.assigneeAgentId === task.assigneeAgentId) return {};
+  /* Held before the task is written, so the stage it takes stays until the move is in. */
+  await holdPipelines(tx, [task.pipelineId]);
   const stage = await stageFor(tx, task.pipelineId, set.assigneeAgentId);
   return stage ? { pipelineStageId: stage } : {};
 }
 
 /* A pipeline a task of this department may join, and the stage it starts on: the one named, which must be the pipeline's,
    else the first one of whoever holds the task. */
-export async function placeOnPipeline(db: Live['db'], companyId: string, spot: Spot, holderId: string | null, pipelineId: string, stageId?: string | null): Promise<{ pipelineId: string; pipelineStageId: string | null }> {
+export async function placeOnPipeline(db: Tx | Live['db'], companyId: string, spot: Spot, holderId: string | null, pipelineId: string, stageId?: string | null): Promise<{ pipelineId: string; pipelineStageId: string | null }> {
   const [pipeline] = await db.select().from(pipelines).where(and(eq(pipelines.id, pipelineId), eq(pipelines.companyId, companyId)));
   if (!pipeline || pipeline.archivedAt) throw invalid('There is no such pipeline in use.');
   if (pipeline.departmentId !== spot.departmentId && pipeline.departmentId !== spot.parentId) throw invalid('A task joins a pipeline of its own department.');
