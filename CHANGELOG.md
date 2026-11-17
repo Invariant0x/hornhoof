@@ -16,6 +16,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
+- The approval and release guides explain when to ask and which checks prove the exact commit.
 
 ## [0.32.0] - 2026-11-17
 
