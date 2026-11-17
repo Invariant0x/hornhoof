@@ -15,7 +15,7 @@ check_setting system screen_off_timeout 2147483647 awake
 check_setting secure sleep_timeout -1 awake
 check_setting secure attentive_timeout -1 awake
 check_setting system screen_brightness_mode 0 brightness
-check_setting system screen_brightness 128 brightness
+check_setting system screen_brightness 0 brightness
 check_setting secure reduce_bright_colors_activated 0 brightness
 check_setting global low_power_sticky 0 batterySaver
 check_setting global automatic_power_save_mode 0 batterySaver

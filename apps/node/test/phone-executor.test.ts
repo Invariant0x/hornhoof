@@ -59,6 +59,7 @@ describe('phone messages on the execution node', () => {
     expect(check?.input).toContain('stay_on_while_plugged_in 7');
     expect(check?.input).toContain('screen_off_timeout 2147483647');
     expect(check?.input).toContain('screen_brightness_mode 0');
+    expect(check?.input).toContain('screen_brightness 0 brightness');
     expect(check?.input).toContain('settings --user current get');
     expect(check?.input).toContain('locksettings get-disabled');
     expect(check?.input).toContain('locksettings set-disabled true');
