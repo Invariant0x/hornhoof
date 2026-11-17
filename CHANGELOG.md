@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A program operator who answers No to a protected question, such as Claude Code's check before a removal, can report it as `denied`, as on a permission question; a `denied` report with no denial recorded says so plainly instead of refusing access to the case.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed
