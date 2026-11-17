@@ -10,6 +10,14 @@ function paddingRightPx(selector: string): number | undefined {
   return px(parts.length === 1 ? parts[0] : parts[1]);
 }
 
+/* A phrase isolated in its own direction (dir="auto") lines up with the side of the block it stands in, not with its own
+   start: on a right to left page an English description stands right like its heading (Design #1186). One rule for every
+   such phrase, with no weight of its own, so that a part that aligns its text on purpose keeps it. */
+it('lines up every isolated phrase with its block through one shared rule and no narrow copies', () => {
+  expect(decl(':where([dir="auto"])', 'text-align')).toBe('match-parent');
+  expect(RULES.filter(r => r.decls['text-align'] === 'match-parent').map(r => [r.media, r.selectors])).toEqual([[null, [':where([dir="auto"])']]]);
+});
+
 it('reads container rules with the same condition as media rules', () => {
   expect(parse('@container card (min-width: 700px) { .blocks { display: grid; } }', null)).toEqual([
     { media: 'card (min-width: 700px)', selectors: ['.blocks'], decls: { display: 'grid' } },
