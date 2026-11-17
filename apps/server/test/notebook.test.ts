@@ -260,7 +260,10 @@ describe("a department's notebook", () => {
     expect(now.text).toContain(method);
     /* A note does not start its program again: it reads the notebook with its tool. */
     expect(now.hash).toBe(before.hash);
-    expect((await instructionsOf(app.ctx, bruno)).text).not.toContain('notebook');
+    /* A worker carries no notebook. Its skills may name one: a head keeps its department's rules there. */
+    const worker = (await instructionsOf(app.ctx, bruno)).text;
+    expect(worker).not.toContain('## Department notebook');
+    expect(worker).not.toContain('Tests first.');
   });
 
   it('says on the stream that it changed, only to people who reach the department', async () => {
