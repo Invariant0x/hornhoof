@@ -1,0 +1,95 @@
+[33m[PLUGIN_TIMINGS] [0mJavaScript callbacks ran for 12.8s of this 13.4s build (95%).
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin vite:native-config-compat-check transform (94%, 12.7s, 3 calls)
+Additional callback time came from callbacks under 1s.
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257/apps/web
+
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+ ❯ test/TaskPanel.test.tsx (46 tests | 2 failed) 111802ms
+   ❯ a task (43)
+     ✓ offers the vault for masked text in en without exposing a value 1629ms
+     ✓ offers the vault for masked text in ru without exposing a value 665ms
+     ✓ lets an authorized person hide an existing secret, then clears the input 919ms
+     ✓ does not offer secret hiding without permission from the server 744ms
+     ✓ clears a secret after a failed request and lets the person cancel 1164ms
+     ✓ names its kind and risk class in en 582ms
+     ✓ names its kind and risk class in ru 420ms
+     ✓ names its kind and risk class in en 531ms
+     ✓ names its kind and risk class in en 815ms
+     ✓ has no line of kind and risk without them: {} 791ms
+     ✓ has no line of kind and risk without them: {"workKind":null,"riskClass":null} 179ms
+     ✓ shows who was not woken and by which run in en 250ms
+     ✓ shows who was not woken and by which run in ru 646ms
+     ✓ shows an obsolete wake in the task log in en 2891ms
+     ✓ shows an obsolete wake in the task log in ru 508ms
+     ✓ shows an external wait with its reason and deadline in en, then clears it after a comment 1151ms
+     ✓ shows an external wait with its reason and deadline in ru, then clears it after a comment 3067ms
+     ✓ puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too 2820ms
+     ✓ opens the asking agent's terminal from what waits for the person, to see what it did 1355ms
+     ✓ shows the current Review owner and ordered stages in en 930ms
+     ✓ shows the current Review owner and ordered stages in ru 646ms
+     ✓ opens with its current workflow, brief, body, subtasks and log 2311ms
+     ✓ says what it comes after and that it waits for them, in each language 4353ms
+     ✓ says in its log, in each language, for whom the orchestrator answered 2297ms
+     ✓ marks, in each language, an owner's answer that the orchestrator gave, in the log and under the question 1643ms
+     ✓ says in its log, in each language, that the machine of a turn is out of reach, and that it is back 3977ms
+     ✓ says in its log, in each language, why a node restart cut a turn off, the retry, and who was called when it happened again 1368ms
+     ✓ shows the verified candidate as ready for authorized integration 670ms
+     ✓ posts a comment 3603ms
+     ✓ lets the CEO pause a task with a reason and shows it paused 1799ms
+     ✓ shows a paused task and resumes it in one step, and hides both for those who may not 310ms
+     ✓ offers no pause to a person who may not pause 524ms
+     ✓ asks before cancelling a task and the tasks under it 743ms
+     ✓ opens a subtask from the list 867ms
+     ✓ shows the independent part and its linked child in en 466ms
+     ✓ shows the independent part and its linked child in ru 593ms
+     ✓ shows why no independent part exists in en and nothing for an old task 783ms
+     ✓ shows why no independent part exists in ru and nothing for an old task 765ms
+     ✓ lists answered and open task questions with their authors and states 1322ms
+     ✓ opens versioned materials without answering and sends their stamps only with the explicit answer 10026ms
+     ✓ forwards native proposal stamps from the decisions list to the material manifest loader 1188ms
+     ✓ forwards native proposal stamps from the orchestrator window to the material manifest loader 4983ms
+     × closes with its cross and with Escape 22039ms
+   ❯ a task whose holder has its machine offline (3)
+     × says which machine is offline and since when, in en 7458ms
+     ✓ says which machine is offline and since when, in ru 10821ms
+     ✓ says nothing of a machine while the holder can run 3612ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/TaskPanel.test.tsx > a task > closes with its cross and with Escape
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/TaskPanel.test.tsx:638:3
+    636|   });
+    637|
+    638|   it('closes with its cross and with Escape', async () => {
+       |   ^
+    639|     const user = userEvent.setup();
+    640|     shell();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/TaskPanel.test.tsx > a task whose holder has its machine offline > says which machine is offline and since when, in en
+Error: expect(element).toBeInTheDocument()
+
+element could not be found in the document
+ ❯ test/TaskPanel.test.tsx:663:50
+    661|     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assi…
+    662|     const panel = await openTask(user);
+    663|     expect(await within(panel).findByText(line)).toBeInTheDocument();
+       |                                                  ^
+    664|   });
+    665|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 44 passed (46)
+   Start at  11:55:23
+   Duration  214.15s (tests 53%, transform 36%, environment 6%, setup 3%, import 2%)
+

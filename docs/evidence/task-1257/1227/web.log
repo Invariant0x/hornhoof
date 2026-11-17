@@ -1,0 +1,20 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257/apps/web
+
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+ ✓ test/TaskPanel.test.tsx (46 tests) 8410ms
+   ✓ a task (43)
+     ✓ offers the vault for masked text in en without exposing a value 405ms
+     ✓ puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too 371ms
+     ✓ marks, in each language, an owner's answer that the orchestrator gave, in the log and under the question 332ms
+     ✓ says in its log, in each language, that the machine of a turn is out of reach, and that it is back 341ms
+     ✓ opens versioned materials without answering and sends their stamps only with the explicit answer 444ms
+     ✓ forwards native proposal stamps from the orchestrator window to the material manifest loader 593ms
+
+ Test Files  1 passed (1)
+      Tests  46 passed (46)
+   Start at  12:11:05
+   Duration  13.90s (tests 63%, environment 18%, transform 11%, import 5%, setup 3%)
+
+
+EXIT 0
