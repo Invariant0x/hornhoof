@@ -64,9 +64,20 @@ function canCheckTask(agent: typeof agents.$inferSelect, task: Task, ability: st
   return !(agent.productId && agent.productId !== task.productId) && agent.skills.includes(ability);
 }
 
+/* The same available, scoped staff supply initial checkers and replacements for future stages. */
+export async function stageStaff(db: Reader['db'], task: Task, named: string | null, roleKey?: string | null): Promise<(typeof agents.$inferSelect)[]> {
+  const rows = await db.select({ agent: agents }).from(agents)
+    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))
+    .where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
+  return rows.map(row => row.agent).filter(agent =>
+    (named ? agent.id === named : agent.kind === 'worker') &&
+    !(agent.productId && agent.productId !== task.productId) &&
+    (roleKey === undefined || agent.roleKey === roleKey));
+}
+
 /* Selection never changes a subscription, model, employee or skill card. */
-export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null): Promise<CheckerIdentity | null> {
-  const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
+export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null, roleKey?: string | null): Promise<CheckerIdentity | null> {
+  const staff = await stageStaff(ctx.db, task, named, roleKey);
   const eligible: CheckerIdentity[] = [];
   for (const agent of staff) {
     if (!canCheckTask(agent, task, ability, named)) continue;
