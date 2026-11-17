@@ -99,6 +99,7 @@ export const ru: Messages = {
       planExperiment: 'Составить план опыта', reviewResults: 'Изучить результаты и предложить, что попробовать дальше',
       findDevices: 'Найти мои телевизоры и другие устройства и помочь убрать лишнее', checkDevices: 'Проверить домашние устройства и Wi-Fi',
       householdBooks: 'Завести бухгалтерию для моих счетов и бумаг', chooseDepartments: 'Создать отделы для моей работы',
+      setUpPipeline: 'Настроить порядок работы',
       telegram: 'Настроить общение с вами в Telegram', assistant: 'Настроить моего личного помощника',
     },
   },
@@ -2004,6 +2005,301 @@ export const ru: Messages = {
       ended: machine => `Ход, который шел на ${machine ? `машине ${machine}` : 'той машине'}, закончился.`,
     },
   },
+  pipelineCatalog: {
+    "operations-requests": {
+      name: "Запросы в Операции", why: "Для обычных запросов на настройку инструментов, учетных записей или доступа.",
+      stages: {
+        "Sort requests": "Разобрать запросы",
+        "Set up access": "Настроить доступ",
+        "Check it works": "Проверить работу",
+        "Record the result": "Записать результат",
+      },
+    },
+    "operations-incidents": {
+      name: "Восстановление работы", why: "Когда служба остановилась, программа зависла или результат не доставлен.",
+      stages: {
+        "Check the signal": "Проверить сигнал",
+        "Restore service": "Восстановить работу",
+        "Confirm recovery": "Подтвердить восстановление",
+        "Record the cause": "Записать причину",
+      },
+    },
+    "operations-integrations": {
+      name: "Подключение инструмента", why: "Для подключения общего инструмента, почты или внешней службы.",
+      stages: {
+        "Map the access needed": "Определить нужный доступ",
+        "Connect the service": "Подключить службу",
+        "Try it from the user’s place": "Проверить в рабочем месте",
+        "Leave a short guide": "Оставить краткую инструкцию",
+      },
+    },
+    "operations-phone-handoff": {
+      name: "Настройка рабочего телефона", why: "Чтобы подготовить рабочий телефон и его приложения.",
+      stages: {
+        "Find the registered phone": "Найти зарегистрированный телефон",
+        "Check settings and access": "Проверить настройки и доступ",
+        "Try the app on the phone": "Проверить приложение на телефоне",
+        "Hand the phone back": "Вернуть телефон",
+      },
+    },
+    "development-changes": {
+      name: "Изменения в программе", why: "Для новой функции или исправления ошибки в продукте.",
+      stages: {
+        "Plan the change": "Спланировать изменение",
+        "Build the change": "Сделать изменение",
+        "Review the change": "Проверить изменение",
+        "Tidy the change": "Упростить изменение",
+        "Check security": "Проверить безопасность",
+        "Run tests": "Запустить тесты",
+      },
+    },
+    "development-docs": {
+      name: "Технические инструкции", why: "Чтобы написать инструкции или обновить примеры, которыми пользуются люди.",
+      stages: {
+        "Collect common questions": "Собрать частые вопросы",
+        "Write the guide": "Написать инструкцию",
+        "Check examples": "Проверить примеры",
+        "Put the guide where people look": "Разместить инструкцию там, где ее ищут",
+      },
+    },
+    "development-release": {
+      name: "Выпуск продукта", why: "Чтобы передать проверенные изменения пользователям.",
+      stages: {
+        "Pick what ships": "Выбрать, что войдет в выпуск",
+        "Prepare the release": "Подготовить выпуск",
+        "Review the release notes": "Проверить описание выпуска",
+        "Check release evidence": "Проверить результаты тестов",
+        "Roll out and watch": "Выпустить и проверить работу",
+      },
+    },
+    "design-requests": {
+      name: "Запросы в Дизайн", why: "Для новых экранов и повседневных задач Дизайна.",
+      stages: {
+        "Write the brief": "Описать задачу",
+        "Explore directions": "Предложить варианты",
+        "Check the design": "Проверить дизайн",
+        "Hand over the files": "Передать файлы",
+      },
+    },
+    "design-brand-assets": {
+      name: "Материалы фирменного стиля", why: "Для иллюстраций, слайдов и других материалов фирменного стиля.",
+      stages: {
+        "Read the style guide": "Изучить руководство по стилю",
+        "Make options": "Подготовить варианты",
+        "Check sizes and reuse": "Проверить размеры и применение",
+        "Export the files": "Подготовить файлы для передачи",
+      },
+    },
+    "design-video-editing": {
+      name: "Монтаж видео", why: "Чтобы собрать готовое видео из отснятого материала.",
+      stages: {
+        "Sort footage": "Разобрать исходники",
+        "Edit a rough cut": "Собрать черновой монтаж",
+        "Add sound and captions": "Добавить звук и субтитры",
+        "Review the cut": "Проверить монтаж",
+        "Export the final video": "Выгрузить готовое видео",
+      },
+    },
+    "marketing-campaigns": {
+      name: "Работа Маркетинга", why: "Для кампании, объявления или отдельной публикации.",
+      stages: {
+        "Choose the audience and goal": "Выбрать аудиторию и цель",
+        "Draft the message": "Написать черновик",
+        "Check voice and facts": "Проверить тон и факты",
+        "Publish and measure": "Опубликовать и оценить результат",
+      },
+    },
+    "marketing-daily-series": {
+      name: "Ежедневные авторские публикации", why: "Для ежедневной серии публикаций от имени человека с его согласия.",
+      stages: {
+        "Research the next topic": "Изучить следующую тему",
+        "Draft several versions": "Написать несколько вариантов",
+        "Review voice and facts": "Проверить голос автора и факты",
+        "Publish from the phone": "Опубликовать с телефона",
+        "Measure the series": "Оценить результаты серии",
+      },
+    },
+    "marketing-news-videos": {
+      name: "Короткие новостные видео", why: "Для коротких видео о проверенных новостях или изменениях продукта.",
+      stages: {
+        "Write the script": "Написать сценарий",
+        "Record the voice": "Записать голос",
+        "Render the video": "Собрать видео",
+        "Review the result": "Проверить результат",
+        "Publish the video": "Опубликовать видео",
+      },
+    },
+    "marketing-press-pool": {
+      name: "Работа с прессой", why: "Чтобы собрать список СМИ и предложить новость подходящим изданиям.",
+      stages: {
+        "Build the media list": "Собрать список СМИ",
+        "Write the pitch": "Написать предложение для СМИ",
+        "Check the pitch and facts": "Проверить письмо и факты",
+        "Send and follow up": "Отправить и ответить на отклики",
+      },
+    },
+    "sales-opportunities": {
+      name: "Работа с покупателями", why: "Для работы с заинтересованными покупателями до их решения.",
+      stages: {
+        "Qualify the request": "Уточнить запрос",
+        "Discuss the need": "Обсудить потребность",
+        "Check the offer": "Проверить предложение",
+        "Follow up and record the result": "Связаться снова и записать итог",
+      },
+    },
+    "sales-outreach": {
+      name: "Знакомство по почте", why: "Чтобы найти подходящие контакты и начать общение по почте.",
+      stages: {
+        "Research contacts in batches": "Искать контакты партиями",
+        "Group by need": "Сгруппировать по потребностям",
+        "Write the letters": "Написать письма",
+        "Check and send test copies": "Проверить и отправить пробные письма",
+        "Send one letter at a time": "Отправлять по одному письму",
+        "Handle replies": "Разобрать ответы",
+      },
+    },
+    "sales-proposals": {
+      name: "Предложения покупателям", why: "Когда покупатель попросил цену и план работ.",
+      stages: {
+        "Confirm what the buyer asked for": "Уточнить запрос покупателя",
+        "Draft the proposal": "Подготовить предложение",
+        "Check the promises and price": "Проверить обещания и цену",
+        "Send and discuss the proposal": "Отправить и обсудить предложение",
+      },
+    },
+    "business-development-opportunities": {
+      name: "Возможности для бизнеса", why: "Чтобы понять, стоит ли развивать новую возможность.",
+      stages: {
+        "Set the question": "Поставить вопрос",
+        "Find options": "Найти варианты",
+        "Check the evidence": "Проверить факты",
+        "Recommend a next step": "Предложить следующий шаг",
+      },
+    },
+    "business-development-market-scan": {
+      name: "Обзор рынка", why: "Чтобы сравнить спрос, предложения конкурентов и свободные ниши на рынке.",
+      stages: {
+        "Define the market": "Определить границы рынка",
+        "Research demand and alternatives": "Изучить спрос и альтернативы",
+        "Verify key claims": "Проверить главные выводы",
+        "Share the findings": "Передать выводы",
+      },
+    },
+    "business-development-partners": {
+      name: "Поиск партнеров", why: "Чтобы найти организации, с которыми компания может работать вместе.",
+      stages: {
+        "Define a good partner": "Описать подходящего партнера",
+        "Draw up a shortlist": "Составить короткий список",
+        "Check fit and contacts": "Проверить соответствие и контакты",
+        "Start conversations": "Начать общение",
+      },
+    },
+    "support-requests": {
+      name: "Запросы в Поддержку", why: "Для ответов на обычные вопросы и решения проблем клиентов.",
+      stages: {
+        "Read and group requests": "Прочитать и сгруппировать запросы",
+        "Find the answer": "Найти ответ",
+        "Check the answer": "Проверить ответ",
+        "Reply and close": "Ответить и закрыть запрос",
+      },
+    },
+    "support-triage": {
+      name: "Разбор обращений", why: "Когда накопились обращения и нужно разобрать их и назначить ответственных.",
+      stages: {
+        "Read incoming tickets": "Прочитать новые обращения",
+        "Group and assess urgency": "Сгруппировать и оценить срочность",
+        "Check disputed cases": "Проверить спорные случаи",
+        "Assign and tell the customer": "Назначить ответственного и сообщить клиенту",
+      },
+    },
+    "support-knowledge": {
+      name: "Статьи для справки", why: "Чтобы сделать из частого вопроса статью, которой смогут пользоваться другие.",
+      stages: {
+        "Find a recurring question": "Найти частый вопрос",
+        "Write the article": "Написать статью",
+        "Try the steps": "Пройти шаги по инструкции",
+        "Publish and link the article": "Опубликовать статью и дать ссылку",
+      },
+    },
+    "finance-records": {
+      name: "Запросы в Финансы", why: "Для повседневного учета, счетов и финансовых вопросов.",
+      stages: {
+        "Collect the papers": "Собрать документы",
+        "Record the figures": "Внести суммы в учет",
+        "Check the records": "Проверить записи",
+        "Share what is due": "Сообщить о предстоящих платежах",
+      },
+    },
+    "finance-monthly-close": {
+      name: "Закрытие месяца", why: "Чтобы закрыть учет за месяц и объяснить расхождения.",
+      stages: {
+        "Collect statements": "Собрать выписки",
+        "Reconcile balances": "Сверить остатки",
+        "Review discrepancies": "Проверить расхождения",
+        "Share the close report": "Передать отчет за месяц",
+      },
+    },
+    "finance-cash-plan": {
+      name: "Планирование денег", why: "Чтобы понять, какие поступления ожидаются и какие счета скоро оплачивать.",
+      stages: {
+        "Collect balances and due dates": "Собрать остатки и сроки платежей",
+        "Forecast money in and out": "Спрогнозировать поступления и расходы",
+        "Check assumptions": "Проверить допущения",
+        "Explain choices to the person paying": "Объяснить варианты тому, кто платит",
+      },
+    },
+    "devices-requests": {
+      name: "Помощь с домашними устройствами", why: "Чтобы проверить или исправить работу домашнего устройства.",
+      stages: {
+        "Identify the device": "Определить устройство",
+        "Check what is wrong": "Найти причину проблемы",
+        "Fix and verify": "Исправить и проверить",
+        "Tell the household": "Сообщить домашним",
+      },
+    },
+    "devices-cleanup": {
+      name: "Уборка на устройстве", why: "Чтобы освободить место и убрать лишнее на телевизоре или другом устройстве.",
+      stages: {
+        "Find what takes space": "Найти, что занимает место",
+        "Move recoverable junk aside": "Переместить лишнее с возможностью возврата",
+        "Check the device still works": "Проверить, что устройство работает",
+      },
+    },
+    "devices-network": {
+      name: "Проверка домашней сети", why: "Когда Wi-Fi работает медленно или устройства пропадают из домашней сети.",
+      stages: {
+        "List affected devices": "Составить список устройств с проблемой",
+        "Check connections and settings": "Проверить подключения и настройки",
+        "Try the fix from each room": "Проверить связь в каждой комнате",
+        "Record what changed": "Записать изменения",
+      },
+    },
+    "household-requests": {
+      name: "Домашние дела", why: "Чтобы разобрать повседневные просьбы и довести дела до конца.",
+      stages: {
+        "Sort household requests": "Разобрать домашние просьбы",
+        "Plan and do the work": "Спланировать и сделать",
+        "Record what is done": "Записать, что сделано",
+      },
+    },
+    "household-bills": {
+      name: "Домашние счета", why: "Чтобы собрать счета и сообщить плательщику суммы и сроки.",
+      stages: {
+        "Collect bills": "Собрать счета",
+        "Check amounts and due dates": "Проверить суммы и сроки",
+        "Remind the person paying": "Напомнить плательщику",
+      },
+    },
+    "household-supplies": {
+      name: "Домашние запасы", why: "Чтобы узнать, чего не хватает дома, и пополнить запасы.",
+      stages: {
+        "Check what is missing": "Проверить, чего не хватает",
+        "Compare what is available": "Сравнить доступные варианты",
+        "Share the list for purchase": "Передать список для покупки",
+        "Record what arrived": "Записать, что доставили",
+      },
+    },
+  },
   tracker: {
     side: {
       title: 'Задачи', people: 'Люди компании', dates: 'Сроки', withoutPipeline: 'Без пайплайна',
@@ -2023,6 +2319,7 @@ export const ru: Messages = {
       employees: 'Сотрудники',
       more: (n: number) => `Еще ${n}`,
       fewer: 'Свернуть',
+      defaultPipeline: (name: string) => `${name} (по умолчанию)`,
       noPipelines: 'Конвейеров пока нет.',
     },
     where: {

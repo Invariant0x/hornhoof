@@ -317,7 +317,15 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
   function save() {
     if (stages.some(s => !s.name.trim() || !s.owner)) return setTried(true);
     const owner = (s: StageDraft) => (s.owner.startsWith('role:') ? { ownerRole: s.owner.slice(5) } : { ownerAgentId: s.owner.slice(6) });
-    const body = { name: name.trim(), why: why.trim(), stages: stages.map(s => ({ key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name: s.name.trim(), ...owner(s) })) };
+    const canonical = (value: string, shown?: string, stock?: string) => value.trim() === shown && stock !== undefined ? stock : value.trim();
+    const body = {
+      name: canonical(name, pipeline?.name, pipeline?.stockName),
+      why: canonical(why, pipeline?.why, pipeline?.stockWhy),
+      stages: stages.map(s => {
+        const before = pipeline?.stages.find(stage => stage.id === s.id);
+        return { key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name: canonical(s.name, before?.name, before?.stockName), ...owner(s) };
+      }),
+    };
     void send(() => (pipeline ? api.patch(`/api/pipelines/${pipeline.id}`, { version, ...body }) : api.post('/api/pipelines', { department: department.id, ...body })));
   }
 
@@ -364,7 +372,7 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
 
 /* A task for a department, from a person who gives it work: it goes to the department's head, named unless it is called
    after its role. */
-export function TrackerNewTask({ department, pipelineId, onCreated, onCancel }: { department: Department; pipelineId?: string; onCreated: (task: TaskDetail) => void; onCancel: () => void }) {
+export function TrackerNewTask({ department, pipelineId, onCreated, onCancel }: { department: Department; pipelineId?: string | null; onCreated: (task: TaskDetail) => void; onCancel: () => void }) {
   const { language } = useLanguage();
   const head = department.employees.find(e => e.kind === 'head');
   if (!head) return null;

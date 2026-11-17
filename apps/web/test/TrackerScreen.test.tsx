@@ -63,6 +63,22 @@ const main = () => screen.findByRole('region', { name: /^(List|Board|Graph)$/ })
 const rowOf = (list: HTMLElement, name: string) => within(list).getByRole('listitem', { name });
 const card = (name: string) => screen.findByRole('complementary', { name });
 
+it('shows a ready pipeline and its stages in the chosen language', async () => {
+  localStorage.setItem('hh-lang', 'ru');
+  try {
+    const stock = {
+      ...PIPELINE, catalogKey: 'development-changes', isDefault: true, name: 'Software changes',
+      stages: [{ ...PIPELINE.stages[0], name: 'Build the change', ownerRole: 'DEV-ENG' }],
+    };
+    shell('/tasks?department=d2&pipeline=pl1&view=board', { 'GET /api/pipelines': [200, { pipelines: [stock] }] });
+    const board = await screen.findByRole('region', { name: 'Доска' });
+    expect(screen.getByRole('button', { name: 'Изменения в программе (по умолчанию)' })).toBeInTheDocument();
+    expect(within(board).getByText('Сделать изменение')).toBeInTheDocument();
+  } finally {
+    localStorage.removeItem('hh-lang');
+  }
+});
+
 describe('My tasks and View as', () => {
   it("lands on the person's own open tasks and goals, and shows another person's with View as", async () => {
     const user = userEvent.setup();

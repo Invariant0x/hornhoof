@@ -65,6 +65,7 @@ export const en = {
       planExperiment: 'Plan an experiment', reviewResults: 'Review the results and suggest what to try next',
       findDevices: 'Find my TVs and other devices and help clear out junk', checkDevices: 'Check my home devices and Wi-Fi',
       householdBooks: 'Set up Accounting for my bills and papers', chooseDepartments: 'Set up departments for the work I do',
+      setUpPipeline: 'Set up a way to handle my work',
       telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
     },
   },
@@ -2007,6 +2008,301 @@ export const en = {
     },
   },
   /* The tracker: lists on the left, where the person is on top, the work as a list, a board or a graph, and one card. */
+  pipelineCatalog: {
+    "operations-requests": {
+      name: "Operations requests", why: "For everyday requests to set up tools, accounts or access.",
+      stages: {
+        "Sort requests": "Sort requests",
+        "Set up access": "Set up access",
+        "Check it works": "Check it works",
+        "Record the result": "Record the result",
+      },
+    },
+    "operations-incidents": {
+      name: "Service recovery", why: "For a stopped service, stuck program or failed delivery.",
+      stages: {
+        "Check the signal": "Check the signal",
+        "Restore service": "Restore service",
+        "Confirm recovery": "Confirm recovery",
+        "Record the cause": "Record the cause",
+      },
+    },
+    "operations-integrations": {
+      name: "Connect a tool", why: "For connecting a shared tool, mailbox or outside service.",
+      stages: {
+        "Map the access needed": "Map the access needed",
+        "Connect the service": "Connect the service",
+        "Try it from the user’s place": "Try it from the user’s place",
+        "Leave a short guide": "Leave a short guide",
+      },
+    },
+    "operations-phone-handoff": {
+      name: "Company phone setup", why: "For getting a company phone ready for work in its apps.",
+      stages: {
+        "Find the registered phone": "Find the registered phone",
+        "Check settings and access": "Check settings and access",
+        "Try the app on the phone": "Try the app on the phone",
+        "Hand the phone back": "Hand the phone back",
+      },
+    },
+    "development-changes": {
+      name: "Software changes", why: "For building a feature or fixing a product problem.",
+      stages: {
+        "Plan the change": "Plan the change",
+        "Build the change": "Build the change",
+        "Review the change": "Review the change",
+        "Tidy the change": "Tidy the change",
+        "Check security": "Check security",
+        "Run tests": "Run tests",
+      },
+    },
+    "development-docs": {
+      name: "Technical guides", why: "For writing instructions or updating examples that people use.",
+      stages: {
+        "Collect common questions": "Collect common questions",
+        "Write the guide": "Write the guide",
+        "Check examples": "Check examples",
+        "Put the guide where people look": "Put the guide where people look",
+      },
+    },
+    "development-release": {
+      name: "Release a product", why: "For taking a checked set of changes to the people who use it.",
+      stages: {
+        "Pick what ships": "Pick what ships",
+        "Prepare the release": "Prepare the release",
+        "Review the release notes": "Review the release notes",
+        "Check release evidence": "Check release evidence",
+        "Roll out and watch": "Roll out and watch",
+      },
+    },
+    "design-requests": {
+      name: "Design requests", why: "For new screens and other everyday design work.",
+      stages: {
+        "Write the brief": "Write the brief",
+        "Explore directions": "Explore directions",
+        "Check the design": "Check the design",
+        "Hand over the files": "Hand over the files",
+      },
+    },
+    "design-brand-assets": {
+      name: "Brand assets", why: "For illustrations, presentation pieces or other reusable brand material.",
+      stages: {
+        "Read the style guide": "Read the style guide",
+        "Make options": "Make options",
+        "Check sizes and reuse": "Check sizes and reuse",
+        "Export the files": "Export the files",
+      },
+    },
+    "design-video-editing": {
+      name: "Video editing", why: "For turning existing footage into a finished video.",
+      stages: {
+        "Sort footage": "Sort footage",
+        "Edit a rough cut": "Edit a rough cut",
+        "Add sound and captions": "Add sound and captions",
+        "Review the cut": "Review the cut",
+        "Export the final video": "Export the final video",
+      },
+    },
+    "marketing-campaigns": {
+      name: "Marketing work", why: "For a campaign, announcement or a piece of content.",
+      stages: {
+        "Choose the audience and goal": "Choose the audience and goal",
+        "Draft the message": "Draft the message",
+        "Check voice and facts": "Check voice and facts",
+        "Publish and measure": "Publish and measure",
+      },
+    },
+    "marketing-daily-series": {
+      name: "Daily signed content", why: "For a daily series published in a person’s name with their agreement.",
+      stages: {
+        "Research the next topic": "Research the next topic",
+        "Draft several versions": "Draft several versions",
+        "Review voice and facts": "Review voice and facts",
+        "Publish from the phone": "Publish from the phone",
+        "Measure the series": "Measure the series",
+      },
+    },
+    "marketing-news-videos": {
+      name: "Short news videos", why: "For making short videos from verified news or product updates.",
+      stages: {
+        "Write the script": "Write the script",
+        "Record the voice": "Record the voice",
+        "Render the video": "Render the video",
+        "Review the result": "Review the result",
+        "Publish the video": "Publish the video",
+      },
+    },
+    "marketing-press-pool": {
+      name: "Press outreach", why: "For building a press list and pitching one story to relevant outlets.",
+      stages: {
+        "Build the media list": "Build the media list",
+        "Write the pitch": "Write the pitch",
+        "Check the pitch and facts": "Check the pitch and facts",
+        "Send and follow up": "Send and follow up",
+      },
+    },
+    "sales-opportunities": {
+      name: "Sales opportunities", why: "For following up with interested buyers through a decision.",
+      stages: {
+        "Qualify the request": "Qualify the request",
+        "Discuss the need": "Discuss the need",
+        "Check the offer": "Check the offer",
+        "Follow up and record the result": "Follow up and record the result",
+      },
+    },
+    "sales-outreach": {
+      name: "Email outreach", why: "For finding suitable contacts and starting conversations by email.",
+      stages: {
+        "Research contacts in batches": "Research contacts in batches",
+        "Group by need": "Group by need",
+        "Write the letters": "Write the letters",
+        "Check and send test copies": "Check and send test copies",
+        "Send one letter at a time": "Send one letter at a time",
+        "Handle replies": "Handle replies",
+      },
+    },
+    "sales-proposals": {
+      name: "Sales proposals", why: "For putting a price and work plan in front of a buyer who asked for them.",
+      stages: {
+        "Confirm what the buyer asked for": "Confirm what the buyer asked for",
+        "Draft the proposal": "Draft the proposal",
+        "Check the promises and price": "Check the promises and price",
+        "Send and discuss the proposal": "Send and discuss the proposal",
+      },
+    },
+    "business-development-opportunities": {
+      name: "Business opportunities", why: "For testing whether a new opportunity is worth pursuing.",
+      stages: {
+        "Set the question": "Set the question",
+        "Find options": "Find options",
+        "Check the evidence": "Check the evidence",
+        "Recommend a next step": "Recommend a next step",
+      },
+    },
+    "business-development-market-scan": {
+      name: "Market scan", why: "For comparing demand, competing offers and gaps in a market.",
+      stages: {
+        "Define the market": "Define the market",
+        "Research demand and alternatives": "Research demand and alternatives",
+        "Verify key claims": "Verify key claims",
+        "Share the findings": "Share the findings",
+      },
+    },
+    "business-development-partners": {
+      name: "Partner search", why: "For finding organizations that could work with the company.",
+      stages: {
+        "Define a good partner": "Define a good partner",
+        "Draw up a shortlist": "Draw up a shortlist",
+        "Check fit and contacts": "Check fit and contacts",
+        "Start conversations": "Start conversations",
+      },
+    },
+    "support-requests": {
+      name: "Support requests", why: "For answering everyday questions and resolving customer problems.",
+      stages: {
+        "Read and group requests": "Read and group requests",
+        "Find the answer": "Find the answer",
+        "Check the answer": "Check the answer",
+        "Reply and close": "Reply and close",
+      },
+    },
+    "support-triage": {
+      name: "Ticket triage", why: "For a backlog or rush of tickets that need sorting and assignment.",
+      stages: {
+        "Read incoming tickets": "Read incoming tickets",
+        "Group and assess urgency": "Group and assess urgency",
+        "Check disputed cases": "Check disputed cases",
+        "Assign and tell the customer": "Assign and tell the customer",
+      },
+    },
+    "support-knowledge": {
+      name: "Help articles", why: "For turning a recurring question into an answer others can reuse.",
+      stages: {
+        "Find a recurring question": "Find a recurring question",
+        "Write the article": "Write the article",
+        "Try the steps": "Try the steps",
+        "Publish and link the article": "Publish and link the article",
+      },
+    },
+    "finance-records": {
+      name: "Finance requests", why: "For routine bookkeeping, bills and financial questions.",
+      stages: {
+        "Collect the papers": "Collect the papers",
+        "Record the figures": "Record the figures",
+        "Check the records": "Check the records",
+        "Share what is due": "Share what is due",
+      },
+    },
+    "finance-monthly-close": {
+      name: "Monthly close", why: "For closing the books and explaining differences at month end.",
+      stages: {
+        "Collect statements": "Collect statements",
+        "Reconcile balances": "Reconcile balances",
+        "Review discrepancies": "Review discrepancies",
+        "Share the close report": "Share the close report",
+      },
+    },
+    "finance-cash-plan": {
+      name: "Cash planning", why: "For seeing what money is expected in and what bills are coming due.",
+      stages: {
+        "Collect balances and due dates": "Collect balances and due dates",
+        "Forecast money in and out": "Forecast money in and out",
+        "Check assumptions": "Check assumptions",
+        "Explain choices to the person paying": "Explain choices to the person paying",
+      },
+    },
+    "devices-requests": {
+      name: "Home device help", why: "For checking or fixing a device already in the home.",
+      stages: {
+        "Identify the device": "Identify the device",
+        "Check what is wrong": "Check what is wrong",
+        "Fix and verify": "Fix and verify",
+        "Tell the household": "Tell the household",
+      },
+    },
+    "devices-cleanup": {
+      name: "Device cleanup", why: "For freeing space and clearing junk on a TV or other home device.",
+      stages: {
+        "Find what takes space": "Find what takes space",
+        "Move recoverable junk aside": "Move recoverable junk aside",
+        "Check the device still works": "Check the device still works",
+      },
+    },
+    "devices-network": {
+      name: "Home network check", why: "For slow Wi-Fi or devices dropping off the home network.",
+      stages: {
+        "List affected devices": "List affected devices",
+        "Check connections and settings": "Check connections and settings",
+        "Try the fix from each room": "Try the fix from each room",
+        "Record what changed": "Record what changed",
+      },
+    },
+    "household-requests": {
+      name: "Household requests", why: "For organizing everyday requests and following through on them.",
+      stages: {
+        "Sort household requests": "Sort household requests",
+        "Plan and do the work": "Plan and do the work",
+        "Record what is done": "Record what is done",
+      },
+    },
+    "household-bills": {
+      name: "Household bills", why: "For gathering bills and telling the person paying what is due.",
+      stages: {
+        "Collect bills": "Collect bills",
+        "Check amounts and due dates": "Check amounts and due dates",
+        "Remind the person paying": "Remind the person paying",
+      },
+    },
+    "household-supplies": {
+      name: "Household supplies", why: "For finding what the household needs and arranging a restock.",
+      stages: {
+        "Check what is missing": "Check what is missing",
+        "Compare what is available": "Compare what is available",
+        "Share the list for purchase": "Share the list for purchase",
+        "Record what arrived": "Record what arrived",
+      },
+    },
+  },
   tracker: {
     side: {
       title: 'Tasks', people: 'Company people', dates: 'Due dates', withoutPipeline: 'Without a pipeline',
@@ -2026,6 +2322,7 @@ export const en = {
       employees: 'Employees',
       more: (n: number) => `${n} more`,
       fewer: 'Show fewer',
+      defaultPipeline: (name: string) => `${name} (default)`,
       noPipelines: 'No pipelines yet.',
     },
     where: {

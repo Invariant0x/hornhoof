@@ -66,7 +66,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept;
           <Item icon={<TrackerIcon name="goals" />} on={here && !place.pipeline && place.view === 'goals'} onClick={() => at({ view: 'goals' })}>{words.goals}</Item>
           <h3 className="tr-side-caption"><TrackerIcon name="pipeline" />{words.pipelines}</h3>
           {ownPipelines.length ? (
-            <ul className="tr-pipelines">{ownPipelines.map(p => <li key={p.id}><Item icon={<TrackerIcon name="chevron" />} on={here && place.pipeline === p.id} onClick={() => at({ pipeline: p.id, view: place.view === 'goals' || place.view === 'due' ? 'list' : place.view })}>{p.name}</Item></li>)}</ul>
+            <ul className="tr-pipelines">{ownPipelines.map(p => <li key={p.id}><Item icon={<TrackerIcon name="chevron" />} on={here && place.pipeline === p.id} onClick={() => at({ pipeline: p.id, view: place.view === 'goals' || place.view === 'due' ? 'list' : place.view })}>{p.isDefault ? t.tracker.side.defaultPipeline(p.name) : p.name}</Item></li>)}</ul>
           ) : <p className="muted">{words.noPipelines}</p>}
           <Item icon={<TrackerIcon name="list" />} on={here && place.pipeline === 'none'} onClick={() => at({ pipeline: 'none', view: 'list' })}>{words.withoutPipeline}</Item>
           {known && known.products.length > 0 && (

@@ -44,7 +44,7 @@ describe('POST /api/setup staffs the template', () => {
       agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
       home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
     };
-    expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'telegram', 'assistant'] });
+    expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'] });
   });
 
   it.each([...COMPANY_TEMPLATE_KEYS, undefined])('starts %s with one default pipeline for each department', async template => {

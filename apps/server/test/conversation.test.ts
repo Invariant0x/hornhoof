@@ -165,7 +165,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     const joined = await invitePerson(app, ceo, { name: 'Sam', email: 'sam@example.test', access: { whole: true } });
     const path = '/api/orchestrator/first-contact';
-    expect((await app.inject({ url: path, ...as(joined) })).json()).toEqual({ offers: ['chooseDepartments', 'telegram', 'assistant'] });
+    expect((await app.inject({ url: path, ...as(joined) })).json()).toEqual({ offers: ['chooseDepartments', 'setUpPipeline', 'telegram', 'assistant'] });
     const chosen = await app.inject({ method: 'POST', url: path, ...as(joined), payload: { offer: 'assistant', language: 'en' } });
     expect(chosen.statusCode).toBe(202);
     const run = await nextRun(builtin);

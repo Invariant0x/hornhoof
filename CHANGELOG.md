@@ -13,6 +13,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 ### Added
 - Every new department starts with a ready pipeline, and the orchestrator can add a different one or make it the default.
+- The orchestrator offers to set up a ready pipeline for work such as video editing when someone first gets started.
 - The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.
 - Everyone can write to the orchestrator from the company Telegram bot or through their personal assistant.
 - Connected company phones have their working settings restored automatically, and Machines shows anything that still needs attention.

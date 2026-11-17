@@ -305,8 +305,8 @@ type Making = 'task' | 'goal' | 'pipeline' | 'editPipeline' | null;
 
 /* What a person may make where they are: a task for the department, a goal of the department or of the company, and the
    department's pipelines, where the server says they plan. */
-function MakeHere({ places, org, department, pipeline, making, setMaking, onOpenTask }: {
-  places: TaskDepartments | undefined; org: Org | null; department: string | null; pipeline: Pipeline | null; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
+function MakeHere({ places, org, department, pipeline, loose, making, setMaking, onOpenTask }: {
+  places: TaskDepartments | undefined; org: Org | null; department: string | null; pipeline: Pipeline | null; loose: boolean; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
 }) {
   const t = useT();
   const words = t.tracker.actions;
@@ -327,7 +327,7 @@ function MakeHere({ places, org, department, pipeline, making, setMaking, onOpen
           {known && pipeline?.mayEdit && <button className="btn small ghost" type="button" onClick={() => setMaking('editPipeline')}>{words.editPipeline}</button>}
         </div>
       )}
-      {making === 'task' && known && <TrackerNewTask department={known} pipelineId={pipeline?.id} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
+      {making === 'task' && known && <TrackerNewTask department={known} pipelineId={loose ? null : pipeline?.id} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
       {making === 'goal' && <GoalForm department={named} onCancel={close} onDone={close} />}
       {making === 'pipeline' && known && <PipelineForm department={known} onCancel={close} onDone={close} />}
       {making === 'editPipeline' && known && pipeline && <PipelineForm key={pipeline.id} pipeline={pipeline} department={known} onCancel={close} onDone={close} />}
@@ -475,7 +475,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
   const makeHere = (section.kind === 'mine' || section.kind === 'department' || section.kind === 'company') && (
-    <MakeHere places={places} org={org} department={section.kind === 'department' ? section.id : other ? 'none' : null} pipeline={pipeline} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
+    <MakeHere places={places} org={org} department={section.kind === 'department' ? section.id : other ? 'none' : null} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
   );
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
 

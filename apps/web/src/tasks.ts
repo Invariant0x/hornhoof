@@ -1,9 +1,10 @@
 import type { DepartmentPipeline } from '@hornhoof/protocol/pipeline-report';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { refetcher } from './refetch';
-import { deptLabel, type Messages } from './i18n';
+import { en } from './i18n/en';
+import { deptLabel, useT, type Messages } from './i18n';
 import type { AgentRef, DepartmentTree, Decisions, GoalView, Improvement, Lang, Org, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskPlace, TurnView, WaitCard } from './types';
 import { everyVisible } from './guard';
 
@@ -96,10 +97,26 @@ export function useGoal(id: string) {
   return { goal: data?.goal, log: data?.log, failure, load };
 }
 
+function localPipeline(t: Messages, pipeline: Pipeline): Pipeline {
+  const key = pipeline.catalogKey as keyof Messages['pipelineCatalog'] | null | undefined;
+  if (!key || !Object.hasOwn(en.pipelineCatalog, key)) return pipeline;
+  const english = en.pipelineCatalog[key];
+  const local = t.pipelineCatalog[key];
+  const labels: Readonly<Record<string, string>> = local.stages;
+  return {
+    ...pipeline,
+    ...(pipeline.name === english.name ? { name: local.name, stockName: english.name } : {}),
+    ...(pipeline.why === english.why ? { why: local.why, stockWhy: english.why } : {}),
+    stages: pipeline.stages.map(stage => Object.hasOwn(labels, stage.name) ? { ...stage, name: labels[stage.name]!, stockName: stage.name } : stage),
+  };
+}
+
 /* The pipelines of every department, with their stages in tree order. */
 export function usePipelines(enabled = true) {
+  const t = useT();
   const { data, failure, load } = useLive(enabled ? '/api/pipelines' : null, (b: { pipelines: Pipeline[] }) => b.pipelines, m => m.type === 'tracker');
-  return { pipelines: data, failure, load };
+  const pipelines = useMemo(() => data?.map(pipeline => localPipeline(t, pipeline)), [data, t]);
+  return { pipelines, failure, load };
 }
 
 /* Everything that waits for people as this person may see it: what agents ask on the tasks they reach, the orchestrator's

@@ -21,6 +21,7 @@ const WORDS = {
   planExperiment: 'Plan an experiment', reviewResults: 'Review the results and suggest what to try next',
   findDevices: 'Find my TVs and other home devices and help clean up junk', checkDevices: 'Check my home devices and Wi-Fi',
   householdBooks: 'Set up Accounting to keep my household books and receive my bills and papers',
+  setUpPipeline: 'Set up a way to handle my work',
   chooseDepartments: 'Set up departments for the work I do',
   telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
 } as const;
@@ -34,7 +35,7 @@ const MENUS = {
   home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
 } as const satisfies Record<CompanyTemplateKey | 'empty', readonly Offer[]>;
 
-const offersFor = (kit: CompanyTemplateKey | null): Offer[] => [...MENUS[kit ?? 'empty'], 'telegram', 'assistant'];
+const offersFor = (kit: CompanyTemplateKey | null): Offer[] => [...MENUS[kit ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'];
 
 export function greetingOffers(kit: CompanyTemplateKey | null): string {
   return ['Ask what the person wants and give this short first-contact menu. Offer each item in their language and act on what they pick.', ...offersFor(kit).map(offer => `- ${WORDS[offer]}`)].join('\n');
@@ -100,6 +101,7 @@ export function firstContactRoutes(app: FastifyInstance, ctx: Ctx): void {
     const prompt = [
       `First contact with one person. Answer only the sender (person id ${me.id}). Reply in ${input.language === 'ru' ? 'Russian' : 'English'}.`,
       'Read the sender’s access in the company before sharing company information. Start the work requested and ask one question only when you need their answer.',
+      ...('offer' in input && input.offer === 'setUpPipeline' ? ['Use the ready pipeline catalog. Ask what work they want to set up, then offer the closest pipeline and apply their choice.'] : []),
       ...(previous?.replies.length ? [`Your last answer to this person:\n${quote(previous.replies.join('\n'))}`] : []),
       turnPrompt({ name: me.name, title: me.title }, quote(input.text)),
     ].join('\n\n');

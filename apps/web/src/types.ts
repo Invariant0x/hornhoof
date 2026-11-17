@@ -764,9 +764,9 @@ export type GoalView = {
 
 /* A department's pipeline: who hands work to whom, as a tree of stages in tree order. A stage's owner is a role of the
    department, or one of its employees. */
-export type PipelineStage = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: PersonRef | null; position: number };
+export type PipelineStage = { id: string; parentId: string | null; name: string; stockName?: string; ownerRole: string | null; owner: PersonRef | null; position: number };
 /* mayEdit: the reader may change it, as the server decides; none said is no. */
-export type Pipeline = { id: string; department: PersonRef; name: string; why: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
+export type Pipeline = { id: string; department: PersonRef; name: string; why: string; catalogKey?: string | null; isDefault?: boolean; stockName?: string; stockWhy?: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
 
 /* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
 export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };

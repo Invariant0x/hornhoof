@@ -7,7 +7,7 @@ import { Field } from './Field';
 
 type Props = {
   department: Department;
-  pipelineId?: string;
+  pipelineId?: string | null;
   showPriority?: boolean;
   /* The head's name, or null when it is called after its role. */
   head: string | null;
@@ -37,7 +37,7 @@ export function NewTask({ department: d, pipelineId, showPriority = false, head,
         brief: brief.trim(),
         body: body.trim(),
         department: d.id,
-        ...(pipelineId ? { pipeline: pipelineId } : {}),
+        ...(pipelineId !== undefined ? { pipeline: pipelineId } : {}),
         ...(priority === 'normal' ? {} : { priority }),
         ...(product ? { product } : {}),
       });
