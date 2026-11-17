@@ -10,7 +10,8 @@ import { keepSnapshot } from './pipeline-report.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
-import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type IntegrationTarget } from './turn-integration.js';
+import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
 
@@ -28,19 +29,6 @@ type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit
 type Repo = IntegrationTarget['repo'];
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
-
-/* A version tag: vX.Y.Z, compared by its numbers. */
-const VERSION = /^v(\d+)\.(\d+)\.(\d+)$/;
-function versionOf(name: string): [number, number, number] | null {
-  const found = VERSION.exec(name);
-  return found ? [Number(found[1]), Number(found[2]), Number(found[3])] : null;
-}
-export function newerVersion(a: string, b: string): boolean {
-  const x = versionOf(a), y = versionOf(b);
-  if (!x || !y) return false;
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;
-  return false;
-}
 
 /* A whole run of R's release: of the turn branch at R, asked for by an agent of the department or the orchestrator, of the product's
    tests in the full profile its manifest names, with no one suite, every part passed with its receipt on R, taking only what its
@@ -315,12 +303,8 @@ async function lastVersion(ctx: Reader, turn: Turn, repo: Repo): Promise<Line> {
   if (turn.baseVersion) return { last: turn.baseVersion };
   const read = await ctx.readTags?.(repo, 30_000).catch(() => null);
   if (!read || 'problem' in read) return null;
-  return { last: newestFirst(read.tags)[0]?.[0] ?? null };
+  return { last: versionsNewestFirst(read.tags)[0]?.[0] ?? null };
 }
-
-/* The version tags of a repository, newest first, each with its commit. */
-const newestFirst = (tags: Record<string, string>): [string, string][] =>
-  Object.entries(tags).filter(([name]) => versionOf(name)).sort(([a], [b]) => newerVersion(a, b) ? -1 : newerVersion(b, a) ? 1 : 0);
 
 const nextTag = (line: Line): string =>
   !line ? 'newer than the last version tag of this repository'
@@ -343,7 +327,7 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   const before = (await ctx.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
   const read = await ctx.readTags(repo, 30_000);
   if ('problem' in read) return;
-  const tagged = newestFirst(read.tags);
+  const tagged = versionsNewestFirst(read.tags);
   const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
   const versions = turn.baseVersion ? tagged : tagged.filter(([, commit]) => records.some(r => r.commit === commit));
   if (!turn.baseVersion && !versions.length) {
@@ -354,8 +338,8 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   for (const [name, commit] of versions) {
     if (turn.baseVersion && !newerVersion(name, turn.baseVersion)) return;
     if (turn.baseCommit && !(await branchHolds(ctx, repo, commit, turn.baseCommit))) continue;
-    const record = records.find(r => r.commit === commit && r.baseCommitSha !== commit);
-    if (!record || !(await branchHolds(ctx, repo, commit, record.baseCommitSha))) {
+    const record = await recordOfTag(ctx, repo, records, commit);
+    if (!record) {
       await tellOfTag(ctx, turn, name, commit, 'unrecorded');
       continue;
     }

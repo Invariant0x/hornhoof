@@ -45,7 +45,10 @@ async function turnkeyIntegration(ctx: Reader, task: Task) {
   try { own = await ctx.readCommit(target.repo, { task: task.number }, 5_000); }
   catch { throw refuse(409, 'task_changed', `The branch of #${task.number} could not be read. Try again.`); }
   if ('problem' in own) return null;
-  await requireInTurn(ctx, { ...target, turn }, own.commitSha, `fast-forward ${target.branch} to ${own.branch} first, so the release takes it, then report done.`);
+  const { branch } = target;
+  await requireInTurn(ctx, { ...target, turn }, own.commitSha, (head, holdsHead) => holdsHead
+    ? `fast-forward ${branch} to ${own.branch} first, so the release takes it, then report done.`
+    : `${own.branch} does not hold ${head}, the head of ${branch}, so ${branch} cannot go to it by fast-forward: take ${branch} into ${own.branch} first, then fast-forward ${branch} to it and report done.`);
   return { turn, integration: { branch: target.branch, commit: own.commitSha, from: own.branch, observedAt: new Date().toISOString() } };
 }
 
