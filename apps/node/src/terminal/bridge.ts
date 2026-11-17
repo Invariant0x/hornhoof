@@ -232,12 +232,18 @@ export class Bridge {
     reply(res, answer.status, answer.text);
   }
 
+  /* The agent an address names: by the secret in its path, or at the tools address that carries none, by the secret its
+     program sends as a bearer token. */
+  private agentAt(req: IncomingMessage, kind: string | undefined, inPath: string | undefined, event: string | undefined): string | undefined {
+    const secret = inPath || (kind === 'mcp' && event === undefined ? bearerSecret(req) : undefined);
+    return secret ? this.bySecret.get(secret) : undefined;
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const asked = Date.now();
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
     const [, kind, inPath, event] = path!.split('/');
-    const secret = inPath || (kind === 'mcp' && event === undefined ? bearerSecret(req) : undefined);
-    const key = secret ? this.bySecret.get(secret) : undefined;
+    const key = this.agentAt(req, kind, inPath, event);
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
