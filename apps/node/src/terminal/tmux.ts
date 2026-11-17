@@ -103,8 +103,12 @@ export class Tmux {
     return true;
   }
 
-  async protectOutput(name: string): Promise<void> {
-    this.recordings.protect(name);
+  privateJob(name: string): string | null {
+    return this.recordings.privateJob(name);
+  }
+
+  async protectOutput(name: string, jobId: string | null = null): Promise<void> {
+    this.recordings.protect(name, jobId);
     try {
       await this.run(['pipe-pane', '-t', name]);
     } catch {
