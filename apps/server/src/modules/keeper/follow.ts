@@ -552,7 +552,7 @@ export class FollowKeeper {
   /* The company's link as this machine's own database holds it, read anew every ten seconds: the watch over the
      leader asks hornhoof.org of it. A read that fails keeps the last one. */
   private async keepLink(): Promise<void> {
-    const now = performance.now();
+    const now = this.clocks().mono;
     if (this.linkAt !== null && now - this.linkAt < LINK_EVERY_MS) return;
     this.linkAt = now;
     const settings = await this.opts.settings().catch(() => undefined);
@@ -600,7 +600,7 @@ export class FollowKeeper {
   /* The role the leader reads this machine's database with for a merge: made at the start, and again whenever a look,
      one a minute, finds it gone or without its rights. A failure is said once. */
   private async keepReplica(): Promise<void> {
-    const now = performance.now();
+    const now = this.clocks().mono;
     if (this.replicaAt !== null && now - this.replicaAt < (this.opts.replicaEveryMs ?? REPLICA_EVERY_MS)) return;
     this.replicaAt = now;
     const sql = this.opts.sql(COPY_DB);
