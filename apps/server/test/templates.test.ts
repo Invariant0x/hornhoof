@@ -696,6 +696,11 @@ describe('templates', () => {
         expect(owner).toContain('tell_orchestrator');
       });
 
+      it("answers No to Claude Code's own check of a deletion through a variable that may be empty, and tells the program how to write it", () => {
+        const rm = point("Claude Code's own check");
+        for (const part of ['rm $VAR/*', 'only a person may allow', 'choose No', '"${VAR:?}/..."', 'literal path', 'decision to denied']) expect(rm, part).toContain(part);
+      });
+
       it('takes a fresh picture before every input and leaves its decision in the agent\'s journal', () => {
         const key = point('Take a fresh');
         expect(key).toContain('program_screen');

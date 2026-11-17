@@ -304,6 +304,15 @@ describe('renderInstructions', () => {
     }
   });
 
+  /* Claude Code refuses such a removal by itself after two minutes, and the step is lost (#1246). */
+  it('tells employees and the orchestrator to write a path from a variable as "${VAR:?}" or literally in a command that deletes or overwrites', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text];
+    for (const text of told) {
+      expect(text).toContain('In rm, mv, cp and any other command that deletes or overwrites, write a path from a variable as "${VAR:?}/..." or as a literal path, never $VAR/* unchecked: Claude Code refuses such a command, and only a person can allow it.');
+    }
+  });
+
   it('keeps every skill whole in the text for a node that writes no skill files, as before', () => {
     const { parts, whole } = renderInstructions(T, agent(), PLACE);
     expect(whole.startsWith('You are Bruno')).toBe(true);
