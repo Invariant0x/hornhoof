@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { privateTurn } from '../tools/privacy.js';
+import { privateTurn } from '../tools/private-turns.js';
 import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';

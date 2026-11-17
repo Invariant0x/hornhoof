@@ -7,7 +7,7 @@ import { INVOCATION } from '../src/modules/tools/calls.js';
 import { appendTurnEvent } from '../src/modules/events/store.js';
 import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ownMachine } from '../src/modules/nodes/hub.js';
-import { forgetPrivateTurn, privateTurn } from '../src/modules/tools/privacy.js';
+import { forgetPrivateTurn, privateTurn } from '../src/modules/tools/private-turns.js';
 import { cancelJob } from '../src/modules/tasks/wake.js';
 import { as, mcp } from './helpers.js';
 import { vaultCompany } from './vault-fixture.js';
