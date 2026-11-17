@@ -51,11 +51,15 @@ export class PrivateValues {
       return;
     }
     if (typeof value === 'string' && value) {
-      this.values.add(value);
-      let form = value;
-      for (let i = 0; i < 3; i++) { form = JSON.stringify(form).slice(1, -1); this.values.add(form); }
+      this.rememberText(value);
     } else if (Array.isArray(value)) for (const item of value) this.remember(item);
     else if (value && typeof value === 'object') for (const item of Object.values(value)) this.remember(item);
+  }
+
+  private rememberText(value: string): void {
+    this.values.add(value);
+    let form = value;
+    for (let i = 0; i < 3; i++) { form = JSON.stringify(form).slice(1, -1); this.values.add(form); }
   }
 
   text(text: string): string {
@@ -74,17 +78,19 @@ export class PrivateValues {
     /* Media is an opaque payload for the authorized caller, not text to rewrite. Its tool's privacy policy decides
        whether it may be persisted. A password fragment may coincidentally occur in base64. */
     if (value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio')) return value;
-    if (typeof value === 'string') {
-      if (this.values.has(value)) return '[hidden]' as T;
-      if (/^\s*[[{]/.test(value)) {
-        try { return JSON.stringify(this.hide(JSON.parse(value))) as T; }
-        catch { /* A plain report may begin with a bracket. */ }
-      }
-      return this.text(value) as T;
-    }
+    if (typeof value === 'string') return this.hiddenString(value) as T;
     if (Array.isArray(value)) return value.map(item => this.hide(item)) as T;
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, IDENTITY.test(key) ? item : this.hide(item)])) as T;
     return value;
+  }
+
+  private hiddenString(value: string): string {
+    if (this.values.has(value)) return '[hidden]';
+    if (/^\s*[[{]/.test(value)) {
+      try { return JSON.stringify(this.hide(JSON.parse(value))); }
+      catch { /* A plain report may begin with a bracket. */ }
+    }
+    return this.text(value);
   }
 
   /* Tool arguments also carry UUID references, classifications, model names and other routing choices. Only prose is
@@ -101,11 +107,19 @@ const parsed = (value: string): unknown => { try { return JSON.parse(value); } c
 /* Results have no call identity. After a sensitive call, subsequent inputs and results can contain it, including
    commands that type it into a form. Text and reports still reach people, with exact values hidden. */
 export function privateToolEvent(event: AgentEvent, sensitive: boolean, untracked = false): AgentEvent {
-  if (!sensitive && !(event.kind === 'tool' && (event.sensitive || privateToolCall(event.name, parsed(event.input)).policy?.sensitive))) return event;
+  if (!sensitive && !sensitiveEvent(event)) return event;
   if (event.kind === 'tool') return { ...event, input: PRIVATE_TOOL_NOTE, sensitive: true };
   if (event.kind === 'tool_result') return { ...event, summary: PRIVATE_TOOL_NOTE };
-  if (untracked && event.kind === 'text') return { ...event, text: PRIVATE_TOOL_NOTE };
-  if (untracked && event.kind === 'todo') return { ...event, items: [] };
+  return untracked ? hiddenText(event) : event;
+}
+
+function sensitiveEvent(event: AgentEvent): boolean {
+  return event.kind === 'tool' && (event.sensitive === true || privateToolCall(event.name, parsed(event.input)).policy?.sensitive === true);
+}
+
+function hiddenText(event: AgentEvent): AgentEvent {
+  if (event.kind === 'text') return { ...event, text: PRIVATE_TOOL_NOTE };
+  if (event.kind === 'todo') return { ...event, items: [] };
   return event;
 }
 
@@ -140,11 +154,15 @@ export class ToolPrivacy {
   }
 
   event(event: AgentEvent, policy?: ToolPrivacyPolicy, resolve = toolPrivacy): AgentEvent {
+    this.observe(event, policy, resolve);
+    return this.values.hide(privateToolEvent(event, this.sensitive));
+  }
+
+  private observe(event: AgentEvent, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): void {
     if (event.kind === 'tool') {
       const call = privateToolCall(event.name, parsed(event.input), name => name === event.name && policy ? policy : resolve(name));
       if (event.sensitive || call.policy?.sensitive) this.input(call.name, call.input, { ...call.policy, sensitive: true });
     }
     if (this.sensitive && event.kind === 'tool_result') this.result(parsed(event.summary), { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
-    return this.values.hide(privateToolEvent(event, this.sensitive));
   }
 }
