@@ -38,35 +38,43 @@ async function expectWrappedText(element: Locator) {
   expect(await element.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 }
 
+/* The orchestrator's notebook, open on its two notes, the first one long; a removed note is counted. The two notebook
+   tests start here, each on a page of its own: one checks how the notes and their actions lie, the other that the actions
+   answer the keyboard and touch. */
+async function openNotebook(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number) {
+  const m = MESSAGES[lang];
+  const { errors, openPanel } = await openAgent(page, { lang, theme, width }, 'orchestrator');
+  const removed: string[] = [];
+  await page.route('**/api/notebook', route => route.fulfill({ json: { notes: NOTES } }));
+  await page.route('**/api/notebook/1', route => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    removed.push(route.request().url());
+    return route.fulfill({ status: 204 });
+  });
+  const notebook = await openPanel('notebook');
+  const first = notebook.locator('.notebook ul').locator('li').nth(0);
+  const change = first.getByRole('button', { name: m.notebook.changeNote(1), exact: true });
+  const remove = first.getByRole('button', { name: m.notebook.removeNote(1), exact: true });
+  return { m, errors, removed, notebook, first, change, remove };
+}
+
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
       {
         const look = `${lang}-${theme}-${width}`;
         test(`Notebook content and its whole action group fit: ${look}`, async ({ page }, info) => {
-          const m = MESSAGES[lang];
-          const { errors, openPanel } = await openAgent(page, { lang, theme, width }, 'orchestrator');
-          const removed: string[] = [];
-          await page.route('**/api/notebook', route => route.fulfill({ json: { notes: NOTES } }));
-          await page.route('**/api/notebook/1', route => {
-            if (route.request().method() !== 'DELETE') return route.fallback();
-            removed.push(route.request().url());
-            return route.fulfill({ status: 204 });
-          });
-          const notebook = await openPanel('notebook');
+          const { m, errors, notebook, first, change, remove } = await openNotebook(page, lang, theme, width);
           const body = notebook.locator('.ac-body');
           const list = notebook.locator('.notebook ul');
           await expect(list).toBeVisible();
           await capture(page, info, `notebook-${look}`);
-          const first = list.locator('li').nth(0);
           const second = list.locator('li').nth(1);
           await expect(first).toHaveClass(/(^| )entry( |$)/);
           await expect(first.locator('.entry-main')).toHaveCount(1);
           const actions = first.locator('.entry-actions');
           await expect(actions).toHaveAttribute('role', 'group');
           const text = first.locator('.entry-main > span');
-          const change = first.getByRole('button', { name: m.notebook.changeNote(1), exact: true });
-          const remove = first.getByRole('button', { name: m.notebook.removeNote(1), exact: true });
           await expect(change).toHaveCSS('min-height', '44px');
           await expect(remove).toHaveCSS('min-height', '44px');
           await expectInside(body, [notebook.locator('.notebook'), first, text, change, remove]);
@@ -79,7 +87,11 @@ for (const lang of ['en', 'ru'] as const) {
           expect(removeBox.x).toBeGreaterThan(changeBox.x);
           const secondChangeBox = (await second.getByRole('button', { name: m.notebook.changeNote(2), exact: true }).boundingBox())!;
           expect(changeBox.x, 'all action groups use one edge').toBe(secondChangeBox.x);
+          expect(errors).toEqual([]);
+        });
 
+        test(`Notebook note actions answer the keyboard and touch: ${look}`, async ({ page }) => {
+          const { m, errors, removed, notebook, change, remove } = await openNotebook(page, lang, theme, width);
           await change.click();
           await expect(notebook.getByRole('textbox', { name: m.notebook.note(1), exact: true })).toBeVisible();
           const save = notebook.getByRole('button', { name: m.notebook.save, exact: true });
