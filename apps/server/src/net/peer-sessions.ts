@@ -32,8 +32,10 @@ export type PeerSessionsOptions = {
   helloMs?: number;
   /* How often the direct path is tried again while the session goes through the relay. */
   directEveryMs?: number;
-  /* A session whose ping is not answered by the next one is ended. */
+  /* How often a session is pinged, so that one on which nothing else goes still brings bytes while its link holds. */
   pingMs?: number;
+  /* A session on which nothing came for this long is ended. */
+  silentMs?: number;
   /* A stream of its own on which no byte moves for this long is cut. */
   streamIdleMs?: number;
   /* Called when a session came or went, or a hello said something new. */
@@ -46,6 +48,12 @@ const HELLO_MS = 10_000;
 const DIRECT_EVERY_MS = 60_000;
 const PING_MS = 15_000;
 const STREAM_IDLE_MS = 30_000;
+/* A session ends on silence alone: a late hello or ping does not end one on which bytes still come, as on a slow link a
+   long copy's bytes go ahead of their answers. Half a minute is three hellos and two pings without a byte of answer on a
+   link that works, and as long as one of its streams may stand still; a copy at 20 KB/s brings bytes every second. */
+const SILENT_MS = STREAM_IDLE_MS;
+/* How often a session is looked at for bytes that came on it. */
+const LISTEN_MS = 1000;
 const WINDOW = 1024 * 1024;
 const HELLO_BYTES = 64 * 1024;
 const ASK_MS = 5000;
@@ -72,8 +80,27 @@ export function highestLead<T extends { hello: Hello }>(said: T[]): T | undefine
   return best;
 }
 
-/* asking: a hello is on its way. pinged: the last ping was answered. */
-type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; asking: boolean; pinged: boolean };
+/* asking: a hello is on its way. pinged: the last ping was answered. read: the bytes that came on its connection so far.
+   bytes and heard: what read said at the last look, and when it last grew. why: why this side ended it. */
+type Session = {
+  h2: ClientHttp2Session;
+  path: LinkPath;
+  hello: Hello;
+  timers: NodeJS.Timeout[];
+  asking: boolean;
+  pinged: boolean;
+  read: () => number;
+  bytes: number;
+  heard: number;
+  why?: string;
+};
+
+/* A session that said hello, to be kept: what came on its connection counts from now. */
+export function heldSession(h2: ClientHttp2Session, path: LinkPath, hello: Hello, read: () => number): Session {
+  return { h2, path, hello, timers: [], asking: false, pinged: true, read, bytes: read(), heard: Date.now() };
+}
+
+const secondsToATenth = (ms: number): number => Math.round(ms / 100) / 10;
 /* failed: the addresses whose last direct try failed. */
 /* trips: how long this machine's hellos to that one took, over the last day. */
 type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number; trips: RoundTrips };
@@ -136,7 +163,7 @@ export class PeerSessions {
       const same = before.find(kept => kept.target.machine === target.machine);
       return same ? Object.assign(same, { target }) : { target, session: null, dialing: false, failed: new Set<string>(), directTriedAt: 0, trips: new RoundTrips() };
     });
-    for (const gone of before.filter(kept => !this.kept.includes(kept))) this.end(gone);
+    for (const gone of before.filter(kept => !this.kept.includes(kept))) this.end(gone, 'the machine is no longer among those this one keeps sessions to');
     this.timer ??= setInterval(() => this.look(), this.opts.everyMs ?? EVERY_MS).unref();
     this.look();
   }
@@ -277,7 +304,7 @@ export class PeerSessions {
   close(): Promise<void> {
     this.closed = true;
     clearInterval(this.timer);
-    for (const kept of this.kept.splice(0)) this.end(kept);
+    for (const kept of this.kept.splice(0)) this.end(kept, 'this machine closed its sessions');
     return Promise.resolve();
   }
 
@@ -286,9 +313,16 @@ export class PeerSessions {
     return best?.kept;
   }
 
-  private end(kept: Kept): void {
-    kept.session?.h2.destroy();
+  private end(kept: Kept, why: string): void {
+    if (kept.session) this.cut(kept.session, why);
     kept.session = null;
+  }
+
+  /* Ends a session for a reason of this side, which its end says. */
+  private cut(session: Session, why: string, gently = false): void {
+    session.why ??= why;
+    if (gently) session.h2.close();
+    else session.h2.destroy();
   }
 
   /* A machine with no session is dialed; one reached through the relay gets its direct addresses tried again in time. */
@@ -396,7 +430,7 @@ export class PeerSessions {
         h2.on('error', ignore);
         const session = h2;
         askHello(session, this.opts.connectMs ?? CONNECT_MS).then(
-          hello => settle({ h2: session, path, hello, timers: [], asking: false, pinged: true }),
+          hello => settle(heldSession(session, path, hello, () => socket.bytesRead)),
           (err: { silent?: boolean }) => fail(err.silent === true),
         );
       });
@@ -417,11 +451,13 @@ export class PeerSessions {
     kept.session = session;
     if (before) {
       for (const timer of before.timers) clearInterval(timer);
-      before.h2.close();
+      this.cut(before, `a ${session.path} session took its place`, true);
     }
     this.refused = false;
     session.h2.once('close', () => {
       for (const timer of session.timers) clearInterval(timer);
+      /* One line for every session that ended, but those this machine closes as it stops. */
+      if (!this.closed || !session.why) this.opts.log(`The ${session.path} session to data machine ${kept.target.machine} ended: ${session.why ?? 'the other side or the network closed it'}.`);
       if (kept.session !== session) return;
       kept.session = null;
       this.opts.changed?.();
@@ -429,13 +465,14 @@ export class PeerSessions {
     session.timers.push(
       setInterval(() => this.hello(session, kept), this.opts.helloMs ?? HELLO_MS).unref(),
       setInterval(() => this.ping(session), this.opts.pingMs ?? PING_MS).unref(),
+      setInterval(() => this.listen(session), Math.min(LISTEN_MS, this.opts.silentMs ?? SILENT_MS)).unref(),
     );
     this.opts.changed?.();
   }
 
   /* One hello at a time, each with the patience a connect gets: a busy machine answers late, and that is no reason to
-     let go of it. One that does not answer at all ends the session, unless another took its place meanwhile: closing cuts
-     a hello that was on its way, and what the session still carries is left to end by itself. */
+     let go of it, nor is one that does not answer at all, as on a slow link its answer waits behind what the session
+     carries. Only silence ends a session. */
   private hello(session: Session, kept: Kept): void {
     if (session.h2.destroyed || session.asking) return;
     session.asking = true;
@@ -446,18 +483,27 @@ export class PeerSessions {
         session.hello = hello;
         if (news) this.opts.changed?.();
       },
-      () => void (kept.session === session && session.h2.destroy()),
+      () => void (session.asking = false),
     );
   }
 
-  /* A machine that went away without a word answers no ping, and its session would else stay for as long as TCP waits. */
+  /* One ping at a time asks for an answer, so that a session on which nothing else goes brings bytes while its link
+     holds; an answer that comes late ends nothing. */
   private ping(session: Session): void {
-    if (session.h2.destroyed) return;
-    if (!session.pinged) return void session.h2.destroy();
-    session.pinged = false;
-    const sent = session.h2.ping(err => {
+    if (session.h2.destroyed || !session.pinged) return;
+    session.pinged = !session.h2.ping(err => {
       if (!err) session.pinged = true;
     });
-    if (!sent) session.h2.destroy();
+  }
+
+  /* Bytes that came on the session since the last look keep it. Nothing for silentMs ends it: a machine that went away
+     without a word sends none, and the session would else stay for as long as TCP waits. */
+  private listen(session: Session): void {
+    if (session.h2.destroyed) return;
+    const bytes = session.read();
+    const now = Date.now();
+    const silentMs = this.opts.silentMs ?? SILENT_MS;
+    if (bytes !== session.bytes) Object.assign(session, { bytes, heard: now });
+    else if (now - session.heard >= silentMs) this.cut(session, `nothing came on it for ${secondsToATenth(silentMs)} s`);
   }
 }
