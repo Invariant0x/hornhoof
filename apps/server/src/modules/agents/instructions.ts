@@ -13,7 +13,7 @@ import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role
 export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 /* The card's parts and its raw text with every skill whole; what the program is told, with its hash; the skills the node
    writes as files, which the program reads when it needs them; and whole, what a node that writes no skill files is told. */
-export type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[]; whole: string };
+type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[]; whole: string };
 
 type AgentRow = typeof agents.$inferSelect;
 type Place = { company: string; department: string; product: string | null };

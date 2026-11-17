@@ -87,9 +87,9 @@ export function whatCame(m: TelegramMessage): Came {
 }
 
 /* Gets a file of a message from Telegram. */
-export type FetchFile = (fileId: string) => Promise<Buffer>;
+type FetchFile = (fileId: string) => Promise<Buffer>;
 /* The words of a voice message, or null when there are none to give. */
-export type Transcribe = (bytes: Buffer, name: string) => Promise<string | null>;
+type Transcribe = (bytes: Buffer, name: string) => Promise<string | null>;
 
 const megabytes = (bytes: number) => Math.round(bytes / 1024 / 1024);
 

@@ -284,7 +284,7 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
 }
 
 /* A request turn ended: its readers see again that nobody is on it, whether or not it did its work. */
-export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
+async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
   const asked = sql<string>`${agentEvents.data}->>'request'`;
   const ended = await ctx.db
     .select({ task: tasks })
@@ -462,13 +462,13 @@ export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] =
 }
 
 /* Turns that broke this soon after they started, this many in a row on one task, stop Hornhoof waking the agent there. */
-export const QUICK_CRASH_MS = 3 * 60_000;
-export const QUICK_CRASHES = 3;
+const QUICK_CRASH_MS = 3 * 60_000;
+const QUICK_CRASHES = 3;
 
 type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | 'finishedAt' | 'result' | 'tail' | 'failure'>;
 
 /* Turns that failed, this many in a row on one task and however long each ran, stop it too: going on did not help. */
-export const FAILED_TURNS = 5;
+const FAILED_TURNS = 5;
 
 /* A turn that failed by itself: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
 const failedByItself = (j: Ended) =>

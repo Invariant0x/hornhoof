@@ -9,7 +9,7 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export const KEPT_DAYS = 30;
 export const PAGE = 100;
 
-export type NewAssistantEvent = { companyId: string; assistantId: string; kind: AssistantEventKind; data: Record<string, unknown> };
+type NewAssistantEvent = { companyId: string; assistantId: string; kind: AssistantEventKind; data: Record<string, unknown> };
 export type AssistantEventView = { seq: number; kind: AssistantEventKind; at: string; data: unknown };
 
 /* Keeps an event under the company's next number, with whatever else must be kept with it. The counter's row stays locked

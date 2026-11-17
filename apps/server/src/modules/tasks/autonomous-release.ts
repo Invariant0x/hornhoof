@@ -43,7 +43,7 @@ type VerifiedVerdict = {
 type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
 
-export type RecordedMainApproval = { entryId: string; baseCommitSha: string; candidateBaseCommitSha: string; department: Dept };
+type RecordedMainApproval = { entryId: string; baseCommitSha: string; candidateBaseCommitSha: string; department: Dept };
 
 export type AutonomousReleaseEntry = {
   id: string;

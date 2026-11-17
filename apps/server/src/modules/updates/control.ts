@@ -60,7 +60,7 @@ function statusWithBuild(dir: string): UpdaterStatus | null {
 const ALIVE_MS = 30_000;
 
 /* What holds the updater: an update or a restore. */
-export type UpdaterWork = 'update' | 'restore';
+type UpdaterWork = 'update' | 'restore';
 /* The steps of a restore that are the updater's own: from there its status file says the restore runs. */
 const RESTORE_SWAP_STEPS = new Set<unknown>(['load', 'swap', 'start']);
 

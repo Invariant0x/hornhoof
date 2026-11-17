@@ -140,11 +140,11 @@ export type KeeperOptions = {
 
 /* The company's link as this keeper's own frpc logs in at the relay: its name, its key, the id that client goes by,
    and the link's address. */
-export type OwnLink = { name: string; key: string; client: string; url: string };
+type OwnLink = { name: string; key: string; client: string; url: string };
 
 /* What hands the server over for this keeper, made with what the keeper gives it. While it holds, the keeper takes no
    lease, says it does not lead, and keeps its front door shut and its link's client stopped. */
-export type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean; to?(): { machine: string; networkId: string } | null };
+type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean; to?(): { machine: string; networkId: string } | null };
 export type HandingParts = {
   front: { close(): Promise<void>; open(): void };
   tunnel: { start(): void; stop(): Promise<void> };
@@ -159,8 +159,8 @@ export type HandingParts = {
 
 /* What this keeper does for an update while other machines keep copies, made with what the keeper gives it. busy: an
    update runs, or it still has one to end. */
-export type UpdatingPart = { start(): Promise<void>; stop(): Promise<void>; busy(): boolean };
-export type UpdatingParts = {
+type UpdatingPart = { start(): Promise<void>; stop(): Promise<void>; busy(): boolean };
+type UpdatingParts = {
   sync: SyncController | null;
   peer: HandingParts['peer'];
   /* The name a machine goes by, none for one this database does not hold. */
@@ -172,7 +172,7 @@ export type UpdatingParts = {
 
 /* What takes the server over for this keeper: it leads once this machine's database is promoted, or at once where
    no switch is on its way, and answers the paths of a switch to the data machine that asks, named by its network id. */
-export type TakingPart = {
+type TakingPart = {
   start(): Promise<void>;
   stop(): Promise<void>;
   leads(): boolean;

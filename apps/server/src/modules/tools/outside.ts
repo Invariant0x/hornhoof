@@ -34,7 +34,7 @@ const INSTALLING = 'This machine installs a new build of Hornhoof now. Call agai
 const TOO_LARGE = "Hornhoof's answer to this call is too large to hand on with no turn running. Ask for less at a time.";
 const UNREADABLE = 'Hornhoof could not read this message.';
 /* What the journal says of a call, which keeps nothing of what it carried or what came back: either may hold a key. */
-export const OUTSIDE_SUMMARY = 'Called with no turn running.';
+const OUTSIDE_SUMMARY = 'Called with no turn running.';
 const CHECK_SUMMARY = 'Ran with no turn running.';
 /* The name a check command goes by in the journal, as the agent calls it. */
 const CHECK = 'hh-check';

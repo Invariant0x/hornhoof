@@ -35,7 +35,7 @@ const comparedLines = (compared: Extract<CompareResult, { complete: true }>): nu
   changedLines(compared.diff) + (compared.omitted ?? []).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 export const exactComparison = (result: CompareResult, base: string, head: string): result is Extract<CompareResult, { complete: true }> => result.complete && result.baseSha === base && result.headSha === head;
 
-export async function authorVendor(db: Store, authorId: string): Promise<string | null> {
+async function authorVendor(db: Store, authorId: string): Promise<string | null> {
   const [row] = await db.select(only(subscriptions, 'provider')).from(agents)
     .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, authorId));
   return row?.provider ? modelProvider(row.provider) : null;

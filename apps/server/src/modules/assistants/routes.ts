@@ -33,10 +33,10 @@ export const MessageBody = z
   .refine(m => m.text || m.files.length, 'Write something or add a file.');
 const FileQuery = z.object({ agentId: z.uuid().optional(), name: z.string().optional() }).strict();
 /* A program may send each letter of both texts as an escape of six bytes. */
-export const MESSAGE_BYTES = 2 * 1024 * 1024;
-export const ASSISTANT_CONTRACT = 3;
+const MESSAGE_BYTES = 2 * 1024 * 1024;
+const ASSISTANT_CONTRACT = 3;
 /* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
-export const LONGEST_WAIT_S = 50;
+const LONGEST_WAIT_S = 50;
 export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
 const IdParams = z.object({ id: z.uuid() });
 
@@ -67,7 +67,7 @@ async function addressee(ctx: Ctx, me: Person, agentId: string | undefined, mine
 }
 
 /* The assistant's own agent, if its owner picked a plan for it once. */
-export async function ownAgentOf(ctx: Pick<Ctx, 'db'>, assistantId: string): Promise<string | null> {
+async function ownAgentOf(ctx: Pick<Ctx, 'db'>, assistantId: string): Promise<string | null> {
   const [row] = await ctx.db.select(only(assistants, 'agentId')).from(assistants).where(eq(assistants.personId, assistantId));
   return row?.agentId ?? null;
 }
@@ -123,7 +123,7 @@ export async function writeFor(ctx: Ctx, me: Person, body: unknown, senderAgentI
 
 /* A file of any kind the assistant sends an agent, to name in its next message to it: kept as its owner's own, as a file
    the owner sends from the agent's window. */
-export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown, declared: number) {
+async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown, declared: number) {
   const { agentId, name } = FileQuery.parse(query);
   const agent = await addressee(ctx, me, agentId, await ownAgentOf(ctx, me.assistant!.id));
   const room = await checkPictureRoom(ctx, me.companyId, declared);

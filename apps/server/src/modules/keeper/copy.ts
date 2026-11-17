@@ -20,11 +20,11 @@ export const ENABLE_FOR_MS = 600_000;
 /* Under this much free disk a subscription that stopped is taken to have stopped for want of room. */
 export const DISK_FULL = 2 ** 30;
 /* The database a copy is made again in, beside the one that is still read. */
-export const NEXT_DB = 'hornhoof_next';
+const NEXT_DB = 'hornhoof_next';
 /* A slot the leader does not list any more counts as gone after this many views in a row said so. */
-export const MISSING_VIEWS = 2;
+const MISSING_VIEWS = 2;
 /* After this many views in a row of a new leader that name no slot for it, a copy is made again from that leader. */
-export const MOVED_VIEWS = 2;
+const MOVED_VIEWS = 2;
 const ENABLE_EVERY_MS = 60_000;
 /* How often the saver of a database that led is asked to go on. */
 const SAVE_EVERY_MS = 10_000;

@@ -45,14 +45,14 @@ export const WORK_MEMORY_GB = 2;
 export const TEST_MINUTES = 30;
 export const TEST_MINUTES_MAX = 120;
 /* Runs of one agent that may go on at once. */
-export const OPEN_RUNS = 3;
+const OPEN_RUNS = 3;
 /* A part that found no free machine this long ends, so its agent hears of it instead of waiting on. */
 export const WAIT_MS = 2 * 3_600_000;
 /* A machine that said nothing of a part this long past its time limit has lost it. */
 const LATE_MS = 2 * 60_000;
 /* A part whose machine is away this long runs again on another, and a part runs again at most this many times. */
 export const AWAY_MS = 3 * 60_000;
-export const RERUNS = 2;
+const RERUNS = 2;
 /* What a part keeps of its log's end for the result: its last lines. */
 const TAIL_LINES = 20;
 const TAIL_CHARS = 2000;
@@ -189,7 +189,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
    of test runs. */
 /* builtinMachine: the machine of a built-in node's place. */
 export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; builtinMachine: string | null; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
-export type BrowserHeldPlace = { name: string; lent: boolean; access: Access | null; works: boolean; browserError: string };
+type BrowserHeldPlace = { name: string; lent: boolean; access: Access | null; works: boolean; browserError: string };
 
 /* The key of a built-in node's place: the server's own by its bare word, as it always went, another machine's by its id. */
 const builtinPlaceKey = (ctx: Ctx, machine: string | null): string => (!machine || machine === ownMachine(ctx.config) ? 'builtin' : `builtin:${machine}`);
@@ -290,7 +290,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   return places.map(p => ({ ...p, ...computerState(p, running, reports, ctx.config.runsPerHost) }));
 }
 
-export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<BrowserHeldPlace[]> {
+async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<BrowserHeldPlace[]> {
   const { db, hub } = ctx;
   const { rows, live } = await companyComputers(ctx, companyId);
   const held: BrowserHeldPlace[] = [];
@@ -308,7 +308,7 @@ export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<Br
   return held;
 }
 
-export async function browserHoldReason(ctx: Ctx, companyId: string, run: Pick<Run, 'kind'>, department: Department | null): Promise<string | null> {
+async function browserHoldReason(ctx: Ctx, companyId: string, run: Pick<Run, 'kind'>, department: Department | null): Promise<string | null> {
   const held = (await browserHeldPlaces(ctx, companyId)).filter(p => mayTake(p, run, department));
   if (!held.length) return null;
   return `Playwright browsers failed to start on ${held.map(p => `${p.name} (${p.browserError})`).join('; ')}.`;

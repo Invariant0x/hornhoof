@@ -11,7 +11,7 @@ import { ofOperations } from './access.js';
 
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-export const casePictureUnknown = (): ApiError => new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+const casePictureUnknown = (): ApiError => new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
 
 /* Bound the bytes in the query too: an invalid row never becomes an unbounded download. */
 async function casePicture(db: Db, companyId: string, id: string, caseId?: string) {
