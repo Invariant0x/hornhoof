@@ -1,0 +1,29 @@
+test,before_ms,before_status,after_min_ms,after_median_ms,after_max_ms,after_passed_series,before_sha,after_sha
+"serves the peer link once its certificate is in, and names each peer to the app by its certificate",18124.577,passed,392.548,495.943,1509.038,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"renews a peer's certificate through the app, for its own row and key",2291.426,passed,150.368,210.444,509.206,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+keeps the network routes from the keeper's other doors,1313.214,passed,93.887,128.504,279.043,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"reads revocations as they come: the open session closes, a new one is refused, and the list is kept",1951.953,passed,101.524,134.258,280.593,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+opens the peer link only after checking its certificate and its list with the app,2697.461,passed,111.15,145.856,572.474,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+takes a new certificate when the database does not know its own,1702.349,passed,97.512,139.099,269.085,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+offers the peer link and the app through the relay while the company has a link,951.767,passed,80.865,117.258,166.951,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"offers nothing through the relay for a company without a link, and still serves the peer port",589.699,passed,70.809,106.369,174.212,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"makes the company's backups, reports its key for them, and serves bundles only to their holders",1445.478,passed,97.369,150.255,221.849,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"takes what a machine that left the data uploads, and from no other machine",876.179,passed,80.321,123.256,315.933,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+writes what it sent each machine,1997.241,passed,68.314,130.843,425.031,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+reports the address its copies saw,844.304,passed,68.468,137.284,291.4,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+opens a door to a copy its app names,1889.408,passed,77.717,123.761,306.349,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+beats as the leader,1999.892,passed,79.295,124.032,272.367,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link",3086.309,passed,66.008,96.33,242.775,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"comes back in through the relay's window, on a registration of its own",3615.926,passed,73.193,110.512,247.806,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"holds no name on the word of an earlier way in, once a switch took the name away",9892.124,passed,69.949,119.876,243.674,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+holds no name before it knows whether its lease takes a proof,4550.589,passed,63.699,86.716,257.933,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"leads under the flag its sync controller gives, and says how its copies do",646.578,passed,64.773,89.603,220.113,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"drops at its next sweep the slot of a broken-off table that a copy named to its app, and keeps the one nobody named",1847.438,passed,65.068,79.756,268.867,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"stops its link when its lease ends with a copy listed, and starts it again to tell the relay",20881.577,failed,81.391,115.467,372.138,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+keeps its link when its lease ends while no other machine holds a copy that finished,26674.255,failed,75.587,98.468,240.975,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+never leads alone while its controller says a copy is listed and the relay cannot be told,3310.522,passed,67.262,84.643,412.067,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+keeps mode and the word to the app on lead through four-second relay hiccups every six minutes,498.606,passed,96.944,133.48,339.615,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+keeps the list of revoked certificates where only the keeper reads it,223.871,passed,72.636,95.755,227.67,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes",1369.508,passed,157.439,204.771,542.607,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"holds the peer tunnel through one empty read during a one-second relay silence, and says why when the link goes",351.654,passed,99.93,138.322,502.726,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
+"offers no peer doors in read mode, stops the public link on the first read after a lease ends, and stops peer doors when leading ends",458.178,passed,87.466,124.326,639.719,20,da43f7b7bc9cd1a7aeb5e8389ad039b692c5e6df,3390423c6f86ae183987551b529520554f33168f
