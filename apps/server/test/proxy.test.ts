@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import dns from 'node:dns';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import type { Duplex, Writable } from 'node:stream';
@@ -189,9 +189,21 @@ function closesWithin(ms: number, emitter: NodeJS.EventEmitter): Promise<unknown
   return once(emitter, 'close', { signal: AbortSignal.timeout(ms) });
 }
 
-function withLookupThatNeverAnswers(): void {
-  const lookup = vi.spyOn(dns, 'lookup').mockImplementation((() => {}) as unknown as typeof dns.lookup);
+/* Waits, with no deadline, until check holds, looking again each time the emitter says event. */
+async function until(emitter: NodeJS.EventEmitter, event: string, check: () => boolean): Promise<void> {
+  while (!check()) await once(emitter, event);
+}
+
+/* A DNS that never answers. What it gives back settles once it has been asked as many times as it is told. */
+function withLookupThatNeverAnswers(): (times: number) => Promise<void> {
+  const asked = new EventEmitter();
+  let count = 0;
+  const lookup = vi.spyOn(dns, 'lookup').mockImplementation((() => {
+    count++;
+    asked.emit('asked');
+  }) as unknown as typeof dns.lookup);
   onTestFinished(() => lookup.mockRestore());
+  return times => until(asked, 'asked', () => count >= times);
 }
 
 function failOnUncaught(): void {
@@ -913,31 +925,47 @@ describe('a target that is down', () => {
     expect(upgraded.split('\r\n\r\n')[1]).toBe('мимо');
   });
 
+  /* The hop's next timer is its give-up on the connect: the clock is moved to it, and only to it. */
   it('gives up on a target that does not connect within connectMs', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 }, { connectMs: 200 });
-    withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy, { path: '/api/x' })).body).toBe(STARTING_JSON);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(150);
-    expect(Date.now() - started).toBeLessThan(3000);
-    expect((await exchange(proxy, UPGRADE)).split('\r\n')[0]).toBe('HTTP/1.1 502 Bad Gateway');
+    const lookedUp = withLookupThatNeverAnswers();
+    virtualTime();
+    const asked = Date.now();
+    const answer = send(proxy, { path: '/api/x' });
+    await lookedUp(1);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(Date.now() - asked).toBe(200);
+    expect((await answer).body).toBe(STARTING_JSON);
+    const upgradeAsked = Date.now();
+    const upgraded = exchange(proxy, UPGRADE);
+    await lookedUp(2);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(Date.now() - upgradeAsked).toBe(200);
+    expect((await upgraded).split('\r\n')[0]).toBe('HTTP/1.1 502 Bad Gateway');
   });
 
   it('gives a connect 5 seconds unless told otherwise', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 });
-    withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy)).status).toBe(502);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4800);
-    expect(Date.now() - started).toBeLessThan(7000);
+    const lookedUp = withLookupThatNeverAnswers();
+    virtualTime();
+    const asked = Date.now();
+    const answer = send(proxy);
+    await lookedUp(1);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(Date.now() - asked).toBe(5000);
+    expect((await answer).status).toBe(502);
   });
 
   it('takes a connectMs of 0 at its word', async () => {
     const proxy = await through({ host: 'never.hornhoof.test', port: 7080 }, { connectMs: 0 });
-    withLookupThatNeverAnswers();
-    const started = Date.now();
-    expect((await send(proxy)).status).toBe(502);
-    expect(Date.now() - started).toBeLessThan(3000);
+    const lookedUp = withLookupThatNeverAnswers();
+    virtualTime();
+    const asked = Date.now();
+    const answer = send(proxy);
+    await lookedUp(1);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(Date.now() - asked).toBe(0);
+    expect((await answer).status).toBe(502);
   });
 
   it('leaves no timer behind a connect that failed, so a stopping process can end', async () => {
@@ -960,12 +988,20 @@ describe('a target that is down', () => {
   });
 
   it('puts no limit on a target that connected and takes its time', async () => {
+    const arrived = deferred();
+    const late = deferred();
     const target = await answering(async (_, res) => {
-      await sleep(400);
+      arrived.resolve();
+      await late.promise;
       res.end('late');
     });
-    const answer = await send(await through(target, { connectMs: 100 }));
-    expect(answer).toMatchObject({ status: 200, body: 'late' });
+    const proxy = await through(target, { connectMs: 100 });
+    virtualTime();
+    const answer = send(proxy);
+    await arrived.promise;
+    await vi.advanceTimersByTimeAsync(PAST_EVERY_LIMIT);
+    late.resolve();
+    expect(await answer).toMatchObject({ status: 200, body: 'late' });
   });
 });
 
