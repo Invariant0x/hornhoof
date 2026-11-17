@@ -32,4 +32,3 @@ undefined
       Tests  1 failed (1)
    Start at  04:56:02
    Duration  3.45s (transform 47%, tests 20%, setup 16%, import 8%, worker 7%, environment 3%)
-
