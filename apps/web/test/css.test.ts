@@ -122,6 +122,7 @@ it('frames every invalid field control in pink by one shared .field rule while k
   expect(RULES.filter(r => r.selectors.some(s => s.includes('aria-invalid'))).map(r => r.selectors)).toEqual([
     [invalid],
     [focused],
+    ['.check-card:has([aria-invalid="true"])'],
   ]);
 });
 

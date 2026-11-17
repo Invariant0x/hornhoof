@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { until } from './helpers-basic.js';
 
 /* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
@@ -49,7 +50,7 @@ describe('the tests of one file', { shuffle: false }, () => {
     const db = await createTestDb();
     opened = databasesOpened();
     firstNumber = await numberedEvent(db);
-    expect(await db.select({ name: companies.name }).from(companies)).toEqual([{ name: 'Acme' }]);
+    expect(await db.select(only(companies, 'name')).from(companies)).toEqual([{ name: 'Acme' }]);
   });
 
   it('share that database and do not see what the test before wrote, and numbers start over', async () => {
@@ -291,7 +292,7 @@ describe('rows a file makes once', { shuffle: false }, () => {
       const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
       return agent!;
     });
-    const names = (db: Db) => db.select({ name: agents.name }).from(agents).orderBy(agents.name);
+    const names = (db: Db) => db.select(only(agents, 'name')).from(agents).orderBy(agents.name);
     const first = await createTestDb();
     await acme(first);
     const bruno = await team(first);

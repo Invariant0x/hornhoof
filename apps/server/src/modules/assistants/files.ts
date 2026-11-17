@@ -1,12 +1,10 @@
 import { Readable } from 'node:stream';
-import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
-import { assistants, attachments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { filePieces, headerName } from '../tasks/attachments.js';
+import { attachmentForPerson, filePieces, headerName } from '../tasks/attachments.js';
 
 const FileParams = z.object({ id: z.uuid() });
 
@@ -23,34 +21,24 @@ export function disposition(name: string): string {
   return `attachment; filename="${ascii || 'file'}"; filename*=UTF-8''${headerName(whole)}`;
 }
 
-/* A file the assistant's own agent put in Hornhoof in a turn of its own with hh-attach: in the assistant's company, by its
-   agent and no person, under a name, and no picture Hornhoof took of the agent's program. Whose it is the same query asks
-   that finds it. */
-async function ownFile(db: Ctx['db'], me: Person, id: string) {
-  const [found] = await db
-    .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
-    .from(attachments)
-    .innerJoin(assistants, and(eq(assistants.agentId, attachments.agentId), eq(assistants.companyId, attachments.companyId)))
-    .where(
-      and(
-        eq(attachments.id, id),
-        eq(attachments.companyId, me.companyId),
-        eq(assistants.personId, me.assistant!.id),
-        isNotNull(attachments.jobId),
-        isNull(attachments.personId),
-        isNull(attachments.operatorCaseId),
-        isNotNull(attachments.name),
-      ),
-    );
-  return found;
+/* Use the interface's current owner visibility, with one refusal for every unavailable file. */
+async function ownerFile(db: Ctx['db'], me: Person, id: string) {
+  try {
+    return await attachmentForPerson(db, me, id);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /* The file's bytes as they were sent, a piece at a time, under the type and the name it was kept with, as often as the
    program asks. */
 export async function fileFor(ctx: Ctx, me: Person, params: unknown, reply: FastifyReply) {
   const asked = FileParams.safeParse(params);
-  const found = asked.success ? await ownFile(ctx.db, me, asked.data.id) : undefined;
-  if (!found) throw noFile();
+  const found = asked.success ? await ownerFile(ctx.db, me, asked.data.id) : undefined;
+  /* An automatic program screenshot has no file name, even if it acquired a task link. Message/request pictures are
+     governed by their person's visibility instead. */
+  if (!found || (!found.picture && found.name === null)) throw noFile();
   return reply
     .header('content-disposition', disposition(found.name ?? 'file'))
     .header('x-content-type-options', 'nosniff')

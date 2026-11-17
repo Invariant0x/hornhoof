@@ -5,6 +5,7 @@ import type { Config } from '../../config.js';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { machines } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
@@ -777,14 +778,14 @@ export class Keeper {
   /* The name the machine of that network id goes by; none for one this database does not hold. */
   private async hostnameOf(networkId: string): Promise<string> {
     if (!this.opts.db) return '';
-    const [row] = await this.opts.db.select({ hostname: machines.hostname }).from(machines).where(eq(machines.networkId, networkId));
+    const [row] = await this.opts.db.select(only(machines, 'hostname')).from(machines).where(eq(machines.networkId, networkId));
     return row?.hostname ?? '';
   }
 
   /* The id the keeper of that machine runs under; none for a row this database does not hold. */
   private async networkIdOf(machine: string): Promise<string> {
     if (!this.opts.db) return '';
-    const [row] = await this.opts.db.select({ networkId: machines.networkId }).from(machines).where(eq(machines.id, machine));
+    const [row] = await this.opts.db.select(only(machines, 'networkId')).from(machines).where(eq(machines.id, machine));
     return row?.networkId ?? '';
   }
 
@@ -933,12 +934,17 @@ export class Keeper {
         await slots.sql.query('SELECT pg_reload_conf()');
         this.keptSizeAt = now;
       }
-      await sweepSlots(slots.sql, this.opts.log, this.syncSlotsIdle, now);
+      await sweepSlots(slots.sql, this.opts.log, this.syncSlotsIdle, now, this.leftSlots());
       this.slotsFail = false;
     } catch (err) {
       if (!this.slotsFail) this.opts.log(`Could not look after the copies' slots: ${reasonOf(err)}`);
       this.slotsFail = true;
     }
+  }
+
+  /* The slots of tables whose first copy broke off, as the copies named them to the app. */
+  private leftSlots(): string[] {
+    return this.peers?.current()?.leftSlots ?? [];
   }
 
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */

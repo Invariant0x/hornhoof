@@ -622,12 +622,10 @@ describe('renderInstructions', () => {
       expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
       expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
-      expect(impl, roleKey).toMatch(/never call `?run_tests`? on (?:an )?individual or (?:parallel )?turnkey task branch/i);
-      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*complete affected package[\s\S]*combined release candidate/i);
+      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*named local tests of the touched area/i);
       expect(impl, roleKey).toMatch(/install from the lockfile and run builds, types and quality checks locally/i);
       expect(policy, roleKey).toContain('NOT_RUN');
       expect(policy, roleKey).toMatch(/fresh and upgraded data[\s\S]*both up\/down when supported[\s\S]*report unsupported down explicitly/i);
-      expect(policy, roleKey).toMatch(/never assume `?run_tests`? selects by itself/i);
       expect(policy, roleKey).toMatch(/a new test file always runs/i);
       expect(policy, roleKey).toMatch(/unavailable adapter[\s\S]*complete affected package rather than an empty selection/i);
       expect(policy, roleKey).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
@@ -709,7 +707,7 @@ describe('work a department did before', () => {
   });
 });
 
-describe('single pre-release full suite and DEV-HEAD inline byte budget', () => {
+describe('one run of every test per release and DEV-HEAD inline byte budget', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const renderRole = (roleId: string) => {
     const role = shipped.roles.get(roleId)!;
@@ -740,13 +738,12 @@ describe('single pre-release full suite and DEV-HEAD inline byte budget', () => 
     }
   });
 
-  it('forbids per-task and parallel-turnkey run_tests and requires one full run per release candidate on the combined release branch before main', () => {
+  it('tells every development role that every test runs together once per release', () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = renderRole(roleId).whole;
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
       expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
-      expect(whole, roleId).toMatch(/never (?:assign|order|call|run)[^.!?\n]*`?"?run_tests"?`?[^.!?\n]*task branch/i);
-      expect(whole, roleId).toMatch(/once per release candidate[\s\S]*combined release (?:branch|candidate)[^.!?\n]*before `?main`?/i);
+      expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);
     }
   });
 });

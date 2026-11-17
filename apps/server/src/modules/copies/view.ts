@@ -1,6 +1,7 @@
 import { isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, publicLinks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from '../network/store.js';
@@ -87,7 +88,7 @@ export async function dataViews(ctx: Ctx, now = new Date()): Promise<Map<string,
 
 async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<string, DataView>> {
   const { db } = ctx;
-  const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+  const [link] = await db.select(only(publicLinks, 'name')).from(publicLinks).limit(1);
   const fit = { link: Boolean(link) };
   const byId = new Map((await candidates(db, now, { shares: false })).map(candidate => [candidate.id, candidate]));
   const old = await oldLeader(ctx);

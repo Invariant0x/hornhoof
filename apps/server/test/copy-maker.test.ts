@@ -15,9 +15,12 @@ const FIRST: CopyOrder = { ...ORDER, slot: null };
 
 /* oid: as Postgres numbers it, one per subscription made. dies: enabled again, it stops on its next error, which one
    look still finds it running before. */
-type Sub = { enabled: boolean; slot: string | null; rels: string[]; oid?: number; dies?: { looked: boolean } };
+/* leads: its connection leads to the leader, as one made by the maker does. working: the tables a worker of it copies now. */
+type Sub = { enabled: boolean; slot: string | null; rels: string[]; oid?: number; dies?: { looked: boolean }; leads?: boolean; working?: number[] };
 /* handed: its time as the leader ended in a handover. passfile: the file the replica role's password is read from is there. */
-type Database = { tables: boolean; led: boolean; handed: boolean; passfile: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub> };
+/* leftovers: the origins of tables whose first copy was broken off, which Postgres keeps until that table's copy is
+   through, and which no worker uses now. */
+type Database = { tables: boolean; led: boolean; handed: boolean; passfile: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub>; leftovers: string[] };
 
 /* The copy's own database server, as far as the maker asks it: each statement it knows changes what a test set up, and
    every statement is kept, with the database it ran on. */
@@ -28,7 +31,11 @@ function cluster() {
      whether the copy reaches it, and whether every apply breaks whatever the schema. A subscription that starts makes a
      slot for each table whose first copy it takes; one whose schema is not the leader's, or any while applies break,
      stops at its first error, and its tables' slots stay. Dropped with its slot, a subscription drops all of them there. */
-  const leader = { live: false, migrations: 108, slots: new Set<string>(), reachable: true, breaks: false };
+  /* hangs: the link takes a connection to the leader and never answers on it. Postgres then waits for as long as it
+     holds, whatever the connection's own timeout says, and only a statement timeout of its session ends the wait. */
+  const leader = { live: false, migrations: 108, slots: new Set<string>(), reachable: true, breaks: false, hangs: false };
+  /* What Postgres still runs after the keeper stopped waiting for it. */
+  const running: string[] = [];
   let oids = 16500;
   const syncSlot = (sub: Sub, table: number): string => `pg_${sub.oid}_sync_${table}_7300000000000000000`;
   const fails = (db: Database): boolean => leader.breaks || db.migrations !== leader.migrations;
@@ -39,13 +46,22 @@ function cluster() {
     if (fails(db)) sub.dies = { looked: false };
   };
   const add = (name: string, over: Partial<Database> = {}) => {
-    const database: Database = { tables: false, led: false, handed: false, passfile: false, migrations: 108, size: 0, pulse: null, subs: new Map(), ...over };
+    const database: Database = { tables: false, led: false, handed: false, passfile: false, migrations: 108, size: 0, pulse: null, subs: new Map(), leftovers: [], ...over };
     databases.set(name, database);
     return database;
   };
   const nameIn = (text: string): string => /"([^"]+)"/.exec(text)![1]!;
-  const answer = (on: string, text: string, params: unknown[] = []): Record<string, unknown>[] => {
+  const answer = (on: string, text: string, params: unknown[] = [], session: { timeout: string | null } = { timeout: null }): Record<string, unknown>[] => {
     const db = databases.get(on);
+    if (text.startsWith('SET statement_timeout') || text === 'RESET statement_timeout') {
+      session.timeout = text.startsWith('SET') ? text : null;
+      return [];
+    }
+    if (text.includes('FROM pg_replication_origin')) return db!.leftovers.map(name => ({ name }));
+    if (text.includes('pg_replication_origin_drop')) {
+      db!.leftovers = db!.leftovers.filter(name => name !== params[0]);
+      return [];
+    }
     if (on !== 'postgres' && !db) throw new Error(`database "${on}" does not exist`);
     if (text.includes("to_regclass('net_local.state')")) return [{ there: db!.tables }];
     /* A row whose time as the leader ended in a handover counts only for a query that does not ask of that. */
@@ -74,11 +90,16 @@ function cluster() {
     if (text === 'SHOW data_directory') return [{ data_directory: '/var/lib/postgresql/data' }];
     if (text.startsWith('CREATE SUBSCRIPTION')) {
       /* One that copies no data has every table ready at once. */
-      const sub: Sub = { enabled: true, slot: nameIn(text), rels: text.includes('copy_data = false') ? ['r', 'r'] : ['i', 'i'], oid: oids++ };
+      const sub: Sub = { enabled: true, slot: nameIn(text), rels: text.includes('copy_data = false') ? ['r', 'r'] : ['i', 'i'], oid: oids++, leads: text.includes('host=keeper') };
       db!.subs.set(nameIn(text), sub);
       if (leader.live) leader.slots.add(sub.slot!);
       start(db!, sub);
       return [];
+    }
+    /* The leader's slots of the tables whose first copy broke off, which no worker takes up now. */
+    if (text.includes('pg_control_system')) {
+      const sub = [...db!.subs.values()].find(found => (found.oid ?? 16500) === params[0]);
+      return (sub?.rels ?? []).flatMap((state, table) => (state === 'd' && !sub!.working?.includes(table) ? [{ name: syncSlot(sub!, table) }] : []));
     }
     if (text.includes('FROM pg_subscription_rel')) {
       const sub = [...db!.subs.values()][0];
@@ -97,10 +118,17 @@ function cluster() {
       if (text.endsWith('ENABLE')) start(db!, sub);
       else if (text.endsWith('DISABLE')) sub.enabled = false;
       else if (text.endsWith('SET (slot_name = NONE)')) sub.slot = null;
+      else if (text.includes(' CONNECTION ')) sub.leads = text.includes('host=keeper');
       return [];
     }
     if (text.startsWith('DROP SUBSCRIPTION')) {
       const sub = db!.subs.get(nameIn(text));
+      /* It asks the leader to drop the slot, and those of the tables not through yet, whenever it has either. */
+      if (leader.live && leader.hangs && sub?.leads && (sub.slot || sub.rels.some(state => state !== 'r'))) {
+        if (session.timeout) throw new Error('canceling statement due to statement timeout');
+        running.push(`${on}: ${text}`);
+        throw new Error('Query read timeout');
+      }
       if (leader.live && sub?.slot) {
         if (!leader.reachable) throw new Error('could not connect to the publisher: connection refused');
         leader.slots.delete(sub.slot);
@@ -122,14 +150,18 @@ function cluster() {
   };
   /* Every connection that was opened, by its database. */
   const opened: string[] = [];
-  const sqlOn = (on: string): Sql & { close(): Promise<void> } => (opened.push(on), {
-    query: async <R>(text: string, params?: unknown[]) => {
-      run.push(`${on}: ${text.startsWith('DO $replica$') ? 'DO $replica$' : text}`);
-      return { rows: answer(on, text, params) as R[] };
-    },
-    close: async () => undefined,
-  });
-  return { databases, run, add, sqlOn, opened, leader };
+  const sqlOn = (on: string): Sql & { close(): Promise<void> } => {
+    opened.push(on);
+    const session = { timeout: null as string | null };
+    return {
+      query: async <R>(text: string, params?: unknown[]) => {
+        run.push(`${on}: ${text.startsWith('DO $replica$') ? 'DO $replica$' : text}`);
+        return { rows: answer(on, text, params, session) as R[] };
+      },
+      close: async () => undefined,
+    };
+  };
+  return { databases, run, add, sqlOn, opened, leader, running };
 }
 
 function stand(over: { diskFree?: number } = {}) {
@@ -272,6 +304,23 @@ describe('the maker of a copy', () => {
     await maker.tick(null);
     expect(maker.report()).toMatchObject({ state: 'making', progress: 0 });
     expect(maker.mode()).toBe('off');
+  });
+
+  it("names in its report the leader's slots of the tables whose first copy broke off, and no more once they start again", async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    /* A cut broke off two tables mid-copy, and a worker took one of them up again; a third waits for its first start. */
+    sub.rels = ['d', 'd', 'i', 'r'];
+    sub.working = [1];
+    await maker.tick(ORDER);
+    expect(maker.report()).toMatchObject({ state: 'making', left: [`pg_${sub.oid}_sync_0_7300000000000000000`] });
+    sub.working = [0, 1];
+    await maker.tick(ORDER);
+    expect(maker.report()).not.toHaveProperty('left');
   });
 
   it('finishes when every table is ready', async () => {
@@ -682,6 +731,9 @@ describe('the maker of a copy', () => {
       `postgres: ALTER DATABASE "hornhoof" RENAME TO "hornhoof_old_${stamp}"`,
       'postgres: ALTER DATABASE "hornhoof_next" RENAME TO "hornhoof"',
       `hornhoof: ALTER SUBSCRIPTION "${NEXT}" ENABLE`,
+      /* Parted from its slot when it was detached, the old subscription is pointed nowhere, so its drop asks the
+         leader nothing. */
+      `hornhoof_old_${stamp}: ALTER SUBSCRIPTION "${NAME}"`,
       `hornhoof_old_${stamp}: DROP SUBSCRIPTION "${NAME}"`,
       `postgres: DROP DATABASE "hornhoof_old_${stamp}" WITH (FORCE)`,
     ]);
@@ -717,6 +769,9 @@ describe('the maker of a copy', () => {
     const stamp = '20261111t120000';
     expect(changes(s, from)).toEqual([
       `hornhoof: ALTER SUBSCRIPTION "${NEXT}" ENABLE`,
+      /* Parted from its slot when it was detached, the old subscription is pointed nowhere, so its drop asks the
+         leader nothing. */
+      `hornhoof_old_${stamp}: ALTER SUBSCRIPTION "${NAME}"`,
       `hornhoof_old_${stamp}: DROP SUBSCRIPTION "${NAME}"`,
       `postgres: DROP DATABASE "hornhoof_old_${stamp}" WITH (FORCE)`,
     ]);
@@ -940,6 +995,83 @@ describe('the maker of a copy', () => {
     /* The attempt given up left nothing on the leader: only the slot of the copy that follows is there. */
     expect([...s.leader.slots]).toEqual([NEXT]);
     expect(seen.most).toBe(3);
+  });
+
+  it('goes on with a first copy that its link cuts again and again while its tables get through, and gives up one that gets nothing more through', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    sub.rels = Array.from({ length: 40 }, () => 'i');
+    /* A slow link that drops within a minute of each start: Postgres stops the subscription on each cut, as on any error
+       of a table's first copy, so no enabling holds a minute. One more table gets through between two cuts. */
+    for (let minute = 0; minute < 25; minute++) {
+      sub.rels[minute] = 'r';
+      sub.enabled = false;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'sync', given: 0 });
+    expect(maker.report()).toMatchObject({ state: 'making', name: NAME });
+    /* Nothing more gets through: ten minutes stopped, and the attempt is given up, as one that breaks each time it starts. */
+    for (let minute = 0; minute <= 10; minute++) {
+      sub.enabled = false;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 2, given: 1 });
+  });
+
+  it('frees the origins of tables whose first copy was broken off before it starts its subscription again', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const db = s.databases.get('hornhoof')!;
+    const sub = db.subs.get(NAME)!;
+    sub.rels = ['r', 'd', 'd', 'i'];
+    /* While it runs, nothing of it is touched. */
+    db.leftovers = ['pg_16500_2', 'pg_16500_3'];
+    await maker.tick({ ...ORDER });
+    expect(db.leftovers).toEqual(['pg_16500_2', 'pg_16500_3']);
+    /* A cut stopped it: each table whose rows were going over keeps its origin, and the next start would begin other
+       tables, each with an origin of its own, until the copy's Postgres has none left. */
+    s.later(60_000);
+    sub.enabled = false;
+    const before = s.run.length;
+    await maker.tick({ ...ORDER });
+    expect(db.leftovers).toEqual([]);
+    const after = s.run.slice(before);
+    const dropped = after.findIndex(line => line.includes('pg_replication_origin_drop'));
+    const enabled = after.findIndex(line => line.endsWith('ENABLE'));
+    expect(dropped).toBeGreaterThanOrEqual(0);
+    expect(enabled).toBeGreaterThan(dropped);
+  });
+
+  it('gives up an attempt while the leader holds its connection without an answer, and leaves nothing running', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    /* The copy was taking its tables' first copies when a cut stopped its subscription and its slot was lost, and the
+       link to the leader now takes a connection and answers nothing on it. */
+    s.databases.get('hornhoof')!.subs.get(NAME)!.enabled = false;
+    s.leader.live = true;
+    s.leader.hangs = true;
+    for (let second = 0; second < 60; second++) {
+      await maker.tick({ ...ORDER, slot: 'lost' });
+      s.later(1000);
+    }
+    /* Nothing is left waiting in the copy's Postgres for the next tick to pile onto, and the attempt is gone whole: its
+       subscription asked the leader once, then parted from it and went. */
+    expect(s.running).toEqual([]);
+    expect(s.kept()).toMatchObject({ attempt: 2, phase: 'schema' });
+    expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual([]);
+    expect(s.run.filter(line => line.includes('DROP SUBSCRIPTION'))).toHaveLength(2);
   });
 
   it('gives up an attempt whose subscription stops each time it starts, takes its slots with it and waits longer each time', async () => {

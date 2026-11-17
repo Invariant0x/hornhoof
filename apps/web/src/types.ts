@@ -92,6 +92,9 @@ export type SubView = {
   limitsUpdatedAt?: string | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
+  /* The plans its employees go on to at its limit, in order, each with the model to run there or null for their role's;
+     empty for any plan of the company with room. None from an older server. */
+  fallbacks?: PlanFallback[];
   isOrchestrator: boolean;
   /* The account each signed-in machine of the plan is on; the address only for its owner and people who see the whole
      company. tier: the one all of them say; accountsDiffer: they are on different accounts or tiers. */
@@ -318,6 +321,8 @@ export type CardSkill = { id: string; title: Lang; description: Lang; on: boolea
 /* Why a node restarted, as far as Hornhoof could tell. */
 export type RestartCause = 'server' | 'update' | 'machine' | 'container' | 'program' | 'connection' | 'unknown';
 
+export type PlanFallback = { subscription: string; model: string | null };
+
 export type AgentCardView = {
   id: string;
   currentTask: { id: string; number: number; title: string } | null;
@@ -332,6 +337,9 @@ export type AgentCardView = {
   /* The level a person picked, or null for the Default. */
   effort: string | null;
   subscription: SubView | null;
+  /* Hornhoof put it on its subscription for a while, as its own plan is at its limit: that plan, and until when as far as it
+     is known; it goes back between turns after that. None from an older server. */
+  fallback?: { home: SubView; until: string | null } | null;
   /* The machine its plan was heard from last while none of the plan's machines is online, and when; none while it can run. */
   offline?: OfflineMachine | null;
   /* The machine its program runs on; none before its first turn, or on a key. */

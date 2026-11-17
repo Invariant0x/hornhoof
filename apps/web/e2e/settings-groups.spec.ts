@@ -5,6 +5,7 @@ import { ru } from '../src/i18n/ru';
 import { builtinSkin } from '../src/skins/registry';
 import { builtinFile, skinText } from '../src/skins/validate';
 import { ME, serveApi } from './api';
+import { cutByNavigation } from './look-steps';
 
 /* The short account menu, Settings as Design's variant A draws it (Profile first, then four groups) and About with
    writing to the developers, as a person meets them: in a light and a dark skin, in the longest and the shortest shipped
@@ -57,8 +58,7 @@ async function prepare(page: Page, lang: string, skin: string, width: number, pe
     localStorage.setItem('hh-theme', skin);
   }, { lang, skin });
   const problems: string[] = [];
-  /* WebKit reports a request that the test's own next page.goto cuts off as a page error; that is the test, not the page. */
-  page.on('pageerror', error => { if (!error.message.endsWith('due to access control checks.')) problems.push(error.message); });
+  page.on('pageerror', error => { if (!cutByNavigation(page, error)) problems.push(error.message); });
   /* The updates the CEO's banner asks for are left unanswered, as the server of a test gives none; a person without the
      whole company is refused what is not theirs, as the server does. */
   const refused = person === 'listed' ? ['/api/google-sheets', '/api/repo-host'] : [];

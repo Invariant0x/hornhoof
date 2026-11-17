@@ -1,20 +1,17 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { tasks, testParts, testRuns } from '../src/db/schema.js';
+import { tasks } from '../src/db/schema.js';
 import { report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks, testsFixture } from './development-echelons-verification.js';
+import { testsFixture, verified } from './development-echelons-verification.js';
 
 const MAIN = 'd'.repeat(40), MERGED = 'e'.repeat(40), EDITED = '9'.repeat(40);
 const OWN = ['logic/totals.ts'], FROM_MAIN = ['logic/rates.ts'];
 
-/* A candidate at Tests whose own change passed and whose run failed only for what the main line fixed since its base. The
+/* A candidate at Tests whose own change passed and whose checks failed only for what the main line fixed since its base. The
    main line is at MAIN; the candidate branch holds MERGED, the candidate with that main line merged in. */
 async function behindMain(merge: string[] = FROM_MAIN, branchHead = MERGED, more: Record<string, string[]> = {}) {
   const f = await testsFixture();
-  const run = await f.run();
-  await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, run.id));
-  await f.db.update(testParts).set({ status: 'failed', exitCode: 1, error: 'failed', commit: HEAD, finishedAt: new Date() }).where(eq(testParts.runId, run.id));
   f.ctx.readCommit = async (_repo, want) => 'branch' in want && want.branch === 'main' ? { branch: 'main', commitSha: MAIN } : { branch: 'task-1', commitSha: branchHead };
   const changes: Record<string, string[]> = { [`${BASE}..${MAIN}`]: FROM_MAIN, [`${MAIN}..${MAIN}`]: [], [`${MAIN}..${MERGED}`]: OWN, [`${HEAD}..${MERGED}`]: merge, ...more };
   f.ctx.readCompare = async (_repo, refs) => {
@@ -22,7 +19,7 @@ async function behindMain(merge: string[] = FROM_MAIN, branchHead = MERGED, more
     return paths ? { complete: true, baseSha: refs.base, headSha: refs.head, paths, diff: '@@ -1 +1 @@\n-old\n+new' } : { complete: false, reason: 'not-an-ancestor' };
   };
   const took = (baseCommit = MAIN) => submit(f.ctx, f.tester.id, f.task.id, { summary: 'Took the main line in.', evidence: 'Merged origin/main into task-1.', review: { baseCommit } });
-  return { ...f, failedRun: run, took };
+  return { ...f, took };
 }
 
 describe('Tests takes the main line into a candidate whose own change passed', () => {
@@ -40,10 +37,8 @@ describe('Tests takes the main line into a candidate whose own change passed', (
       tookMain: { from: BASE, to: MAIN },
     });
 
-    const again = await candidateChecks(f, route, MERGED, MAIN);
-    const passed = await again.run();
-    const verified = await report(f.ctx, f.tester.id, f.task.id, again.verified([passed.id]));
-    expect(verified.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    const checked = await report(f.ctx, f.tester.id, f.task.id, verified(route));
+    expect(checked.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
     expect((await f.detail()).echelons).toMatchObject({ phase: 'ready', stage: 'tests', candidateId: route.candidateId });
   });
 
