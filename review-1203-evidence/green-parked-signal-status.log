@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ✓ test/check-command-child.test.ts (6 tests) 4ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  05:35:19
+   Duration  201ms (transform 81%, import 16%, tests 2%, worker 1%)
+

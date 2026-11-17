@@ -1,0 +1,78 @@
+{
+  "checkedCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "workingTree": "clean before and after named checks",
+  "nodeUnitChecks": [
+    {
+      "file": "check-group.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-group.test.ts",
+      "log": "candidate49-check-group.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-child.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-child.test.ts",
+      "log": "candidate49-check-command-child.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-held.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-held.test.ts",
+      "log": "candidate49-check-command-held.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-platform.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-platform.test.ts",
+      "log": "candidate49-check-command-platform.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-stop.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-stop.test.ts",
+      "log": "candidate49-check-command-stop.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-wait.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-wait.test.ts",
+      "log": "candidate49-check-command-wait.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-command-lease.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-lease.test.ts",
+      "log": "candidate49-check-command-lease.log",
+      "exit_code": 0
+    },
+    {
+      "file": "check-client.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-client.test.ts",
+      "log": "candidate49-check-client.log",
+      "exit_code": 0
+    }
+  ],
+  "additionalChecks": [
+    {
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command.test.ts -t 'keeps no running group past the slot'",
+      "log": "candidate49-killed-wrapper.log",
+      "exit_code": 0,
+      "passed": 1,
+      "skipped": 18
+    },
+    {
+      "cmd": "node ../../node_modules/vitest/vitest.mjs run test/Machines.test.tsx -t 'shows why new checks wait'",
+      "cwd": "apps/web",
+      "log": "candidate49-machine-refusal.log",
+      "exit_code": 0,
+      "passed": 1,
+      "skipped": 113
+    }
+  ],
+  "totalPassed": 53,
+  "limits": [
+    "Final build, types and lint pending remote owner",
+    "No complete check-command file receipt for this commit",
+    "Server machine state and inbox proof pending",
+    "No run_tests or whole suite"
+  ]
+}

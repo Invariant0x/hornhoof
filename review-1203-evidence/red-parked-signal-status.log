@@ -1,0 +1,112 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ❯ test/check-command-child.test.ts (6 tests | 3 failed) 8ms
+   × reports the recorded group SIGTERM even before the wrapper reads a stop frame 5ms
+   × reports the recorded group SIGINT even before the wrapper reads a stop frame 1ms
+   × reports the recorded group SIGHUP even before the wrapper reads a stop frame 1ms
+   ✓ starts nothing before admission and exits on an early wrapper disconnect 1ms
+   ✓ never starts a payload when the node already stopped its waiting leader 0ms
+   ✓ keeps a managed identity anchor for node cleanup when its admitted wrapper disappears 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/check-command-child.test.ts > reports the recorded group SIGTERM even before the wrapper reads a stop frame
+AssertionError: expected "vi.fn()" to be called with arguments: [ …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+-     "code": null,
+-     "signal": "SIGTERM",
++     "code": 0,
++     "signal": null,
+    },
+-   Any<Function>,
++   [Function anonymous],
+  ]
+
+
+Number of calls: 1
+
+ ❯ test/check-command-child.test.ts:19:26
+     17|   /* The payload catches the signal and exits zero. Cancellation still…
+     18|   c.child.emit('exit', 0, null);
+     19|   expect(c.process.send).toHaveBeenCalledWith({ code: null, signal }, …
+       |                          ^
+     20| });
+     21|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/check-command-child.test.ts > reports the recorded group SIGINT even before the wrapper reads a stop frame
+AssertionError: expected "vi.fn()" to be called with arguments: [ …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+-     "code": null,
+-     "signal": "SIGINT",
++     "code": 0,
++     "signal": null,
+    },
+-   Any<Function>,
++   [Function anonymous],
+  ]
+
+
+Number of calls: 1
+
+ ❯ test/check-command-child.test.ts:19:26
+     17|   /* The payload catches the signal and exits zero. Cancellation still…
+     18|   c.child.emit('exit', 0, null);
+     19|   expect(c.process.send).toHaveBeenCalledWith({ code: null, signal }, …
+       |                          ^
+     20| });
+     21|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/check-command-child.test.ts > reports the recorded group SIGHUP even before the wrapper reads a stop frame
+AssertionError: expected "vi.fn()" to be called with arguments: [ …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+-     "code": null,
+-     "signal": "SIGHUP",
++     "code": 0,
++     "signal": null,
+    },
+-   Any<Function>,
++   [Function anonymous],
+  ]
+
+
+Number of calls: 1
+
+ ❯ test/check-command-child.test.ts:19:26
+     17|   /* The payload catches the signal and exits zero. Cancellation still…
+     18|   c.child.emit('exit', 0, null);
+     19|   expect(c.process.send).toHaveBeenCalledWith({ code: null, signal }, …
+       |                          ^
+     20| });
+     21|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 3 passed (6)
+   Start at  05:34:53
+   Duration  169ms (transform 65%, import 25%, tests 8%, worker 2%)
+

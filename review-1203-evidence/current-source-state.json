@@ -1,11 +1,11 @@
 {
   "status": "WORKING",
   "codeBranch": "task-1203-iv-queue",
-  "candidate": "1a4fc21bb8b677fd670e90991ffafbe1064c9b91",
+  "candidate": "49d006478171c8cac4cf5639b4f6cc4d45647870",
   "originalCandidate": "d140cec945b368b16b1415639fa7cc1d76661119",
   "base": "816d02652f0c671cd609fa3adeda9e6520865e4f",
   "comparedTurn31": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
-  "ownNamedPassedTests": 47,
+  "ownNamedPassedTests": 53,
   "fullSuiteRun": false,
   "pending": [
     "remote node build",
