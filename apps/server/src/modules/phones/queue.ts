@@ -7,6 +7,7 @@ import { nodeIdentity } from '../nodes/hub.js';
 import { taskByRef } from '../tasks/views.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
+import { idOnly, only } from '../../db/selections.js';
 
 /* An employee or assistant that borrows a phone, and the turn it runs. */
 export type PhoneAgent = { id: string; companyId: string; jobId: string | null };
@@ -37,13 +38,13 @@ export async function activeSession(ctx: Ctx, me: PhoneAgent, id: string): Promi
   await liveJob(ctx, me);
   const phone = await phoneById(ctx, me.companyId, session.phoneId);
   if (session.status !== 'active' || !phone.lending || session.generation !== phone.generation || !session.leaseUntil || session.leaseUntil.getTime() <= ctx.clock()) throw phoneGone();
-  const [binding] = await ctx.db.select({ id: nodes.id }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(and(eq(nodes.id, phone.nodeId), eq(nodes.machineId, phone.machineId), eq(nodes.companyId, phone.companyId), isNull(machines.revokedAt)));
+  const [binding] = await ctx.db.select(idOnly(nodes)).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(and(eq(nodes.id, phone.nodeId), eq(nodes.machineId, phone.machineId), eq(nodes.companyId, phone.companyId), isNull(machines.revokedAt)));
   if (!binding) throw phoneOffline();
   return { phone, session };
 }
 
 export async function sessionView(ctx: Ctx, session: PhoneSession) {
-  const ahead = session.status === 'queued' ? await ctx.db.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, session.phoneId), eq(phoneSessions.status, 'queued'))).orderBy(asc(phoneSessions.order)) : [];
+  const ahead = session.status === 'queued' ? await ctx.db.select(idOnly(phoneSessions)).from(phoneSessions).where(and(eq(phoneSessions.phoneId, session.phoneId), eq(phoneSessions.status, 'queued'))).orderBy(asc(phoneSessions.order)) : [];
   return { id: session.id, phoneId: session.phoneId, taskId: session.taskId, status: session.status, position: session.status === 'queued' ? ahead.findIndex(s => s.id === session.id) + 1 : 0, reason: session.reason };
 }
 
@@ -54,7 +55,7 @@ export async function acquirePhone(ctx: Ctx, me: PhoneAgent, phoneId: string, ta
   if (!task) throw phoneInvalid();
   // A task of another person's assistant remains private even within the company.
   const privateIds = [task.assigneeAgentId, task.executorAgentId].filter((v): v is string => Boolean(v));
-  if (privateIds.length && (await ctx.db.select({ id: agents.id }).from(agents).where(and(inArray(agents.id, privateIds), eq(agents.kind, 'assistant'), ne(agents.id, me.id)))).length) throw phoneDenied();
+  if (privateIds.length && (await ctx.db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, privateIds), eq(agents.kind, 'assistant'), ne(agents.id, me.id)))).length) throw phoneDenied();
   if (!phoneCapable(ctx, nodeIdentity(phone.nodeId))) throw phoneOffline();
   await reconcilePhone(ctx, phoneId);
   const session = await ctx.db.transaction(async tx => {
@@ -73,13 +74,13 @@ export async function pumpPhone(ctx: Ctx, phoneId: string): Promise<void> {
   const next = await ctx.db.transaction(async tx => {
     const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, phoneId)).for('update');
     if (!phone?.lending || phone.removedAt || !phoneCapable(ctx, nodeIdentity(phone.nodeId))) return null;
-    const [active] = await tx.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phoneId), inArray(phoneSessions.status, [...holding]))).limit(1);
+    const [active] = await tx.select(idOnly(phoneSessions)).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phoneId), inArray(phoneSessions.status, [...holding]))).limit(1);
     if (active) return null;
     const [waiting] = await tx.select({ session: phoneSessions }).from(phoneSessions).innerJoin(jobs, eq(jobs.id, phoneSessions.jobId)).innerJoin(agents, eq(agents.id, phoneSessions.agentId))
       .where(and(eq(phoneSessions.phoneId, phoneId), eq(phoneSessions.status, 'queued'), eq(jobs.status, 'running'), isNull(agents.removedAt)))
       .orderBy(asc(phoneSessions.order)).limit(1);
     if (!waiting) return null;
-    const [job] = await tx.select({ error: jobs.error }).from(jobs).where(eq(jobs.id, waiting.session.jobId));
+    const [job] = await tx.select(only(jobs, 'error')).from(jobs).where(eq(jobs.id, waiting.session.jobId));
     if (job?.error === 'cancelled') return null;
     const generation = phone.generation + 1;
     const expires = new Date(ctx.clock() + PHONE_LEASE_MS);
@@ -151,7 +152,7 @@ export async function reconcilePhone(ctx: Ctx, phoneId: string): Promise<void> {
 }
 
 export async function releaseJobPhones(ctx: Ctx, jobId: string, reason: PhoneSession['reason'] = 'cancelled'): Promise<void> {
-  const held = await ctx.db.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.jobId, jobId), isNull(phoneSessions.endedAt)));
+  const held = await ctx.db.select(idOnly(phoneSessions)).from(phoneSessions).where(and(eq(phoneSessions.jobId, jobId), isNull(phoneSessions.endedAt)));
   await Promise.all(held.map(s => finishPhoneSession(ctx, s.id, reason)));
 }
 

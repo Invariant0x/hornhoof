@@ -4,6 +4,7 @@ import { keyOf, type NodeIdentity } from '../nodes/hub.js';
 import { hasCurrentKey } from '../nodes/nodes.js';
 import { machines, nodes } from '../../db/schema.js';
 import { and, eq, isNull, isNotNull } from 'drizzle-orm';
+import { idOnly } from '../../db/selections.js';
 
 type Request = Exclude<PhoneServerMessage, { type: 'phone.renew' }>;
 type Pending = { node: string; done(reply: PhoneReply): void; timer: ReturnType<typeof setTimeout> };
@@ -21,7 +22,7 @@ export async function phoneRequest(ctx: Ctx, node: NodeIdentity, message: Reques
   if (!phoneCapable(ctx, node)) return failed();
   const authenticated = state(ctx).capable.get(keyOf(node));
   if (!authenticated || !await hasCurrentKey(ctx, authenticated) || authenticated.kind !== 'node') return failed();
-  const [live] = await ctx.db.select({ id: nodes.id }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(and(eq(nodes.id, authenticated.nodeId), isNotNull(nodes.keyHash), isNull(machines.revokedAt)));
+  const [live] = await ctx.db.select(idOnly(nodes)).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(and(eq(nodes.id, authenticated.nodeId), isNotNull(nodes.keyHash), isNull(machines.revokedAt)));
   if (!live) return failed();
   return new Promise(resolve => {
     const timer = setTimeout(() => { state(ctx).pending.delete(message.requestId); resolve(failed()); }, 20_000);
