@@ -1,5 +1,5 @@
 import { OperatorNodeMessage, type OperatorEvidence } from '@hornhoof/protocol/program-operator';
-import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, nodes, programDeliveries, programInstances, subscriptions } from '../../db/schema.js';
@@ -117,9 +117,19 @@ async function bindInstance(tx: Tx, companyId: string, nodeId: string, frame: Op
   const [old] = await tx.select().from(programInstances).where(eq(programInstances.id, frame.instance));
   if (old && (old.companyId !== companyId || old.agentId !== frame.agentKey || old.nodeId !== nodeId)) return false;
   await tx.insert(programInstances).values({ id: frame.instance, companyId, agentId: frame.agentKey, nodeId }).onConflictDoNothing();
+  const [bound] = await tx.select({ createdAt: programInstances.createdAt }).from(programInstances).where(eq(programInstances.id, frame.instance));
   const update = instanceState(frame);
+  /* A word of an older program, which a node sends again once it is back, is history: the agent's program is the newest. */
+  if (update.active && await startedSince(tx, frame.agentKey, bound!.createdAt)) delete update.active;
   if (Object.keys(update).length) await tx.update(programInstances).set(update).where(eq(programInstances.id, frame.instance));
+  /* An agent runs one program: the one that starts, as on a node that started again, is the only one active. */
+  if (frame.type === 'program.launch') await tx.update(programInstances).set({ active: false }).where(and(eq(programInstances.agentId, frame.agentKey), lt(programInstances.createdAt, bound!.createdAt), eq(programInstances.active, true)));
   return true;
+}
+
+async function startedSince(tx: Tx, agentId: string, createdAt: Date): Promise<boolean> {
+  const [newer] = await tx.select({ id: programInstances.id }).from(programInstances).where(and(eq(programInstances.agentId, agentId), gt(programInstances.createdAt, createdAt), eq(programInstances.launched, true))).limit(1);
+  return Boolean(newer);
 }
 
 function instanceState(frame: OperatorEvidence): Partial<Pick<typeof programInstances.$inferInsert, 'launched' | 'active' | 'exited'>> {

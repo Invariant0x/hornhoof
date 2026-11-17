@@ -189,6 +189,20 @@ describe('Machines', () => {
     expect(fact(mac, 'Test runs')).toContain('Lend to test runs');
   });
 
+  it("sets apart only the percent sign of the pool's and the card's shares, to take the text font", async () => {
+    lists();
+    render(<Machines me={ME} />);
+    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    const mac = await openCard('dev-laptop');
+    const signs = (node: Element | null | undefined) => [...(node?.querySelectorAll('.pct') ?? [])].map(n => n.textContent);
+    const busy = within(pool).getByText('Busy now', { selector: 'dt' }).nextElementSibling;
+    const load = meter(mac, 'Load').querySelector('.g-f b');
+    expect([busy?.textContent, signs(busy)]).toEqual(['21%', ['%']]);
+    expect([load?.textContent, signs(load)]).toEqual(['25%', ['%']]);
+    expect(signs(within(pool).getByText('Processor cores', { selector: 'dt' }).nextElementSibling)).toEqual([]);
+    expect(signs(meter(mac, 'Memory'))).toEqual([]);
+  });
+
   it('does not draw an invalid resource bar when a node reports zero total memory or disk', async () => {
     lists({}, { ...BUILTIN, load: { ...BUILTIN.load!, memFree: 0, memTotal: 0, diskFree: 0, diskTotal: 0 } });
     render(<Machines me={ME} />);

@@ -111,6 +111,21 @@ describe('a task file', () => {
   });
 });
 
+describe('an employee chat file', () => {
+  it('is readable by its sender, while another employee still cannot fetch it', async () => {
+    const { bruno, sam, turn, attach, fetchFile } = await company();
+    const token = await turn(bruno);
+    const bytes = Buffer.from('Owned report');
+    const uploaded = await attach(token, 'chat=1&name=report.txt', bytes);
+    expect(uploaded.statusCode).toBe(201);
+    const query = `task=message&file=${uploaded.json().id}`;
+    const own = await fetchFile(token, query);
+    expect(own.statusCode).toBe(200);
+    expect(own.rawPayload).toEqual(bytes);
+    expect((await fetchFile(await turn(sam), query)).statusCode).toBe(404);
+  });
+});
+
 describe('the room for task files', () => {
   it('holds 500 MB on one task and says so plainly past it', async () => {
     const { bruno, task, turn, attach, counted } = await company();

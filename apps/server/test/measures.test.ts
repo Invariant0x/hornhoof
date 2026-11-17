@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KEEP_SAMPLES, Measures, SAMPLE_MS, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
 
 const PROBE_FILE = 'fsync-probe';
-// Real timers under a busy machine: what must come is given time, and a correct run ends as soon as it comes.
-const SOON = { timeout: 10_000 };
 const folders: string[] = [];
 const running: Measures[] = [];
 
@@ -22,9 +20,16 @@ function measuresOn(dir: string, sampleMs?: number): Measures {
   return measures;
 }
 
-const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/* The sampling clock is virtual: a sample starts only when the test moves it by a period, and runs to its end on the real
+   disk. A tick moves the clock one period of 1 ms and lets every sample begun so far end, taken or refused. */
+async function tick(sample: { mock: { results: { value: unknown }[] } }): Promise<void> {
+  await vi.advanceTimersByTimeAsync(1);
+  await Promise.allSettled(sample.mock.results.map((result) => result.value));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const measures of running.splice(0)) measures.stop();
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
@@ -125,38 +130,50 @@ describe('Measures', () => {
   });
 
   it('samples by itself until it stops', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const dir = tempFolder();
     const measures = measuresOn(dir, 1);
     const sample = vi.spyOn(measures, 'sample');
     measures.start();
-    await vi.waitFor(() => expect(sample.mock.calls.length).toBeGreaterThanOrEqual(2), SOON);
+    expect(sample).not.toHaveBeenCalled();
+    await tick(sample);
+    await tick(sample);
+    expect(sample).toHaveBeenCalledTimes(2);
     measures.stop();
-    const taken = sample.mock.calls.length;
-    await pause(30);
-    expect(sample.mock.calls.length).toBe(taken);
+    await vi.advanceTimersByTimeAsync(30);
+    expect(sample).toHaveBeenCalledTimes(2);
   });
 
   it('waits for a slow sample, and takes no further one when stopped during it', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const measures = measuresOn(tempFolder(), 1);
     let finish: () => void = () => undefined;
     const sample = vi.spyOn(measures, 'sample').mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
     measures.start();
-    await vi.waitFor(() => expect(sample).toHaveBeenCalledTimes(1), SOON);
-    await pause(20);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sample).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20);
     expect(sample).toHaveBeenCalledTimes(1);
     measures.stop();
     finish();
-    await pause(20);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(20);
     expect(sample).toHaveBeenCalledTimes(1);
   });
 
   it('goes on after a sample it could not take', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const dir = join(tempFolder(), 'not-made-yet');
     const measures = measuresOn(dir, 1);
     const sample = vi.spyOn(measures, 'sample');
     measures.start();
-    await vi.waitFor(() => expect(sample.mock.calls.length).toBeGreaterThanOrEqual(2), SOON);
+    await tick(sample);
+    await tick(sample);
+    await expect(sample.mock.results[1]!.value).rejects.toThrow(/ENOENT/);
+    expect(existsSync(join(dir, PROBE_FILE))).toBe(false);
     mkdirSync(dir);
-    await vi.waitFor(() => expect(existsSync(join(dir, PROBE_FILE))).toBe(true), SOON);
+    await tick(sample);
+    expect(sample).toHaveBeenCalledTimes(3);
+    expect(existsSync(join(dir, PROBE_FILE))).toBe(true);
   });
 });

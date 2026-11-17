@@ -129,7 +129,7 @@ const readVisible = (tables: string[], name: string) =>
    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
    A call may not sit in an open transaction, and how long it may take is the role's own setting. */
 const role = (settings: string[], rights: (name: string) => string) => (name: string) => `DO $grants$
-DECLARE t text; c text;
+DECLARE t text; c text; k text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
 ${settings.map(setting => `  ALTER ROLE "${name}" ${setting};`).join('\n')}
@@ -148,15 +148,28 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
 /* The keys: what opens a sign-in, a machine, a plan, a link or a secret, sealed, hashed or as it is. Besides these, every
    column whose name ends in _enc or _hash. */
 export const KEY_NAMES = ['sealed', 'wrapped', 'salt', 'iv', 'grant', 'machine_key', 'capability', 'bytes'];
+/* These payloads hold signed download links; the delivery addresses may themselves carry a program's key. Their
+   ordinary column names do not make those bearer credentials safe to read. */
+export const KEY_FIELDS: Record<string, string[]> = {
+  assistant_events: ['data'],
+  tool_calls: ['answer'],
+  assistants: ['events_url', 'skills_url'],
+};
 const KEY_END = '(_enc|_hash)$';
 export const isKey = (column: string) => new RegExp(KEY_END).test(column) || KEY_NAMES.includes(column);
-const KEY_COLUMN = `column_name ~ '${KEY_END}' OR column_name = ANY (ARRAY[${KEY_NAMES.map(name => `'${name}'`).join(', ')}])`;
+const KEY_COLUMN = `column_name ~ '${KEY_END}' OR column_name = ANY (${quoted(KEY_NAMES)}) OR ${Object.entries(KEY_FIELDS).map(([table, fields]) => `(table_name = '${table}' AND column_name = ANY (${quoted(fields)}))`).join(' OR ')}`;
 
 /* The orchestrator knows everything of the system (Ivan's word of 16 November 2026): its role reads every table and
    column but the keys, the rows of a table that shows them to no role of its own too. Those rows show to its columns
    alone: a right on the whole table, as a build from before these tables gave it, sees none of them. */
 const readAllButKeys = (name: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
-    SELECT string_agg(quote_ident(column_name), ', ') INTO c FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND NOT (${KEY_COLUMN});
+    SELECT string_agg(quote_ident(column_name), ', ') FILTER (WHERE NOT (${KEY_COLUMN})),
+      string_agg(quote_ident(column_name), ', ') FILTER (WHERE ${KEY_COLUMN}) INTO c, k
+      FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t;
+    IF k IS NOT NULL THEN
+      EXECUTE format('REVOKE SELECT ON %I FROM "${name}"', t);
+      EXECUTE format('REVOKE SELECT (%s) ON %I FROM "${name}"', k, t);
+    END IF;
     IF c IS NOT NULL THEN EXECUTE format('GRANT SELECT (%s) ON %I TO "${name}"', c, t); END IF;
   END LOOP;
   FOR t IN SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relrowsecurity AND relname <> 'agents' LOOP

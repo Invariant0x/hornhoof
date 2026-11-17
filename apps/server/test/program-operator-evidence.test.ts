@@ -5,6 +5,7 @@ import { agentEvents, nodes, programDeliveries, programInstances } from '../src/
 import { listEvents } from '../src/modules/events/store.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
+import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { operatorTransaction } from '../src/modules/program-operator/transactions.js';
 import { operatorCompany as fixture } from './program-operator-company.js';
@@ -82,6 +83,31 @@ it('binds launch state to its agent and refuses instance reuse by another agent'
   expect((await c.db.select().from(programInstances))[0]).toMatchObject({ launched: true, active: false, exited: false });
   await c.db.update(programInstances).set({ agentId: c.head.id }).where(eq(programInstances.id, launch.instance));
   expect(await acceptOperatorEvidence(c.ctx, c.identity, { ...launch, evidenceId: randomUUID(), ordinal: 1 })).toBe(false);
+});
+
+/* A node that starts again starts the agent's program anew under a new identity (fixtures in task 1200: the node of
+   2026-11-17 01:39:56 UTC kept four records of the agent's programs from before active, and its new one inactive). */
+it('leaves only the program a node started again active, even when a late word of an older one comes after it', async () => {
+  const c = await fixture();
+  const launch = (instance: string) => ({ type: 'program.launch' as const, agentKey: c.agent.id, jobId: c.job.id, instance, evidenceId: randomUUID(), ordinal: 0, phase: 'started' as const, elapsedMs: 0 });
+  const activity = (instance: string, delivery: { id: string; ordinal: number; digest: string }, ordinal: number) => ({ ...c.fact, instance, evidenceId: randomUUID(), ordinal, deliveryId: delivery.id, deliveryOrdinal: delivery.ordinal, wordsDigest: delivery.digest, phase: 'activity' as const, elapsedMs: 10 });
+  const words = async () => {
+    const reserved = await reserveDelivery(c.db, { companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, nodeId: c.identity.nodeId, kind: 'assignment', words: 'Words.', reference: `job:${c.job.id}:${randomUUID()}` });
+    return (await c.db.select().from(programDeliveries).where(eq(programDeliveries.id, reserved.id)))[0]!;
+  };
+  const [older, before, after] = [randomUUID(), randomUUID(), randomUUID()];
+  for (const instance of [older, before]) {
+    expect(await acceptOperatorEvidence(c.ctx, c.identity, launch(instance))).toBe(true);
+    expect(await acceptOperatorEvidence(c.ctx, c.identity, activity(instance, await words(), 1))).toBe(true);
+  }
+  const late = await words();
+  expect(await acceptOperatorEvidence(c.ctx, c.identity, launch(after))).toBe(true);
+  const state = async () => Object.fromEntries((await c.db.select().from(programInstances)).map(row => [row.id, { launched: row.launched, active: row.active }]));
+  expect(await state()).toEqual({ [older]: { launched: true, active: false }, [before]: { launched: true, active: false }, [after]: { launched: true, active: false } });
+  /* The node sends again what it had not heard acknowledged before it stopped: the older program's word stays history. */
+  expect(await acceptOperatorEvidence(c.ctx, c.identity, activity(before, late, 2))).toBe(true);
+  expect(await acceptOperatorEvidence(c.ctx, c.identity, activity(after, await words(), 1))).toBe(true);
+  expect(await state()).toEqual({ [older]: { launched: true, active: false }, [before]: { launched: true, active: false }, [after]: { launched: true, active: true } });
 });
 
 it('keeps cancelled outcomes until a taken receipt and preserves the first receipt clock', async () => {

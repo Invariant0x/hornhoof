@@ -57,7 +57,7 @@ describe('a person given several departments, not the whole company, runs the me
     expect(every.departments.map(d => d.id).sort()).toEqual([m.mkt.id, m.c.sales.id, m.support.id, m.biz.id].sort());
     expect(every.channels.map(ch => ch.name)).toEqual(['B2C Email Outreach']);
     expect((await m.get(`/api/outbound?department=${m.c.dev.id}`)).statusCode).toBe(404);
-  }, 60_000);
+  });
 
   it('publishes and takes back a template of their own department\'s catalog, and is refused on another department', async () => {
     const m = await fourDepartments();
@@ -81,7 +81,7 @@ describe('a person given several departments, not the whole company, runs the me
       await m.post(`/api/outbound/catalog/${m.devRevisionId}/revoke`, {}),
     ];
     expect(refusals.map(a => [a.statusCode, reasonOf(a)])).toEqual(Array(5).fill([403, 'outbound_not_allowed']));
-  }, 60_000);
+  });
 
   it('adds a test address with the consent and purpose of the channel, and no address to another department\'s channel', async () => {
     const m = await fourDepartments();
@@ -94,7 +94,7 @@ describe('a person given several departments, not the whole company, runs the me
     const refused = await m.post('/api/outbound/contacts', { channelId: m.devChannelId, kind: 'email', address: 'dev.test@acme.example', source: 'Test address of the team', evidence: 'Max\'s own address' });
     expect([refused.statusCode, reasonOf(refused)]).toEqual([403, 'outbound_not_allowed']);
     expect(await m.c.db.select().from(outboundPermissions).where(eq(outboundPermissions.channelId, m.devChannelId))).toEqual([]);
-  }, 60_000);
+  });
 });
 
 type Listed1175 = { permissionId: string; channelId: string; kind: string; address: string; purpose: string; source: string; status: string; grantedAt: string; revokedAt: string | null; doNotContact: boolean; addedBy: { person: { name: string } | null; agent: { name: string } | null } | null };
@@ -122,7 +122,7 @@ describe('a person who runs a department sees the addresses added to it and take
     }]);
     const refused = await m.get(`/api/outbound/contacts?department=${m.c.dev.id}`);
     expect([refused.statusCode, reasonOf(refused)]).toEqual([403, 'outbound_not_allowed']);
-  }, 60_000);
+  });
 
   it('takes back the consent of an address of their department, logs both steps without the address, and no consent of another', async () => {
     const m = await fourDepartments();
@@ -145,7 +145,7 @@ describe('a person who runs a department sees the addresses added to it and take
     expect([refused.statusCode, reasonOf(refused)]).toEqual([403, 'outbound_not_allowed']);
     const [still] = await m.c.db.select().from(outboundPermissions).where(eq(outboundPermissions.id, devPermission));
     expect(still!.status).toBe('granted');
-  }, 60_000);
+  });
 });
 
 type Shown = { id: string; revision: number; status: string; value: { subject?: string; parts?: unknown[] }; createdAt: string; createdBy: { kind: string; name: string | null } };
@@ -178,7 +178,7 @@ describe('a person who runs a department publishes the version they were shown',
     expect(Date.parse(entry.revisions[0]!.createdAt)).not.toBeNaN();
     const other = await m.get(`/api/outbound/catalog?department=${m.c.dev.id}`);
     expect([other.statusCode, reasonOf(other)]).toEqual([403, 'outbound_not_allowed']);
-  }, 60_000);
+  });
 
   it('is refused when the entry got a newer version after the screen showed it, and publishes it once shown', async () => {
     const m = await fourDepartments();
@@ -193,7 +193,7 @@ describe('a person who runs a department publishes the version they were shown',
     const shown = await m.post(`/api/outbound/catalog/${second.id}/publish`, { revision: 2, newest: 2 });
     expect(shown.statusCode, shown.body).toBe(200);
     expect((await entryIn(m, first.entryId)).current).toBe(2);
-  }, 60_000);
+  });
 
   it('takes back only the version they were shown, as the entry stood then', async () => {
     const m = await fourDepartments();
@@ -207,5 +207,5 @@ describe('a person who runs a department publishes the version they were shown',
     const shown = await m.post(`/api/outbound/catalog/${first.id}/revoke`, { revision: 1, newest: 2 });
     expect(shown.statusCode, shown.body).toBe(200);
     expect((await entryIn(m, first.entryId)).current).toBeNull();
-  }, 60_000);
+  });
 });

@@ -966,6 +966,7 @@ describe('manifest argv selection', () => {
   it.each([
     { id: 'node', selected: 'test/redact.test.ts', expected: 'apps/node/test/redact.test.ts' },
     { id: 'server-postgres', selected: 'test/postgres/race.pg.spec.ts', expected: 'apps/server/test/postgres/race.pg.spec.ts' },
+    { id: 'server-slow', selected: 'test/slow/release-benchmark.slow.ts', expected: 'apps/server/test/slow/release-benchmark.slow.ts' },
   ])('collects only the selected file for $id before execution', async ({ id, selected, expected }) => {
     const checkout = fileURLToPath(new URL('../../..', import.meta.url));
     const manifest = JSON.parse(readFileSync(join(checkout, '.hornhoof/test-environment.json'), 'utf8')) as { suites: { id: string; run: ServiceCommand }[] };
