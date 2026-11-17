@@ -1,0 +1,379 @@
+{
+  "reviewed": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+  "base": "150c19a62d2ab39ad2b0a451ff6cbae43ffe91d3",
+  "prior": "ee776ee6bfa947f70d75bad38f94bdd8b43756c4",
+  "mergeParents": [
+    "ee776ee6bfa947f70d75bad38f94bdd8b43756c4",
+    "150c19a62d2ab39ad2b0a451ff6cbae43ffe91d3"
+  ],
+  "objects": [
+    {
+      "path": "apps/node/src/redact.ts",
+      "prior": "8b18a4b2fe23065b207f7bc7bab7dcb8de56bfcb",
+      "turn31": "7e777b8a7f2c84b307f2f8944f58aad46fb8cd24",
+      "candidate": "8b18a4b2fe23065b207f7bc7bab7dcb8de56bfcb"
+    },
+    {
+      "path": "apps/server/drizzle/0137_secret_redactions.sql",
+      "prior": "fe898d993c29863c57c472a000d536f9f1ac640f",
+      "turn31": null,
+      "candidate": "fe898d993c29863c57c472a000d536f9f1ac640f"
+    },
+    {
+      "path": "apps/server/drizzle/meta/0137_snapshot.json",
+      "prior": "324d493d7728f94ee885c9dcc1e8a90323c71bc8",
+      "turn31": null,
+      "candidate": "324d493d7728f94ee885c9dcc1e8a90323c71bc8"
+    },
+    {
+      "path": "apps/server/drizzle/meta/_journal.json",
+      "prior": "81bfe4363007fe8469b969c4e0f18ba6ee07902c",
+      "turn31": "abcddd6e08bd4863ac99d7de7e47e515c5901b5a",
+      "candidate": "81bfe4363007fe8469b969c4e0f18ba6ee07902c"
+    },
+    {
+      "path": "apps/server/src/db/agent-sql.ts",
+      "prior": "b828682e80d396b9b6f74c8a2eaf01613ce82049",
+      "turn31": "32928465ae8595ed693193408882155c4b17309c",
+      "candidate": "c16840eb1bd9e66f17968e7a0315f75cfbb4db09"
+    },
+    {
+      "path": "apps/server/src/db/schema.ts",
+      "prior": "03a7675d0eac74b0e224ebc97ac6e90d66a11d08",
+      "turn31": "aed73bd4d26b9e526c0f81f8ba4fe0cc605e5767",
+      "candidate": "03a7675d0eac74b0e224ebc97ac6e90d66a11d08"
+    },
+    {
+      "path": "apps/server/src/modules/conversation/inbox.ts",
+      "prior": "f8593914277fefa4c5edf87cdfcf692309c54ac9",
+      "turn31": "ab90d1ac848977fb96eb01df10f060246cfd3321",
+      "candidate": "f8593914277fefa4c5edf87cdfcf692309c54ac9"
+    },
+    {
+      "path": "apps/server/src/modules/conversation/queue.ts",
+      "prior": "312e7124a92041b269eda21e891adb9065ca3107",
+      "turn31": "7d070fce9d190349e70b3802927e3a66f4b588a5",
+      "candidate": "384d2fcaff0cfb82685b5cc70ce926aaca631d79"
+    },
+    {
+      "path": "apps/server/src/modules/events/store.ts",
+      "prior": "72cc2c2b858efccb5133d28b7df6eb9d909208d2",
+      "turn31": "bf505d350412c0b28d406edd724fdc1b235d7e3c",
+      "candidate": "0e3f68f2bd0842a02a5ad7aee4e652aa86115c0b"
+    },
+    {
+      "path": "apps/server/src/modules/merge/apply.ts",
+      "prior": "538b7941a568491c9d684ab460c113122fd3a2a7",
+      "turn31": "dfac4b8aebcbaadb8282dd1a2cc50aa931101acb",
+      "candidate": "538b7941a568491c9d684ab460c113122fd3a2a7"
+    },
+    {
+      "path": "apps/server/src/modules/merge/rules.ts",
+      "prior": "6bc082b3171e177e72ffe3ee7b04c7b6ec0b4579",
+      "turn31": "ed9948ffc45813f7190aca536a4bd897cae48392",
+      "candidate": "6bc082b3171e177e72ffe3ee7b04c7b6ec0b4579"
+    },
+    {
+      "path": "apps/server/src/modules/tasks/engine.ts",
+      "prior": "b334fb3bc0987b47a8cb828aecbea2e757336932",
+      "turn31": "cbee42ee23a67c6c9e73af34effdcba0789cbfa6",
+      "candidate": "562ea3884c4eb8de3009a7b6b13fedbe07108f6c"
+    },
+    {
+      "path": "apps/server/src/modules/tasks/hide-secret.ts",
+      "prior": "061f6da6e6c57894a9ed34dbf0043bb4583f7d2b",
+      "turn31": null,
+      "candidate": "061f6da6e6c57894a9ed34dbf0043bb4583f7d2b"
+    },
+    {
+      "path": "apps/server/src/modules/tasks/routes.ts",
+      "prior": "a33618dce2a7508096ace43bbee47cda28ab89fa",
+      "turn31": "d2a2938b12915ddbd9bfebc9726b296b59e355a4",
+      "candidate": "7c76e61f8bf8cbc728eabea8e1bbcac482a2cfc3"
+    },
+    {
+      "path": "apps/server/test/events.test.ts",
+      "prior": "60bda6692c9ae03f68619799398aaeee262a4929",
+      "turn31": "c909e5e837f1bc8dbe7785707d9f8d3c5620acb7",
+      "candidate": "837ca55bc4a91a3c18bdad09360ff5569af3fdf1"
+    },
+    {
+      "path": "apps/server/test/orchestrator-sql-secrets.test.ts",
+      "prior": null,
+      "turn31": "074c008ff3e0facb297471914a6c4a7c1816415c",
+      "candidate": "77345997de24f6219741c2465cb711180a0d01e4"
+    },
+    {
+      "path": "apps/server/test/secret-redaction-merge.test.ts",
+      "prior": "b1a6ea9ecb5a374b1647ea021a1b8f204701a0ef",
+      "turn31": null,
+      "candidate": "b1a6ea9ecb5a374b1647ea021a1b8f204701a0ef"
+    },
+    {
+      "path": "apps/server/test/secret-redaction-migration.test.ts",
+      "prior": "dcb2f9b13fbbbf755d4cc1b1e05b10abea4a3a28",
+      "turn31": null,
+      "candidate": "dcb2f9b13fbbbf755d4cc1b1e05b10abea4a3a28"
+    },
+    {
+      "path": "apps/server/test/secret-redaction-rights.test.ts",
+      "prior": "55b3d39abcd77e75ad6ae93930a2653be320a6bb",
+      "turn31": null,
+      "candidate": "55b3d39abcd77e75ad6ae93930a2653be320a6bb"
+    },
+    {
+      "path": "apps/server/test/secret-redaction-scan.test.ts",
+      "prior": "a7548f0662f3b5023325366414b05034d1e29a2a",
+      "turn31": null,
+      "candidate": "a7548f0662f3b5023325366414b05034d1e29a2a"
+    },
+    {
+      "path": "apps/server/test/stored-secrets.test.ts",
+      "prior": "33b5d221c5e59e86aa6b09ced9ab21c0e72da55b",
+      "turn31": null,
+      "candidate": "33b5d221c5e59e86aa6b09ced9ab21c0e72da55b"
+    },
+    {
+      "path": "apps/web/e2e/hide-secret.config.ts",
+      "prior": "3b95953aac9d26af148af5916207cfe2f123ba3a",
+      "turn31": null,
+      "candidate": "3b95953aac9d26af148af5916207cfe2f123ba3a"
+    },
+    {
+      "path": "apps/web/e2e/hide-secret.spec.ts",
+      "prior": "332db3284939ec65c3f23db1ac8cc9dff448b6e2",
+      "turn31": null,
+      "candidate": "332db3284939ec65c3f23db1ac8cc9dff448b6e2"
+    },
+    {
+      "path": "apps/web/src/i18n/en.ts",
+      "prior": "c9b24153cd8edc18e0f77ef73046b0cb7230d803",
+      "turn31": "f3c128ee28995c5690be446de68cef517ae98a9a",
+      "candidate": "07703f3cd68236e3745184ae9a7903c3cfd7dc76"
+    },
+    {
+      "path": "apps/web/src/i18n/ru.ts",
+      "prior": "0bd880a6e60b0b25bc049f0331528d87b9372525",
+      "turn31": "5d7f28ed9118415b7caa597c31a01a9e3e804d2f",
+      "candidate": "423fd0ea5f2884df4ceb4a23635ec5fa0531695b"
+    },
+    {
+      "path": "apps/web/src/types.ts",
+      "prior": "d5bd4462648e571f6d44d058d9502d5cd5126cd7",
+      "turn31": "59a7f117e94f114443dff1cbfc0d61182d1a5097",
+      "candidate": "23475a0fe563aefa40e3875dfc46b10f472bb1b5"
+    },
+    {
+      "path": "apps/web/src/ui/HideSecret.tsx",
+      "prior": "f8b317f02f3f6072e87130cd0f71e7a6bdbfbd8e",
+      "turn31": null,
+      "candidate": "f8b317f02f3f6072e87130cd0f71e7a6bdbfbd8e"
+    },
+    {
+      "path": "apps/web/src/ui/TaskPanel.tsx",
+      "prior": "9fd8cfe6ed05f739baaa721cb37fe8e719d75f9c",
+      "turn31": "1f5a77e0415dedcc7776bbff15b0e5f87af11eb7",
+      "candidate": "4f09253ae427fb530ab1281f11523fdddeaf7c49"
+    },
+    {
+      "path": "apps/web/src/ui/hide-secret.css",
+      "prior": "cb2a8275804e411c384d8467c73a67ea6f33d5a1",
+      "turn31": null,
+      "candidate": "cb2a8275804e411c384d8467c73a67ea6f33d5a1"
+    },
+    {
+      "path": "apps/web/test/TaskPanel.test.tsx",
+      "prior": "aa60431e6aa88b3f39f09005cbe417e46ab3fcfd",
+      "turn31": "d0d955519f218f2a06b6cc16a93c783e693b2013",
+      "candidate": "854f360701a0967bd2476cd2c1680c0e24e21320"
+    },
+    {
+      "path": "docs/tasks/1077-en-cyberpunk.png",
+      "prior": "314310beb2235bfb3a4eac765c37f84ddcab07c7",
+      "turn31": null,
+      "candidate": "314310beb2235bfb3a4eac765c37f84ddcab07c7"
+    },
+    {
+      "path": "docs/tasks/1077-en-light.png",
+      "prior": "daff9bbf250cb11072b77f0eed38c6d937cc568a",
+      "turn31": null,
+      "candidate": "daff9bbf250cb11072b77f0eed38c6d937cc568a"
+    },
+    {
+      "path": "docs/tasks/1077-en-matrix.png",
+      "prior": "5fc9c7892acf50b2ef3ca16ceb7f5fdc47a18e12",
+      "turn31": null,
+      "candidate": "5fc9c7892acf50b2ef3ca16ceb7f5fdc47a18e12"
+    },
+    {
+      "path": "docs/tasks/1077-en-pixel.png",
+      "prior": "55eebb9c4c30969a6f648390604a4e725151121b",
+      "turn31": null,
+      "candidate": "55eebb9c4c30969a6f648390604a4e725151121b"
+    },
+    {
+      "path": "docs/tasks/1077-ru-cyberpunk.png",
+      "prior": "431bbe180635bf25691dd56744696454affadaba",
+      "turn31": null,
+      "candidate": "431bbe180635bf25691dd56744696454affadaba"
+    },
+    {
+      "path": "docs/tasks/1077-ru-light.png",
+      "prior": "6b1820252cf7d1a5e39776ff3338828a8405f232",
+      "turn31": null,
+      "candidate": "6b1820252cf7d1a5e39776ff3338828a8405f232"
+    },
+    {
+      "path": "docs/tasks/1077-ru-matrix.png",
+      "prior": "c707c042927ce4958924bc1461bee2828e80d81f",
+      "turn31": null,
+      "candidate": "c707c042927ce4958924bc1461bee2828e80d81f"
+    },
+    {
+      "path": "docs/tasks/1077-ru-pixel.png",
+      "prior": "a12cfb52ced950a81666e759f39beac4c321925b",
+      "turn31": null,
+      "candidate": "a12cfb52ced950a81666e759f39beac4c321925b"
+    },
+    {
+      "path": "docs/tasks/1077-secret-redaction-evidence.md",
+      "prior": "7878df461175aa1659960404efd5f8f193da796c",
+      "turn31": null,
+      "candidate": "7878df461175aa1659960404efd5f8f193da796c"
+    },
+    {
+      "path": "docs/tasks/1077-secret-redaction.md",
+      "prior": "c5d21f5e36ec21193ff67aba254487c00d3c4775",
+      "turn31": null,
+      "candidate": "c5d21f5e36ec21193ff67aba254487c00d3c4775"
+    },
+    {
+      "path": "packages/protocol/src/redaction.ts",
+      "prior": "b60ee20964938bdf2886ccb9681a9744a0061de7",
+      "turn31": "0942f6615f8438ac3294788a4519f9a9b057fb0a",
+      "candidate": "b60ee20964938bdf2886ccb9681a9744a0061de7"
+    },
+    {
+      "path": "packages/protocol/test/redaction.test.ts",
+      "prior": "a3a8a0715a6f9b9b88f233ac224401349d0d27db",
+      "turn31": "3347ea73e3ac9a634e9b15c78f087ba990fa2c39",
+      "candidate": "a3a8a0715a6f9b9b88f233ac224401349d0d27db"
+    }
+  ],
+  "conflicts": [
+    "apps/server/src/db/agent-sql.ts",
+    "apps/server/src/modules/events/store.ts"
+  ],
+  "checks": [
+    {
+      "log": "final-eslint-touched.log",
+      "sha256": "6c8109ac7b57c7da1ea4964f0cc75beaa5736b3a671ed6a5cb553e90aea3cb69",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": null,
+      "command": "timeout 600 npx eslint apps/server/src/db/agent-sql.ts apps/server/src/modules/events/store.ts apps/server/test/events.test.ts apps/server/test/orchestrator-sql-secrets.test.ts"
+    },
+    {
+      "log": "final-protocol-redaction.log",
+      "sha256": "b289bd44dddc98f9dbf247ad2b6c5214507057a059fddb599308657799d13b8f",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 8,
+      "command": "timeout 600 npx vitest run test/redaction.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-events.log",
+      "sha256": "cda3f20c829c0e32ec43bde3acfafc45fb8d492160aee9d8c024420cf6db4072",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 11,
+      "command": "timeout 900 npx vitest run test/events.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-orchestrator-sql-secrets.log",
+      "sha256": "11e30e953e7d467c3ce5b086c1b93f967fa3fb0c4165e8e91c0a4b3b4d12ac3b",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 2,
+      "command": "timeout 900 npx vitest run test/orchestrator-sql-secrets.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-merge.log",
+      "sha256": "07325b9383f977517e6ba644b7720aeedd85a17717a7623001215b84f94855b0",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 4,
+      "command": "timeout 900 npx vitest run test/secret-redaction-merge.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-migration.log",
+      "sha256": "de7a1915f3cc4f3cc67c800524c9831102797d39c5c7466962b4f80a88ac94fb",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 2,
+      "command": "timeout 900 npx vitest run test/secret-redaction-migration.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-rights.log",
+      "sha256": "fe547f289c954e00671809f4c25b64f3dfb5cbeebfd5c20f28184ccbe9129f9e",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 1,
+      "command": "timeout 900 npx vitest run test/secret-redaction-rights.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-scan.log",
+      "sha256": "d3986be5215a1d7472c2e415a7523af1aa64f7b6ab6bf6af1fd0c88f93153c98",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 13,
+      "command": "timeout 900 npx vitest run test/secret-redaction-scan.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-stored-secrets.log",
+      "sha256": "1e68c234868ebb6c1b4f127e9ce3c2ecf1d3f07b5390ba81ff608247422554ec",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 10,
+      "command": "timeout 900 npx vitest run test/stored-secrets.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-tsc-server-tests.log",
+      "sha256": "367091b35e3f66a32691feeae9b92cc6f3efc8e6aaa721313a5e41fde8849797",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": null,
+      "command": "timeout 1500 npx tsc -p apps/server/tsconfig.eslint.json --noEmit"
+    }
+  ],
+  "fixPatchMatchesGit": true,
+  "migrationUnchangedFromPrior": true,
+  "noDrizzleDeltaIntoTurn31": true,
+  "emptyRegisteredRuns": true,
+  "treeClean": true,
+  "redEvidence": {
+    "accepted": [
+      "red-final-orchestrator-sql-secrets.log",
+      "red-final-events.log"
+    ],
+    "baseline": "226fb7272566965115e443277f00af4623ca9450 with only final tests changed",
+    "draftFilesNotFinal": [
+      "red-orchestrator-sql-secrets.log",
+      "red-events.log"
+    ],
+    "authorCorrection": "Earlier attachments overwrote final logs with same-name draft logs; Developer supplied distinct final and draft names on this task. Corrected final logs fully read."
+  },
+  "t5": {
+    "test": "keeps the fingerprint and the length of a hidden value from the orchestrator",
+    "ms": 2718,
+    "acceptedBy": "aa671623-7f15-4e6b-b434-2ef8c0bb933c",
+    "reason": "Same ownDatabases/grants DB exception as the 14 in task 1077; no PGlite optimization in task 1227."
+  },
+  "limits": [
+    "No registered run IDs; ten complete local author receipts for exact candidate were read instead.",
+    "Unchanged author checks were not rerun.",
+    "Manual review completed; codex review could not inspect code because bwrap could not create a namespace.",
+    "Current merged browser/web/node checks not claimed; task 1077 prior stages are recorded separately.",
+    "Independent Security and Tests remain required; no integration or release."
+  ]
+}

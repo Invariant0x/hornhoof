@@ -1,0 +1,5 @@
+Command: python3 docs/tasks/1227-tests/verify.py
+Candidate: ee4a49d54a882b1c8e9070689fd6ace447e9ab2a
+PASS: 20 archive hashes, 126 Git objects, 10 exact-version receipts, 51 passed tests, merge parents and conflicts, two behavioral REDs
+LIMIT: T5 NOT_PASS with the heads accepted DB exception; native review NOT_RUN; no new product check run
+Exit: 0

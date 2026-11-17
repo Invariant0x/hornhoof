@@ -1,0 +1,127 @@
+{
+  "candidate": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+  "base": "150c19a62d2ab39ad2b0a451ff6cbae43ffe91d3",
+  "archive_hashes_verified": 20,
+  "git_objects_verified": 126,
+  "local_receipts_verified": 10,
+  "named_files": 8,
+  "passed_tests": 51,
+  "merge_parents_verified": [
+    "ee776ee6bfa947f70d75bad38f94bdd8b43756c4",
+    "150c19a62d2ab39ad2b0a451ff6cbae43ffe91d3"
+  ],
+  "historical_logs_verified": 2,
+  "historical_limit": "run without --maxWorkers=1 / --no-file-parallelism (both commands are one package each); written from the session record, not a receipt captured by a tool",
+  "native_review": "NOT_RUN: bwrap could not create namespace; CLI exit 0 is not a completed review",
+  "checks": [
+    {
+      "log": "final-eslint-touched.log",
+      "sha256": "6c8109ac7b57c7da1ea4964f0cc75beaa5736b3a671ed6a5cb553e90aea3cb69",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": null,
+      "command": "timeout 600 npx eslint apps/server/src/db/agent-sql.ts apps/server/src/modules/events/store.ts apps/server/test/events.test.ts apps/server/test/orchestrator-sql-secrets.test.ts"
+    },
+    {
+      "log": "final-protocol-redaction.log",
+      "sha256": "b289bd44dddc98f9dbf247ad2b6c5214507057a059fddb599308657799d13b8f",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 8,
+      "command": "timeout 600 npx vitest run test/redaction.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-events.log",
+      "sha256": "cda3f20c829c0e32ec43bde3acfafc45fb8d492160aee9d8c024420cf6db4072",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 11,
+      "command": "timeout 900 npx vitest run test/events.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-orchestrator-sql-secrets.log",
+      "sha256": "11e30e953e7d467c3ce5b086c1b93f967fa3fb0c4165e8e91c0a4b3b4d12ac3b",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 2,
+      "command": "timeout 900 npx vitest run test/orchestrator-sql-secrets.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-merge.log",
+      "sha256": "07325b9383f977517e6ba644b7720aeedd85a17717a7623001215b84f94855b0",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 4,
+      "command": "timeout 900 npx vitest run test/secret-redaction-merge.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-migration.log",
+      "sha256": "de7a1915f3cc4f3cc67c800524c9831102797d39c5c7466962b4f80a88ac94fb",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 2,
+      "command": "timeout 900 npx vitest run test/secret-redaction-migration.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-rights.log",
+      "sha256": "fe547f289c954e00671809f4c25b64f3dfb5cbeebfd5c20f28184ccbe9129f9e",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 1,
+      "command": "timeout 900 npx vitest run test/secret-redaction-rights.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-secret-redaction-scan.log",
+      "sha256": "d3986be5215a1d7472c2e415a7523af1aa64f7b6ab6bf6af1fd0c88f93153c98",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 13,
+      "command": "timeout 900 npx vitest run test/secret-redaction-scan.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-server-stored-secrets.log",
+      "sha256": "1e68c234868ebb6c1b4f127e9ce3c2ecf1d3f07b5390ba81ff608247422554ec",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": 10,
+      "command": "timeout 900 npx vitest run test/stored-secrets.test.ts --maxWorkers=1"
+    },
+    {
+      "log": "final-tsc-server-tests.log",
+      "sha256": "367091b35e3f66a32691feeae9b92cc6f3efc8e6aaa721313a5e41fde8849797",
+      "commit": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+      "exit": 0,
+      "passed": null,
+      "command": "timeout 1500 npx tsc -p apps/server/tsconfig.eslint.json --noEmit"
+    }
+  ],
+  "security_decision": "PASS for the exact merge and secret-protection candidate; no code repair by Security",
+  "scope": "Follow-up merge of accepted task 1077, focused on merge conflicts and the three required safeguards, not a new review of unchanged prior code.",
+  "t5": {
+    "status": "NOT_PASS; accepted DB exception of the Head of development",
+    "owner": "aa671623-7f15-4e6b-b434-2ef8c0bb933c",
+    "permission": "Head confirmed in this conversation that the ownDatabases/grants case at 2718 ms and the listed PGlite file times are the same accepted exception as task 1077; speeding them up is outside task 1227.",
+    "files_s": {
+      "events": 49.8,
+      "stored-secrets": 38.23,
+      "orchestrator-sql-secrets": 37.89,
+      "secret-redaction-migration": 30.43,
+      "secret-redaction-rights": 36.35
+    }
+  },
+  "confirmed": [
+    "Merge 226fb727 has the exact prior feature and turn-31 parents; only agent-sql.ts and events/store.ts conflicted.",
+    "Column grants deny fingerprint and characters, including direct selects, whole-row expressions and WHERE predicates; window_hash is denied by its existing suffix rule.",
+    "Incoming, streamed and outgoing-letter data pass hideEventSecrets. Turn events first retain privateToolEvent, privateTurn and state.values.hide.",
+    "hideJoinCodes runs before hideCredentialsIn; both required English and Russian examples are covered by a behavioral RED and GREEN.",
+    "Migration 0137 is unchanged from the prior feature. The merged turn-31 journal ends at 0136."
+  ],
+  "limits": [
+    "No whole suite, run_tests, release, live-data operation or integration.",
+    "Native codex review did not execute because bwrap could not create a namespace. Manual Security review completed.",
+    "Current merged web/browser/node checks are not claimed here. Historical 82b84774 node and web logs were read and hash-checked, not counted in the 51 current tests.",
+    "Author index records NODE_OPTIONS=4096; per-check logs record exact commands, cwd, candidate, clean status and exit.",
+    "Known join variants with equals, extra spaces or quotes remain outside this task by its explicit scope.",
+    "Other direct event inserts identified by the author were not introduced by this merge; no new guarantee for those paths is claimed."
+  ]
+}

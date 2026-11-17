@@ -1,0 +1,172 @@
+{
+  "candidate": "ee4a49d54a882b1c8e9070689fd6ace447e9ab2a",
+  "source": "complete exact-candidate author logs; not a new execution",
+  "files": [
+    {
+      "log": "review-1227/final-protocol-redaction.log",
+      "file": "test/redaction.test.ts",
+      "passed": 8,
+      "testFileMs": 30,
+      "runnerSeconds": 0.516,
+      "overOneSecond": []
+    },
+    {
+      "log": "review-1227/final-server-events.log",
+      "file": "test/events.test.ts",
+      "passed": 11,
+      "testFileMs": 15831,
+      "runnerSeconds": 49.8,
+      "overOneSecond": [
+        {
+          "name": "test/events.test.ts (11 tests)",
+          "ms": 15831
+        },
+        {
+          "name": "refuses a signed-out request",
+          "ms": 3270
+        },
+        {
+          "name": "sends the orchestrator's conversation to people who see the whole company",
+          "ms": 2147
+        },
+        {
+          "name": "keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream",
+          "ms": 1481
+        },
+        {
+          "name": "keeps the conversation from a department head but tells them the org changed",
+          "ms": 1588
+        },
+        {
+          "name": "ends open streams first when the server shuts down, so it does not wait for them",
+          "ms": 1047
+        },
+        {
+          "name": "stops sending a department's news to a person at once when they no longer reach it",
+          "ms": 1540
+        },
+        {
+          "name": "counts an agent with a running conversation as working, on the map and in the stream",
+          "ms": 1708
+        }
+      ]
+    },
+    {
+      "log": "review-1227/final-server-orchestrator-sql-secrets.log",
+      "file": "test/orchestrator-sql-secrets.test.ts",
+      "passed": 2,
+      "testFileMs": 8586,
+      "runnerSeconds": 37.89,
+      "overOneSecond": [
+        {
+          "name": "test/orchestrator-sql-secrets.test.ts (2 tests)",
+          "ms": 8586
+        },
+        {
+          "name": "keeps secrets closed through expressions and older grants while ordinary reads and writes stay open",
+          "ms": 5863
+        },
+        {
+          "name": "keeps the fingerprint and the length of a hidden value from the orchestrator",
+          "ms": 2718
+        }
+      ]
+    },
+    {
+      "log": "review-1227/final-server-secret-redaction-merge.log",
+      "file": "test/secret-redaction-merge.test.ts",
+      "passed": 4,
+      "testFileMs": 11832,
+      "runnerSeconds": 28.4,
+      "overOneSecond": [
+        {
+          "name": "test/secret-redaction-merge.test.ts (4 tests)",
+          "ms": 11832
+        },
+        {
+          "name": "keeps a secret suppressed when the leader receives a merge",
+          "ms": 4728
+        },
+        {
+          "name": "keeps a secret suppressed when the offline receives a merge",
+          "ms": 2958
+        },
+        {
+          "name": "keeps another company unchanged when the leader receives a suppression",
+          "ms": 2185
+        },
+        {
+          "name": "keeps another company unchanged when the offline receives a suppression",
+          "ms": 1955
+        }
+      ]
+    },
+    {
+      "log": "review-1227/final-server-secret-redaction-migration.log",
+      "file": "test/secret-redaction-migration.test.ts",
+      "passed": 2,
+      "testFileMs": 12544,
+      "runnerSeconds": 30.43,
+      "overOneSecond": [
+        {
+          "name": "test/secret-redaction-migration.test.ts (2 tests)",
+          "ms": 12544
+        },
+        {
+          "name": "upgrades an existing database without discarding prose, and a suppression row changes no row by itself",
+          "ms": 7158
+        },
+        {
+          "name": "lets frozen evidence lose a hidden value only in the named columns, from the server session itself",
+          "ms": 5380
+        }
+      ]
+    },
+    {
+      "log": "review-1227/final-server-secret-redaction-rights.log",
+      "file": "test/secret-redaction-rights.test.ts",
+      "passed": 1,
+      "testFileMs": 7422,
+      "runnerSeconds": 36.35,
+      "overOneSecond": [
+        {
+          "name": "test/secret-redaction-rights.test.ts (1 test)",
+          "ms": 7422
+        },
+        {
+          "name": "keeps suppression records out of agent SQL, and leaves the database no function or trigger that sees a value",
+          "ms": 7417
+        }
+      ]
+    },
+    {
+      "log": "review-1227/final-server-secret-redaction-scan.log",
+      "file": "test/secret-redaction-scan.test.ts",
+      "passed": 13,
+      "testFileMs": 19,
+      "runnerSeconds": 28.47,
+      "overOneSecond": []
+    },
+    {
+      "log": "review-1227/final-server-stored-secrets.log",
+      "file": "test/stored-secrets.test.ts",
+      "passed": 10,
+      "testFileMs": 10907,
+      "runnerSeconds": 38.23,
+      "overOneSecond": [
+        {
+          "name": "test/stored-secrets.test.ts (10 tests)",
+          "ms": 10907
+        },
+        {
+          "name": "masks tasks and comments before storing their copies",
+          "ms": 3897
+        },
+        {
+          "name": "checks department authority on the server and rejects ordinary readers",
+          "ms": 1614
+        }
+      ]
+    }
+  ]
+}
