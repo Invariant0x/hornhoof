@@ -429,7 +429,7 @@ describe('renderInstructions', () => {
     expect(workerPacket.text).toContain(canonicalChecks);
     expect(workerPacket.text).not.toContain('Run npm test locally.');
     expect(workerPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
-    expect(workerPacket.skills.map(s => s.name)).toEqual(['dev-tdd']);
+    expect(workerPacket.skills.map(s => s.name)).toEqual(['hh-one-shot-calls', 'dev-tdd']);
 
     const rolelessWorker = renderInstructions(
       shipped,

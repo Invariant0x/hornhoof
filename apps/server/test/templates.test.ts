@@ -439,14 +439,14 @@ describe('templates', () => {
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
       'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
-      'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
+      'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */
@@ -1888,8 +1888,10 @@ describe('skills compose around an assignment without a universal role', () => {
 
   it.each(skills.filter(skill => skill.kind !== 'core'))('delivers $id without its default role or other optional abilities', skill => {
     const rendered = render('DEV-ENG', [skill.id]);
-    expect(rendered.skills.map(file => file.name)).toEqual([skill.id]);
-    expect(rendered.skills[0]!.body).toContain(skill.body);
+    /* Besides the files every employee carries, as a procedure of everyone's is read when it is needed. */
+    const everyones = CORE_SKILLS.filter(id => templates.skills.get(id)!.kind !== 'core');
+    expect(rendered.skills.map(file => file.name)).toEqual([...new Set([...everyones, skill.id])]);
+    expect(rendered.skills.find(file => file.name === skill.id)!.body).toContain(skill.body);
     expect(rendered.text).not.toContain('when that one is not on your list, go on without it');
   });
 
@@ -1958,6 +1960,19 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(steady.parts.map(part => part.kind)).toEqual(['base', 'assignment', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
     expect(steady.parts[0]!.text).toBe(ORCHESTRATOR_INSTRUCTIONS);
     for (const id of ORCHESTRATOR_SKILLS) expect(steady.parts.filter(part => part.id === id)).toHaveLength(1);
+  });
+
+  it('tells every employee and the orchestrator, in a file read when it is needed, when one-shot calls fit and when not', () => {
+    expect(CORE_SKILLS).toContain('hh-one-shot-calls');
+    expect(ORCHESTRATOR_SKILLS).toContain('hh-one-shot-calls');
+    const skill = templates.skills.get('hh-one-shot-calls')!;
+    expect(skill.kind).toBe('procedure');
+    expect(skill.body).toMatch(/start_calls[\s\S]*calls[\s\S]*stop_calls/);
+    expect(skill.body).toMatch(/Use calls when:[\s\S]*independent[\s\S]*judge[\s\S]*one-shot/);
+    expect(skill.body).toMatch(/Do it yourself[^:]*when:[\s\S]*questions[\s\S]*browser[\s\S]*depends on the answer/);
+    expect(skill.body).toMatch(/as many at once as[^.]*memory/);
+    expect(skill.body).not.toMatch(/check queue/);
+    expect(skill.body).not.toMatch(/(?:^|\s)#\d+\b|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+|Claude|Codex|Kimi|Antigravity/i);
   });
 
   it('includes hh-tables in CORE_SKILLS and ORCHESTRATOR_SKILLS, forbids refusing spreadsheet delivery, and keeps DEV-HEAD within limits', () => {

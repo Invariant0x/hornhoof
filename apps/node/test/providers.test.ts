@@ -903,6 +903,42 @@ describe('Antigravity CLI', () => {
   });
 });
 
+describe('one-shot calls', () => {
+  it('run Claude Code once in print mode in a session it keeps nowhere, whatever session the input names', async () => {
+    const res = await adapter('claude').oneCall!(input({ sessionId: CLAUDE_SESSION, model: 'opus' }));
+    expect(lastRun().argv).toEqual([
+      '-p', '--output-format', 'stream-json', '--verbose', '--session-id', expect.stringMatching(/^[0-9a-f-]{36}$/), '--no-session-persistence',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--model', 'opus', '--', 'say ready',
+    ]);
+    expect(lastRun().cwd).toBe(work);
+    expect(res).toMatchObject({ ok: true, result: 'ready', error: null });
+  });
+
+  it('run Codex once with exec in a thread it keeps nowhere, in the work folder', async () => {
+    const res = await adapter('codex').oneCall!(input({ sessionId: CODEX_THREAD, model: 'gpt-5.5' }));
+    expect(lastRun().argv).toEqual(['exec', '--ephemeral', ...FLAGS, '-C', work, '-m', 'gpt-5.5', '--', 'say ready']);
+    expect(lastRun().cwd).toBe(work);
+    expect(res).toMatchObject({ ok: true, result: 'ready', error: null });
+  });
+
+  it('run Kimi Code once in its print mode, which its output format needs', async () => {
+    const res = await adapter('kimi').oneCall!(input({ sessionId: KIMI_SESSION }));
+    expect(lastRun().argv).toEqual(['--print', '--prompt=say ready', '--output-format', 'stream-json']);
+    expect(res).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('run Antigravity once in print mode in a new conversation', async () => {
+    const res = await adapter('antigravity').oneCall!(input({ sessionId: AGY_NEW }));
+    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS]);
+    expect(res).toMatchObject({ ok: true, sessionId: AGY_NEW });
+  });
+
+  it('report a failed call as agent_failed, as a turn', async () => {
+    process.env.FAKE_MODE = 'fail';
+    for (const provider of ['claude', 'codex'] as const) expect(await adapter(provider).oneCall!(input())).toMatchObject({ ok: false, error: 'agent_failed' });
+  });
+});
+
 describe('calling a job off', () => {
   it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('stops the whole process group of %s', async provider => {
     process.env.FAKE_MODE = 'hang';

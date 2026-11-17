@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
@@ -326,6 +326,69 @@ describe('runJob', () => {
     expect(broken).toMatchObject({ ok: true, result: 'ready', error: null });
     expect(prepared).toEqual([join(dir, 'work', 'agents', 'dev-1', 'shop'), 'agent-ran', 'agent-ran']);
     expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so missing');
+  });
+});
+
+describe('a one-shot call', () => {
+  /* An adapter whose program runs one call headless, and records what it was given and what its folder held. */
+  function callAdapter(result: (input: RunInput) => RunResult = () => ok({ sessionId: null, result: 'three findings' })) {
+    const adapter = fakeAdapter(async () => ok());
+    const calls: { input: RunInput; files: string[] }[] = [];
+    return Object.assign(adapter, {
+      calls,
+      oneCall: async (input: RunInput) => {
+        calls.push({ input, files: readdirSync(input.workDir) });
+        writeFileSync(join(input.workDir, 'notes.md'), 'scratch');
+        return result(input);
+      },
+    });
+  }
+
+  it("runs the program's one-call mode in a fresh folder of its own, with no session, and removes the folder after", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = callAdapter();
+    const done = await runJob(adapter, job({ jobId: 'call-1', call: true, sessionId: 'sess-1' }), dir);
+    expect(done).toMatchObject({ type: 'job.done', jobId: 'call-1', ok: true, result: 'three findings', error: null });
+    expect(adapter.inputs).toHaveLength(0);
+    expect(adapter.calls[0]!.input).toMatchObject({ workDir: join(dir, 'work', 'calls', 'call-1'), sessionId: null, agentKey: null, tools: null });
+    expect(existsSync(join(dir, 'work', 'calls', 'call-1'))).toBe(false);
+    expect(readSessions(dir)).toEqual({});
+  });
+
+  it('clones the branch it names into its folder before the program starts, and removes both after', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = callAdapter();
+    const cloned: string[][] = [];
+    const git = async (args: string[], { cwd }: { cwd: string }) => {
+      cloned.push(args);
+      if (args[0] === 'clone') mkdirSync(join(cwd, 'shop'), { recursive: true });
+      return args[0] === 'remote' ? 'https://github.com/acme/shop.git' : '';
+    };
+    const repo = { url: 'https://github.com/acme/shop.git', branch: 'feature-x', token: '' };
+    const done = await runJob(adapter, job({ jobId: 'call-2', call: true, workspace: { key: '00000000-0000-4000-8000-000000000002', repo } }), dir, { git, prepareRepoBrowser: async () => {} });
+    expect(done.ok).toBe(true);
+    expect(cloned[0]).toEqual(['clone', '--quiet', '--branch', 'feature-x', '--', repo.url, join(dir, 'work', 'calls', 'call-2', 'shop')]);
+    expect(adapter.calls[0]!.files).toEqual(['shop']);
+    expect(adapter.calls[0]!.input.agentKey).toBeNull();
+    expect(existsSync(join(dir, 'work', 'calls', 'call-2'))).toBe(false);
+  });
+
+  it('answers at once, in plain words, when the program has no mode that runs one call and exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => new Promise<RunResult>(() => {}));
+    const done = await runJob(adapter, job({ jobId: 'call-3', call: true, provider: 'kimi' }), dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(done.tail).toBe('Kimi Code has no mode that runs one call and exits, so it takes no one-shot calls. Start them on a subscription whose program has one.');
+    expect(adapter.inputs).toHaveLength(0);
+    expect(existsSync(join(dir, 'work', 'calls', 'call-3'))).toBe(false);
+  });
+
+  it('removes its folder even when the program fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = callAdapter(() => { throw new Error('crashed'); });
+    const done = await runJob(adapter, job({ jobId: 'call-4', call: true }), dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(existsSync(join(dir, 'work', 'calls', 'call-4'))).toBe(false);
   });
 });
 

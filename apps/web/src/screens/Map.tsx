@@ -261,6 +261,23 @@ function Cells({ employees, onChange }: { employees: Employee[]; onChange?(): vo
   );
 }
 
+/* One mark per one-shot call of the department while it lives: lit while it runs, pale while it waits for memory on its
+   machine. */
+function CallMarks({ d }: { d: Department }) {
+  const t = useT();
+  const calls = d.calls ?? [];
+  if (!calls.length) return null;
+  const running = calls.filter(c => c.startedAt).length;
+  const by = (id: string) => d.employees.find(e => e.id === id)?.name ?? '';
+  return (
+    <span className="cells calls" role="img" aria-label={t.map.calls(running, calls.length - running)}>
+      {calls.map(c => (
+        <i key={c.id} className={`cell ${c.startedAt ? 'w' : 'q'}`} title={c.judge ? t.map.judgeCall(c.task, by(c.by)) : t.map.call(c.number, c.task, by(c.by))} />
+      ))}
+    </span>
+  );
+}
+
 /* busy: someone works, and the frame breathes cyan; waits: nobody works and someone waits for people, so it breathes amber. */
 function deptClass(d: Department, flashing: boolean): string {
   const busy = d.employees.some(e => e.status === 'working');
@@ -896,6 +913,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
                 {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
               </span>
               <Cells employees={d.employees} onChange={() => flash(d.id)} />
+              <CallMarks d={d} />
               {d.current ? (
                 <span className="now task">
                   <i />
