@@ -2217,6 +2217,8 @@ export const ru: Messages = {
     later: 'Позже',
     waiting: (version, until) => `Hornhoof обновится до ${version}, когда агенты закончат. Если они не закончат до ${until}, обновление отменится, и ничего не остановится.`,
     calledOff: (version, at) => `Обновление до ${version} отменено в ${at}: агенты не закончили работу. Ничего не остановлено.`,
+    cancelled: (version, at) => `Обновление до ${version} отменено в ${at}. Ничего не остановлено.`,
+    notPassed: (version, at) => `Обновление до ${version} отменено в ${at}: Hornhoof не смог передать его программе обновления. Ничего не остановлено.`,
     callOff: 'Отменить',
     running: version => (version ? `Hornhoof обновляется до ${version}` : 'Hornhoof обновляется'),
     progress: 'Ход обновления',
