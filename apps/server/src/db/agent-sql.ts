@@ -34,7 +34,7 @@ const OUTBOUND = [
   'outbound_setup_events',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'company_phones', 'phone_sessions', 'phone_frames', 'phone_actions', ...OUTBOUND];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {

@@ -1370,13 +1370,15 @@ export const companyPhones = pgTable('company_phones', {
   id: id(), companyId: companyId(), personId: uuid('person_id').notNull().references(() => people.id),
   machineId: uuid('machine_id').notNull().references(() => machines.id), nodeId: uuid('node_id').notNull().references(() => nodes.id),
   serial: text('serial').notNull(), transport: text('transport', { enum: ['network', 'usb'] }).notNull(), endpoint: text('endpoint'),
-  hardwareKey: text('hardware_key'),
+  hardwareKey: text('hardware_key').notNull(),
   name: text('name').notNull(), lending: boolean('lending').notNull().default(true), generation: integer('generation').notNull().default(0),
   createdAt: createdAt(), removedAt: timestamp('removed_at', { withTimezone: true }),
 }, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), uniqueIndex('company_phones_hardware').on(t.hardwareKey).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
 
+/* A turn waits for one phone in one company queue. phoneId is the phone it asked for, or null for any free one until a
+   phone takes it. */
 export const phoneSessions = pgTable('phone_sessions', {
-  id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),
+  id: id(), companyId: companyId(), phoneId: uuid('phone_id').references(() => companyPhones.id),
   order: bigserial('queue_order', { mode: 'number' }).notNull(),
   agentId: uuid('agent_id').notNull().references(() => agents.id), jobId: uuid('job_id').notNull().references(() => jobs.id),
   taskId: uuid('task_id').notNull().references(() => tasks.id),
@@ -1385,9 +1387,10 @@ export const phoneSessions = pgTable('phone_sessions', {
   createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), endedAt: timestamp('ended_at', { withTimezone: true }),
   reason: text('reason', { enum: ['completed', 'cancelled', 'lost', 'stopped', 'offline', 'recording_limit', 'failed'] }),
 }, t => [
-  index('phone_sessions_task').on(t.taskId), index('phone_sessions_job').on(t.jobId), index('phone_sessions_queue').on(t.phoneId, t.order),
+  index('phone_sessions_task').on(t.taskId), index('phone_sessions_company_queue').on(t.companyId, t.order),
   uniqueIndex('phone_sessions_active').on(t.phoneId).where(sql`${t.status} in ('starting', 'active', 'revoking')`),
-  uniqueIndex('phone_sessions_borrower').on(t.phoneId, t.jobId).where(sql`${t.status} in ('queued', 'starting', 'active', 'revoking')`),
+  uniqueIndex('phone_sessions_job').on(t.jobId).where(sql`${t.status} in ('queued', 'starting', 'active', 'revoking')`),
+  check('phone_sessions_held_phone', sql`${t.status} in ('queued', 'cancelled') or ${t.phoneId} is not null`),
 ]);
 
 /* Only sanitized frames enter attachments. The active lease and the receipt stay private server state. */
@@ -1396,6 +1399,20 @@ export const phoneFrames = pgTable('phone_frames', {
   at: timestamp('at', { withTimezone: true }).notNull(), attachmentId: uuid('attachment_id').references(() => attachments.id, { onDelete: 'cascade' }),
   capture: jsonb('capture').$type<Omit<import('@hornhoof/protocol').PhoneCapture, 'png'>>().notNull(),
 }, t => [unique('phone_frames_sequence').on(t.sessionId, t.sequence), index('phone_frames_session').on(t.sessionId)]);
+
+export const PHONE_SOCIAL_KINDS = ['post', 'comment', 'like', 'follow', 'message'] as const;
+export const PHONE_STEP_KINDS = ['tap', 'swipe', 'text', 'secret', 'app', 'url'] as const;
+
+/* The phone's journal: what an agent declared it would do on an account, with the steps of that action. Typed text is
+   never kept here; a sign-in step says only that a secret was typed. */
+export const phoneActions = pgTable('phone_actions', {
+  id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),
+  sessionId: uuid('session_id').notNull().references(() => phoneSessions.id), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  declarationId: uuid('declaration_id'),
+  account: text('account').notNull(), kind: text('kind', { enum: [...PHONE_SOCIAL_KINDS, 'sign_in', ...PHONE_STEP_KINDS] }).notNull(),
+  text: text('text'), at: timestamp('at', { withTimezone: true }).notNull(),
+}, t => [index('phone_actions_account').on(t.phoneId, t.account, t.at), index('phone_actions_session').on(t.sessionId), index('phone_actions_task').on(t.taskId)]);
 
 /* A physical agent program, distinct from the provider session it resumes. */
 export const programInstances = pgTable('program_instances', {

@@ -17,12 +17,13 @@ const MAX_SESSION_FRAMES = 2000;
 export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: PhoneFrame): Promise<void> {
   if (node.kind !== 'node') return;
   const [known] = await ctx.db.select().from(phoneSessions).where(eq(phoneSessions.id, frame.sessionId));
-  if (!known) return;
+  if (!known?.phoneId) return;
+  const phoneId = known.phoneId;
   let expiresAt: Date | null = null;
   let full = false;
   try {
     await ctx.db.transaction(async tx => {
-      const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, known.phoneId)).for('update');
+      const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, phoneId)).for('update');
       const [held] = await tx.select({ session: phoneSessions, status: jobs.status, error: jobs.error, task: tasks }).from(phoneSessions).innerJoin(jobs, eq(jobs.id, phoneSessions.jobId)).innerJoin(tasks, eq(tasks.id, phoneSessions.taskId)).where(eq(phoneSessions.id, frame.sessionId));
       if (!phone?.lending || phone.nodeId !== node.nodeId || !held || held.status !== 'running' || held.error === 'cancelled' || held.session.status !== 'active' || held.session.generation !== frame.generation || phone.generation !== frame.generation || !held.session.leaseUntil || held.session.leaseUntil.getTime() <= ctx.clock()) return;
       const [duplicate] = await tx.select({ id: phoneFrames.id }).from(phoneFrames).where(and(eq(phoneFrames.sessionId, frame.sessionId), eq(phoneFrames.sequence, frame.sequence)));

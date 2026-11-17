@@ -4,10 +4,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { companyPhones } from '../../db/schema.js';
-import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneView, probePhone } from './store.js';
-import { phoneOwner } from './store.js';
-import { phoneFillTarget, reconcilePhone, stopPhone } from './queue.js';
-import { usePhoneTargets } from '../vault/fill.js';
+import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneOwner, phoneView, probePhone } from './store.js';
+import { pumpPhones, reconcilePhones, stopPhone } from './queue.js';
+import { phoneJournal } from './journal.js';
 import { imageBytes, livePhone, recordingImage, taskRecordings } from './recording.js';
 import { phoneBridgeRoutes } from './bridge.js';
 
@@ -21,11 +20,10 @@ function body<T>(schema: z.ZodType<T>, input: unknown): T {
 
 export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
   phoneBridgeRoutes(app, ctx);
-  usePhoneTargets(ctx, phoneFillTarget);
   app.get('/api/phones', async req => {
     const me = await requirePerson(req, ctx.db);
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));
-    await Promise.all(phones.map(p => reconcilePhone(ctx, p.id)));
+    await reconcilePhones(ctx, me.companyId);
     return { phones: await Promise.all(phones.map(p => phoneView(ctx, p, me))) };
   });
   app.get('/api/phones/:id', async req => {
@@ -53,7 +51,8 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
     const phone = await phoneById(ctx, me.companyId, Id.parse(req.params).id);
     phoneOwner(me, phone);
     await ctx.db.update(companyPhones).set({ lending: true }).where(eq(companyPhones.id, phone.id));
-    return phoneView(ctx, { ...phone, lending: true }, me);
+    await pumpPhones(ctx, me.companyId);
+    return phoneView(ctx, await phoneById(ctx, me.companyId, phone.id), me);
   });
   app.get('/api/phones/:id/live', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
@@ -64,6 +63,10 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, ctx.db);
     const live = await livePhone(ctx, me, Id.parse(req.params).id);
     return reply.type('image/png').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').send(await imageBytes(ctx, me.companyId, live.attachmentId));
+  });
+  app.get('/api/phones/:id/journal', async (req, reply) => {
+    const me = await requirePerson(req, ctx.db);
+    return reply.header('cache-control', 'no-store').send(await phoneJournal(ctx, me, Id.parse(req.params).id));
   });
   app.get('/api/tasks/:id/phone-recordings', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);

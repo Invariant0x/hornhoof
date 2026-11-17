@@ -109,6 +109,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   // Historical records follow their task. A row alone never reissues a runtime grant on the node.
   phone_sessions: rows('protected'),
   phone_frames: add('protected'),
+  phone_actions: add('protected'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
