@@ -274,8 +274,8 @@ async function madeAll(): Promise<void> {
    one. Under one key, make builds the same rows each time. */
 export function fixture<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
   if (vi.isFakeTimers() && !clock) return make();
-  /* Keep Switch's completion barrier: a test that ends while rows are being made must finish that work before its
-     app and database close, so the next test can reuse the completed snapshot. */
+  /* A test can end while rows are still being made, as when its time runs out on a busy machine. Its end waits for them
+     then, with its database and app still open, so they are kept for the next test. */
   if (TestRunner.getCurrentTest()) onTestFinished(madeAll);
   const call = keptOrMade(client, key, make, clock);
   making.add(call);
@@ -306,6 +306,12 @@ async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>
 
 let shared: Shared | undefined;
 let held = false;
+
+/* The embedded database is test infrastructure. Files can prepare the first copy before application scenarios start,
+   keeping a cold WASM/database open out of the scenario's deadline. Shared-row and schema checks stay in place. */
+export async function prepareSharedDatabase(): Promise<void> {
+  shared ??= await openShared();
+}
 
 export const sharedDatabase = () => shared?.client;
 
