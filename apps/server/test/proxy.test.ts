@@ -49,9 +49,13 @@ function virtualTime(): void {
   onTestFinished(() => void vi.useRealTimers());
 }
 
+/* The sockets each server has open, upgraded ones too. */
+const socketsOf = new WeakMap<http.Server, Set<net.Socket>>();
+
 /* A server on a free port, taken down with every socket it has, upgraded ones too, when the test ends. */
 async function listening(server: http.Server): Promise<Target> {
   const sockets = new Set<net.Socket>();
+  socketsOf.set(server, sockets);
   server.on('connection', socket => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
@@ -76,13 +80,9 @@ async function servedThrough(target: Target, options: Partial<PassOptions> = {})
   return { server, proxy: await listening(server) };
 }
 
+/* Waits, with no deadline, until the server has no socket left open, closed cleanly or after an error. */
 async function holdsNoSocket(server: http.Server): Promise<void> {
-  await vi.waitFor(async () => {
-    const count = await new Promise((resolve, reject) =>
-      server.getConnections((error, connections) => (error ? reject(error) : resolve(connections))),
-    );
-    expect(count).toBe(0);
-  });
+  for (const socket of socketsOf.get(server)!) await new Promise<void>(resolve => socket.once('close', () => resolve()));
 }
 
 /* A port nothing listens on. */
@@ -185,8 +185,9 @@ async function pour(out: Writable, chunk: Buffer, times: number, poured: { bytes
   out.end();
 }
 
-function closesWithin(ms: number, emitter: NodeJS.EventEmitter): Promise<unknown> {
-  return once(emitter, 'close', { signal: AbortSignal.timeout(ms) });
+/* Waits, with no deadline, for the emitter to close. */
+function closes(emitter: NodeJS.EventEmitter): Promise<unknown> {
+  return once(emitter, 'close');
 }
 
 /* Waits, with no deadline, until check holds, looking again each time the emitter says event. */
@@ -523,7 +524,7 @@ describe('neither dropped nor doubled', () => {
     socket.write('GET / HTTP/1.1\r\nHost: h\r\n\r\n');
     const atTarget = await arrived.promise;
     socket.destroy();
-    await closesWithin(1000, atTarget);
+    await closes(atTarget);
     await sleep(50);
   });
 
@@ -556,7 +557,7 @@ describe('neither dropped nor doubled', () => {
     const atTarget = await arrived.promise;
     await readsUntil(socket, 'first');
     socket.destroy();
-    await closesWithin(1000, atTarget);
+    await closes(atTarget);
   });
 
   it('holds an upload back while the target does not read it', async () => {
@@ -644,7 +645,7 @@ describe('neither dropped nor doubled', () => {
     onTestFinished(() => void odd.close());
     const proxy = await through({ host: '127.0.0.1', port: (odd.address() as AddressInfo).port });
     expect((await send(proxy)).status).toBe(502);
-    await closesWithin(1000, await arrived.promise);
+    await closes(await arrived.promise);
   });
 });
 
@@ -857,7 +858,7 @@ describe('headers', () => {
     failOnUncaught();
     const proxy = await through(target, { headers: () => Promise.reject(new Error('no')) });
     const socket = await connected(proxy);
-    const closed = closesWithin(1000, socket);
+    const closed = closes(socket);
     const text = readToEnd(socket);
     socket.write('POST /api/x HTTP/1.1\r\nHost: h\r\nContent-Length: 1000\r\n\r\nonly a part');
     await closed;
@@ -1083,12 +1084,12 @@ describe('upgrades', () => {
     const down = once(first.client, 'message');
     first.atTarget.send('down');
     expect(String((await down)[0])).toBe('down');
-    const targetClosed = closesWithin(1000, first.atTarget);
+    const targetClosed = closes(first.atTarget);
     first.client.close();
     await targetClosed;
 
     const second = await open();
-    const clientClosed = closesWithin(1000, second.client);
+    const clientClosed = closes(second.client);
     second.atTarget.close();
     await clientClosed;
   });
@@ -1100,7 +1101,7 @@ describe('upgrades', () => {
     const { open } = await webSockets();
     const { client, atTarget } = await open();
     const sides = { client, target: atTarget };
-    const closed = closesWithin(1000, sides[other]);
+    const closed = closes(sides[other]);
     sides[gone].terminate();
     await closed;
   });
@@ -1152,8 +1153,10 @@ describe('upgrades', () => {
 
   it('writes the 101 back as it came, with the bytes sent right behind it, both ways', async () => {
     let ahead = '';
+    const arrived = deferred<Duplex>();
     const asIs = 'HTTP/1.1 101 Switching It\r\nUpgrade: x-test\r\nConnection: Upgrade\r\nX-Own-Header: caf\xe9\r\n\r\n';
     const target = await takingUpgrades((socket, head) => {
+      arrived.resolve(socket);
       ahead += head.toString();
       socket.on('data', chunk => (ahead += chunk.toString()));
       socket.write(`${asIs}behind`, 'latin1');
@@ -1163,7 +1166,8 @@ describe('upgrades', () => {
     raw.write(`${UPGRADE}ahead`);
     expect(await readsUntil(raw, 'behind', 'latin1')).toBe(`${asIs}behind`);
     raw.write('-more');
-    await vi.waitFor(() => expect(ahead).toBe('ahead-more'));
+    await until(await arrived.promise, 'data', () => ahead.length >= 'ahead-more'.length);
+    expect(ahead).toBe('ahead-more');
   });
 
   it('writes back an answer other than 101, whole and unframed, and ends the socket', async () => {
@@ -1202,7 +1206,7 @@ describe('upgrades', () => {
     const socket = await connected(await through(target));
     socket.write(UPGRADE);
     await readsUntil(socket, 'part');
-    await closesWithin(1000, socket);
+    await closes(socket);
   });
 
   it.each([
@@ -1236,7 +1240,7 @@ describe('upgrades', () => {
     const raw = await connected(await through(await takingUpgrades(socket => arrived.resolve(socket))));
     raw.write(UPGRADE);
     const atTarget = await arrived.promise;
-    const closed = closesWithin(1000, atTarget);
+    const closed = closes(atTarget);
     leave(raw);
     await closed;
   });
@@ -1253,7 +1257,8 @@ describe('upgrades', () => {
     atTarget.write(SWITCHED);
     await readsUntil(raw, 'Upgrade');
     raw.write('-late');
-    await vi.waitFor(() => expect(received).toBe('ahead-early-late'));
+    await until(atTarget, 'data', () => received.length >= 'ahead-early-late'.length);
+    expect(received).toBe('ahead-early-late');
   });
 
   it.each(LEAVING)('keeps no socket when a client that sent bytes %s before the 101', async (_, leave) => {
@@ -1264,7 +1269,7 @@ describe('upgrades', () => {
     const atTarget = await arrived.promise;
     raw.write('early');
     await sleep(100);
-    const closed = closesWithin(1000, atTarget);
+    const closed = closes(atTarget);
     leave(raw);
     await closed;
     await holdsNoSocket(server);
@@ -1281,7 +1286,8 @@ describe('upgrades', () => {
     await sleep(100);
     atTarget.write(SWITCHED);
     await readsUntil(raw, 'Upgrade');
-    await vi.waitFor(() => expect(received).toBe(EARLY_LIMIT));
+    await until(atTarget, 'data', () => received >= EARLY_LIMIT);
+    expect(received).toBe(EARLY_LIMIT);
   });
 
   it('cuts a client that sends more than it holds before the 101, and the target with it', async () => {
@@ -1290,7 +1296,7 @@ describe('upgrades', () => {
     const raw = await connected(proxy);
     raw.write(UPGRADE);
     const atTarget = await arrived.promise;
-    const closed = closesWithin(1000, atTarget);
+    const closed = closes(atTarget);
     raw.resume();
     raw.write(Buffer.alloc(EARLY_LIMIT + 1, 'x'));
     await closed;
@@ -1307,9 +1313,11 @@ describe('upgrades', () => {
     atTarget.write(SWITCHED);
     await readsUntil(raw, 'Upgrade');
     raw.write(Buffer.alloc(4 * EARLY_LIMIT, 'x'));
-    await vi.waitFor(() => expect(received).toBe(4 * EARLY_LIMIT));
+    await until(atTarget, 'data', () => received >= 4 * EARLY_LIMIT);
+    expect(received).toBe(4 * EARLY_LIMIT);
     raw.write('more');
-    await vi.waitFor(() => expect(received).toBe(4 * EARLY_LIMIT + 4));
+    await until(atTarget, 'data', () => received >= 4 * EARLY_LIMIT + 4);
+    expect(received).toBe(4 * EARLY_LIMIT + 4);
     atTarget.write('and back');
     await readsUntil(raw, 'and back');
     expect(raw.destroyed).toBe(false);
@@ -1347,7 +1355,7 @@ describe('upgrades', () => {
     const raw = await connected(proxy);
     raw.write(UPGRADE);
     const atTarget = await arrived.promise;
-    const closed = closesWithin(1000, atTarget);
+    const closed = closes(atTarget);
     raw.destroy();
     await closed;
     await sleep(50);
@@ -1463,7 +1471,7 @@ describe('upgrades', () => {
     raw.write(UPGRADE);
     await readsUntil(raw, 'Upgrade');
     const atTarget = await arrived.promise;
-    const closed = closesWithin(1000, atTarget);
+    const closed = closes(atTarget);
     raw.resetAndDestroy();
     await closed;
     expect((await send(proxy)).status).toBe(200);
@@ -1480,7 +1488,7 @@ describe('upgrades', () => {
     const raw = await connected(proxy);
     raw.write(UPGRADE);
     await readsUntil(raw, 'Upgrade');
-    const closed = closesWithin(1000, raw);
+    const closed = closes(raw);
     ((await arrived.promise) as net.Socket).resetAndDestroy();
     await closed;
     expect((await send(proxy)).status).toBe(200);
@@ -1553,22 +1561,34 @@ describe('a request held while the target is down', () => {
     return { target, seen, server, comeUp };
   }
 
+  const HOLD_EVERY = 5;
+
   /* Counts the tries that failed, so a test knows the request is being held before it brings the target up. */
   function holding(extra: Partial<PassOptions> = {}) {
     let failed = 0;
-    const options: Partial<PassOptions> = { holdMs: 60_000, holdEveryMs: 5, holding: () => (failed++, null), ...extra };
-    return { options, failedTries: () => failed };
+    const tried = new EventEmitter();
+    const options: Partial<PassOptions> = {
+      holdMs: 60_000,
+      holdEveryMs: HOLD_EVERY,
+      holding: () => {
+        failed++;
+        tried.emit('failed');
+        return null;
+      },
+      ...extra,
+    };
+    return { options, failedTries: () => failed, failedAtLeast: (times: number) => until(tried, 'failed', () => failed >= times) };
   }
 
   it('reaches the target once it is up, with its whole body', async () => {
     const { target, seen, server, comeUp } = await targetToCome();
     let connections = 0;
     server.on('connection', () => connections++);
-    const { options, failedTries } = holding();
+    const { options, failedAtLeast } = holding();
     const proxy = await through(target, options);
     const body = randomBytes(MiB);
     const answer = send(proxy, { method: 'POST', path: '/api/x' }, body);
-    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    await failedAtLeast(2);
     await comeUp();
     expect((await answer).status).toBe(200);
     expect(seen).toHaveLength(1);
@@ -1581,12 +1601,12 @@ describe('a request held while the target is down', () => {
     const { target, server, comeUp } = await targetToCome();
     const sockets = new WebSocketServer({ server });
     sockets.on('connection', socket => socket.send('hello'));
-    const { options, failedTries } = holding();
+    const { options, failedAtLeast } = holding();
     const proxy = await through(target, options);
     const ws = new WebSocket(`ws://${proxy.host}:${proxy.port}/socket`);
     onTestFinished(() => ws.terminate());
     const heard = once(ws, 'message');
-    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    await failedAtLeast(2);
     await comeUp();
     expect(String((await heard)[0])).toBe('hello');
   });
@@ -1619,16 +1639,19 @@ describe('a request held while the target is down', () => {
   });
 
   it('leaves no connection behind for a client that went away while it was held', async () => {
-    const { options, failedTries } = holding();
+    const { options, failedTries, failedAtLeast } = holding();
     const { server, proxy } = await servedThrough(await downTarget(), options);
+    virtualTime();
     const socket = await connected(proxy);
     socket.write('GET /api/x HTTP/1.1\r\nHost: h\r\n\r\n');
-    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    await failedAtLeast(1);
+    await vi.advanceTimersByTimeAsync(HOLD_EVERY);
+    await failedAtLeast(2);
     socket.destroy();
     await holdsNoSocket(server);
-    const tries = failedTries();
-    await holdsNoSocket(server);
-    await vi.waitFor(() => expect(failedTries()).toBeLessThanOrEqual(tries + 1));
+    /* The client went during a pause between two tries: no try comes after it, and nothing of the hold waits on the clock. */
+    expect(vi.getTimerCount()).toBe(0);
+    expect(failedTries()).toBe(2);
   });
 
   it('answers 502 at once for a target that is down when it holds nothing', async () => {
