@@ -1402,6 +1402,8 @@ describe('the filter groups and search of Machines (#1020)', () => {
     showIn(language);
     await screen.findByRole('table');
     const t = { en, ru }[language];
+    /* The phones under the machines have loaded, so the machines' count is the one status line. */
+    await screen.findByText(t.phones.empty);
 
     const pool = screen.getByRole('region', { name: t.machines.pool });
     const figures = [...pool.querySelectorAll('.pool-facts dd')];
