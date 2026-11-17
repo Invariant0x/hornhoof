@@ -27,12 +27,12 @@ import { HOLD } from '../src/net/proxy.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
 import { TEST_SECRET, until as untilState } from './helpers.js';
-import { prepareSharedDatabase } from './helpers-db.js';
-import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, SLEEPER, worker, workerRound, type Company } from './worker-keeper-fixture.js';
+import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, prepareCompany, SLEEPER, worker, workerRound, type Company } from './worker-keeper-fixture.js';
 import { controlledTime, fetchApp, manualTime, registerStep, until } from './worker-keeper-time.js';
 
-/* The embedded database opens as the file is collected, so its cold start is no test's time. */
-await prepareSharedDatabase();
+/* The embedded database opens, and the company's first app is built on it and set up, as the file is collected: their
+   cold start is no test's time. */
+await prepareCompany();
 
 const LOOPBACK = '127.0.0.1';
 

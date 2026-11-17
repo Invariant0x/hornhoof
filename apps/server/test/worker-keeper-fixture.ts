@@ -14,7 +14,7 @@ import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { WorkerKeeper, type WorkerKeeperOptions, type WorkerStatus } from '../src/modules/keeper/worker.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { fakeLease } from './fake-lease.js';
-import { as, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { as, prepareApp, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 import { appAt, fetchApp, manualTime, registerStep } from './worker-keeper-time.js';
 
 /* What the tests of a joined machine's keeper share: the company's server with its keeper, and a worker's keeper beside it. */
@@ -24,6 +24,8 @@ export const hostIdOf = (machineKey: string) => hashToken(`hornhoof-host:${machi
 export const HOST_ID = hostIdOf('host-0000-abcd');
 export const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 export const DAY_MS = 86_400_000;
+/* How the company's server is configured in these tests. */
+const COMPANY_ENV = { TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID };
 /* A stand-in for an frpc child: it sleeps until it is stopped. */
 export const SLEEPER = { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
 
@@ -86,11 +88,15 @@ export async function doorBefore(appPort: number, intercept: Intercept): Promise
   return port;
 }
 
+/* The cold start of the company's first app, its database and the setup of its company, before any test of a file that
+   calls this at its top. */
+export const prepareCompany = () => prepareApp(COMPANY_ENV);
+
 /* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
    reports the test's own address as the place to dial it at. With manual time, bootstrap takes its steps directly
    instead of waiting for recurring timers. */
 export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept, manual = manualTime()) {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
+  const { app, db, config } = await testApp({ ...COMPANY_ENV, ...env });
   const ceo = await setUpCompany(app);
   await listenAt(port => app.listen({ host: '127.0.0.1', port }));
   const appPort = (app.server.address() as AddressInfo).port;
