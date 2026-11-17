@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { useLanguage, useT, type Language } from '../i18n';
 import { changes, partsAsTokens, wordsOf, type Piece, type Token } from './catalog-diff';
 
@@ -38,15 +38,37 @@ function Slot({ type }: { type: string }) {
   return <span className="outbound-slot">{slots[type] ?? type}</span>;
 }
 
+const MARKS = { added: 'ins', removed: 'del' } as const;
+
+/* A text with the spaces at its edges apart from its words. */
+const edgesOf = (text: string): [string, string, string] => {
+  const [, lead = '', words = '', trail = ''] = /^(\s*)(.*?)(\s*)$/s.exec(text)!;
+  return [lead, words, trail];
+};
+
+/* One change, its mark covering words only: the spaces at its edges stand outside it, and words put in right after words
+   taken out with no space between get one outside both, so that neither direction runs them together. */
+function Change({ piece, afterTakenOut }: { piece: Piece & { change: 'added' | 'removed' }; afterTakenOut: boolean }) {
+  const Mark = MARKS[piece.change];
+  const [lead, words, trail] = piece.slot === undefined ? edgesOf(piece.text) : ['', '', ''];
+  const gap = piece.change === 'added' && afterTakenOut && !lead ? ' ' : '';
+  const marked = piece.slot === undefined ? words : <Slot type={piece.slot} />;
+  return <>{gap}{lead}{marked && <Mark>{marked}</Mark>}{trail}</>;
+}
+
+/* Whether a piece ends in words taken out, with no space after them. */
+const endsTakenOut = (piece: Piece | undefined): boolean => piece?.change === 'removed' && (piece.slot !== undefined || (/\S$/.test(piece.text)));
+
 function Words({ pieces }: { pieces: readonly Piece[] }) {
   return (
     <>
-      {pieces.map((piece, at) => {
-        const said = piece.slot === undefined ? piece.text : <Slot type={piece.slot} />;
-        if (piece.change === 'added') return <ins key={at}>{said}</ins>;
-        if (piece.change === 'removed') return <del key={at}>{said}</del>;
-        return <span key={at}>{said}</span>;
-      })}
+      {pieces.map((piece, at) =>
+        piece.change === 'same' ? (
+          <span key={at}>{piece.slot === undefined ? piece.text : <Slot type={piece.slot} />}</span>
+        ) : (
+          <Fragment key={at}><Change piece={{ ...piece, change: piece.change }} afterTakenOut={endsTakenOut(pieces[at - 1])} /></Fragment>
+        ),
+      )}
     </>
   );
 }
@@ -56,21 +78,21 @@ const unchanged = (tokens: readonly Token[]): Piece[] => tokens.map(token => ({ 
 function Changes({ entry, revision }: { entry: ShownEntry; revision: ShownRevision }) {
   const v = useT().outboundSetup.view;
   const inUse = entry.revisions.find(r => r.revision === entry.current);
-  if (!inUse) return <p className="outbound-note">{v.isNew}</p>;
-  if (inUse.revision === revision.revision) return <p className="outbound-note">{v.inUseNow}</p>;
+  if (!inUse) return <p className="outbound-note" dir="auto">{v.isNew}</p>;
+  if (inUse.revision === revision.revision) return <p className="outbound-note" dir="auto">{v.inUseNow}</p>;
   const subject = changes(subjectOf(inUse), subjectOf(revision));
   const text = changes(textOf(inUse), textOf(revision));
   const same = [...subject, ...text].every(piece => piece.change === 'same');
   return (
     <div className="outbound-changes" role="group" aria-label={v.changesFrom(inUse.revision)}>
-      <b>{v.changesFrom(inUse.revision)}</b>
+      <b dir="auto">{v.changesFrom(inUse.revision)}</b>
       {same ? (
-        <p className="outbound-note">{v.same}</p>
+        <p className="outbound-note" dir="auto">{v.same}</p>
       ) : (
         <>
-          <small>{v.key}</small>
-          {templateOf(revision.value) && <p className="outbound-words"><Words pieces={subject} /></p>}
-          <p className="outbound-words"><Words pieces={text} /></p>
+          <small dir="auto">{v.key}</small>
+          {templateOf(revision.value) && <p className="outbound-words" dir="auto"><Words pieces={subject} /></p>}
+          <p className="outbound-words" dir="auto"><Words pieces={text} /></p>
         </>
       )}
     </div>
@@ -85,23 +107,23 @@ export function RevisionView({ id, entry, revision, children }: { id: string; en
   return (
     <section className="outbound-view" id={id} aria-label={s.revision(revision.revision)}>
       <p className="outbound-meta">
-        {entry.locale && <span>{`${v.language}: ${languageName(entry.locale, language)}`}</span>}
-        <span>{v.proposed(revision.createdBy.name ?? '', whenOf(language, revision.createdAt))}</span>
+        {entry.locale && <span dir="auto">{`${v.language}: ${languageName(entry.locale, language)}`}</span>}
+        <span dir="auto">{v.proposed(revision.createdBy.name ?? '', whenOf(language, revision.createdAt))}</span>
       </p>
       {template ? (
         <dl className="outbound-facts">
           <dt>{v.subject}</dt>
-          <dd>{template.subject ?? v.noSubject}</dd>
+          <dd dir="auto">{template.subject ?? v.noSubject}</dd>
           <dt>{v.text}</dt>
           <dd>
-            <p className="outbound-words"><Words pieces={unchanged(partsAsTokens(template.parts))} /></p>
-            <small>{v.places}</small>
+            <p className="outbound-words" dir="auto"><Words pieces={unchanged(partsAsTokens(template.parts))} /></p>
+            <small dir="auto">{v.places}</small>
           </dd>
         </dl>
       ) : (
         <dl className="outbound-facts">
           <dt>{v.value}</dt>
-          <dd>{revision.summary}</dd>
+          <dd dir="auto">{revision.summary}</dd>
         </dl>
       )}
       <Changes entry={entry} revision={revision} />
