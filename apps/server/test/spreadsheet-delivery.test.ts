@@ -642,7 +642,9 @@ describe('the edges of a table delivered to a person', () => {
     expect(said(await send({ person: randomUUID(), attachment }))).toEqual({ isError: true, text: 'There is no active person with that id in this company.' });
     expect(said(await send({ person: c.clara.id, attachment: randomUUID() }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
     expect(said(await send({ person: c.clara.id, attachment: salesFile.json().id }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
-    expect(said(await send({ person: c.ceo.id, attachment: salesFile.json().id })).isError).toBe(false);
+    /* The CEO sees the Sales file, but its sender still may not read or forward it. */
+    expect(said(await send({ person: c.ceo.id, attachment: salesFile.json().id }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
+    expect(said(await send({ person: c.ceo.id, attachment })).isError).toBe(false);
 
     await invitePerson(c.app, c.ceoSession, { name: 'Clara', email: 'clara.two@acme.test', access: { departments: [c.mkt.id] } });
     expect(said(await send({ person: 'Clara', attachment })).text).toContain('More than one person is named "Clara"');
