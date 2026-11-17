@@ -4,7 +4,7 @@ Task: #1204. Reviewer: Architect. Date: 2026-11-17 UTC.
 
 ## Verdict and versions
 
-**FAIL on branch `6c0cbd7271a3ad6a8d61647a2f7345c830c6eeb1`.** The column-name filter does not prevent secrets in readable JSON payloads, and pre-existing column grants can retain access to excluded hashes. Security #1207 reproduced and repaired these defects, but its SQL patch is absent from the pinned integration snapshot. This report does not grant release approval.
+**FAIL on branch `6c0cbd7271a3ad6a8d61647a2f7345c830c6eeb1`.** The column-name filter does not prevent secrets in readable JSON payloads, and grants from the same initialization block keep excluded hash columns readable. Security #1207 reproduced and repaired these defects, but its SQL patch is absent from the pinned integration snapshot. This report does not grant release approval.
 
 The #1204 review work is **DONE_WITH_CONCERNS**: two additional defects were repaired locally with RED/GREEN evidence. The repair branch requires independent Review and Security before shared integration. Remaining SQL work belongs to #1207; it was not duplicated here.
 
@@ -132,3 +132,16 @@ Independent Review and Security review this document and the #1204 repair branch
 ## Review corrections
 
 Code reviewer, 2026-11-17: F1 now quotes the reviewed expression and line exactly. F4 now names the real cause, shown by a probe on the base: grants of the same block, not grants surviving the reset. Findings, severities and dispositions are unchanged.
+
+
+## Security verification
+
+Security engineer, 2026-11-17. Input document candidate `19ed27e0-96c2-49f3-9272-4005a8bd5a6f`, SHA-256 `0129cea89eb8cff91f86db5fd243ef8fe738efaa2be0bfcd61b7c9acc1df3ef8`, saved on `c9f26fb1d14034de77dbf5769f042fd0e9217836`. Security corrected one remaining contradiction: the opening verdict still blamed old column grants even though F4 and Review corrections already explain that the reset removes them. The opening now names grants issued later in the same block. Findings, severity, SQL disposition, code and CSV are unchanged.
+
+The 35 entries of the author manifest and 19 entries of its raw-evidence manifest were recomputed successfully. The 42-row API inventory was read. Its SHA-256 is `250bb6ea686edac529b9db0412d569406e105551361b1ecc0ac23478a0c1c5c2`. Review archive `t1204-review-checks.tar.gz` has SHA-256 `62d2de473777d6c3be1f57bc38c391b55980a1390a2fd42d33b2d1c6c32610ad`. Complete Review outputs on `2d33d94322b763b6feded12c8aadbf558d79db92` show 3 + 8 + 33 + 27 + 40 = 111 passed, all exit 0. Production and test source trees match the final executable commit `80aa63bae277e64373e69b0ceea7048664ef42d0` and the input document commit. All three recorded source/test SHA-256 fingerprints also match. These passed checks were not rerun. The RED output shows exactly the wrong head marker and 500 instead of 401; the SQL probe confirms before=false, granted=true, afterRegrant=false.
+
+The two runtime repairs were independently inspected: the internal header length is checked in bytes before timingSafeEqual; request attribution is checked against database-loaded orchestrator identities, including the answer agent. The running job supplies the caller kind/company, API arguments supply no internal headers or identity, and use_tool keeps the same caller. The foreign-company regression verifies both a denied foreign edit and an allowed local edit. These are representative tested boundaries, not proof of every API route or multi-company SQL. The one-company deployment assumption and intentional assistant-manager exception remain explicit.
+
+A fresh fetch found `iv-orchestrator-all` unchanged at `6c0cbd7271a3ad6a8d61647a2f7345c830c6eeb1`, `turn-31` at `2d77df040d12be495ced044c13937b7ea6c7d69e`; `git log --oneline origin/turn-31..origin/iv-orchestrator-all` again printed no commits. No integration was performed. The document still reports FAIL for the original branch snapshot, not a release approval. Accepted fixes of other tasks must be assessed on the combined candidate by its owner.
+
+`codex review --base review-1204-base` failed before code inspection because bwrap could not create a namespace. It is NOT_RUN; manual independent source inspection was performed. No new runtime, browser, full-suite or live-data check was run. The Review file durations (boundary 38.60 s, decision-context 43.22 s, request-choice-feedback 31.56 s, auth 33.73 s) exceed the local file budget and are retained as timing concerns. They are not hidden by the passed assertion counts.
