@@ -1,14 +1,20 @@
 import { expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import { agentRole, HIDDEN, openAgentSql, readerRole, SECRET, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
+import { agentRole, HIDDEN, isKey, openAgentSql, readerRole, SECRET, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
 import { companies, people } from '../../src/db/schema.js';
 import { privatePostgres } from './helpers.js';
 
+/* Operations reads no hidden table and no secret column; the orchestrator reads every table and column but the keys. */
 async function deniedReads(sql: AgentSql, mode: SqlMode): Promise<void> {
-  for (const table of HIDDEN) await expect(sql.run(`SELECT 1 FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+  for (const table of HIDDEN) {
+    if (mode === 'read') await expect(sql.run(`SELECT 1 FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+    else expect((await sql.run(`SELECT 1 FROM "${table}"`, mode))[0]!.changed, table).toBe(0);
+  }
   for (const [table, columns] of Object.entries(SECRET)) {
-    for (const column of columns) await expect(sql.run(`SELECT "${column}" FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+    for (const column of columns.filter(column => mode === 'read' || isKey(column))) {
+      await expect(sql.run(`SELECT "${column}" FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+    }
   }
 }
 
