@@ -1,0 +1,22 @@
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+taskByRef                      modules.tasks.views                    7   0.0%     56.0
+line                           modules.tasks.views                    7  16.7%     35.4
+fileViews                      modules.tasks.views                    6  11.1%     31.3
+agentSeesTask                  modules.tasks.views                    5   0.0%     30.0
+taskDetail                     modules.tasks.views                   10  62.5%     15.3
+names                          modules.tasks.views                    6  45.5%     11.8
+byOf                           modules.tasks.views                    9  78.6%      9.8
+internalCall                   auth.internal                          9  93.8%      9.0
+nameLookups                    modules.tasks.views                    9 100.0%      9.0
+holderOffline                  modules.tasks.views                    5  66.7%      5.9
+forWhom                        modules.tasks.views                    3 100.0%      3.0
+orchestratorDecisionHeaders    auth.internal                          2 100.0%      2.0
+proofsOf                       modules.tasks.views                    2 100.0%      2.0
+taskLines                      modules.tasks.views                    1   0.0%      2.0
+orchestratorHeaders            auth.internal                          1 100.0%      1.0
+Wrote /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server/.metrics/crap.edn

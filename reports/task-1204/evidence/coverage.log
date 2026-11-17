@@ -1,0 +1,75 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+      Coverage enabled with v8
+
+ ✓ test/decision-context.test.ts (33 tests) 15236ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 2516ms
+     ✓ is the CEO or the delegate who wrote into it last, unchanged by a letter of an agent or notices of Hornhoof, and the owner otherwise 324ms
+   ✓ tools only the CEO asks for, in a turn (3)
+     ✓ go as the owner after a person without the right wrote, and say so only when the company has no owner 403ms
+     ✓ go as the CEO delegate in a turn that answers the delegate, whose own limits the routes see 332ms
+     ✓ change an employee's own subscription after a person without the right wrote, as the owner 372ms
+   ✓ answer_request in a turn (4)
+     ✓ takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom 688ms
+     ✓ takes any decision as the owner in a turn that answers a person who is neither the CEO nor the delegate 684ms
+     ✓ goes as the owner when only an employee or Hornhoof wrote, and keeps the CEO after their notices 628ms
+     ✓ applies cards in any turn: as the delegate in a turn of theirs, as the owner in one of an employee or another person 522ms
+   ✓ a decision of the orchestrator as it is kept (3)
+     ✓ waits for words going into the turn, and goes by them once they are kept 362ms
+   ✓ words typed into a running orchestrator turn (2)
+     ✓ leave the turn without a person from before they are typed until their message is kept 363ms
+   ✓ words of a person to an agent directly (1)
+     ✓ answer only the questions that person may take 305ms
+   ✓ a turn's mark that it answers the CEO (4)
+     ✓ leaves a release approval and a choice waiting for their own answer when the CEO delegate writes to the agent 315ms
+     ✓ gives no right to machines by itself, set to true: they go by the last person who wrote and their own right 433ms
+     ✓ gives no right to machines by itself, set to false: they go by the last person who wrote and their own right 468ms
+     ✓ does not make a repeated turn of the CEO delegate a click on the computer's access 333ms
+   ✓ who spoke last in a turn, for a command on a machine (4)
+     ✓ counts a notice that names a person as that person's words, and one of Hornhoof, of an employee or of a click on access as nobody's 326ms
+     ✓ refuses when whose words came into the turn is not known: no person, no sender, or a notice of a kind it does not know 327ms
+     ✓ counts the letters a person sent that woke an inbox turn 312ms
+   ✓ management after the turn that answered a person ended (7)
+     ✓ lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked 1062ms
+     ✓ takes a person's decisions, people and access in a later turn too, as the owner 492ms
+     ✓ hires on the word of an employee, as the owner, when no person ever asked 442ms
+     ✓ lets a head hire and change its own department in its next turn for the person who asked it, and nothing outside it 352ms
+     ✓ installs a version as the owner when the last person who asked is not the CEO or the delegate 314ms
+ ✓ test/request-choice-feedback.test.ts (27 tests) 7675ms
+   ✓ choice feedback without a pick (2)
+     ✓ accepts HTTP feedback as neutral text and delivers the actual person to its author 2350ms
+   ✓ lets the actual authorized delegate person answer neutrally 353ms
+   ✓ rechecks authority when the answer is committed 385ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 5664ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 2738ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 837ms
+     ✓ says what a call lacks, and which tools there are when the name is wrong 534ms
+     ✓ runs a tool of a department's own for the department it names, and without one names the departments 400ms
+ ✓ test/orchestrator-api-boundaries.test.ts (3 tests) 4492ms
+   ✓ distinguishes a department head, the orchestrator and a person when showing who decided 3791ms
+   ✓ keeps owner API and delegation off other agents and confines a foreign orchestrator to its own company 317ms
+
+ Test Files  4 passed (4)
+      Tests  71 passed (71)
+   Start at  05:02:46
+   Duration  50.13s (tests 78%, import 14%, transform 8%)
+
+ % Coverage report from v8
+---------------|---------|----------|---------|---------|-----------------------
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+---------------|---------|----------|---------|---------|-----------------------
+All files      |   75.18 |    56.19 |   67.21 |   80.89 |
+ auth          |   94.73 |    94.73 |     100 |     100 |
+  internal.ts  |   94.73 |    94.73 |     100 |     100 | 28
+ modules/tasks |   71.92 |    49.01 |   65.51 |   77.33 |
+  views.ts     |   71.92 |    49.01 |   65.51 |   77.33 | ...15,248-251,285-291
+---------------|---------|----------|---------|---------|-----------------------
+
+=============================== Coverage summary ===============================
+Statements   : 75.18% ( 100/133 )
+Branches     : 56.19% ( 68/121 )
+Functions    : 67.21% ( 41/61 )
+Lines        : 80.89% ( 72/89 )
+================================================================================

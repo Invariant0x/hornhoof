@@ -1,0 +1,22 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/orchestrator-api-boundaries.test.ts (3 tests) 1353ms
+   ✓ distinguishes a department head, the orchestrator and a person when showing who decided 1075ms
+ ✓ test/decision-context.test.ts (33 tests) 7898ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 836ms
+   ✓ management after the turn that answered a person ended (7)
+     ✓ lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked 710ms
+     ✓ takes a person's decisions, people and access in a later turn too, as the owner 399ms
+ ✓ test/request-choice-feedback.test.ts (27 tests) 3688ms
+   ✓ choice feedback without a pick (2)
+     ✓ accepts HTTP feedback as neutral text and delivers the actual person to its author 1130ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 2895ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 1680ms
+
+ Test Files  4 passed (4)
+      Tests  71 passed (71)
+   Start at  04:53:02
+   Duration  23.11s (tests 84%, import 14%, transform 2%)

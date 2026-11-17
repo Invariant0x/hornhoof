@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/orchestrator-api-boundaries.test.ts (3 tests) 1538ms
+   ✓ distinguishes a department head, the orchestrator and a person when showing who decided 1256ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  05:11:26
+   Duration  7.48s (tests 55%, import 26%, transform 18%)

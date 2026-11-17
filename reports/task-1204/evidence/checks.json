@@ -1,0 +1,268 @@
+[
+  {
+    "log": "baseline.log",
+    "candidate": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-any-tool.test.ts",
+      "test/orchestrator-self.test.ts",
+      "test/decision-context.test.ts",
+      "test/decisions-answers-fallback.test.ts",
+      "test/decisions-answers-department.test.ts",
+      "test/decisions-answers-ceo.test.ts",
+      "test/request-choice-feedback.test.ts",
+      "test/sql-check.test.ts",
+      "test/agent-sql-permissions.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 266,
+    "exit": 0
+  },
+  {
+    "log": "boundaries-red-final.log",
+    "candidate": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-api-boundaries.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 1,
+    "exit": 1,
+    "note": "Base plus the uncommitted regression at the original test version. Two expected product failures; three total tests."
+  },
+  {
+    "log": "boundaries-green.log",
+    "candidate": "88c4e9371f77e1e9dff85700195f2a761cacd679",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-api-boundaries.test.ts",
+      "test/orchestrator-any-tool.test.ts",
+      "test/decision-context.test.ts",
+      "test/request-choice-feedback.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 71,
+    "exit": 0
+  },
+  {
+    "log": "auth-neighbors.log",
+    "candidate": "88c4e9371f77e1e9dff85700195f2a761cacd679",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/auth.test.ts",
+      "test/route-access.test.ts",
+      "test/attachment-token.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 53,
+    "exit": 0
+  },
+  {
+    "log": "owner-routes.log",
+    "candidate": "88c4e9371f77e1e9dff85700195f2a761cacd679",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-control.test.ts",
+      "test/node-commands.test.ts",
+      "test/assistants.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 66,
+    "exit": 0,
+    "note": "The last selector does not exist. Two actual files executed; no assistant-suite claim."
+  },
+  {
+    "log": "web.log",
+    "candidate": "88c4e9371f77e1e9dff85700195f2a761cacd679",
+    "cwd": "apps/web",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/TaskPanel.test.tsx",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 41,
+    "exit": 0
+  },
+  {
+    "log": "coverage.log",
+    "candidate": "88c4e9371f77e1e9dff85700195f2a761cacd679",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-api-boundaries.test.ts",
+      "test/orchestrator-any-tool.test.ts",
+      "test/decision-context.test.ts",
+      "test/request-choice-feedback.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--coverage.enabled",
+      "--coverage.include=src/auth/internal.ts",
+      "--coverage.include=src/modules/tasks/views.ts",
+      "--coverage.reporter=text",
+      "--coverage.reporter=lcov"
+    ],
+    "passed": 71,
+    "exit": 0
+  },
+  {
+    "log": "final-green.log",
+    "candidate": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-api-boundaries.test.ts",
+      "test/orchestrator-any-tool.test.ts",
+      "test/decision-context.test.ts",
+      "test/request-choice-feedback.test.ts",
+      "test/auth.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism",
+      "--coverage.enabled",
+      "--coverage.include=src/auth/internal.ts",
+      "--coverage.include=src/modules/tasks/views.ts",
+      "--coverage.reporter=text",
+      "--coverage.reporter=lcov"
+    ],
+    "passed": 111,
+    "exit": 0
+  },
+  {
+    "log": "final-boundaries.log",
+    "candidate": "80aa63bae277e64373e69b0ceea7048664ef42d0",
+    "cwd": "apps/server",
+    "command": [
+      "npx",
+      "--no-install",
+      "vitest",
+      "run",
+      "test/orchestrator-api-boundaries.test.ts",
+      "--maxWorkers=1",
+      "--no-file-parallelism"
+    ],
+    "passed": 3,
+    "exit": 0,
+    "note": "Stronger foreign-company probe uses an ordinary person title edit, proves the same edit works for local CEO, and checks the foreign refusal text. Runtime source and other test inputs equal 2ac75e76e."
+  },
+  {
+    "name": "server-types",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "-p",
+      "apps/server/tsconfig.json",
+      "--noEmit"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0,
+    "candidate": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe",
+    "log": "final-server-types.log"
+  },
+  {
+    "name": "test-types",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "-p",
+      "apps/server/tsconfig.eslint.json",
+      "--noEmit"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0,
+    "candidate": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe",
+    "log": "final-test-types.log"
+  },
+  {
+    "name": "lint",
+    "command": [
+      "npx",
+      "--no-install",
+      "eslint",
+      "apps/server/src/auth/internal.ts",
+      "apps/server/src/modules/tasks/views.ts",
+      "apps/server/test/orchestrator-api-boundaries.test.ts"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0,
+    "candidate": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe",
+    "log": "final-lint.log"
+  },
+  {
+    "name": "test-types",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "-p",
+      "apps/server/tsconfig.eslint.json",
+      "--noEmit"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0,
+    "candidate": "80aa63bae277e64373e69b0ceea7048664ef42d0",
+    "log": "submission-test-types.log"
+  },
+  {
+    "name": "lint",
+    "command": [
+      "npx",
+      "--no-install",
+      "eslint",
+      "apps/server/src/auth/internal.ts",
+      "apps/server/src/modules/tasks/views.ts",
+      "apps/server/test/orchestrator-api-boundaries.test.ts"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0,
+    "candidate": "80aa63bae277e64373e69b0ceea7048664ef42d0",
+    "log": "submission-lint.log"
+  }
+]

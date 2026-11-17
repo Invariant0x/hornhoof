@@ -1,0 +1,23 @@
+[
+  {
+    "name": "crapper",
+    "command": [
+      "crapper",
+      "--use-existing-coverage",
+      "src/auth/internal.ts",
+      "src/modules/tasks/views.ts"
+    ],
+    "cwd": "apps/server",
+    "exit": 0
+  },
+  {
+    "name": "dryer",
+    "command": [
+      "dryer",
+      "src/auth/internal.ts",
+      "src/modules/tasks/views.ts"
+    ],
+    "cwd": "apps/server",
+    "exit": 0
+  }
+]

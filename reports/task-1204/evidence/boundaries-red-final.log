@@ -1,0 +1,48 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ❯ test/orchestrator-api-boundaries.test.ts (3 tests | 2 failed) 4050ms
+   × distinguishes a department head, the orchestrator and a person when showing who decided 2565ms
+   × refuses forged internal headers, including a same-character-length value with different byte length 658ms
+   ✓ keeps owner API and delegation off other agents and confines a foreign orchestrator to its own company 767ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/orchestrator-api-boundaries.test.ts > distinguishes a department head, the orchestrator and a person when showing who decided
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ test/orchestrator-api-boundaries.test.ts:23:85
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/orchestrator-api-boundaries.test.ts > refuses forged internal headers, including a same-character-length value with different byte length
+AssertionError: expected 500 to be 401 // Object.is equality
+
+- Expected
++ Received
+
+- 401
++ 500
+
+ ❯ test/orchestrator-api-boundaries.test.ts:42:33
+     40|   for (const secret of ['0'.repeat(64), '\u00e9'.repeat(64)]) {
+     41|     const response = await c.app.inject({ url: '/api/me', headers: { '…
+     42|     expect(response.statusCode).toBe(401);
+       |                                 ^
+     43|     expect(response.json().error.reason).toBe('signed_out');
+     44|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  04:51:58
+   Duration  8.92s (tests 81%, import 12%, transform 7%)

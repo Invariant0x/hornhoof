@@ -1,0 +1,146 @@
+{
+  "base": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
+  "candidate": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe",
+  "grown": [],
+  "verdicts": [
+    {
+      "name": "taskByRef",
+      "namespace": "modules.tasks.views",
+      "complexity": 7,
+      "coverage": 0,
+      "crap": 56,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "line",
+      "namespace": "modules.tasks.views",
+      "complexity": 7,
+      "coverage": 16.6667,
+      "crap": 35.3564,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "fileViews",
+      "namespace": "modules.tasks.views",
+      "complexity": 6,
+      "coverage": 11.1111,
+      "crap": 31.284,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "agentSeesTask",
+      "namespace": "modules.tasks.views",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "taskDetail",
+      "namespace": "modules.tasks.views",
+      "complexity": 10,
+      "coverage": 62.5,
+      "crap": 15.2734,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "names",
+      "namespace": "modules.tasks.views",
+      "complexity": 6,
+      "coverage": 45.4545,
+      "crap": 11.8422,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "byOf",
+      "namespace": "modules.tasks.views",
+      "complexity": 9,
+      "coverage": 78.5714,
+      "crap": 9.797,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "internalCall",
+      "namespace": "auth.internal",
+      "complexity": 9,
+      "coverage": 93.75,
+      "crap": 9.0198,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "nameLookups",
+      "namespace": "modules.tasks.views",
+      "complexity": 9,
+      "coverage": 100,
+      "crap": 9,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "holderOffline",
+      "namespace": "modules.tasks.views",
+      "complexity": 5,
+      "coverage": 66.6667,
+      "crap": 5.9259,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "forWhom",
+      "namespace": "modules.tasks.views",
+      "complexity": 3,
+      "coverage": 100,
+      "crap": 3,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "orchestratorDecisionHeaders",
+      "namespace": "auth.internal",
+      "complexity": 2,
+      "coverage": 100,
+      "crap": 2,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "proofsOf",
+      "namespace": "modules.tasks.views",
+      "complexity": 2,
+      "coverage": 100,
+      "crap": 2,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "taskLines",
+      "namespace": "modules.tasks.views",
+      "complexity": 1,
+      "coverage": 0,
+      "crap": 2,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "orchestratorHeaders",
+      "namespace": "auth.internal",
+      "complexity": 1,
+      "coverage": 100,
+      "crap": 1,
+      "baseCc": null,
+      "verdict": "ok"
+    }
+  ],
+  "changedLines": {
+    "covered": 6,
+    "total": 6
+  }
+}

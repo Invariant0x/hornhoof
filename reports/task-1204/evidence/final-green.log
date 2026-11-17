@@ -1,0 +1,69 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+      Coverage enabled with v8
+
+ ✓ test/decision-context.test.ts (33 tests) 11152ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 1508ms
+   ✓ answer_request in a turn (4)
+     ✓ takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom 319ms
+     ✓ takes any decision as the owner in a turn that answers a person who is neither the CEO nor the delegate 408ms
+     ✓ goes as the owner when only an employee or Hornhoof wrote, and keeps the CEO after their notices 333ms
+     ✓ applies cards in any turn: as the delegate in a turn of theirs, as the owner in one of an employee or another person 304ms
+   ✓ a turn's mark that it answers the CEO (4)
+     ✓ gives no right to machines by itself, set to false: they go by the last person who wrote and their own right 380ms
+     ✓ does not make a repeated turn of the CEO delegate a click on the computer's access 328ms
+   ✓ who spoke last in a turn, for a command on a machine (4)
+     ✓ counts a notice that names a person as that person's words, and one of Hornhoof, of an employee or of a click on access as nobody's 325ms
+   ✓ management after the turn that answered a person ended (7)
+     ✓ lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked 928ms
+     ✓ takes a person's decisions, people and access in a later turn too, as the owner 414ms
+     ✓ hires on the word of an employee, as the owner, when no person ever asked 326ms
+     ✓ lets a head hire and change its own department in its next turn for the person who asked it, and nothing outside it 320ms
+     ✓ installs a Hornhoof version and calls an update off in its next turn, for the CEO who asked 308ms
+     ✓ installs a version as the owner when the last person who asked is not the CEO or the delegate 342ms
+ ✓ test/request-choice-feedback.test.ts (27 tests) 5056ms
+   ✓ choice feedback without a pick (2)
+     ✓ accepts HTTP feedback as neutral text and delivers the actual person to its author 1323ms
+ ✓ test/auth.test.ts (40 tests) 10984ms
+   ✓ POST /api/auth/login (10)
+     ✓ logs in with a differently cased, padded email 1776ms
+     ✓ stops the 11th attempt for one email within 15 minutes and leaves other emails alone 362ms
+     ✓ counts per email and address, so failures from elsewhere never lock the owner out 338ms
+     ✓ takes the visitor's address from X-Forwarded-For only from the tunnel 707ms
+     ✓ counts sign-ins through a worker as one address 839ms
+     ✓ stops one email after 50 attempts in an hour from any addresses, and other emails go on 2096ms
+     ✓ deletes expired sessions when someone signs in 324ms
+   ✓ moving a session from before the switch to __Host-hh_session (17)
+     ✓ leaves another person's session alone 350ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 4337ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 2514ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 418ms
+     ✓ answers a decision itself as the owner's answer, and people see that the orchestrator gave it 334ms
+ ✓ test/orchestrator-api-boundaries.test.ts (3 tests) 2454ms
+   ✓ distinguishes a department head, the orchestrator and a person when showing who decided 1861ms
+   ✓ keeps owner API and delegation off other agents and confines a foreign orchestrator to its own company 314ms
+
+ Test Files  5 passed (5)
+      Tests  111 passed (111)
+   Start at  05:05:18
+   Duration  48.93s (tests 84%, import 13%, transform 3%)
+
+ % Coverage report from v8
+---------------|---------|----------|---------|---------|-----------------------
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+---------------|---------|----------|---------|---------|-----------------------
+All files      |   76.25 |    55.83 |   68.75 |   81.52 |
+ auth          |   95.23 |    94.44 |     100 |     100 |
+  internal.ts  |   95.23 |    94.44 |     100 |     100 | 29
+ modules/tasks |   72.88 |    49.01 |   67.21 |   77.92 |
+  views.ts     |   72.88 |    49.01 |   67.21 |   77.92 | ...18,251-254,288-294
+---------------|---------|----------|---------|---------|-----------------------
+
+=============================== Coverage summary ===============================
+Statements   : 76.25% ( 106/139 )
+Branches     : 55.83% ( 67/120 )
+Functions    : 68.75% ( 44/64 )
+Lines        : 81.52% ( 75/92 )
+================================================================================

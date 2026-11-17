@@ -1,0 +1,260 @@
+[
+  [
+    "Method and route",
+    "Data reaching api answer",
+    "Classification and conditions",
+    "Source"
+  ],
+  [
+    "GET /api/me; GET /api/people; PATCH /api/people/:id; PUT /api/people/:id/ceo-delegate",
+    "Names, email, title, status, scope, Telegram username/account ID, assistant owner/program/eventsUrl/skillsUrl",
+    "Personal data. Assistant URLs may contain user-provided query credentials; no issued assistant key in PersonView.",
+    "modules/people/views.ts:12; modules/people/routes.ts:215; modules/auth/routes.ts:83"
+  ],
+  [
+    "POST /api/people/invite; POST /api/people/:id/invite",
+    "PersonView and inviteUrl containing a newly issued bearer token",
+    "Credential issuance available to owner API.",
+    "modules/people/routes.ts:221,248"
+  ],
+  [
+    "GET /api/invites/:token; POST /api/invites/:token/accept",
+    "Invite recipient/company metadata, accepted person/session",
+    "Requires a valid invite token; not a way to enumerate token values. Session cookie is not copied by api send().",
+    "modules/people/routes.ts:267,274"
+  ],
+  [
+    "GET /api/org; GET /api/agents/:id",
+    "Company structure, people, employee instructions/skills and changes, subscription and integration metadata",
+    "Personal/internal data under existing owner views and masking.",
+    "modules/org/routes.ts:72; modules/agents/routes.ts:581"
+  ],
+  [
+    "GET /api/subscriptions; POST /api/subscriptions; PATCH /api/subscriptions/:id; POST /api/subscriptions/:id/orchestrator",
+    "Plan owner, account emails, machines, labels, usage, budgets, API endpoint, last4",
+    "Personal data and credential metadata. secret_enc is not selected by SubView; endpoint query parameters can carry user-supplied credentials.",
+    "modules/subscriptions/routes.ts:296; modules/subscriptions/views.ts:15"
+  ],
+  [
+    "GET /api/subscriptions/:id/tokens; GET /api/tokens",
+    "Per-plan/per-model usage",
+    "Internal usage and ownership data.",
+    "modules/subscriptions/routes.ts:312,323"
+  ],
+  [
+    "GET /api/subscriptions/:id/recipients; POST /api/subscriptions/:id/credential",
+    "Node IDs, hostnames, public keys, credential version or stored count",
+    "Public keys/metadata, not decrypted saved plan sign-in.",
+    "modules/subscriptions/routes.ts:429,442"
+  ],
+  [
+    "GET /api/machines; GET /api/machines/access; GET /api/machines/here; GET /api/computer",
+    "Machine identities, hostnames, owner and access state",
+    "Machine/person metadata. No browser signing private key returned.",
+    "modules/nodes/routes.ts:248; modules/computer/routes.ts:93,100,126"
+  ],
+  [
+    "GET /api/nodes/commands",
+    "Active decrypted install command with one-use --join code",
+    "Bearer credential reaches the model through generic api, even though dedicated machine_command reports only SHOWN_TO_CEO. Existing test intentionally permits this.",
+    "modules/nodes/command-routes.ts:15,36,58; test/orchestrator-control.test.ts:149"
+  ],
+  [
+    "POST /api/machines/command; POST /api/machines/:id/plans; POST /api/machines/:id/core; POST /api/subscriptions/:id/command; POST /api/subscriptions/connect",
+    "shown notice for orchestrator-created commands, subscription metadata",
+    "No code in the immediate orchestrator answer; it can be read through GET /api/nodes/commands.",
+    "modules/nodes/command.ts:40; modules/nodes/routes.ts:206,214,232; modules/subscriptions/routes.ts:388,404"
+  ],
+  [
+    "POST /api/nodes/join",
+    "Fresh machine/node credentials, nodes[].key",
+    "Conditional on possessing a valid join code. Not unlocked merely by owner headers.",
+    "modules/nodes/routes.ts:102,176"
+  ],
+  [
+    "GET /api/me/key",
+    "publicKey, wrapped private key, salt, iv, iterations",
+    "Encrypted key material; server does not unwrap it. PUT additionally verifies the person password.",
+    "modules/computer/keys.ts:42,53"
+  ],
+  [
+    "POST /api/backups/recovery",
+    "New recovery file: age private identity; public recipient/certificate; link.key and tunnel settings when a public link exists",
+    "Credential issuance available to owner API when lead mode and authority exist. Raw recovery material enters the api answer. No production call made.",
+    "modules/backups/routes.ts:179; modules/backups/recovery.ts:65,81,82"
+  ],
+  [
+    "GET /api/backups; GET /api/backups/recovery; GET /api/backups/:id/warning; POST /api/backups/:id/restore",
+    "Backup metadata, holder machine names, recovery creator/time and restore state",
+    "Personal/internal metadata. GET does not return an existing private recovery identity.",
+    "modules/backups/routes.ts:187,196,231,240"
+  ],
+  [
+    "GET /api/google-sheets; PUT /api/google-sheets",
+    "Service-account/share email, integration metadata, last4",
+    "No saved Google private key in googleSheetsView. PUT accepts credentials supplied by caller.",
+    "modules/google/routes.ts:81,88"
+  ],
+  [
+    "GET /api/repo-host; PUT /api/repo-host; PUT /api/departments/:id/repo-host",
+    "GitHub owner, tokenLast4 and repository metadata",
+    "No decrypted saved GitHub token in hostView.",
+    "modules/departments/repo-hosts.ts:99,106,120"
+  ],
+  [
+    "PUT /api/agents/:id/telegram",
+    "Bot username",
+    "No saved Telegram bot token in response; token supplied by caller. People Telegram identities appear in PersonView.",
+    "modules/telegram/routes.ts:78"
+  ],
+  [
+    "GET /api/departments/:id/briefing; PUT /api/departments/:id/briefing",
+    "Rules, repository URL/branch, author and test settings",
+    "Internal text and user-supplied URLs may contain private data. Stored repo token is not returned.",
+    "modules/briefings/routes.ts:29,34"
+  ],
+  [
+    "GET/POST /api/notebook; GET/POST /api/departments/:id/notebook; PATCH corresponding /:number",
+    "Notebook text and attribution",
+    "Arbitrary private/internal text.",
+    "modules/notebook/routes.ts:42,69,70"
+  ],
+  [
+    "GET /api/tasks; GET /api/tasks/:id; POST /api/tasks; POST /api/tasks/:id/comments",
+    "Task body, logs, request text/options/answers, files and authors",
+    "Arbitrary private content under owner access. Structured fields are not a guarantee that free text contains no secrets.",
+    "modules/tasks/routes.ts:270,292,299,376; modules/tasks/views.ts:219"
+  ],
+  [
+    "GET /api/requests; POST /api/requests/:id; POST /api/requests/:id/explained",
+    "Question/decision contents and answer state",
+    "Private content; marker distinguishes orchestrator after this task fix.",
+    "modules/tasks/routes.ts:415,445,452"
+  ],
+  [
+    "GET /api/turns; GET /api/turns/current; GET /api/departments/:id/tree; GET /api/departments/:id/pipeline; GET /api/departments/:id/backlog",
+    "Task/work metadata and backlog text",
+    "Internal data; backlog text is arbitrary.",
+    "modules/tasks/routes.ts:468,476,485,497; modules/backlog/routes.ts:27"
+  ],
+  [
+    "GET /api/agents/:id/events",
+    "Masked conversation events, messages and tool/result text",
+    "Existing viewer masking still applies; owner sees content allowed by viewerOf/maskEvent. Not a claim all stored events are raw.",
+    "modules/conversation/routes.ts:124"
+  ],
+  [
+    "GET /api/jobs/:id; POST /api/subscriptions/:id/test",
+    "Job result, tail, error, machine and times",
+    "Arbitrary program output may contain private text. Public job response excludes prompt, session and tool token.",
+    "modules/jobs/routes.ts:48,85; modules/jobs/views.ts:8"
+  ],
+  [
+    "GET /api/attachments/:id",
+    "Authorized file or picture bytes",
+    "Private file contents under attachmentForPerson. Generic api treats the body as text and caps 30000 characters; this is not redaction.",
+    "modules/tasks/attachments.ts:511; modules/tools/control.ts:408"
+  ],
+  [
+    "GET /api/phones; GET /api/phones/:id; POST /api/phones/probe; POST /api/phones",
+    "Phone identity/serial, owner, state and available-machine metadata",
+    "Personal/device metadata under phone route authorization.",
+    "modules/phones/routes.ts:20,26,30,34"
+  ],
+  [
+    "GET /api/phones/:id/live; GET /api/phones/:id/live/image; GET /api/tasks/:id/phone-recordings; GET /api/phone-sessions/:id/frames/:sequence/image",
+    "Live phone screen / recorded frame metadata and image bytes",
+    "May contain personal screen content; existing phone/recording checks apply. Binary body is not a useful structured image tool answer.",
+    "modules/phones/routes.ts:53,58,63,67"
+  ],
+  [
+    "GET /api/vault; POST /api/vault; PATCH /api/vault/:id; GET /api/vault/:id/log",
+    "Entry metadata/site/login and audit entries",
+    "No password or TOTP seed returned by vault HTTP routes. The separate vault_entry tool intentionally returns an authorized password/current code.",
+    "modules/vault/routes.ts:22,27,34,49"
+  ],
+  [
+    "GET /api/outbound/contacts; POST /api/outbound/contacts",
+    "Decrypted recipient address, contact/source/evidence/permission data",
+    "Third-party personal data; policy question already belongs to #1193.",
+    "modules/outbound/routes.ts:157,164"
+  ],
+  [
+    "GET /api/outbound; GET /api/requests/:id/outbound-approval; GET /api/outbound/catalog; GET /api/outbound/setup-log; GET /api/outbound/channels/:id/accounts",
+    "Message/review/setup history, contact and account metadata, catalog contents",
+    "Private/internal data, subject to outbound views. Saved transport secret is not an account response field. Agent job-token routes for submit/status are not opened by owner headers alone.",
+    "modules/outbound/views.ts:562,583; modules/outbound/routes.ts:110,120; modules/outbound/accounts.ts:281"
+  ],
+  [
+    "GET /api/feedback; POST /api/feedback/preview; POST /api/feedback; GET /api/feedback/inbox",
+    "Feedback/report text and inbound issue metadata",
+    "Arbitrary private report content. Inbound webhook route uses its own authorization.",
+    "modules/feedback/routes.ts:87,92,98,165"
+  ],
+  [
+    "GET /api/merges/:id/conflicts; GET /api/improvements",
+    "Merge conflict values and suggested improvement text",
+    "May carry copied/private record contents.",
+    "modules/merge/routes.ts:33; modules/improvements/routes.ts:53"
+  ],
+  [
+    "GET /api/departments/:id/model-checks",
+    "Check metadata/measurements",
+    "Existing check view boundary; not unrestricted raw held-out dataset export.",
+    "modules/model-checks/routes.ts:64"
+  ],
+  [
+    "POST /api/people/assistants; PATCH /api/people/:id/assistant; POST/DELETE /api/people/:id/key",
+    "403 assistant_not_allowed for orchestrator",
+    "Intentional exception pending policy decision. Head explicitly excluded removing guard from #1204. Direct person key issuance returns raw key/signingSecret, but api cannot reach that issuance.",
+    "modules/assistants/setup.ts:45,46,133,151,164,182"
+  ],
+  [
+    "POST /api/network/secrets; /api/network/* keeper routes; GET /api/parts/:id/files/:name; /api/assistant/*; GET /api/attachments/file",
+    "No automatic owner authorization",
+    "Separate keeper, node, assistant or running-job bearer credential required. api cannot provide arbitrary Authorization headers.",
+    "modules/copies/routes.ts:29; modules/network/routes.ts; modules/testruns/files.ts:18; modules/tasks/attachments.ts:494"
+  ],
+  [
+    "GET /api/agents/:id/inbox",
+    "Letter sender, task and private letter text, counts and inbox mode",
+    "Private communication under agentFor/lettersFor view authorization. Opening the route does not itself mark letters read.",
+    "modules/conversation/inbox-routes.ts:101"
+  ],
+  [
+    "GET /api/tasks/:id/waits; GET /api/wait-cards; GET /api/departments/:id/wait-policy; GET /api/departments/:id/approval-policy; GET /api/autonomous-releases",
+    "Wait/card/policy records, ownership and reasons",
+    "Internal task/decision data; free-text reasons may be private. Existing views and access checks apply.",
+    "modules/tasks/routes.ts:337,362; modules/departments/wait-policy-routes.ts:35; modules/departments/approval-policy.ts:150,170"
+  ],
+  [
+    "GET /api/machines/:id/connections",
+    "Node/plan identifiers, connection times, cause, close reason, errors and report",
+    "Machine history and arbitrary diagnostic text.",
+    "modules/nodes/connection-routes.ts:16"
+  ],
+  [
+    "GET /api/departments/:id/branches; GET /api/departments/:id/roster",
+    "Task/branch/commit metadata, role/staff and serving-subscription views",
+    "Internal work and personnel metadata.",
+    "modules/departments/routes.ts:464,475"
+  ],
+  [
+    "GET /api/pool; GET /api/network/question",
+    "Pool status and recovery question/copy metadata",
+    "Internal machine/work metadata under route checks. Recovery question is not the private backup recovery file.",
+    "modules/testruns/pool.ts:152; modules/network/question-routes.ts:30"
+  ],
+  [
+    "GET /api/link; GET /api/link/names/:name; GET /api/map/layout; GET /api/updates; GET /api/updates/current; GET /api/setup; GET /api/setup/names/:name",
+    "Public link/TLS metadata, map position, installed/update/setup status",
+    "Configuration/status responses; no saved relay signing key returned by linkOf. Error/status text can describe internal machine state.",
+    "modules/link/routes.ts:15,20; modules/org/layout.ts:45; modules/updates/routes.ts:86,91; modules/setup/routes.ts:187,192"
+  ],
+  [
+    "POST /api/agents/:id/pictures; GET /api/stream; terminal sockets",
+    "No ordinary JSON owner-api download response",
+    "Picture upload requires a person (me.via refused) and raw bytes; api body is JSON. Declared indefinite stream/terminal paths are refused by control.ts.",
+    "modules/conversation/pictures.ts; modules/tools/control.ts:20,141"
+  ]
+]

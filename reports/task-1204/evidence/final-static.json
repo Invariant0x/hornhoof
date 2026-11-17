@@ -1,0 +1,48 @@
+[
+  {
+    "name": "server-types",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "-p",
+      "apps/server/tsconfig.json",
+      "--noEmit"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0
+  },
+  {
+    "name": "test-types",
+    "command": [
+      "node",
+      "node_modules/typescript/bin/tsc",
+      "-p",
+      "apps/server/tsconfig.eslint.json",
+      "--noEmit"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0
+  },
+  {
+    "name": "lint",
+    "command": [
+      "npx",
+      "--no-install",
+      "eslint",
+      "apps/server/src/auth/internal.ts",
+      "apps/server/src/modules/tasks/views.ts",
+      "apps/server/test/orchestrator-api-boundaries.test.ts"
+    ],
+    "cwd": ".",
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=2048"
+    },
+    "exit": 0
+  }
+]

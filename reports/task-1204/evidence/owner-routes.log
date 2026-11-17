@@ -1,0 +1,23 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/orchestrator-control.test.ts (53 tests) 11506ms
+   ✓ the orchestrator runs the company as the CEO can in Hornhoof (29)
+     ✓ describes the role effort in change_employee 964ms
+   ✓ the orchestrator reads and changes the database itself (17)
+     ✓ reads any table and changes a field, and the map hears of the change 436ms
+     ✓ stays out of the merge records 332ms
+     ✓ stays out of the ranking 450ms
+     ✓ stays out of the pulse 497ms
+     ✓ is refused the keys, a change of what only Hornhoof writes, and the tables themselves 475ms
+     ✓ reads every table and column but the keys 496ms
+     ✓ keeps people, their access, an employee's kind, role and skills, a head's department, turns' tokens and assistants out of its hands, and says why 473ms
+     ✓ lets the head of Operations read, but nothing hidden or secret, and change nothing 355ms
+ ✓ test/node-commands.test.ts (13 tests) 2238ms
+   ✓ one active install command per place (8)
+     ✓ rejects a second plan command and overlapping connect without hiding or changing the first 1191ms
+
+ Test Files  2 passed (2)
+      Tests  66 passed (66)
+   Start at  04:59:13
+   Duration  20.03s (tests 86%, import 8%, transform 6%)

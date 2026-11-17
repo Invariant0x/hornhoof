@@ -1,0 +1,22 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/auth.test.ts (40 tests) 6441ms
+   ✓ POST /api/auth/login (10)
+     ✓ logs in with a differently cased, padded email 1036ms
+     ✓ stops the 11th attempt for one email within 15 minutes and leaves other emails alone 347ms
+     ✓ counts per email and address, so failures from elsewhere never lock the owner out 360ms
+     ✓ takes the visitor's address from X-Forwarded-For only from the tunnel 660ms
+     ✓ counts sign-ins through a worker as one address 598ms
+     ✓ stops one email after 50 attempts in an hour from any addresses, and other emails go on 1223ms
+ ✓ test/route-access.test.ts (4 tests) 1090ms
+   ✓ route access declarations (3)
+     ✓ requires an explicit access rule for every registered HTTP and WS route, including static assets 955ms
+ ✓ test/attachment-token.test.ts (9 tests) 1518ms
+   ✓ attachment authorization over the node link (9)
+     ✓ attaches to the existing conversation without revealing its tool token or opening a new step 734ms
+
+ Test Files  3 passed (3)
+      Tests  53 passed (53)
+   Start at  04:55:45
+   Duration  16.93s (tests 74%, import 18%, transform 7%)

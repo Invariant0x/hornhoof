@@ -1,0 +1,21 @@
+{
+  "raw/reports/task-1204/evidence/web.log": "a8a41e4e62e46c290a559ba9ff06923da6732305186d4cb63bcc314d24c291ea",
+  "raw/reports/task-1204/evidence/auth-neighbors.log": "4b773fdabb7e34d3cb0d9168fa482c27011d266a16f037f0f3da96c92fdae163",
+  "raw/reports/task-1204/evidence/final-crapper.log": "2dc7c0b4902216adee40871217d1d7f7a3ee1767b2fbecc65c507637457d8675",
+  "raw/reports/task-1204/evidence/crapper-base.log": "54dd8c66e9d466a43b827556f9eccedf594b3ffa17c332ce9c1ee16619e73a02",
+  "raw/reports/task-1204/evidence/coverage.log": "9f630a6a08baa30c6e638362267b1a0f8efb6793be4b0a35e18ea57857e62ba5",
+  "raw/reports/task-1204/evidence/boundaries-red-final.log": "3b838232d783342233852a27547b43844994be7722fcbca0e734fed3aa402142",
+  "raw/reports/task-1204/evidence/final-test-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/reports/task-1204/evidence/final-boundaries.log": "60ded89baca0fb9c7767245856747752f2662094512dff921e710666e5b3f1aa",
+  "raw/reports/task-1204/evidence/owner-routes.log": "7e2cca2b77a466769f1affc6d3f4e9f8091c7d4b5317fde4f2cbd9c6a36677c1",
+  "raw/reports/task-1204/evidence/final-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/reports/task-1204/evidence/final-server-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/reports/task-1204/evidence/final-dryer.log": "428fee0a38c6a7f91e2f852bdc7e20cda334d1a6fccfaace2d4dd66482c9e1f1",
+  "raw/reports/task-1204/evidence/final-green.log": "7f913cf5c231f95ca878b1309cbdb22991199e162a034763121fcb519184518a",
+  "raw/reports/task-1204/evidence/submission-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/reports/task-1204/evidence/boundaries-green.log": "efc47c5c7ec3be9f14c47eb8abf173e768330e9af27eaf894cbc2b287bf8f165",
+  "raw/reports/task-1204/evidence/deps.log": "cb7f11c4ee9ed407c88f2d61433c133b546833a7239196ddb6af924c0ef15c9f",
+  "raw/reports/task-1204/evidence/baseline.log": "98cad7037127880c9c29caf3f5cce17ed756c930a4e87ac52fb709364e241a41",
+  "raw/reports/task-1204/evidence/submission-test-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/repair.patch": "c331b9d11d7b7a0834f03a0a6d060d3df1e298a444cefdd51730cea874126f89"
+}

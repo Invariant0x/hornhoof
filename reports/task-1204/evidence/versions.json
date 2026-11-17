@@ -1,0 +1,22 @@
+{
+  "base": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
+  "reviewedBranch": "6c0cbd7271a3ad6a8d61647a2f7345c830c6eeb1",
+  "codeCandidate": "80aa63bae277e64373e69b0ceea7048664ef42d0",
+  "sourceSha256": {
+    "apps/server/src/auth/internal.ts": "7676d29f5dbb1d4a8f0e35393485f919887509ade5bda2104f6afeae7f43da68",
+    "apps/server/src/modules/tasks/views.ts": "2b4eb13f755105855319ce68e0f6daf3d59ddb0d8adfcacc5037dd10e989bd32",
+    "apps/server/test/orchestrator-api-boundaries.test.ts": "a2b34fb43ea2cae19f36a14cabf3504ad3c43d1c0e0e8a4e63429ea65a23b021"
+  },
+  "security1207": {
+    "candidate": "cda62c87-6c77-483c-887e-1bc29737e2fb",
+    "patch": "1fc8a035544758c30fa02d162b5662de5186dcb8",
+    "reportSha256": "cb2a96f04e5a2186c905d149dc0077b679a2cc7eabe1aec686edd1d301659691",
+    "archiveSha256": "0abed1d6d2ae97b99780de82cb357c151513f176c951792fb76ca76a8e1c7033",
+    "manifestMembersVerified": 27,
+    "patchPresentInCodeCandidate": false
+  },
+  "wholeSuite": "NOT_RUN: task forbids whole-suite and run_tests",
+  "postgresRoles": "NOT_RUN: project PGlite fixtures used",
+  "mutation": "NOT_APPLICABLE: process authentication and database views, no changed pure function with direct unit tests",
+  "runtimeRepairCommit": "2ac75e76e9ec7e7171a12fb35de5b0807fd3fcbe"
+}

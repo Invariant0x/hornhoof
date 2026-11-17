@@ -1,0 +1,22 @@
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+taskDetail                     modules.tasks.views                   10   N/A       N/A
+internalCall                   auth.internal                          9   N/A       N/A
+byOf                           modules.tasks.views                    9   N/A       N/A
+nameLookups                    modules.tasks.views                    9   N/A       N/A
+line                           modules.tasks.views                    7   N/A       N/A
+taskByRef                      modules.tasks.views                    7   N/A       N/A
+fileViews                      modules.tasks.views                    6   N/A       N/A
+names                          modules.tasks.views                    6   N/A       N/A
+agentSeesTask                  modules.tasks.views                    5   N/A       N/A
+holderOffline                  modules.tasks.views                    5   N/A       N/A
+forWhom                        modules.tasks.views                    3   N/A       N/A
+orchestratorDecisionHeaders    auth.internal                          2   N/A       N/A
+proofsOf                       modules.tasks.views                    2   N/A       N/A
+orchestratorHeaders            auth.internal                          1   N/A       N/A
+taskLines                      modules.tasks.views                    1   N/A       N/A
+Wrote /tmp/task-1204-quality-base/.metrics/crap.edn

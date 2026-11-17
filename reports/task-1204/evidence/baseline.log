@@ -1,0 +1,97 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/decision-context.test.ts (33 tests) 8765ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 1104ms
+   ✓ answer_request in a turn (4)
+     ✓ goes as the owner when only an employee or Hornhoof wrote, and keeps the CEO after their notices 300ms
+   ✓ a decision of the orchestrator as it is kept (3)
+     ✓ waits for words going into the turn, and goes by them once they are kept 324ms
+   ✓ management after the turn that answered a person ended (7)
+     ✓ lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked 550ms
+     ✓ takes a person's decisions, people and access in a later turn too, as the owner 348ms
+     ✓ lets a head hire and change its own department in its next turn for the person who asked it, and nothing outside it 305ms
+ ✓ test/request-choice-feedback.test.ts (27 tests) 7124ms
+   ✓ choice feedback without a pick (2)
+     ✓ accepts HTTP feedback as neutral text and delivers the actual person to its author 1296ms
+     ✓ keeps a neutral engine wake and its provenance without inventing a chosen option 598ms
+   ✓ does not infer a selected option from feedback Round 347ms
+   ✓ lets the actual authorized delegate person answer neutrally 450ms
+   ✓ refuses a company viewer who cannot decide, and an unauthenticated caller 633ms
+   ✓ does not reveal or answer another company request 323ms
+   ✓ rechecks authority when the answer is committed 347ms
+ ✓ test/sql-check.test.ts (123 tests) 6221ms
+   ✓ the check on the orchestrator's SQL (123)
+     ✓ keeps answering after a flood of texts too deep for the parser 5746ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 3576ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 1282ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 335ms
+     ✓ answers a decision itself as the owner's answer, and people see that the orchestrator gave it 699ms
+     ✓ is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key 399ms
+ ✓ test/agent-sql-permissions.test.ts (34 tests) 10736ms
+   ✓ keeps program_instances writes behind the service API for both SQL roles 1406ms
+   ✓ keeps program_deliveries writes behind the service API for both SQL roles 346ms
+   ✓ keeps turn_snapshots writes behind the service API for both SQL roles 312ms
+   ✓ keeps test_suite_memory writes behind the service API for both SQL roles 724ms
+   ✓ keeps assistant_seqs writes behind the service API for both SQL roles 413ms
+   ✓ keeps task_waits from Operations, and lets the orchestrator read it but not change it 345ms
+   ✓ keeps the new purpose of a notice readable and not writable, as the rest of it 302ms
+   ✓ closes model_check_datasets to Operations, and to every change, but lets the orchestrator read it 469ms
+   ✓ closes model_check_evaluations to Operations, and to every change, but lets the orchestrator read it 347ms
+ ✓ test/decisions-answers-fallback.test.ts (13 tests) 8392ms
+   ✓ who may answer, by decision rights (13)
+     ✓ devPlain: ceo gets 200 2396ms
+     ✓ devPlain: delegate gets 200 554ms
+     ✓ devPlain: zed gets 403 422ms
+     ✓ devPlain: dan gets 403 431ms
+     ✓ devPlain: sara gets 403 431ms
+     ✓ mktQuestion: ceo gets 200 460ms
+     ✓ mktQuestion: delegate gets 200 490ms
+     ✓ mktQuestion: zed gets 403 447ms
+     ✓ mktQuestion: dan gets 403 472ms
+     ✓ mktQuestion: sara gets 403 514ms
+     ✓ takes the orchestrator's own call, with no turn of a person in it, as the owner's answer 555ms
+     ✓ shows the computer to people of the whole company and lets only the CEO, the delegate and the orchestrator decide it 632ms
+     ✓ lets only the CEO and the delegate apply the structure card, and the people of a department its staff, with or without the card 488ms
+{"level":40,"time":1794890884292,"pid":722257,"hostname":"038c67748414","msg":"Something to find 19713e9f-2931-4787-b8c0-9ed4e84edaf1"}
+ ✓ test/orchestrator-self.test.ts (3 tests) 5636ms
+   ✓ the orchestrator looks at Hornhoof from outside (3)
+     ✓ searches and reads the source of the very build that runs, and its tool says which 4653ms
+     ✓ reads the server's last lines of log 478ms
+     ✓ asks a node for its last lines of log and gives them with its machine's name 318ms
+ ✓ test/decisions-answers-department.test.ts (13 tests) 9179ms
+   ✓ who may answer, by decision rights (13)
+     ✓ devQuestion: ceo gets 200 2502ms
+     ✓ devQuestion: delegate gets 200 719ms
+     ✓ devQuestion: zed gets 403 520ms
+     ✓ devQuestion: dan gets 200 622ms
+     ✓ devQuestion: eve gets 200 618ms
+     ✓ devQuestion: sara gets 403 517ms
+     ✓ devQuestion: tia gets 403 518ms
+     ✓ salesQuestion: ceo gets 200 564ms
+     ✓ salesQuestion: delegate gets 200 562ms
+     ✓ salesQuestion: zed gets 403 516ms
+     ✓ salesQuestion: sara gets 200 459ms
+     ✓ salesQuestion: olga gets 200 502ms
+     ✓ salesQuestion: dan gets 403 467ms
+ ✓ test/decisions-answers-ceo.test.ts (12 tests) 7756ms
+   ✓ who may answer, by decision rights (12)
+     ✓ devApproval: ceo gets 200 1474ms
+     ✓ devApproval: delegate gets 200 682ms
+     ✓ devApproval: zed gets 403 493ms
+     ✓ devApproval: dan gets 200 513ms
+     ✓ devApproval: eve gets 200 697ms
+     ✓ devApproval: sara gets 403 534ms
+     ✓ devApproval: tia gets 403 458ms
+     ✓ devPeople: ceo gets 200 497ms
+     ✓ devPeople: delegate gets 200 578ms
+     ✓ devPeople: zed gets 403 501ms
+     ✓ devPeople: dan gets 403 644ms
+     ✓ devPeople: sara gets 403 593ms
+
+ Test Files  9 passed (9)
+      Tests  266 passed (266)
+   Start at  04:46:59
+   Duration  85.18s (tests 85%, import 11%, transform 4%)

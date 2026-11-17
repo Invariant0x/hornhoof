@@ -1,0 +1,17 @@
+{:entries [
+  {:name "taskDetail", :namespace "modules.tasks.views", :complexity 10, :coverage nil, :crap nil}
+  {:name "internalCall", :namespace "auth.internal", :complexity 9, :coverage nil, :crap nil}
+  {:name "byOf", :namespace "modules.tasks.views", :complexity 9, :coverage nil, :crap nil}
+  {:name "nameLookups", :namespace "modules.tasks.views", :complexity 9, :coverage nil, :crap nil}
+  {:name "line", :namespace "modules.tasks.views", :complexity 7, :coverage nil, :crap nil}
+  {:name "taskByRef", :namespace "modules.tasks.views", :complexity 7, :coverage nil, :crap nil}
+  {:name "fileViews", :namespace "modules.tasks.views", :complexity 6, :coverage nil, :crap nil}
+  {:name "names", :namespace "modules.tasks.views", :complexity 6, :coverage nil, :crap nil}
+  {:name "agentSeesTask", :namespace "modules.tasks.views", :complexity 5, :coverage nil, :crap nil}
+  {:name "holderOffline", :namespace "modules.tasks.views", :complexity 5, :coverage nil, :crap nil}
+  {:name "forWhom", :namespace "modules.tasks.views", :complexity 3, :coverage nil, :crap nil}
+  {:name "orchestratorDecisionHeaders", :namespace "auth.internal", :complexity 2, :coverage nil, :crap nil}
+  {:name "proofsOf", :namespace "modules.tasks.views", :complexity 2, :coverage nil, :crap nil}
+  {:name "orchestratorHeaders", :namespace "auth.internal", :complexity 1, :coverage nil, :crap nil}
+  {:name "taskLines", :namespace "modules.tasks.views", :complexity 1, :coverage nil, :crap nil}
+]}
