@@ -1,0 +1,11 @@
+# check: final-eslint-touched
+# dir: /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237
+# command: timeout 600 npx eslint apps/server/src/db/agent-sql.ts apps/server/test/orchestrator-sql-agent-changes.test.ts
+# env: NODE_OPTIONS=--max-old-space-size=4096
+# commit: 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac (task-1237)
+# tree changes against that commit (git status --short, empty = clean):
+# started: 2026-11-17T09:41:09Z
+
+
+# ended: 2026-11-17T09:41:21Z
+# exit code: 0

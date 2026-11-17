@@ -1,0 +1,5 @@
+Command: python3 docs/tasks/1237-tests/verify.py
+Candidate: 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac
+PASS: 13 record hashes, 2 candidate source hashes, parent and source patch, 6 exact-version receipts, 20 passed tests and behavioral RED
+LIMIT: T5 not PASS; existing local author executions reused; no live PostgreSQL or release-wide execution
+Exit: 0

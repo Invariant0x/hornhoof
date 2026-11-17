@@ -1,0 +1,14 @@
+# check: deps
+# dir: /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237
+# command: timeout 1500 npm run -s deps
+# commit: 11aa5777c4a5f74a550c0e53570ec35ebae39f53 (task-1237)
+# tree changes (git status --short):
+# started: 2026-11-17T09:32:17Z
+
+$ npm ci --ignore-scripts
+$ npm run -s prepare
+$ npm run -s build -w @hornhoof/protocol
+$ npm run -s build -w @hornhoof/node
+
+# ended: 2026-11-17T09:32:33Z
+# exit code: 0

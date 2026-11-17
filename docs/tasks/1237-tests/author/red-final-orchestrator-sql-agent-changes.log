@@ -1,0 +1,55 @@
+# check: red-final-orchestrator-sql-agent-changes
+# dir: /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+# command: timeout 900 npx vitest run test/orchestrator-sql-agent-changes.test.ts --maxWorkers=1
+# env: NODE_OPTIONS=--max-old-space-size=4096
+# commit: 11aa5777c4a5f74a550c0e53570ec35ebae39f53 (task-1237)
+# tree changes against that commit (git status --short, empty = clean):
+#    ?? test/orchestrator-sql-agent-changes.test.ts
+# started: 2026-11-17T09:38:19Z
+
+
+ RUN  v5.0.5 /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+
+ ❯ test/orchestrator-sql-agent-changes.test.ts (1 test | 1 failed) 3899ms
+   × keeps the history of an employee's card out of the orchestrator's writes and open to its reads 3894ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/orchestrator-sql-agent-changes.test.ts > keeps the history of an employee's card out of the orchestrator's writes and open to its reads
+AssertionError: promise resolved "[ { rows: [], fields: [], …(3) } ]" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+[
+  {
+    "affectedRows": 1,
+    "command": "INSERT",
+    "fields": [],
+    "rowCount": 1,
+    "rows": [],
+  },
+]
+
+ ❯ test/orchestrator-sql-agent-changes.test.ts:39:35
+     37|     'MERGE INTO agent_changes c USING agent_changes o ON c.id = o.id W…
+     38|     `DO $$ BEGIN DELETE FROM agent_changes; END $$`,
+     39|   ]) await expect(run(text), text).rejects.toThrow(/permission denied …
+       |                                   ^
+     40|   expect((await run('SELECT agent_id, person_id, by_orchestrator, fiel…
+     41|     { agent_id: agent!.id, person_id: person!.id, by_orchestrator: fal…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  09:38:20
+   Duration  17.94s (tests 81%, import 16%, transform 3%)
+
+
+# ended: 2026-11-17T09:38:39Z
+# exit code: 1

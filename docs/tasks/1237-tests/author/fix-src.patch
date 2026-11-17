@@ -1,0 +1,25 @@
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index 32928465a..4974eab01 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -53,8 +53,9 @@ export const SECRET: Record<string, string[]> = {
+   proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
+ };
+ /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
+-   role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
+-   which only Hornhoof writes, so that it can be believed. Test and work runs too, as they
++   role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections
++   and of the employees' cards, which only Hornhoof writes, so that it can be believed: a forged line would name another
++   author of a change. Test and work runs too, as they
+    carry a repository's token and the task's files to the machines lent to them. And what waits for people's decisions
+    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
+    who may take it, and a forged message would make a turn answer someone else. The numbers of the pipeline report, which
+@@ -68,7 +69,7 @@ export const SECRET: Record<string, string[]> = {
+    fallback plan and the plan it goes back to, which only Hornhoof writes, as a forged row would move it to another plan. */
+ export const ASSISTANT_TABLES = ['assistants', 'assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'];
+ const READ_ONLY = [
+-  'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
++  'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'agent_changes', 'test_runs', 'test_parts',
+   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
+   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
+   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',

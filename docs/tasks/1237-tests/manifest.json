@@ -1,0 +1,23 @@
+{
+  "base": "11aa5777c4a5f74a550c0e53570ec35ebae39f53",
+  "candidate": "5fccde4cc1fd576f7ed7ae29b2949f62054f5fac",
+  "sources": {
+    "apps/server/src/db/agent-sql.ts": "d072bebae02358dfd6f9c627e8cf49749c090fe09795a2f7934700cc4dcfe2a9",
+    "apps/server/test/orchestrator-sql-agent-changes.test.ts": "62ac23fb2645f85d9f37b0f42396d0c7756adf6d475d8ceac40059c1868e6c9c"
+  },
+  "records": {
+    "00-index-1237.txt": "900169aa613bfd7845c1de12593091767bded5e87635d36085869554102ffc13",
+    "final-server-department-owner-control.log": "31a9098bedc8e27ee746c765badfdb72888fc446bf04dfd7ea45575ca970bb02",
+    "green-orchestrator-sql-agent-changes-pre-commit.log": "64360411ea238b3ec7d5ec354711e4dcfe2f8998a362d8c1045220708309edb9",
+    "final-server-orchestrator-sql-agent-changes.log": "cd7506a5f15994655d5233fc8897ea385482ecfb7cd17f8093c5c96a36e468ae",
+    "final-server-head-department-control.log": "43864a673e3f6c2d4cb63ea3e5eeb709357892d63cff584822fcda05f3941fe3",
+    "final-tsc-server-tests.log": "90cd88aa8da6e4347023350df62474965470b3633a0cf38820c5631455ed5161",
+    "table-rights-probe-1237.txt": "88fe5340136471a5bcab9f6f979bc8fe99ab64cd4f54dbd3b396f747ecf1c893",
+    "final-eslint-touched.log": "e2ae73832a74b4e2cb93470618d25f2b3dd975c07be6c181cc594e3dc18ff3b7",
+    "red-draft-orchestrator-sql-agent-changes.log": "b73b24aff5dfe3a7221ddc19bce9c4bd3f5ca8b5cc590b4171c272a8065f3ef7",
+    "fix-src.patch": "924d60c733a8698bf4c0c4e38522ece91bb6d667a0f3d2369145755fb158e326",
+    "red-final-orchestrator-sql-agent-changes.log": "df85db3a1b355d636c162f9fe3787e97ad5731cdd7e82d0ac7445513c3cdddc8",
+    "deps.log": "bd915c14de44fa5e955888ab7bebf9f470dd2f083e1ea7f89e23ef30727fabab",
+    "final-server-orchestrator-sql-secrets.log": "76f76da70c471ec2f2fee94b2ecc095b9a007b29d3be2bceacd8c80a437a429f"
+  }
+}

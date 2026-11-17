@@ -1,0 +1,31 @@
+# check: final-server-head-department-control
+# dir: /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+# command: timeout 1200 npx vitest run test/head-department-control.test.ts --maxWorkers=1
+# env: NODE_OPTIONS=--max-old-space-size=4096
+# commit: 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac (task-1237)
+# tree changes against that commit (git status --short, empty = clean):
+# started: 2026-11-17T09:39:35Z
+
+
+ RUN  v5.0.5 /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+
+ ✓ test/head-department-control.test.ts (7 tests) 12193ms
+   ✓ a department head's tools (1)
+     ✓ run its own department, and no worker has them 5753ms
+   ✓ a department head for a person who runs its department (4)
+     ✓ creates, renames and removes sub-units and adds and removes products of its department 908ms
+     ✓ hires into its department and changes, resets and fires its employees, each kept as that person's decision 1600ms
+     ✓ moves an employee who holds work into an urgent-only sub-unit 878ms
+     ✓ goes by the last person who wrote into its turn, also through their assistant 851ms
+   ✓ a department head refuses (2)
+     ✓ in a turn that answers nobody, or someone who does not run its department, and changes nothing 1251ms
+     ✓ anything outside its own department, even on the CEO's word 536ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  09:39:35
+   Duration  35.90s (tests 51%, transform 36%, import 12%)
+
+
+# ended: 2026-11-17T09:40:12Z
+# exit code: 0

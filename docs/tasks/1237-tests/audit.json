@@ -1,0 +1,90 @@
+{
+  "candidate": "5fccde4cc1fd576f7ed7ae29b2949f62054f5fac",
+  "base": "11aa5777c4a5f74a550c0e53570ec35ebae39f53",
+  "checks": [
+    {
+      "log": "final-server-orchestrator-sql-agent-changes.log",
+      "command": "timeout 1200 npx vitest run test/orchestrator-sql-agent-changes.test.ts --maxWorkers=1",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server",
+      "exit": 0,
+      "passed": 1,
+      "runnerSeconds": 15.93,
+      "overOneSecond": [
+        {
+          "name": "keeps the history of an employee's card out of the orchestrator's writes and open to its reads",
+          "ms": 2850
+        }
+      ]
+    },
+    {
+      "log": "final-server-orchestrator-sql-secrets.log",
+      "command": "timeout 1200 npx vitest run test/orchestrator-sql-secrets.test.ts --maxWorkers=1",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server",
+      "exit": 0,
+      "passed": 1,
+      "runnerSeconds": 12.95,
+      "overOneSecond": [
+        {
+          "name": "keeps secrets closed through expressions and older grants while ordinary reads and writes stay open",
+          "ms": 2527
+        }
+      ]
+    },
+    {
+      "log": "final-server-head-department-control.log",
+      "command": "timeout 1200 npx vitest run test/head-department-control.test.ts --maxWorkers=1",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server",
+      "exit": 0,
+      "passed": 7,
+      "runnerSeconds": 35.9,
+      "overOneSecond": [
+        {
+          "name": "run its own department, and no worker has them",
+          "ms": 5753
+        },
+        {
+          "name": "hires into its department and changes, resets and fires its employees, each kept as that person's decision",
+          "ms": 1600
+        },
+        {
+          "name": "in a turn that answers nobody, or someone who does not run its department, and changes nothing",
+          "ms": 1251
+        }
+      ]
+    },
+    {
+      "log": "final-server-department-owner-control.log",
+      "command": "timeout 1200 npx vitest run test/department-owner-control.test.ts --maxWorkers=1",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server",
+      "exit": 0,
+      "passed": 11,
+      "runnerSeconds": 32.02,
+      "overOneSecond": [
+        {
+          "name": "are added, seen, renamed and removed by the person who runs it, without the CEO",
+          "ms": 4203
+        }
+      ]
+    },
+    {
+      "log": "final-tsc-server-tests.log",
+      "command": "timeout 900 npx tsc -p apps/server/tsconfig.eslint.json --noEmit",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237",
+      "exit": 0,
+      "passed": null,
+      "runnerSeconds": null,
+      "overOneSecond": []
+    },
+    {
+      "log": "final-eslint-touched.log",
+      "command": "timeout 600 npx eslint apps/server/src/db/agent-sql.ts apps/server/test/orchestrator-sql-agent-changes.test.ts",
+      "cwd": "/data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237",
+      "exit": 0,
+      "passed": null,
+      "runnerSeconds": null,
+      "overOneSecond": []
+    }
+  ],
+  "redExit": 1,
+  "productRerun": false
+}

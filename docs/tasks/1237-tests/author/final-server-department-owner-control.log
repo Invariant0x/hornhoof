@@ -1,0 +1,35 @@
+# check: final-server-department-owner-control
+# dir: /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+# command: timeout 1200 npx vitest run test/department-owner-control.test.ts --maxWorkers=1
+# env: NODE_OPTIONS=--max-old-space-size=4096
+# commit: 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac (task-1237)
+# tree changes against that commit (git status --short, empty = clean):
+# started: 2026-11-17T09:40:12Z
+
+
+ RUN  v5.0.5 /data/work/agents/4c9cbb02-aa67-4d39-bd25-c00fc99cabe4/task-1237/apps/server
+
+ ✓ test/department-owner-control.test.ts (11 tests) 9072ms
+   ✓ a department's API keys (4)
+     ✓ are added, seen, renamed and removed by the person who runs it, without the CEO 4203ms
+     ✓ include one the CEO placed in the department, which its person keeps as the CEO does 740ms
+     ✓ are no one's elsewhere: another department, a team of it, the whole company or the orchestrator stay closed 601ms
+     ✓ never show another person's personal plan or its secret, and are never added by an agent 366ms
+   ✓ hiring with a skill that shows the whole company (2)
+     ✓ is left to people who see the whole company, while the department hires the rest itself 496ms
+     ✓ is never done by a head, even on the CEO's word, for a new employee or one there is 587ms
+   ✓ a head's own approval and wait policies (2)
+     ✓ are set in a turn that answers the person who runs the department, for it and no other 446ms
+     ✓ are not set on the word of someone who does not run it, of nobody, or for commits 371ms
+   ✓ a head and its department's work (3)
+     ✓ cancels a task given to its department by the orchestrator, and none of another department 393ms
+     ✓ sets the department description on the word of a person who runs it, as that person does on the screen 411ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  09:40:14
+   Duration  32.02s (tests 64%, import 21%, transform 15%)
+
+
+# ended: 2026-11-17T09:40:47Z
+# exit code: 0

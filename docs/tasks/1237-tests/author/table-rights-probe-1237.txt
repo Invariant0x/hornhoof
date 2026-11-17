@@ -1,0 +1,25 @@
+Rights of the orchestrator's role (agentRole('postgres')) after grantsFor, on turn-31 11aa5777c4a5f74a550c0e53570ec35ebae39f53
+before the fix, from a temporary probe test (not committed): has_table_privilege / has_any_column_privilege per table.
+108 tables; writable by the role:
+  agent_changes          INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  agents                 INSERT=no  UPDATE=yes DELETE=no  TRUNCATE=no
+  backlog_items          INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  briefings              INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  companies              INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  departments            INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  feedback_inbox         INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  feedback_signals       INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  improvements           INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  jobs                   INSERT=no  UPDATE=yes DELETE=no  TRUNCATE=no
+  map_layouts            INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  map_returns            INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  notebook_notes         INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  pending_wakes          INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  task_routes            INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  tasks                  INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  teams                  INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  telegram_replies       INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  turn_releases          INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+  turns                  INSERT=yes UPDATE=yes DELETE=yes TRUNCATE=no
+Read-only for the role: agent_events, agent_fallbacks, agent_inbox, applied, approval_policies, assistant_events, assistant_replies, assistant_requests, assistant_seqs, assistants, attachments, authority, autonomous_releases, certificates, company_phones, computer_runs, google_sheets, harness_builds, harness_products, invites, link_tls, machine_access, machine_online, machine_tickets, machines, model_check_certificates, model_check_datasets, model_check_evaluations, model_check_revisions, model_checks, node_codes, node_connections, nodes, outbound_accounts, outbound_approvals, outbound_attempts, outbound_bindings, outbound_catalog_revisions, outbound_channels, outbound_contact_events, outbound_contacts, outbound_daily_usage, outbound_events, outbound_message_revisions, outbound_messages, outbound_permissions, outbound_policies, outbound_review_receipts, outbound_sampling_counters, outbound_setup_events, peer_secrets, people, person_access, person_changes, person_keys, phone_frames, phone_sessions, plan_credentials, program_deliveries, program_instances, program_operator_cases, program_operator_signals, proposals, public_links, recovery_keys, repo_hosts, request_internal, requests, sessions, sign_in_attempts, subscriptions, support_classifications, support_tickets, task_events, task_waits, telegram_bots, test_file_results, test_part_timings, test_parts, test_runs, test_suite_memory, tool_calls, turn_snapshots, turn_tokens, vault_entries, vault_log, wait_notices, wait_policies
+Functions outside pg_catalog the role may execute: net.assert_lease(margin interval, invocation uuid) SECURITY DEFINER, net.assert_lease(margin interval, invocation uuid, job uuid, answer jsonb) SECURITY DEFINER, public.hornhoof_assistant_kept(), public.hornhoof_head_stays(), public.outbound_refuse_change()

@@ -1,0 +1,63 @@
+[
+  {
+    "kind": "comment",
+    "text": "Глава, Code reviewer: 1) Да, новый DB-тест orchestrator-sql-agent-changes (2850 ms, файл 15.93 s) допускаю как исключение T5, как в #1227. Он проверяет настоящие права роли в базе, без базы это не проверить. Запиши исключение в вердикте с замерами. 2) turn_releases и task_routes в #1237 не трогаем, на них заведу отдельную задачу. Продолжай Review на 5fccde4c.",
+    "data": {},
+    "by": {
+      "kind": "agent",
+      "id": "aa671623-7f15-4e6b-b434-2ef8c0bb933c",
+      "name": "Head of development"
+    },
+    "at": "2026-11-17T09:49:17.626Z"
+  },
+  {
+    "kind": "verdict",
+    "text": "Review PASS на точном 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac, candidateId 10ff1422-b5c7-4f56-bbab-9d11aacb5cb9, база 11aa5777c4a5f74a550c0e53570ec35ebae39f53. Проверены diff двух назначенных путей, parent, remote HEAD, чистое дерево и автор/sign-off. Добавление agent_changes в READ_ONLY закрывает I/U/D при старте, сохраняет SELECT, не меняет серверные записи. Проверены общие grants, net-функции и отсутствие каскадных FK; миграция для прежних table-wide прав не нужна, upgrade-сценарий исполнен автором. Полностью прочитаны RED на базе и 6 успешных final-логов exact SHA: новый тест 1, secrets 1, head-department-control 7, department-owner-control 11 — всего 20 PASS; server test tsc и ESLint обоих файлов exit 0. Все 13 вложений сверены по размеру; source patch совпал с commit diff. review.runs/testEvidence пусты, доказательство — эти локальные журналы с command/cwd/SHA/actual exit; неизменные проверки не повторялись. Новый case 2850 ms, файл/runner 15.93 s: глава явно допустил DB-исключение T5 комментарием задачи. Превышения неизменных соседних файлов и отдельных случаев перечислены в предыдущем комментарии, нагрузка в авторских логах не указана. Старые права turn_releases/task_routes сообщены главе; он оставил их для отдельной задачи, здесь они не менялись. First-look codex review недоступен из-за bwrap, exit 0 не считается PASS; ручное ревью выполнено, журнал приложен 3748e6e3. Код не менял, run_tests/полный прогон/интеграцию не выполнял. Обязательные независимые Security и Tests следуют по маршруту.",
+    "data": {
+      "pass": true,
+      "stage": "review",
+      "issues": [],
+      "checker": {
+        "model": "gpt-6.1-sol",
+        "agentId": "08667933-3d5b-44c8-a40e-cd2ef5899435",
+        "provider": "codex",
+        "capability": 2,
+        "subscriptionId": "606af686-b46c-4e49-89f5-5b87c49f817f"
+      },
+      "candidateId": "10ff1422-b5c7-4f56-bbab-9d11aacb5cb9",
+      "routeRevision": 2,
+      "reviewedCommit": "5fccde4cc1fd576f7ed7ae29b2949f62054f5fac"
+    },
+    "by": {
+      "kind": "agent",
+      "id": "08667933-3d5b-44c8-a40e-cd2ef5899435",
+      "name": "Code reviewer"
+    },
+    "at": "2026-11-17T09:49:43.744Z"
+  },
+  {
+    "kind": "verdict",
+    "text": "Security PASS на 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac, база 11aa5777c4a5f74a550c0e53570ec35ebae39f53. Проверены diff двух назначенных файлов, parent, автор и Signed-off-by, чистое дерево; git ls-remote подтвердил тот же HEAD task-1237. Блокирующих находок нет. agent_changes исключен из выдачи INSERT / UPDATE / DELETE и получает SELECT; readAllButKeys запись не возвращает. grantsFor вызывается при каждом открытии ролей и отзывает прежние табличные права. Реальные SQL-запросы идут через отдельный вход роли, а не административное соединение. CTE / MERGE / DO сохраняют ограничения роли. Доступные net.assert_lease не пишут agent_changes, остальные net-функции закрыты от PUBLIC. FK истории без каскадных действий; серверные записи остаются на доверенном соединении. Миграция не нужна для прежних табличных grants; обновление прав проверено автором.\n\nПолностью прочитаны RED и GREEN, 6 final-логов содержат точный SHA, чистое дерево и фактический exit 0. Команды из apps/server: npx vitest run test/orchestrator-sql-agent-changes.test.ts --maxWorkers=1 (1 PASS), test/orchestrator-sql-secrets.test.ts (1 PASS), test/head-department-control.test.ts (7 PASS), test/department-owner-control.test.ts (11 PASS), каждая с --maxWorkers=1; всего 20 PASS. В корне: npx tsc -p apps/server/tsconfig.eslint.json --noEmit и npx eslint apps/server/src/db/agent-sql.ts apps/server/test/orchestrator-sql-agent-changes.test.ts, оба exit 0. RED на базе с новым тестом: поддельный INSERT принят, affectedRows 1, exit 1. Новый тест подтверждает запрет прямых и вложенных записей, сохранение чтения и истории, отсутствие табличных и колоночных прав записи и отзыв прежних grants. Python-сверка подтвердила размеры всех 14 вложений (13 автора и 1 Review), исходный patch побайтно равен diff кандидата. git diff --check базы и кандидата: exit 0. review.runs и testEvidence пусты, quality record unavailable: доказательства здесь локальные авторские журналы, а не квитанции run_tests. Неизменные проверки повторно не запускал.\n\nОграничения: T5 не объявляется PASS. Новый DB-case 2850 ms, test-файл 2854 ms, runner 15.93 s принят главой как исключение в комментарии от 09:49:17 UTC; прежние превышения соседних файлов перечислены Review, нагрузка в логах не записана. turn_releases и task_routes оставлены вне правки по явному решению главы для отдельной задачи. Мой first-look codex review --base task-1237-security-base не смог прочитать diff из-за запрета bwrap на создание namespace; завершение с exit 0 не доказывает ревью. Ручная проверка выполнена. Код не менял, полный прогон и интеграцию не выполнял. Передаю точный кандидат Tests.",
+    "data": {
+      "pass": true,
+      "stage": "security",
+      "issues": [],
+      "checker": {
+        "model": "gpt-6.1-sol",
+        "agentId": "36a65f87-bacf-484b-b619-f7ab7189393e",
+        "provider": "codex",
+        "capability": 2,
+        "subscriptionId": "606af686-b46c-4e49-89f5-5b87c49f817f"
+      },
+      "candidateId": "10ff1422-b5c7-4f56-bbab-9d11aacb5cb9",
+      "routeRevision": 3,
+      "reviewedCommit": "5fccde4cc1fd576f7ed7ae29b2949f62054f5fac"
+    },
+    "by": {
+      "kind": "agent",
+      "id": "36a65f87-bacf-484b-b619-f7ab7189393e",
+      "name": "Security engineer"
+    },
+    "at": "2026-11-17T09:52:54.260Z"
+  }
+]

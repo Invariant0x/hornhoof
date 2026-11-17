@@ -1,0 +1,17 @@
+#1237, Developer 4c9cbb02, 2026-11-17. task-1237 = 5fccde4cc1fd576f7ed7ae29b2949f62054f5fac, one commit on turn-31 11aa5777c4a5f74a550c0e53570ec35ebae39f53.
+Change: apps/server/src/db/agent-sql.ts puts agent_changes into READ_ONLY (comment says why). No migration: grantsFor runs at
+  every start and begins with REVOKE ALL, so a write right left from an earlier build goes too.
+New test: apps/server/test/orchestrator-sql-agent-changes.test.ts. The orchestrator's role is refused with "permission denied
+  for table agent_changes" on INSERT, INSERT ... SELECT, UPDATE (author and content), DELETE, TRUNCATE, INSERT/UPDATE/DELETE in
+  a CTE, MERGE and a DO block; it reads the line; the line is unchanged; no INSERT/UPDATE/DELETE/TRUNCATE right is left; and
+  after a GRANT of all four plus grantsFor again, INSERT is refused.
+RED on 11aa5777 sources with the final test (fix taken out and put back with fix-src.patch):
+  red-final-orchestrator-sql-agent-changes.log: the forged INSERT resolved with affectedRows 1 instead of being refused.
+  red-draft-orchestrator-sql-agent-changes.log: the same run before the last three lines (earlier-build right) were added.
+green-orchestrator-sql-agent-changes-pre-commit.log: the new test right after the fix, before the commit.
+GREEN on 5fccde4c, clean tree, in apps/server, npx vitest run test/<name>.test.ts --maxWorkers=1, NODE_OPTIONS=--max-old-space-size=4096,
+  one file at a time, all exit 0: orchestrator-sql-agent-changes 1/1, orchestrator-sql-secrets 1/1, head-department-control 7/7,
+  department-owner-control 11/11. final-tsc-server-tests: tsc -p apps/server/tsconfig.eslint.json --noEmit, exit 0.
+  final-eslint-touched: eslint of the two files, exit 0.
+table-rights-probe-1237.txt: what the role could write on 11aa5777 before the fix (temporary probe, not committed).
+deps.log: npm run -s deps from the lockfile. No run_tests, no full run, nothing pushed to turn-31.
