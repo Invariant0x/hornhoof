@@ -360,12 +360,16 @@ describe('a heavy check in the agent\'s own shell', () => {
     let stdout = ''; child.stdout!.on('data', chunk => { stdout += String(chunk); });
     child.once('close', code => resolve(`${code}:${stdout}`));
   });
-  function machine(grantAtOnce: boolean, online = true) {
+  function machine(grantAtOnce: boolean, online = true, onRelease = () => {}) {
     const key = '10000000-0000-4000-8000-000000000011', frames: string[] = [];
-    let grant = () => {};
+    let grant = () => {}, end = () => {};
     const client = new CheckClient(frame => {
       frames.push(frame.type);
-      if (frame.type === 'check.acquire') grant = () => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+      if (frame.type === 'check.release') onRelease();
+      if (frame.type === 'check.acquire') {
+        grant = () => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+        end = () => client.receive({ type: 'check.state', id: frame.id, state: 'ended', position: 0 });
+      }
       if (grantAtOnce && frame.type === 'check.acquire') queueMicrotask(grant);
       return true;
     });
@@ -374,7 +378,7 @@ describe('a heavy check in the agent\'s own shell', () => {
     onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const dir = mkdtempSync(join(tmpdir(), 'hh-check-wait-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    return { key, frames, bridge, dir, grant: () => grant(), start: async () => { await bridge.start(); bridge.setToken(key, 'turn'); return bridge.agent(key).hookUrl; } };
+    return { key, frames, bridge, dir, grant: () => grant(), end: () => end(), start: async () => { await bridge.start(); bridge.setToken(key, 'turn'); return bridge.agent(key).hookUrl; } };
   }
 
   it('runs the command in its own shell once a slot is given, and holds the slot until the command ends', async () => {
@@ -388,6 +392,28 @@ describe('a heavy check in the agent\'s own shell', () => {
     expect(await done).toBe(`7:${child.pid} ${realpathSync(m.dir)} slot`);
     await eventually(() => m.frames.includes('check.release'));
     expect(m.frames).toEqual(['check.acquire', 'check.release']);
+  });
+
+  it.runIf(existsSync('/proc/self'))('stops the command and what it started as its slot ends, and gives the slot back only after', async () => {
+    /* A process that was killed but not yet reaped is gone too. */
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0, grandchild = 0;
+    const atRelease: boolean[] = [];
+    const m = machine(true, true, () => atRelease.push(alive(leader) || alive(grandchild))), hook = await m.start();
+    const started = join(m.dir, 'started');
+    const starts = 'const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); require("node:fs").writeFileSync(process.argv[1], [process.pid, g.pid].join(" ")); setInterval(() => {}, 1000)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', starts, started], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    /* A run that fails leaves nothing behind; a pid never named stays unsent, as 0 would mean this test's own group. */
+    onTestFinished(() => { for (const pid of [child.pid ?? 0, leader, grandchild]) if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL'); });
+    await eventually(() => existsSync(started) && readFileSync(started, 'utf8') !== '');
+    [leader, grandchild] = readFileSync(started, 'utf8').split(' ').map(Number) as [number, number];
+    expect([alive(leader), alive(grandchild)]).toEqual([true, true]);
+    m.end();
+    expect(await done).toBe('143:');
+    await eventually(() => m.frames.includes('check.release'));
+    expect(atRelease).toEqual([false]);
+    expect([alive(leader), alive(grandchild)]).toEqual([false, false]);
   });
 
   it('runs the command at once when the machine has no slot to give or it is not an agent\'s', async () => {
