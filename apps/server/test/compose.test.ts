@@ -179,8 +179,15 @@ describe('the compose file', () => {
     expect(front!.depends_on).toEqual(['keeper']);
     expect(keeper!.depends_on).toEqual({ db: { condition: 'service_healthy', required: false } });
     expect(compose.services.updater!.depends_on).toBeUndefined();
+  });
+
+  /* The updater takes the installers and the compose files of the build it moves to from the image, the server its
+     migrations, templates and version, and the orchestrator reads the source to see how Hornhoof is made. */
+  it("carries Hornhoof's files as they are in the server's image, the source with them, but the README's animations", () => {
     const dockerfile = readFileSync(fileURLToPath(new URL('../../../Dockerfile', import.meta.url)), 'utf8');
-    expect(dockerfile).toContain('COPY compose.worker.yaml compose.worker.yaml');
+    expect(dockerfile).toMatch(/^COPY --exclude=\.github\/assets \. \.$/m);
+    const ignored = readFileSync(fileURLToPath(new URL('../../../.dockerignore', import.meta.url)), 'utf8').split('\n').map(line => line.trim());
+    for (const kept of ['apps', 'packages', 'templates', 'docs', 'guide', 'scripts', 'compose.yaml', 'compose.worker.yaml']) expect(ignored, kept).not.toContain(kept);
   });
 
   it("tells the keeper and the updater what the machine is, and the keeper where it joined", () => {
