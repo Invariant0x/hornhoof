@@ -244,11 +244,13 @@ describe('a department reaches nothing of another one', () => {
   it('an agent of another department publishes nothing of this one, and a worker has no tool for it', async () => {
     const m = await marketing();
     const l = await lettersOf(m);
+    const status = async () => (await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status;
+    expect(await status()).toBe('proposed');
     const sue = await m.c.tools(m.c.salesHead, m.c.ids.ceo);
     refused(await call(sue, 'outbound_publish', { revision: l.template.id }));
     const worker = (await (await m.c.tools(m.writer)).listTools()).tools.map(t => t.name);
     for (const name of ['outbound_publish', 'outbound_revoke', 'outbound_policy_set', 'outbound_account_author']) expect(worker, name).not.toContain(name);
-    expect((await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status).toBe('published');
+    expect(await status()).toBe('proposed');
   });
 });
 
