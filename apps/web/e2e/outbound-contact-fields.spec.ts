@@ -68,7 +68,7 @@ for (const language of extremes) for (const skin of BUILTIN_SKINS) for (const wi
     await expect(fieldName).toHaveAttribute('aria-invalid', 'true');
     await expect(form.getByText(c.fieldNameInvalid, { exact: true })).toBeVisible();
     await fits();
-    await fieldName.locator('xpath=ancestor::div[contains(@class, "field")][1]').screenshot({ path: info.outputPath('field-error-focus.png') });
+    await fieldName.locator('xpath=ancestor::div[@class="field"][1]').screenshot({ path: info.outputPath('field-error-focus.png') });
     writeFileSync(info.outputPath('geometry.json'), JSON.stringify({ language: { id: language.id, length: language.length }, skin: skin.id, width, browser: info.project.name, form: await form.boundingBox(), focus: await fieldName.evaluate(el => { const s = getComputedStyle(el); return { color: s.color, border: s.borderColor, outline: s.outlineColor }; }) }, null, 2));
     await fieldName.fill('personal_line');
     await form.getByRole('button', { name: c.submit, exact: true }).click();
