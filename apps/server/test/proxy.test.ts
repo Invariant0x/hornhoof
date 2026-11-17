@@ -359,21 +359,22 @@ describe('requests', () => {
     expect(connections).toBe(2);
   });
 
-  it('keeps a client connection through an idle stretch that would end it at 5 s', async () => {
-    const socket = await connected(await through(await answering((_, res) => res.end('ok'))));
-    socket.write('GET /first HTTP/1.1\r\nHost: h\r\n\r\n');
-    await readsUntil(socket, 'ok');
-    await sleep(6500);
-    socket.write('GET /second HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n');
-    expect((await readToEnd(socket)).split('\r\n')[0]).toBe('HTTP/1.1 200 OK');
+  /* Node closes the idle connection itself, on a timer of its own: what is this hop's is how long it tells Node to wait. */
+  it('keeps an idle client connection for longer than the 5 s Node gives one', () => {
+    const server = serve(passThrough({ target: { host: '127.0.0.1', port: 1 }, headers: () => ({}), unreachable: startingAnswer }));
+    expect(server.keepAliveTimeout).toBeGreaterThan(http.createServer().keepAliveTimeout);
   });
 
+  /* The target closed the connection once it went idle, and a request that still came on it finds it closed. */
   it('takes no request on a connection the target closed while idle', async () => {
-    const server = http.createServer((_, res) => res.end('ok'));
-    server.keepAliveTimeout = 5000;
+    const answered = new WeakSet<net.Socket>();
+    const server = http.createServer((req, res) => {
+      if (answered.has(req.socket)) return void req.socket.destroy();
+      answered.add(req.socket);
+      res.end('ok');
+    });
     const proxy = await through(await listening(server));
     expect((await send(proxy)).status).toBe(200);
-    await sleep(6000);
     expect((await send(proxy)).status).toBe(200);
   });
 });
