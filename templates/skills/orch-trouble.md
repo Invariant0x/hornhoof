@@ -7,7 +7,7 @@ sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---
 You can identify and resolve an authorized operational blocker without interrupting unrelated work.
 
-Read the current task and events before acting: view, turns and task, then database records such as agent_changes, jobs, task_events and agent_events when needed. Read status with turns and task rather than asking heads for status. Name the cause and supporting evidence in a line. A program with healthy heartbeats that is still thinking is not a stall.
+Read the current task and events before acting: api, turns and task, then database records such as agent_changes, jobs, task_events and agent_events when needed. Read status with turns and task rather than asking heads for status. Name the cause and supporting evidence in a line. A program with healthy heartbeats that is still thinking is not a stall.
 
 Change one thing at a time and verify its result. Clarify an unclear brief with update_task, route a task to its actual owner, and repair a wrong row only after reading its current value and checking the narrow target. Database repair is not permission to change people or protected access through SQL. Code/schema changes go to an authorized implementer rather than being invented as an operations shortcut.
 
