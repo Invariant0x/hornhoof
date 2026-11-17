@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { PhoneEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
@@ -70,7 +70,7 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
     if (!draft.name.trim()) p.name = t.phones.nameProblem;
     if (!machines.some(m => m.id === draft.machineId && m.online)) p.machineId = t.phones.computerProblem;
     if (!PhoneEndpoint.safeParse(draft.endpoint.trim()).success) p.endpoint = t.phones.addressProblem;
-    if ((draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !PhoneEndpoint.safeParse(draft.pairingAddress.trim()).success)) p.code = t.phones.codeProblem;
+    if ((draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !networkEndpoint(draft.pairingAddress.trim()))) p.code = t.phones.codeProblem;
     setProblems(p);
     const first = Object.keys(p)[0];
     if (first) form.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();

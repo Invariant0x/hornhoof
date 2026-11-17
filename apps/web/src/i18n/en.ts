@@ -22,7 +22,7 @@ export const en = {
   phones: {
     heading: 'Company phones', intro: 'Let your company assistants work on your Android phone, one at a time. Stop puts it back in your hands.',
     add: 'Add phone', find: 'Find phone', cancel: 'Cancel', name: 'Phone name', computer: 'Computer', chooseComputer: 'Choose a computer', address: 'Phone address',
-    networkHint: 'The phone needs Android 11 or newer and the same Wi-Fi as the computer. On the phone, open Settings, System, Developer options, Wireless debugging, turn it on and type here the IP address and port it shows. After the phone restarts or changes Wi-Fi, turn it on again and add the phone with the new address, without a new code. No Developer options? In About phone, tap Build number seven times.',
+    networkHint: 'The phone needs Android 11 or newer and the same Wi-Fi as the computer. On the phone, open Settings, System, Developer options, Wireless debugging, turn it on and type here the IP address and port it shows. After the phone restarts or changes Wi-Fi, turn it on again and add the phone with the new address, without a new code. No Developer options? In About phone, tap Build number seven times. Phone plugged by cable into the machine, and the machine set up for that by its administrator? Then type here its serial number from About phone instead of the address.',
     pairingAddress: 'Pairing address, first time only', pairingAddressHint: 'The first time only: on the phone, tap Pair device with pairing code and type here the IP address and port from that window.',
     pairingCode: 'Pairing code, first time only', pairingHint: 'The six digits from the same window. The code is used once and is not saved.',
     nameProblem: 'Give the phone a name.', computerProblem: 'Choose an online computer.', addressProblem: 'Enter the address and port shown on the phone.', codeProblem: 'Enter the six digits and the pairing address shown on the phone.',
@@ -1777,6 +1777,8 @@ export const en = {
     decidedByDepartment: (department: string) => `Decided by the people of ${department}, the CEO or the CEO delegate.`,
     decidedByOwner: (department: string) => `Decided by the owner of ${department}, the CEO or the CEO delegate.`,
     actedFor: (agent: string, person: string) => `${agent} for ${person}`,
+    /* A person's answer the orchestrator gave of its own. */
+    byOrchestrator: 'decided by the orchestrator',
     note: 'Note, if any',
     choiceNote: 'Comment or feedback',
     choiceHint: 'Pick an option above, or send feedback without picking one.',
