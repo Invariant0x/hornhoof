@@ -12,12 +12,14 @@ let lastShared: PGlite | undefined;
 afterAll(() => {
   expect(lastShared?.closed).toBe(true);
 });
-const { checkSharedDatabase, createTestDb, databasesOpened, fixture, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
+const { checkSharedDatabase, createTestDb, databasesOpened, fixture, prepareSharedDatabase, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
 afterAll(() => {
   lastShared = sharedDatabase();
   expect(lastShared?.closed).toBe(false);
 });
+
+await prepareSharedDatabase();
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 const reader = readerRole('postgres');
