@@ -186,6 +186,38 @@ describe('machine access scope', () => {
     expect(lines.map(line => [line.personId, (line.data as { state?: string; scope?: string }).scope])).toEqual([[null, 'all_agents']]);
   });
 
+  it('attributes the pending-request notification to the orchestrator when it opens access itself', async () => {
+    const c = await company();
+    await c.app.ctx.computer.ask(c.acme.id, c.machine, 'Synthetic pending access request');
+    await listen(c.app);
+    const client = await mcp(c.app, (await c.run(c.orchestrator)).token);
+    const called = await client.callTool({ name: 'api', arguments: { method: 'POST', path: `/api/machines/${c.machine}/access/open`, body: { scope: 'all_agents', confirm: true } } });
+    expect(called.isError).not.toBe(true);
+    expect(await c.app.ctx.computer.view(c.owner, c.machine)).toMatchObject({ openedBy: null, until: new Date(AT.getTime() + 3600_000).toISOString() });
+    const notes = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'message')));
+    const notice = notes.map(row => row.data as { text?: string; notification?: { source?: string }; _message?: unknown }).find(data => data.notification?.source === 'computer_access');
+    expect(notice).toMatchObject({ _message: { from: { kind: 'agent', id: c.orchestrator.id } } });
+    expect(notice!.text).not.toContain('The CEO opened access');
+    const queued = (await c.db.select().from(jobs)).filter(job => job.prompt.includes('Synthetic pending access request'));
+    expect(queued.length).toBeGreaterThan(0);
+    for (const job of queued) expect(job).toMatchObject({ createdBy: null, answersCeo: false });
+  });
+
+  it('names no person when the orchestrator closes access or declines its request', async () => {
+    const c = await company();
+    expect((await c.open()).statusCode).toBe(200);
+    await listen(c.app);
+    const client = await mcp(c.app, (await c.run(c.orchestrator)).token);
+    const close = await client.callTool({ name: 'api', arguments: { method: 'POST', path: `/api/machines/${c.machine}/access/close` } });
+    expect(close.isError).not.toBe(true);
+    await c.app.ctx.computer.ask(c.acme.id, c.machine, 'Synthetic declined request');
+    const decline = await client.callTool({ name: 'api', arguments: { method: 'POST', path: `/api/machines/${c.machine}/access/decline` } });
+    expect(decline.isError).not.toBe(true);
+    const lines = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer'))).orderBy(agentEvents.seq);
+    const changes = lines.filter(line => ['closed', 'declined'].includes((line.data as { state: string }).state));
+    expect(changes.map(line => [(line.data as { state: string }).state, line.personId])).toEqual([['closed', null], ['declined', null]]);
+  });
+
   it('offers heads and workers command tools without asking for access', async () => {
     const c = await company();
     await listen(c.app);
