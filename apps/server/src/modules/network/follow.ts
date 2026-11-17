@@ -59,7 +59,7 @@ export function leaderBuild(ctx: Ctx): LeaderBuild | null {
 
 /* How long a join waits for the registry when the server knows no build of its own: well under the half minute its
    installer gives the whole join. */
-export const JOIN_BUILD_WAIT_MS = 10_000;
+const JOIN_BUILD_WAIT_MS = 10_000;
 
 /* The server's own build for a join, which names it to a machine once and so asks the registry when nothing is known,
    but only for a moment: a registry that is slow must not cost the machine its one-time command. */
@@ -141,7 +141,7 @@ export async function tryGrant(tx: Db, own: Own, machineId: string, build: Leade
   return true;
 }
 
-export type NextToInstall = { id: string; networkId: string | null; since: number };
+type NextToInstall = { id: string; networkId: string | null; since: number };
 const lines = new WeakMap<Ctx['config'], { machine: string; commit: string; since: number }>();
 
 /* The machine next to install the server's build, and since when it is: while none installs, of the machines that have

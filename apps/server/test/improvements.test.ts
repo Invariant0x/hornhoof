@@ -460,8 +460,8 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     expect(relay.feedback).toHaveLength(2);
   });
 
-  it('lets only a person who sees the whole company report the repeats, never an agent or the orchestrator', async () => {
-    const { app, db, ceo, relay, orchestrator, propose, send, reportRepeats, id } = await installation();
+  it('lets only a person who sees the whole company report the repeats, or the orchestrator for the owner, never an agent', async () => {
+    const { app, db, ceo, relay, orchestrator, propose, send, id } = await installation();
     expect((await send()).statusCode).toBe(200);
     await propose();
     const [dev] = await db.select().from(departments).where(eq(departments.roleCode, 'DEV'));
@@ -469,9 +469,9 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, ...as(dana) })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: { authorization: `Bearer ${TOKENS.orchestrator}` } })).statusCode).toBe(401);
     const [ivan] = await db.select().from(people);
-    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(403);
     expect(relay.feedback).toHaveLength(1);
-    expect((await reportRepeats()).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(200);
+    expect(relay.feedback).toHaveLength(2);
   });
 
   it('keeps the repeats when hornhoof.org does not answer, and counts them on without failing the agent', async () => {

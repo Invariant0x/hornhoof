@@ -22,6 +22,10 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; line-he
 h1 { font-size: 26px; }
 h2 { font-size: 18px; }
 p { margin: 0; }
+/* A phrase isolated in its own direction lines up with the side of the block it stands in, not with its own start: on a
+   right to left page an English description stands right like its heading. No weight, so a part that aligns on purpose
+   keeps it. Chromium knows the value only by its old name, which the others skip. */
+:where([dir="auto"]) { text-align: -webkit-match-parent; text-align: match-parent; }
 a { color: var(--cyan-ink); }
 button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-rendering: inherit; }
 :focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
@@ -495,6 +499,9 @@ select:disabled { opacity: .55; }
 .outbound-entry small { color: var(--muted); font-size: 12px; }
 .outbound-entry > .entry-actions { margin-block-start: 4px; }
 .outbound-address { overflow-wrap: anywhere; }
+/* A channel's addresses: a block of their own after its buttons, under a line, with a subheading of the panel. */
+.outbound-contacts { display: grid; gap: 8px; min-width: 0; margin-block-start: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.outbound-contacts > h4 { margin: 0; font-family: var(--f-display); font-weight: 600; font-size: 14px; line-height: 1.15; overflow-wrap: break-word; }
 .outbound-setup .form-foot { margin-block-start: 8px; }
 /* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
@@ -1381,6 +1388,8 @@ button.shead, button.schip { cursor: pointer; }
 .shead .hc .bar { flex: 1; }
 .shead .hc b { font-weight: 500; font-variant-numeric: tabular-nums; }
 .shead.empty > .edge { background: var(--line2); }
+/* A card with no head yet keeps its role line, its words and its count at one start edge, right to left too. */
+.shead.empty { text-align: start; }
 .shead.empty .hn { font-size: 18px; color: var(--muted); }
 .schip .edge-in { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 10px 14px; box-sizing: border-box; }
 .schip .cx { position: absolute; left: 14px; right: 12px; bottom: 6px; height: 3px; }
@@ -1607,6 +1616,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
   .dview .ticker { left: 16px; right: 16px; }
   .dv-acts { left: 16px; right: 16px; bottom: 124px; flex-wrap: wrap; }
+  /* The hint of an empty map stands whole above the buttons, which may wrap to several rows: across the width, 16px above
+     the top of the buttons as the map measures it. */
+  .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
   .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-inline-start: 0; }

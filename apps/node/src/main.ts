@@ -25,6 +25,7 @@ import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, take
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { PhoneAdb, privateAdb } from './phones/adb.js';
 import { PhoneExecutor } from './phones/executor.js';
+import { keyboardApk } from './phones/keyboard.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -298,7 +299,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   };
   await learn();
   /* Company phones this node reaches by wireless debugging, through its own adb. */
-  const phones = new PhoneExecutor({ adb: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb'))), send: m => void send?.(m) });
+  const phones = new PhoneExecutor({ adb: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb')), keyboardApk(join(dir, 'phone-adb'))), send: m => void send?.(m) });
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
@@ -447,6 +448,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
+    if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
     if (m.type === 'phone.probe' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();

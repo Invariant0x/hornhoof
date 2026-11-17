@@ -45,20 +45,14 @@ it.each([
   }
 });
 
-it.each(['task_waits', 'wait_policies'])('keeps %s away from both SQL roles, reading included', async table => {
+it.each(['task_waits', 'wait_policies'])('keeps %s from Operations, and lets the orchestrator read it but not change it', async table => {
   const run = await roles();
-  const statements = [
-    `SELECT * FROM ${table}`,
-    `SELECT id FROM ${table}`,
-    `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`,
-    `UPDATE ${table} SET id = id WHERE false`,
-    `DELETE FROM ${table} WHERE false`,
-  ];
-  for (const mode of ['write', 'read'] as const) {
-    for (const statement of statements) {
-      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
-    }
+  const writes = [`INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
+  for (const statement of [`SELECT * FROM ${table}`, `SELECT id FROM ${table}`, ...writes]) {
+    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied/);
   }
+  expect((await run('write', `SELECT * FROM ${table}`))[0]!.rows).toEqual([]);
+  for (const statement of writes) await expect(run('write', statement), `write: ${statement}`).rejects.toThrow(/permission denied/);
 });
 
 it.each(['wait_id', 'generation', 'level', 'purpose', 'route_revision'])('keeps the new %s of a notice readable and not writable, as the rest of it', async column => {
@@ -80,44 +74,43 @@ it.each([
   }
 });
 
-it('keeps request material history invisible and immutable to both SQL roles', async () => {
+it('keeps request material history from Operations and unchanged by either SQL role, and lets the orchestrator read it', async () => {
   const run = await roles();
-  for (const mode of ['write', 'read'] as const) {
-    for (const statement of [
-      'SELECT material_snapshot FROM request_internal',
-      'SELECT * FROM request_internal',
-      'INSERT INTO request_internal (request_id,company_id) SELECT request_id,company_id FROM request_internal WHERE false',
-      'UPDATE request_internal SET material_snapshot = null WHERE false',
-      'DELETE FROM request_internal WHERE false',
-    ]) {
-      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
-    }
+  const writes = [
+    'INSERT INTO request_internal (request_id,company_id) SELECT request_id,company_id FROM request_internal WHERE false',
+    'UPDATE request_internal SET material_snapshot = null WHERE false',
+    'DELETE FROM request_internal WHERE false',
+  ];
+  for (const statement of ['SELECT material_snapshot FROM request_internal', 'SELECT * FROM request_internal', ...writes]) {
+    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied/);
   }
+  expect((await run('write', 'SELECT * FROM request_internal'))[0]!.rows).toEqual([]);
+  for (const statement of writes) await expect(run('write', statement), `write: ${statement}`).rejects.toThrow(/permission denied/);
 });
 
-it('exposes safe request/proposal digests while refusing private proposal history and writes', async () => {
+it('exposes safe request/proposal digests, private proposal history to the orchestrator alone, and refuses writes', async () => {
   const run = await roles();
   for (const mode of ['write', 'read'] as const) {
     expect((await run(mode, 'SELECT id,material_revision,material_digest FROM requests'))[0]!.rows).toEqual([]);
     expect((await run(mode, 'SELECT id,material_revision,material_digest FROM proposals'))[0]!.rows).toEqual([]);
-    for (const statement of [
-      'SELECT material_snapshot FROM proposals', 'SELECT * FROM proposals',
-      'UPDATE proposals SET material_snapshot = null WHERE false',
-      'UPDATE requests SET material_digest = null WHERE false',
-    ]) {
+    for (const statement of ['UPDATE proposals SET material_snapshot = null WHERE false', 'UPDATE requests SET material_digest = null WHERE false']) {
       await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
     }
+  }
+  for (const statement of ['SELECT material_snapshot FROM proposals', 'SELECT * FROM proposals']) {
+    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied/);
+    expect((await run('write', statement))[0]!.rows, `write: ${statement}`).toEqual([]);
   }
 });
 
-it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to both SQL roles, reading too', async table => {
+it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to Operations, and to every change, but lets the orchestrator read it', async table => {
   const run = await roles();
-  const statements = [`SELECT * FROM ${table}`, `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
-  for (const mode of ['write', 'read'] as const) {
-    for (const statement of statements) {
-      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
-    }
+  const writes = [`INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
+  for (const statement of [`SELECT * FROM ${table}`, ...writes]) {
+    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied/);
   }
+  expect((await run('write', `SELECT id FROM ${table}`))[0]!.rows).toEqual([]);
+  for (const statement of writes) await expect(run('write', statement), `write: ${statement}`).rejects.toThrow(/permission denied/);
 });
 
 it('keeps departments.autonomous_release readable and not writable by either SQL role', async () => {

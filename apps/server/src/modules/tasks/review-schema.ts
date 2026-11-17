@@ -21,7 +21,7 @@ export function isTestPath(path: string): boolean {
   return TEST_FILE.test(file) || parts.slice(0, -1).some(dir => TEST_DIRS.has(dir));
 }
 
-export function matchesScopePattern(path: string, pattern: string): boolean {
+function matchesScopePattern(path: string, pattern: string): boolean {
   if (!RepoPath.safeParse(pattern).success) return false;
   if (!GLOB_META.test(pattern)) return path === pattern;
   return posix.matchesGlob(dotSafe(path), dotSafe(pattern));

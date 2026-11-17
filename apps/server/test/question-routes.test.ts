@@ -50,7 +50,7 @@ describe("the question of which copy to go on from, on the copy's app", () => {
     const seen = async (who: object) => (await s.app.inject({ url: '/api/network/question', ...who })).json();
     expect(await seen(as(s.ceo))).toEqual({ question: QUESTION, canAnswer: true });
     expect(await seen(as(s.pat))).toEqual({ question: QUESTION, canAnswer: false });
-    expect(await seen(s.forOwner)).toEqual({ question: QUESTION, canAnswer: false });
+    expect(await seen(s.forOwner)).toEqual({ question: QUESTION, canAnswer: true });
     expect((await s.app.inject({ url: '/api/network/question' })).statusCode).toBe(401);
     /* The owner who signed in on this machine while it only reads answers too. */
     const signed = await s.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: SETUP.email, password: SETUP.password } });
@@ -82,16 +82,17 @@ describe("the question of which copy to go on from, on the copy's app", () => {
       expect((refused.json() as { error: { message: string } }).error.message).toBe('The question changed. Look again.');
     }
     expect(s.word()).toBeNull();
-    /* The CEO alone, on his own session. */
-    for (const who of [as(s.pat), s.forOwner]) {
-      expect(s.refusal(await s.post('go-on', { networkId: B, reach: '2026-11-12T14:01:40.000Z' }, who))).toEqual([403, 'not_owner_session']);
-      expect(s.refusal(await s.post('wait', {}, who))).toEqual([403, 'not_owner_session']);
-    }
+    /* The CEO alone, by himself or through the orchestrator. */
+    expect(s.refusal(await s.post('go-on', { networkId: B, reach: '2026-11-12T14:01:40.000Z' }, as(s.pat)))).toEqual([403, 'not_owner_session']);
+    expect(s.refusal(await s.post('wait', {}, as(s.pat)))).toEqual([403, 'not_owner_session']);
     expect(s.word()).toBeNull();
     const wait = await s.post('wait', {}, as(s.ceo));
     expect(wait.statusCode).toBe(202);
     expect(s.word()).toMatchObject({ wait: true, by: s.owner.id });
     expect(s.word()).not.toHaveProperty('goOn');
+    rmSync(join(s.dir, RECOVERY_FILE));
+    expect((await s.post('wait', {}, s.forOwner)).statusCode).toBe(202);
+    expect(s.word()).toMatchObject({ wait: true, by: s.owner.id });
   });
 
   it('answers that the question changed when none stands', async () => {

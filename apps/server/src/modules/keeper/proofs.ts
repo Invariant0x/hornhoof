@@ -4,6 +4,7 @@ import type { Beats, Heard } from './beats.js';
 import { LEASE_MS, type Clocks } from './lease.js';
 import type { Sql } from './lease-store.js';
 import { above } from './takeover-step.js';
+import { Ticker } from './ticker.js';
 
 /* What lets the machine that leads keep its lease once another machine holds a copy that finished: each second it
    proves anew that it is still the one the company's name leads to, or that the copy its commits wait for still
@@ -77,7 +78,7 @@ function classifyMiss(said: ProbeRace, nonce: string): LinkMiss | null {
   return said.value.nonce === nonce ? null : 'stale';
 }
 
-export type LeaseProofsOptions = {
+type LeaseProofsOptions = {
   /* A request through the company's link for who holds the lease there, with a nonce of this keeper's. */
   probe: (nonce: string) => Promise<ProbeAnswer>;
   beats: Pick<Beats, 'answer' | 'all'>;
@@ -92,8 +93,7 @@ export type LeaseProofsOptions = {
 };
 
 export class LeaseProofs {
-  private timer: NodeJS.Timeout | null = null;
-  private stopped = false;
+  private readonly ticks: Ticker;
   private inFlight = 0;
   private epoch = 0;
   private byLink: Clocks | null = null;
@@ -106,6 +106,7 @@ export class LeaseProofs {
 
   constructor(private readonly opts: LeaseProofsOptions) {
     this.clocks = opts.now ?? (() => ({ wall: Date.now(), mono: performance.now() }));
+    this.ticks = new Ticker(() => this.tick(), opts.everyMs ?? EVERY_MS);
   }
 
   private everyMs(): number {
@@ -117,15 +118,11 @@ export class LeaseProofs {
   }
 
   start(): void {
-    if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => void this.tick(), this.everyMs());
-    this.timer.unref();
+    this.ticks.start();
   }
 
   stop(): void {
-    this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.ticks.stop();
   }
 
   /* Lets a lease that stood before proofs were needed stand from when they began to be, while the first proof is
@@ -138,14 +135,14 @@ export class LeaseProofs {
      answer of this machine proves the name still leads here as of when the question went out; one of another machine
      ends the lease. No answer in five seconds proves nothing. */
   async tick(): Promise<void> {
-    if (this.stopped || this.inFlight >= MAX_PROBES) return;
+    if (this.ticks.stopped || this.inFlight >= MAX_PROBES) return;
     this.inFlight += 1;
     const epoch = this.epoch;
     const nonce = randomBytes(16).toString('base64url');
     const sent = this.clocks();
     try {
       const said = await this.raceProbe(nonce);
-      if (this.stopped || epoch !== this.epoch) return;
+      if (this.ticks.stopped || epoch !== this.epoch) return;
       this.applyProbe(said, nonce, sent);
     } finally {
       this.inFlight -= 1;

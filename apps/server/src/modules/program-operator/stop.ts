@@ -10,8 +10,8 @@ import { accessRefused, authorizeAccess, masked } from './access.js';
 import type { OperatorCaller } from './authorization.js';
 import { pictureSecrets } from './pictures.js';
 
-export type StopInput = { employee: string; reason: string };
-export type StopResult = { result: 'stopped'; employee: string; name: string; job: string };
+type StopInput = { employee: string; reason: string };
+type StopResult = { result: 'stopped'; employee: string; name: string; job: string };
 
 /* Operations end the turn any employee of their company runs, the orchestrator's and every head's too, as Esc in its window
    does, in a turn of their own that no person need answer. The employee stays as it is, and its next turn starts from its

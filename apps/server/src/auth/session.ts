@@ -11,11 +11,11 @@ import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
 import { checkRead, READ_MS, readCookieOf, readPerson, signRead } from './read-cookie.js';
 
-export const SESSION_COOKIE = 'hh_session';
+const SESSION_COOKIE = 'hh_session';
 /* A browser takes a __Host- cookie only when it is secure, has path / and no domain, so a page on another company's name
    under hornhoof.org cannot set it. */
 export const LINK_SESSION_COOKIE = '__Host-hh_session';
-export const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
+const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
 const SESSION_DAYS = 30;
 const HANDOVER_GRACE_SECONDS = 60;
 
@@ -254,7 +254,7 @@ const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue
 export const personOf = (me: Person): string | null => (me.via ? null : me.id);
 
 /* The orchestrator acts for the owner, as itself: not a head carrying out the decision of the person its turn answers. */
-export const viaOrchestrator = (me: Person): boolean => !!me.via && !me.viaHead;
+export const viaOrchestrator = (me: Pick<Person, 'via' | 'viaHead'>): boolean => !!me.via && !me.viaHead;
 
 /* Who a change is by: the person, or the orchestrator when it acts for the owner. What a head changes is the decision of
    the person its turn answers, so it is that person's. */

@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
 import { agentBriefing } from './briefing.js';
 
-type ToolJob = { companyId: string; agentId: string };
+type ToolJob = { companyId: string; agentId: string; departmentId: string | null };
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -21,7 +21,8 @@ export function registerBriefingTool(server: McpServer, ctx: Ctx, job: ToolJob):
     },
     async () => {
       const [me] = await ctx.db.select({ companyId: agents.companyId, departmentId: agents.departmentId, productId: agents.productId }).from(agents).where(eq(agents.id, job.agentId));
-      const briefing = me && me.companyId === job.companyId ? await agentBriefing(ctx.db, me) : null;
+      /* The orchestrator, in no department, reads the one it names. */
+      const briefing = me && me.companyId === job.companyId ? await agentBriefing(ctx.db, { ...me, departmentId: me.departmentId ?? job.departmentId }) : null;
       return briefing ? say(JSON.stringify(briefing)) : say('You belong to no department, so nothing is kept for you here.');
     },
   );

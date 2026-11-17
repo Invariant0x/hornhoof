@@ -7,7 +7,7 @@ import { useState, useSyncExternalStore } from 'react';
    moves time by hand. */
 
 export type Clock = () => number;
-export type RateMeter = { hit(): boolean; reset(): void };
+type RateMeter = { hit(): boolean; reset(): void };
 
 /* What happened within the last windowMs: hit counts one more and says whether that is past the limit. It keeps at most
    limit + 1 moments, so a storm costs no memory. */
@@ -28,7 +28,7 @@ export function rateMeter(limit: number, windowMs: number, now: Clock = Date.now
 }
 
 /* Why the page went light: a block drew without end, a box swung between two sizes, or frames kept coming late. */
-export type GuardReason = 'render' | 'resize' | 'frames';
+type GuardReason = 'render' | 'resize' | 'frames';
 
 let light: GuardReason | null = null;
 const lightWatchers = new Set<() => void>();
@@ -69,7 +69,7 @@ export function useLight(): GuardReason | null {
 const RENDER_LIMIT = 300;
 const RENDER_WINDOW_MS = 2000;
 
-export class RenderStormError extends Error {
+class RenderStormError extends Error {
   constructor(readonly block: string) {
     super(`${block} drew more than ${RENDER_LIMIT} times in ${RENDER_WINDOW_MS / 1000} s`);
     this.name = 'RenderStormError';
@@ -184,7 +184,7 @@ export function everyVisible(fn: () => void, ms: number): () => void {
   };
 }
 
-export type FrameWatch = { every: number; budget: number; strikes: number; now: Clock; frame: (cb: FrameRequestCallback) => void };
+type FrameWatch = { every: number; budget: number; strikes: number; now: Clock; frame: (cb: FrameRequestCallback) => void };
 
 /* Every `every` ms while the tab is seen, how long two frames in a row take; past `budget` `strikes` times running, the
    page goes light. A hidden tab draws no frames, so the watch waits for it to come back. */

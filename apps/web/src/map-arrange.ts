@@ -8,9 +8,9 @@ import type { Point } from './ui/wires';
 
 /* World coordinates: people on top, the orchestrator in the middle, departments in two columns around him. */
 export const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
-export const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
+const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
 /* A card grows by its turn strip while any department works in the turn, so every card of the map stays the same size. */
-export const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
+const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
 /* Up to two rows sit at the four corners; more rows stack evenly around the hub, this far apart, and never closer than
    ROW_GAP between the cards. */
 const CORNER = 220, ROW = 220, ROW_GAP = 32;
@@ -31,7 +31,7 @@ function rowOffsets(rows: number, h: number): number[] {
 }
 
 /* How tall the cards of the map are: taller for the turn strip while any department works in the turn. */
-export const cardHeight = (org: Org): number => (workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H);
+const cardHeight = (org: Org): number => (workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H);
 
 /* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others
    run out under the hub, turn up or down beside it and come into the near side of their card, all at right angles. */
@@ -52,12 +52,11 @@ export function deptLayout(n: number, h = DEPT_H): DeptSpot[] {
 }
 
 /* The people sit just above the top row, and their bus runs 14 below them. */
-export function chipsTop(n: number, h = DEPT_H): number {
+function chipsTop(n: number, h = DEPT_H): number {
   return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2), h)[0] ?? -CORNER) - h / 2 - GAP - CHIP_H;
 }
 export const busY = (n: number, h = DEPT_H) => chipsTop(n, h) + CHIP_H + 14;
-export const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
-export const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
+const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
 
 /* A block of the map, as a person's arrangement names it. */
 export const HUB_KEY = 'hub';
@@ -78,13 +77,13 @@ export type MapLine = { key: string; pts: Point[]; ends: [string, string] };
 
 export type Block = { key: string; rect: Rect };
 /* via: the dot where the trace turns towards its card, on the trace the map draws itself. */
-export type ArrangedDept = DeptSpot & { id: string; via: Point | null };
+type ArrangedDept = DeptSpot & { id: string; via: Point | null };
 /* A whole-company person's card and the way to it from the hub. apart: the person took the card out of the row, and it has a
    line of its own from the middle of the hub. */
 export type TopPerson = Rect & { id: string; path: Point[]; apart: boolean };
 /* The quiet lines of the people who stay in the row: a line down from each card, the bus, the way from it to the hub, and the
    dot where that way leaves the bus. */
-export type Bus = { lines: Point[][]; drop: Point[]; via: Point };
+type Bus = { lines: Point[][]; drop: Point[]; via: Point };
 
 export type MapArrangement = {
   hub: Rect;

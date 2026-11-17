@@ -7,6 +7,7 @@ import type { Ctx } from '../../app.js';
 import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
+import { turnProtection } from './privacy.js';
 import { isOperations } from '../operations/required.js';
 import { ApiError } from '../../errors.js';
 import { guardTools, invocationOf } from './calls.js';
@@ -24,7 +25,7 @@ import { registerMergeTools } from '../merge/tools.js';
 import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
-import { registerTaskTools } from '../tasks/tools.js';
+import { registerHolderTools, registerTaskTools } from '../tasks/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerVaultTools } from '../vault/tools.js';
@@ -40,6 +41,10 @@ import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
+import { GRANTS } from '../templates/load.js';
+import { actingFor, Shelf } from './shelf.js';
+import { registerSourceTool } from './source.js';
+import { registerLogsTool } from './logs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -60,14 +65,16 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
    and gets the tools its skills grant, a head keeps its department notebook, changes its department as the people who run
    it decide, tells the orchestrator and puts what to improve under Improvements, and the orchestrator also proposes cards
-   and does whatever the CEO can do in the screens. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null): McpServer {
+   and does whatever the CEO can do in the screens. Whatever any other agent has, the orchestrator has on its shelf, off its
+   list until it needs it. listing: the request reads the list, which leaves the shelf out. */
+async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null, listing = false): Promise<McpServer> {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
-  /* Before any tool is registered, so that every one of them is covered. */
-  guardTools(server, ctx, job, invocation);
+  const shelf = job.agentKind === 'orchestrator' ? new Shelf(server, ctx, job) : null;
   /* On a machine that only reads, no tool that changes something runs, however the call came: cut off, it tells the
      agent to wrap up; else, that the call did not run. */
   if (reading) cutOff(server, { text: reading.cut ? CUT_OFF : PAUSED });
+  /* The mode guard owns the registration first, so a refused sensitive call never starts its audit or value masks. */
+  guardTools(server, ctx, job, invocation, await turnProtection(ctx, job.id));
   server.registerTool(
     'company',
     { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
@@ -81,22 +88,32 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerPhoneTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
-  if (job.agentKind !== 'orchestrator') {
-    registerBriefingTool(server, ctx, job);
-    const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
-    registerWatchTools(server, ctx, job, grants);
-    registerTestTools(server, ctx, job);
-    if (job.agentKind === 'head') {
-      registerHeadNotebookTools(server, ctx, job);
-      registerAssignmentTools(server, ctx, job);
-      registerDepartmentControlTools(server, ctx, app, job);
-      registerHeadPolicyTools(server, ctx, app, job);
-      registerOutboundHeadTools(server, ctx, app, job);
-    }
-    if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
-    if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');
-    return server;
+  if (shelf) registerOrchestratorTools(server, ctx, app, job, reading);
+  /* A department's own tools go for the department the orchestrator names. */
+  shelf?.shelve(true);
+  registerBriefingTool(server, ctx, job);
+  shelf?.shelve();
+  const grants = new Set(shelf ? GRANTS : job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
+  registerWatchTools(server, ctx, job, grants);
+  registerTestTools(server, ctx, job);
+  if (shelf) registerHolderTools(server, ctx, job);
+  if (job.agentKind === 'head' || shelf) {
+    shelf?.shelve(true);
+    registerHeadNotebookTools(server, ctx, job);
+    registerAssignmentTools(server, ctx, job);
+    registerDepartmentControlTools(server, ctx, app, job);
+    registerHeadPolicyTools(server, ctx, app, job);
+    registerOutboundHeadTools(server, ctx, app, job);
+    shelf?.shelve();
   }
+  if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
+  if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');
+  shelf?.close(listing);
+  return server;
+}
+
+/* What only the orchestrator does: it proposes cards and does whatever the CEO can do in the screens. */
+function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob, reading: { cut: boolean } | null): void {
   server.registerTool(
     'propose_structure',
     {
@@ -176,9 +193,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerReleaseTool(server, ctx, job);
   /* On a machine that only reads, the orchestrator reads the database as a head does. */
   registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
+  registerSourceTool(server, ctx);
+  registerLogsTool(server, ctx, job);
   registerOrchestratorImprovementTools(server, ctx, job);
   registerMergeTools(server, ctx, job);
-  return server;
 }
 
 /* Streamable HTTP without sessions: every POST gets its own server and transport. What a program sends with no turn
@@ -205,7 +223,9 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
        machine that only reads it waits, as its tools keep what they do. */
     if (reading && job.agentKind === 'assistant') throw paused();
-    const server = job.agentKind === 'assistant' ? await assistantAgentTools(ctx, job, callName(req.body)) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
+    const server = job.agentKind === 'assistant'
+      ? await assistantAgentTools(ctx, job, callName(req.body))
+      : await toolsFor(ctx, app, actingFor(job, req.body), reading ? null : await invocationOf(req, ctx.config), reading, callName(req.body) === null);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

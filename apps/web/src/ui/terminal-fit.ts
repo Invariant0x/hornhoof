@@ -1,9 +1,9 @@
 import type { Terminal } from '@xterm/xterm';
 import { guardedResizeObserver } from '../guard';
 
-export type EdgeBox = { top: number; right: number; bottom: number; left: number };
+type EdgeBox = { top: number; right: number; bottom: number; left: number };
 
-export type TerminalFitInput = {
+type TerminalFitInput = {
   containerWidth: number;
   containerHeight: number;
   padding: EdgeBox;
@@ -12,7 +12,7 @@ export type TerminalFitInput = {
   cellHeight: number;
 };
 
-export type TerminalSize = { cols: number; rows: number };
+type TerminalSize = { cols: number; rows: number };
 
 const MIN_COLS = 2;
 const MIN_ROWS = 1;

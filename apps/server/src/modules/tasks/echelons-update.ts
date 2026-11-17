@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import { checkerFor } from './echelons-assign.js';
+import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { changeRoute, checkedScopePaths, routeOf, type Route } from './echelons-store.js';
@@ -15,7 +15,7 @@ export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, a
   if (!actor || (actor.kind !== 'orchestrator' && !(actor.kind === 'head' && actor.departmentId === task.departmentId))) throw refuse(403, 'task_not_yours', 'Only this department head or the orchestrator may revise the route.');
 }
 
-export function withCleanup(route: Route, enabled: boolean): Route['state'] {
+function withCleanup(route: Route, enabled: boolean): Route['state'] {
   if (route.state.resultKind === 'coordination') return route.state;
   const review = route.state.stages.findIndex(step => step.stage === 'review');
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
@@ -47,6 +47,10 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
   let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
   const paths = changedPaths(route, change);
   state = withRisk(state, agentId, change.riskClass);
+  if (state.security.required && !route.state.security.required) {
+    const producer = route.state.candidateId ? await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)) : null;
+    state = await populateSecurityOwner(ctx.db, task, state, producer);
+  }
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
