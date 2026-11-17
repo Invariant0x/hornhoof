@@ -83,7 +83,7 @@ async function securityOrigin(db: Reader['db'], task: Task, producer?: CheckerId
 }
 
 /* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
-export async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string, producer?: CheckerIdentity | null): Promise<string | null> {
+async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string, producer?: CheckerIdentity | null): Promise<string | null> {
   if (!task.departmentId) return null;
   const origin = await securityOrigin(db, task, producer);
   const checker = origin ? await checkerFor({ db }, task, origin, ability, null) : null;
