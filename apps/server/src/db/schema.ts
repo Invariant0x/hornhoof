@@ -340,7 +340,6 @@ export const repoHosts = pgTable(
 /* The company's Google Sheets credentials, encrypted at rest, so agents of any department can create populated spreadsheets
    and share their links when Google is connected. */
 export const GOOGLE_CREDENTIAL_KINDS = ['service_account', 'oauth'] as const;
-export type GoogleCredentialKind = (typeof GOOGLE_CREDENTIAL_KINDS)[number];
 
 export const googleSheets = pgTable(
   'google_sheets',
@@ -2963,7 +2962,6 @@ export const recoveryKeys = pgTable('recovery_keys', {
 /* waiting: its machine's keeper has not taken it; sent: the keeper took it; lost: the keeper no longer holds it and gave
    no answer, so what it did is not known. */
 export const RUN_STATES = ['waiting', 'sent', 'done', 'lost'] as const;
-export type RunState = (typeof RUN_STATES)[number];
 
 /* The commands the orchestrator runs on a machine while its access is open, and their answers. */
 export const computerRuns = pgTable(
