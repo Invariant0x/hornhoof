@@ -6,6 +6,17 @@ it must not be integrated into turn-31. After 0.31.0, take in the released main.
 
 ## Finding
 
+The head approved the narrow channel in the task log on 2026-11-17. That decision
+supersedes the proposal below: eligibility is now small or a nonempty delta of
+Markdown files outside `apps/*/src`, test directories and test filenames.
+Cherry-picks receive no special shortcut. The new `check_author` tool takes only
+the task; the server chooses its repository, task branch and target branch base.
+The node checks a clean source checkout, runs the candidate's committed script
+in its own clean worktree and sends the bound result over its existing link.
+An explicit no-functions result applies only to document deltas; unknown CRAP
+for code keeps Review. Tests and Security for every non-none risk remain.
+The original finding and initial proposal are retained as the decision record.
+
 The server has no trusted record of a local `check:author` result or its CRAP
 measurement at the candidate SHA:
 

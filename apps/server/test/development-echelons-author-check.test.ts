@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskEvents } from '../src/db/schema.js';
-import { submit } from '../src/modules/tasks/engine.js';
+import { submit, updateTask } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
 async function receipt(f: Awaited<ReturnType<typeof fixture>>, task = f.task, options: { paths?: string[]; commit?: string; crap?: number | null; reason?: string | null; exitCode?: number } = {}) {
@@ -50,10 +50,23 @@ describe('Review shortcuts require a server-owned author receipt', () => {
     expect((await submit(f.ctx, f.author.id, task.id, { summary: 'Change.', evidence: 'clean cherry-pick', review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.reviewer.id);
   });
 
-  it.each([{ crap: 10 }, { crap: 12 }, { commit: 'c'.repeat(40) }, { reason: 'dirty_tree' }, { exitCode: 1 }])('keeps Review for an unusable receipt %j', async options => {
+  it.each([{ crap: 10 }, { crap: 12 }, { crap: null }, { commit: 'c'.repeat(40) }, { reason: 'dirty_tree' }, { exitCode: 1 }])('keeps Review for an unusable receipt %j', async options => {
     const f = await fixture();
     await receipt(f, f.task, options);
     expect((await submit(f.ctx, f.author.id, f.task.id, { summary: 'Change.', evidence: 'passed', review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.reviewer.id);
+  });
+
+  it('does not use an already recorded check after its route revision changes', async () => {
+    const f = await fixture();
+    await receipt(f);
+    await updateTask(f.ctx, f.head.id, f.task.id, { riskClass: 'data' });
+    expect((await submit(f.ctx, f.author.id, f.task.id, { summary: 'Change.', evidence: 'checked', review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.reviewer.id);
+  });
+
+  it('does not reuse a green SHA against a different base', async () => {
+    const f = await fixture();
+    await receipt(f);
+    expect((await submit(f.ctx, f.author.id, f.task.id, { summary: 'Change.', evidence: 'checked', review: { baseCommit: 'c'.repeat(40) } })).task.assigneeAgentId).toBe(f.reviewer.id);
   });
 
   it('keeps Review when the author only claims a green JSON result', async () => {
@@ -61,10 +74,11 @@ describe('Review shortcuts require a server-owned author receipt', () => {
     expect((await submit(f.ctx, f.author.id, f.task.id, { summary: 'Change.', evidence: JSON.stringify({ exitCode: 0, crap: 2, checkCommit: HEAD }), review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.reviewer.id);
   });
 
-  it('skips Review but keeps Security for a security risk', async () => {
-    const f = await fixture({ riskClass: 'security' });
-    await receipt(f);
-    expect((await submit(f.ctx, f.author.id, f.task.id, { summary: 'Change.', evidence: 'checked', review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.security.id);
-    expect((await f.detail()).echelons.security.required).toBe(true);
+  it.each(['security', 'access', 'money', 'data'] as const)('skips Review but keeps Security for a %s risk', async riskClass => {
+    const f = await fixture();
+    const { task } = await f.create({ riskClass });
+    await receipt(f, task);
+    expect((await submit(f.ctx, f.author.id, task.id, { summary: 'Change.', evidence: 'checked', review: { baseCommit: BASE } })).task.assigneeAgentId).toBe(f.security.id);
+    expect((await f.detail(task.id)).echelons.security.required).toBe(true);
   });
 });

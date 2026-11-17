@@ -813,12 +813,16 @@ describe('numbered node messages', () => {
   });
 
   it('lets every message in NUMBERED carry n, and no other', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
     const samples: Record<string, object> = {
       'job.started': { type: 'job.started', jobId: 'j' },
       'job.event': event,
       'job.done': { type: 'job.done', jobId: 'j', ok: true, sessionId: null, result: '', tail: '', error: null },
       'tests.started': { type: 'tests.started', partId: 'p' },
       'tests.done': { type: 'tests.done', partId: 'p', ok: true, exitCode: 0, error: null, commit: null, log: '' },
+      'author_check.done': { type: 'author_check.done', requestId: id, jobId: id, agentId: id, taskId: id,
+        repoUrl: 'https://github.com/acme/shop.git', branch: 'task-1', baseCommit: 'a'.repeat(40), commit: 'b'.repeat(40), paths: ['a.ts'],
+        exitCode: 0, crap: { kind: 'measured', max: 2 }, reason: null, startedAt: '2026-11-17T00:00:00Z', finishedAt: '2026-11-17T00:00:01Z' },
       'cred.sealed': { type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [] },
       'login.done': { type: 'login.done', ok: true, error: null },
       'agent.context': { type: 'agent.context', agentKey: 'a', used: 0.5 },
@@ -830,7 +834,7 @@ describe('numbered node messages', () => {
       'agent.restarted': { type: 'agent.restarted', agentKey: 'a', jobId: 'j', ok: true, reason: null },
       'node.stopping': { type: 'node.stopping', startedAt: '2026-11-04T10:00:00.000Z', exit: { kind: 'planned', reason: 'stopped', startedAt: null, at: null, log: '' } },
     };
-    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
+    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'author_check.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
     for (const [type, sample] of Object.entries(samples)) {
       const parsed = nodeMessage({ ...sample, n: 7 });
       expect(parsed, type).not.toBeNull();

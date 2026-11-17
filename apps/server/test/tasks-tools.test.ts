@@ -120,7 +120,7 @@ describe('task tools', () => {
   it('tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal', async () => {
     const { orchestrator, head, tools } = await company();
     const said = async (agent: { id: string }, name: string) => (await (await tools(agent)).listTools()).tools.find(t => t.name === name)!.description!;
-    expect(await said(head, 'create_task')).toContain('Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate.');
+    expect(await said(head, 'create_task')).toContain('Code follows Architecture (unless small or shared with its Development owner), Development, Review, risk-based Security, then Tests on the final candidate. Review is skipped only for small or Markdown-only changes outside source and tests, with a trusted check_author receipt and CRAP below 10.');
     expect(await said(orchestrator, 'add_tasks')).toContain('Gives tasks to the heads of their departments');
     const add = await said(orchestrator, 'add_tasks');
     expect(add).toContain('hh-lead-tasks');

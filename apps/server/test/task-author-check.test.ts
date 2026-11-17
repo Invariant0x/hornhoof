@@ -37,7 +37,7 @@ describe('server-pinned author check receipts', () => {
     expect(f.sent).toEqual([f.request]);
     expect(f.request).toMatchObject({ repoUrl: 'https://github.com/acme/shop.git', baseCommit: BASE, commit: HEAD, branch: `task-${f.task.number}` });
     await handleNodeMessage(f.ctx, f.node, f.completed);
-    await recordAuthorCheck(f.ctx, f.node, f.completed);
+    await Promise.all([recordAuthorCheck(f.ctx, f.node, f.completed), recordAuthorCheck(f.ctx, f.node, f.completed)]);
     const receipts = await f.receipts();
     expect(receipts).toHaveLength(1);
     expect(receipts[0]).toMatchObject({ agentId: null, personId: null, data: { authorCheck: f.completed } });
