@@ -9,13 +9,6 @@ export const trunkBranch = (department: Department) => department.repository?.br
 export const treeClock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 export const secondsBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 1000);
 export const currentSegment = (segments: TreeSegment[], now: string) => segments.find(s => s.from <= now && (!s.to || s.to > now));
-export const latestLines = (lines: TreeLine[]) => [
-  ...lines.reduce((all, line) => {
-    const old = all.get(line.agent.id);
-    if (!old || line.createdAt > old.createdAt) all.set(line.agent.id, line);
-    return all;
-  }, new Map<string, TreeLine>()).values(),
-];
 
 const IDLE_CLASS = { stall: 'm', person: 'p', after: 'm', lost: 'bad', alarm: 'bad', queued: 'm', unknown: 'm' };
 export const idleClass = (kind: Exclude<SegmentKind, 'work'>): string => IDLE_CLASS[kind];
