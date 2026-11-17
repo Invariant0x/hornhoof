@@ -21,7 +21,7 @@ const PIPELINE: Pipeline = {
 const goal = (over: Partial<GoalView> & { id: string; number: number }): GoalView => ({
   title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: IVAN, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, mayEdit: true, ...over,
 });
-const TASK: TaskDetail & { version: number } = { ...TASK_DETAIL, parentId: null, department: DEV, product: null, version: 5, why: '', pipelineId: 'pl1', pipelineStageId: 's1', responsible: IVAN, goal: null, dueAt: null };
+const TASK: TaskDetail & { version: number; revision: number } = { ...TASK_DETAIL, parentId: null, department: DEV, product: null, version: 5, revision: 2, why: '', pipelineId: 'pl1', pipelineStageId: 's1', responsible: IVAN, goal: null, dueAt: null };
 const changed = (reason: string) => [409, { error: { code: 'conflict', message: 'changed', reason } }] as [number, unknown];
 const patches = (calls: { method: string; body?: unknown }[]) => calls.filter(c => c.method === 'PATCH').map(c => c.body);
 const ui = (form: ReactElement) => <LanguageProvider>{form}</LanguageProvider>;
@@ -42,7 +42,7 @@ describe('the edit of a task', () => {
     rerender(form({ ...TASK, version: 6, pipelineStageId: 's2' }));
     await user.type(screen.getByRole('textbox', { name: 'Why' }), 'Because');
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, why: 'Because' }]));
+    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, revision: 2, why: 'Because' }]));
     expect(await screen.findByRole('alert')).toHaveTextContent('Someone changed this task meanwhile. Look at it again and retry.');
     expect(reload).toHaveBeenCalled();
     /* The person's words stay; what they did not touch is what the task holds now. */
@@ -50,7 +50,31 @@ describe('the edit of a task', () => {
     expect(screen.getByRole('textbox', { name: 'Why' })).toHaveValue('Because');
     refuse = false;
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, why: 'Because' }, { version: 6, why: 'Because' }]));
+    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, revision: 2, why: 'Because' }, { version: 6, revision: 2, why: 'Because' }]));
+  });
+
+  it('starts again from the task as it is when another edit of the card came first, though its work did not move', async () => {
+    const user = userEvent.setup();
+    let refuse = true;
+    const calls = mockApi({
+      'GET /api/org': [200, DEV_ORG], 'GET /api/goals': [200, { goals: [] }], 'GET /api/pipelines': [200, { pipelines: [PIPELINE] }],
+      'PATCH /api/tasks/t12': () => (refuse ? changed('task_changed') : [200, { task: TASK }]),
+    });
+    const reload = vi.fn();
+    const form = (task: typeof TASK) => ui(<TaskEdit task={task} onDone={() => {}} onCancel={() => {}} onReload={reload} />);
+    const { rerender } = render(form(TASK));
+    await user.type(await screen.findByRole('textbox', { name: 'Why' }), 'Because');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, revision: 2, why: 'Because' }]));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Someone changed this task meanwhile. Look at it again and retry.');
+    expect(reload).toHaveBeenCalled();
+    /* Read again: someone renamed it meanwhile, and the version of its work is the same. */
+    rerender(form({ ...TASK, revision: 3, title: 'Renamed by someone else' }));
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Renamed by someone else');
+    expect(screen.getByRole('textbox', { name: 'Why' })).toHaveValue('Because');
+    refuse = false;
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(patches(calls)).toEqual([{ version: 5, revision: 2, why: 'Because' }, { version: 5, revision: 3, why: 'Because' }]));
   });
 
   it("offers the goals a task may serve: the company's and those of its department and its product", async () => {

@@ -9,7 +9,7 @@ import { seesTask } from '../tasks/sight.js';
 import { taskByRef } from '../tasks/views.js';
 import type { Grant } from '../templates/load.js';
 import type { ToolJob } from '../tools/job.js';
-import { editTask, type TaskEdit } from './edit.js';
+import { editTask, seenOf, type TaskEdit } from './edit.js';
 import { createGoal, editGoal, goalViews, setGoalStatus, type GoalGuard } from './goals.js';
 import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
 import { placeOwner, spotOf } from './responsible.js';
@@ -203,7 +203,7 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
         const goalId = input.goal === undefined ? undefined : input.goal === null ? null : await goalIdOf(ctx, job.companyId, input.goal);
         if (input.responsible !== undefined) await requireNamable(ctx, task, input.responsible, goalId);
         const edit: TaskEdit = { title: input.title, brief: input.brief, why: input.why, goalId, responsiblePersonId: input.responsible, pipelineId: input.pipeline, pipelineStageId: input.stage };
-        const row = await editTask(ctx, actor, task, edit, task.version);
+        const row = await editTask(ctx, actor, task, edit, seenOf(task));
         return `#${row.number} reads "${row.title}" now.`;
       }),
   );

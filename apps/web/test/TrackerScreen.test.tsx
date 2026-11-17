@@ -30,7 +30,7 @@ const LOGIN = line({ id: 't24', number: 24, title: 'Fix the login page', status:
 const TASKS = [LOGIN, REFUND, FORM, PAY];
 const PIPELINE: Pipeline = { id: 'pl1', department: DEV, name: 'Payments way', why: '', archived: false, version: 3, mayEdit: true, stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: 'DEV-BE', owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: 'DEV-HEAD', owner: null, position: 0 }] };
 const detail = (task: TaskLine, over: Partial<TaskDetail> = {}): TaskDetail => ({
-  ...TASK_DETAIL, ...task, body: '', parent: null, after: [], neededFor: [], executor: BRUNO, createdBy: null, subtasks: [], log: [], requests: [], files: [], mayEdit: true, version: 4, ...over,
+  ...TASK_DETAIL, ...task, body: '', parent: null, after: [], neededFor: [], executor: BRUNO, createdBy: null, subtasks: [], log: [], requests: [], files: [], mayEdit: true, version: 4, revision: 1, ...over,
 });
 const ORG: Org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, status: 'working' as const, task: { id: 't21', number: 21, title: 'Take card payments', echelons: taskRoute() } } : e)) })) };
 
@@ -228,7 +228,7 @@ describe('the views and the card', () => {
     await user.type(within(form).getByLabelText('Title'), 'Take cards and wallets');
     await user.selectOptions(within(form).getByLabelText('Responsible'), 'p1');
     await user.click(within(form).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ version: 4, title: 'Take cards and wallets', responsible: 'p1' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ version: 4, revision: 1, title: 'Take cards and wallets', responsible: 'p1' }));
     refuse = true;
     await user.click(await within(panel).findByRole('button', { name: 'Edit' }));
     const again = within(panel).getByRole('form', { name: 'Edit the task' });

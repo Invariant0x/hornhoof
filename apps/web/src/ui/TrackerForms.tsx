@@ -51,18 +51,19 @@ const changedMeanwhile = (failure: unknown) => failure instanceof ApiFailure && 
 
 /* A form's fields over what it opened on. It compares with that and sends its version, not those of what came after, so a
    change made meanwhile is never sent back. Refused because the thing changed meanwhile, it starts again from what the
-   thing is once read again, keeping what the person changed. */
-function useDraft<F extends Record<string, string>>(now: F, version: number) {
-  const [base, setBase] = useState({ fields: now, version });
+   thing is once read again, keeping what the person changed. revision: a second count a thing may keep beside its version,
+   as a task keeps one for what the tracker keeps of it; a change of either is the thing read again. */
+function useDraft<F extends Record<string, string>>(now: F, version: number, revision = 0) {
+  const [base, setBase] = useState({ fields: now, version, revision });
   const [draft, setDraft] = useState(now);
   const [stale, setStale] = useState(false);
-  if (stale && version !== base.version) {
+  if (stale && (version !== base.version || revision !== base.revision)) {
     setStale(false);
-    setBase({ fields: now, version });
+    setBase({ fields: now, version, revision });
     setDraft(Object.fromEntries(Object.entries(now).map(([k, v]) => [k, draft[k] !== base.fields[k] ? draft[k] : v])) as F);
   }
   const set = (change: Partial<F>) => setDraft(d => ({ ...d, ...change }));
-  return { draft, set, was: base.fields, version: base.version, refused: () => setStale(true) };
+  return { draft, set, was: base.fields, version: base.version, revision: base.revision, refused: () => setStale(true) };
 }
 
 /* A form in the grid of section 3 of the style book, its head, its refusal and its foot with Save and Cancel. */
@@ -87,15 +88,15 @@ const taskFields = (task: TaskDetail) => ({
 });
 
 /* What the tracker keeps of a task, changed by whoever acts on its work: only what the person changed goes, with the version
-   the form opened on. A subtask serves the goal of its task, so it names none; a task, a goal of the company or of its own
-   department or product. onReload: reads the task again. */
-export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetail & { version: number }; onDone: () => void; onCancel: () => void; onReload?: () => void }) {
+   and the revision the form opened on. A subtask serves the goal of its task, so it names none; a task, a goal of the
+   company or of its own department or product. onReload: reads the task again. */
+export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetail & { version: number; revision: number }; onDone: () => void; onCancel: () => void; onReload?: () => void }) {
   const t = useT();
   const words = t.tracker.form;
   const { org } = useOrg();
   const { goals } = useGoals();
   const { pipelines } = usePipelines();
-  const { draft, set, was, version, refused } = useDraft(taskFields(task), task.version);
+  const { draft, set, was, version, revision, refused } = useDraft(taskFields(task), task.version, task.revision);
   const { title, brief, why, goal, responsible, due, pipeline, stage } = draft;
   const { busy, failure, send } = useSend(onDone, err => {
     if (!changedMeanwhile(err)) return;
@@ -120,7 +121,7 @@ export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetai
     if (pipeline !== was.pipeline) change.pipeline = pipeline || null;
     if (pipeline && stage !== was.stage) change.stage = stage || null;
     if (!Object.keys(change).length) return onCancel();
-    void send(() => api.patch(`/api/tasks/${task.id}`, { version, ...change }));
+    void send(() => api.patch(`/api/tasks/${task.id}`, { version, revision, ...change }));
   }
 
   return (

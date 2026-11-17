@@ -1,5 +1,5 @@
 {
-  "id": "2261ea5b-81e8-4a80-92b0-a760e185bf3e",
+  "id": "47dc802a-0c2e-4286-a62e-8fa1d90a44a3",
   "prevId": "2dfb522a-e5be-4fc5-88d5-d7da785ef99d",
   "version": "7",
   "dialect": "postgresql",
@@ -15946,6 +15946,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "tracker_revision": {
+          "name": "tracker_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

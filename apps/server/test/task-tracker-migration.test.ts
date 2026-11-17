@@ -26,8 +26,8 @@ describe('the task tracker migration', { timeout: 60_000 }, () => {
     `);
     await migrate(drizzle(client), { migrationsFolder: await migrationsThrough('task_tracker') });
 
-    const task = await client.query('SELECT title, goal_id, responsible_person_id, why, due_at, pipeline_id, pipeline_stage_id FROM tasks');
-    expect(task.rows).toEqual([{ title: 'Checkout', goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null }]);
+    const task = await client.query('SELECT title, goal_id, responsible_person_id, why, due_at, pipeline_id, pipeline_stage_id, tracker_revision FROM tasks');
+    expect(task.rows).toEqual([{ title: 'Checkout', goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null, tracker_revision: 0 }]);
     expect((await client.query('SELECT tracker_due FROM companies')).rows).toEqual([{ tracker_due: true }]);
     const fresh = await client.query<{ column_default: string }>("SELECT column_default FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'tracker_due'");
     expect(fresh.rows).toEqual([{ column_default: 'false' }]);

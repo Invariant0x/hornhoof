@@ -63,6 +63,7 @@ const NewTaskBody = z.object({
 /* What a person changes of a task beside its work, on the task as they saw it. */
 const TaskPatch = z.strictObject({
   version: z.number().int().min(0),
+  revision: z.number().int().min(0),
   title: z.string().trim().min(1).max(120).optional(),
   brief: z.string().max(600).optional(),
   why: z.string().trim().max(300).optional(),
@@ -282,11 +283,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
-  /* The task as this person reads it, whether they may pause it and edit what the tracker keeps of it, and the version an
-     edit names. */
+  /* The task as this person reads it, whether they may pause it and edit what the tracker keeps of it, and the version and
+     the revision an edit names. */
   const detail = async (me: Person, task: Task) => {
     const viewer = await viewerOf(db, me);
-    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task), version: task.version };
+    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
   };
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one
@@ -384,7 +385,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const task = await changed(me, id);
     const row = await editTask(ctx, actorOf(me), task, {
       title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
-    }, body.version);
+    }, { version: body.version, revision: body.revision });
     return { task: await detail(me, row) };
   });
 

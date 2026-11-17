@@ -5,7 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, goals, jobs, people, pipelines, pipelineStages, subscriptions, tasks, taskWaits } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { repeatWake, taskForWake } from '../src/modules/tasks/wake-state.js';
-import { editTask } from '../src/modules/tracker/edit.js';
+import { editTask, seenOf } from '../src/modules/tracker/edit.js';
 import { nudgeTrackerKeepers } from '../src/modules/tracker/nudge.js';
 import { as, echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -109,7 +109,7 @@ describe('the tracker at its edges', () => {
     const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 900000, status: 'failed', error: 'agent_failed' }).returning();
     const [fresh] = await db.select().from(tasks).where(eq(tasks.id, task.id));
     const state = await repeatWake(db, { job: job!, task: fresh!, agent: bruno }, 'continue');
-    const edited = await editTask(ctx, { agentId: head.id }, fresh!, { why: 'Customers asked for it.' }, fresh!.version);
+    const edited = await editTask(ctx, { agentId: head.id }, fresh!, { why: 'Customers asked for it.' }, seenOf(fresh!));
     expect([edited.why, edited.version, edited.updatedAt.getTime()]).toEqual(['Customers asked for it.', fresh!.version, fresh!.updatedAt.getTime()]);
     expect(await taskForWake(db, { agentId: bruno.id, taskId: task.id, why: state!.why as never, version: state!.version })).not.toBeNull();
   });

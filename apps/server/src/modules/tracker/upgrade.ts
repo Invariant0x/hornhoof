@@ -10,6 +10,7 @@ import { tellOrchestrator } from '../operations/ensure.js';
 import { candidates } from '../tasks/decisions.js';
 import { CLOSED, ownNote, published, taskSpot, type Tx } from '../tasks/engine.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
+import { nextRevision } from './edit.js';
 import { goalNote } from './goals.js';
 import { placeSubject } from './responsible.js';
 
@@ -42,8 +43,9 @@ async function passTasks(ctx: Pick<Ctx, 'db' | 'bus'>, o: Owners, companyId: str
     const to = o.owner(spot);
     if (to === personId) continue;
     const row = await ctx.db.transaction(async tx => {
-      /* No move of its work: its version and time of the last change stay, as for any edit of what the tracker keeps. */
-      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to })
+      /* No move of its work: its version and time of the last change stay, as for any edit of what the tracker keeps, and
+         its revision grows, so a card read before it does not name the person back. */
+      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to, trackerRevision: nextRevision() })
         .where(and(eq(tasks.id, task.id), eq(tasks.responsiblePersonId, personId))).returning();
       if (moved) await ownNote(tx, moved, { kind: 'edited', ...passedOn(o, personId, to) });
       return moved;
@@ -84,24 +86,21 @@ export async function passResponsibility(ctx: Pick<Ctx, 'db' | 'bus'>, companyId
 
 /* Open tasks get a responsible person by the rule new tasks follow, work under a task first that task's. Closed ones stay
    without one: nobody answers for them any more. */
-async function fillOpenTasks(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<void> {
-  const o = await ownersOf(ctx, companyId);
-  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
-  const goalPeople = new Map((await ctx.db.select({ id: goals.id, personId: goals.responsiblePersonId }).from(goals).where(eq(goals.companyId, companyId))).map(g => [g.id, g.personId]));
+async function fillOpenTasks(tx: Tx, companyId: string): Promise<void> {
+  const o = await ownersOf({ db: tx }, companyId);
+  const open = await tx.select().from(tasks).where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
+  const goalPeople = new Map((await tx.select({ id: goals.id, personId: goals.responsiblePersonId }).from(goals).where(eq(goals.companyId, companyId))).map(g => [g.id, g.personId]));
   const known = new Map<string, string>(open.flatMap(t => (t.responsiblePersonId ? [[t.id, t.responsiblePersonId] as const] : [])));
   for (const task of open) {
     if (task.responsiblePersonId) continue;
     const person = (task.parentId ? known.get(task.parentId) : null) ?? (task.goalId ? goalPeople.get(task.goalId) : null) ?? o.owner(taskSpot(task));
-    await ctx.db.update(tasks).set({ responsiblePersonId: person }).where(and(eq(tasks.id, task.id), isNull(tasks.responsiblePersonId)));
+    await tx.update(tasks).set({ responsiblePersonId: person, trackerRevision: nextRevision() }).where(and(eq(tasks.id, task.id), isNull(tasks.responsiblePersonId)));
     known.set(task.id, person);
   }
 }
 
-/* One product manager into each top-level department of a template that has one and holds none, under the company's lock,
-   once: the mark goes with the hiring. */
+/* One product manager into each top-level department of a template that has one and holds none. */
 async function hireManagers(ctx: Ctx, tx: Tx, companyId: string): Promise<{ departmentId: string; hired: Hired[] }[]> {
-  const [company] = await tx.select({ due: companies.trackerDue }).from(companies).where(eq(companies.id, companyId)).for('update');
-  if (!company?.due) return [];
   const made: { departmentId: string; hired: Hired[] }[] = [];
   for (const dept of await tx.select().from(departments).where(and(eq(departments.companyId, companyId), isNull(departments.parentId))).orderBy(asc(departments.position))) {
     const role = dept.templateKey ? ctx.templates.roster(dept.templateKey).find(r => r.id.endsWith('-PM')) : undefined;
@@ -112,17 +111,24 @@ async function hireManagers(ctx: Ctx, tx: Tx, companyId: string): Promise<{ depa
     const skills = role.skills.filter(s => s.on).map(s => s.id);
     made.push({ departmentId: dept.id, hired: [await hireEmployee(ctx, tx, { companyId, departmentId: dept.id }, { role: role.id, name: role.title.en, model: '', subscription: plan?.id ?? null, skills }, HORNHOOF)] });
   }
-  await tx.update(companies).set({ trackerDue: false }).where(eq(companies.id, companyId));
   return made;
 }
 
 /* A company from before the tracker: its open tasks get their responsible people and each department its product manager,
-   once. Running it again changes nothing. */
+   once. All of it is one change under the company's lock, the mark with it: a failure anywhere leaves the company as it
+   was, to be upgraded whole on the next run, and two runs at once do it once. Running it again changes nothing. */
 export async function upgradeCompany(ctx: Ctx, companyId: string): Promise<void> {
   const [company] = await ctx.db.select({ due: companies.trackerDue }).from(companies).where(eq(companies.id, companyId));
   if (!company?.due) return;
-  await fillOpenTasks(ctx, companyId);
-  const made = await ctx.db.transaction(tx => hireManagers(ctx, tx, companyId));
+  const made = await ctx.db.transaction(async tx => {
+    const [held] = await tx.select({ due: companies.trackerDue }).from(companies).where(eq(companies.id, companyId)).for('update');
+    if (!held?.due) return [];
+    await fillOpenTasks(tx, companyId);
+    const hired = await hireManagers(ctx, tx, companyId);
+    await tx.update(companies).set({ trackerDue: false }).where(eq(companies.id, companyId));
+    return hired;
+  });
+  /* People and the orchestrator hear of it once it is in. */
   if (!made.length) return;
   ctx.bus.publish(companyId, { type: 'org' });
   for (const { departmentId, hired } of made) await tellOrchestrator(ctx, companyId, departmentId, hired);

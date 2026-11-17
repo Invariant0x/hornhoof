@@ -515,9 +515,11 @@ export type TaskDetail = TaskLine & {
   after: TaskLink[];
   /* The tasks that wait for this one, of those the reader sees. */
   neededFor?: TaskLink[];
-  /* The person reading it acts on its work and may change what the tracker keeps of it; version: what such a change names. */
+  /* The person reading it acts on its work and may change what the tracker keeps of it; version and revision: what such a
+     change names, the version of its work and the revision of what the tracker keeps. */
   mayEdit?: boolean;
   version?: number;
+  revision?: number;
   executor: AgentRef | null;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
