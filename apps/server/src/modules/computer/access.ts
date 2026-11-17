@@ -6,7 +6,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import { viaOrchestrator, type Person } from '../../auth/session.js';
+import { personOf, viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -293,7 +293,8 @@ export class Computers {
       const opened = await this.untilOf(tx, opener, row, options.grant, now, seconds);
       const [before] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
       await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);
-      const set = { scope, until: opened.until, grant: opened.grant, openedBy: me.id, openedAt: now, askedReason: null, askedAt: null };
+      /* The orchestrator opening for the owner is no person's opening, and names none. */
+      const set = { scope, until: opened.until, grant: opened.grant, openedBy: personOf(me), openedAt: now, askedReason: null, askedAt: null };
       await tx.insert(machineAccess).values({ machineId, companyId: me.companyId, ...set }).onConflictDoUpdate({ target: machineAccess.machineId, set });
       const asked = before?.askedReason && before.askedAt ? { reason: before.askedReason, at: before.askedAt.toISOString() } : null;
       return { machine, until: opened.until.toISOString(), asked, scope };
