@@ -28,7 +28,7 @@ const isZone = (zone: string): boolean => {
 export const TokensQuery = z.object({ zone: z.string().max(64).refine(isZone, 'zone: Not a time zone, like Europe/Moscow.').default('UTC') });
 
 /* Midnight in the zone, on the day it is there now. */
-export function dayStart(now: number, zone: string): Date {
+function dayStart(now: number, zone: string): Date {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' })
       .formatToParts(new Date(now))

@@ -10,7 +10,7 @@ import { caseText, countOnSent, improvementsChanged, listImprovements, moveImpro
 type ToolJob = { id: string; companyId: string; agentId: string };
 
 /* What one turn may put under Improvements, so a round that goes wrong cannot flood the CEO. */
-export const TURN_IMPROVEMENTS = 10;
+const TURN_IMPROVEMENTS = 10;
 /* What each running turn put, counted before the next one goes in so parallel calls cannot both pass; the oldest turns
    are forgotten. */
 const put = new WeakMap<Ctx, Map<string, number>>();

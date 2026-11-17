@@ -5,9 +5,9 @@ import type { FastifyRequest } from 'fastify';
    there, so the cookie itself says who signed in and until when, under a mark only this company can make. The mark
    covers the person's password as it was, so a password that changed or was reset ends every such cookie. */
 
-export const READ_COOKIE = 'hh_read';
+const READ_COOKIE = 'hh_read';
 /* Over the link, as the session's: a page on another company's name under hornhoof.org cannot set it. */
-export const LINK_READ_COOKIE = '__Host-hh_read';
+const LINK_READ_COOKIE = '__Host-hh_read';
 export const readCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_READ_COOKIE : READ_COOKIE);
 export const READ_MS = 12 * 3_600_000;
 
