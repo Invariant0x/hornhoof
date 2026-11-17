@@ -717,13 +717,17 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await pump(ctx, job.agentId);
 }
 
-/* Inbox wakes keep their retry policy. An ordinary turn can carry the same summary: until its prompt is confirmed
-   typed, its failed delivery must not consume those letters. A confirmed prompt stays read to avoid a second delivery. */
+/* What the program itself says in a turn: only that shows it got the turn's prompt. A typed mark is a person's Enter or
+   words shown again, and proves nothing of it. */
+const PROGRAM_SAID = ['text', 'todo', 'tool', 'tool_result'] as const;
+
+/* Inbox wakes keep their retry policy. An ordinary turn can carry the same summary: until its program answered it, its
+   failed delivery must not consume those letters. Once it answered, they stay read, so they are not given twice. */
 async function restoreUnheardInbox(ctx: Ctx, jobId: string, job: { agentId: string; inboxWake: boolean }): Promise<void> {
   if (!job.inboxWake) {
-    const [typed] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
-      .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'typed'))).limit(1);
-    if (typed) return;
+    const [said] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
+      .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, [...PROGRAM_SAID]))).limit(1);
+    if (said) return;
   }
   if (await mailBack(ctx.db, job.agentId, jobId)) await inboxChanged(ctx, job.agentId);
 }
