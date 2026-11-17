@@ -17,7 +17,7 @@ export type DecisionSubject =
 export const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
 
 /* The topics of a department's work its named owner decides too, as the CEO does: its repository and its releases. */
-export const OWNED: readonly DecisionTopic[] = ['repositories', 'release'];
+const OWNED: readonly DecisionTopic[] = ['repositories', 'release'];
 
 function ceoOf(people: readonly Candidate[]): string {
   const ceo = people.find(p => p.isOwner && p.status === 'active');

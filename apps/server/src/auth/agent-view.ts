@@ -37,7 +37,7 @@ export type AgentViewer = {
 
 /* Where the agent works and the plan it runs on. A terminal passes the plan its program really lives on. assistant: the
    agent's id, when it is an assistant's own. */
-export type AgentPlace = { subscriptionId: string | null; spot: Spot; assistant?: string };
+type AgentPlace = { subscriptionId: string | null; spot: Spot; assistant?: string };
 
 /* Whether the place is in a department this person owns. */
 export function ownsPlace(viewer: Pick<AgentViewer, 'access'>, spot: Spot): boolean {

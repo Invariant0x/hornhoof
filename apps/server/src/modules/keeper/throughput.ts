@@ -4,15 +4,15 @@ import { z } from 'zod';
 import { writePrivately } from './machine-keys.js';
 import { DAY_MS } from './round-trips.js';
 
-export const THROUGHPUT_TICK_MS = 100;
+const THROUGHPUT_TICK_MS = 100;
 /* A sliding minute of reads. */
-export const THROUGHPUT_SLOTS = 600;
-export const THROUGHPUT_MIN_BYTES = 4 * 2 ** 20;
+const THROUGHPUT_SLOTS = 600;
+const THROUGHPUT_MIN_BYTES = 4 * 2 ** 20;
 /* In the keeper's folder: each machine's best rate of each hour, for a week. */
-export const THROUGHPUT_FILE = 'throughput.json';
+const THROUGHPUT_FILE = 'throughput.json';
 /* A rate read from what flows anyway says the link is at least that fast, so the best stands for as long as the
    online share looks back: a day of changes trickling to a copy does not replace what making the copy showed. */
-export const THROUGHPUT_KEEP_MS = 7 * DAY_MS;
+const THROUGHPUT_KEEP_MS = 7 * DAY_MS;
 const MINUTE_MS = THROUGHPUT_SLOTS * THROUGHPUT_TICK_MS;
 const HOUR_MS = 3_600_000;
 

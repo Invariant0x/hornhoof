@@ -5,7 +5,7 @@ import { declarations, type Skin, type SkinLook } from './roles';
 /* The skin on the page and the collection of a person's own, kept in this browser. The skin on the page is always one
    that exists: a name the browser kept that names no skin, from an older version or a deleted skin, means Cyberpunk. */
 
-export type SkinsState = { active: string; custom: readonly CustomSkin[] };
+type SkinsState = { active: string; custom: readonly CustomSkin[] };
 /* A skin just deleted, as much as it takes to put it back: where it stood, and whether it was on. */
 export type Removal = { entry: CustomSkin; at: number; wasOn: boolean; choice: number };
 export type Added = { ok: true; entry: CustomSkin } | { ok: false; reason: 'full' | 'not_kept' };

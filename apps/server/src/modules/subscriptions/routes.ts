@@ -64,10 +64,10 @@ function connectionRules(body: { provider: ApiProvider; baseUrl?: string; protoc
 export const ApiKeyFields = z.object({ kind: z.literal('api_key'), ...Connection, label, apiKey, target: Target, models: ConnectionModels.optional() });
 
 /* Company API keys only. Personal subscriptions are connected by their owner through a machine. */
-export const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
+const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
 
 /* An API's models, asked before its connection is saved. */
-export const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
+const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
 
 /* The plans its employees go on to at its limit, in order, each once, with the model to run there or none for their role's. */
 const Fallbacks = z
@@ -77,7 +77,7 @@ const Fallbacks = z
 
 /* What a subscription's owner or company scope changes: the share of its limits and its fallbacks, and of an API connection
    its name, models and the place it serves. */
-export const SubscriptionPatch = z
+const SubscriptionPatch = z
   .object({ budget: Budget.optional(), fallbacks: Fallbacks.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'Say what to change.');
 
@@ -124,7 +124,7 @@ export const ConnectBody = z.object({
 const IdParams = z.object({ id: z.uuid() });
 
 /* A key the owner pasted and sealed in their browser to the plan's nodes. Claude and Codex sign in on a machine. */
-export const CredentialBody = z.object({
+const CredentialBody = z.object({
   kind: z.enum(['kimi_key', 'glm_key']),
   version: z.number().int().min(1),
   envelopes: z.array(z.object({ nodeId: z.uuid(), sealed: Sealed })).min(1).max(20),

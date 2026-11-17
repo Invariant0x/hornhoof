@@ -4,7 +4,7 @@ import { rateMeter, type Clock } from './guard';
    come, and the newest answer wins. Past that one request is on its way at a time, with one more after it for what came
    meanwhile: a burst of the stream costs a few requests, not one a message. What the stream hands on in the same task as
    the request that just went out, as a burst handed on at once, was said before it and is in its answer. */
-export type Refetcher = { run(): void; inAnswer(): boolean; forget(): void };
+type Refetcher = { run(): void; inAnswer(): boolean; forget(): void };
 
 export function refetcher(fetch: () => Promise<unknown>, quiet = 2, windowMs = 1000, now: Clock = Date.now): Refetcher {
   const meter = rateMeter(quiet, windowMs, now);

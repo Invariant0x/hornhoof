@@ -11,13 +11,13 @@ import { certFacts, issuedBy } from '../network/authority.js';
 /* A backup of the company as one file of three parts, so it travels as one stream and is checked before it is opened:
    this line, the head (what was signed, the signature and the signer's certificate, as one line of JSON), and the part
    sealed with age, which only the machines that hold the data and the recovery file open. */
-export const BUNDLE_LINE = 'hornhoof-bundle v1';
+const BUNDLE_LINE = 'hornhoof-bundle v1';
 /* The first line inside the sealed part. */
-export const CONTENT_LINE = 'hornhoof-bundle-content v1';
+const CONTENT_LINE = 'hornhoof-bundle-content v1';
 /* The first line inside a challenge, which is sealed the same way and is no bundle. */
-export const CHALLENGE_LINE = 'hornhoof-recovery-challenge v1';
+const CHALLENGE_LINE = 'hornhoof-recovery-challenge v1';
 /* What stands before the manifest in what is signed, so the signature is of nothing else the key signs. */
-export const SIGNED_PREFIX = 'hornhoof-bundle-manifest v1\n';
+const SIGNED_PREFIX = 'hornhoof-bundle-manifest v1\n';
 export const MAX_HEAD = 65_536;
 export const MAX_CHALLENGE = 1024;
 
@@ -175,7 +175,7 @@ export function checkHead(head: string, want: { authorityPem: string; company: s
   return manifest;
 }
 
-export type SealOptions = {
+type SealOptions = {
   dump: Readable; id: string; company: string; dumpedAt: Date; now?: Date; reason: BundleReason; migrations: number; secrets: BundleSecrets;
   recipients: string[]; recovery: string | null; recoveryLink: RecoveryLink | null; key: MachineKey; held: HeldCertificate; out: string;
 };

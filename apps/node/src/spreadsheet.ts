@@ -2,9 +2,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { crc32, deflateRawSync } from 'node:zlib';
 
-export type SpreadsheetCell = string | number | boolean | null | undefined;
+type SpreadsheetCell = string | number | boolean | null | undefined;
 
-export type SpreadsheetSheet = {
+type SpreadsheetSheet = {
   name?: string;
   headers?: string[];
   rows: SpreadsheetCell[][];

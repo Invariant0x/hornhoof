@@ -51,7 +51,7 @@ function claimsOf(ctx: Ctx, token: string): z.infer<typeof Claims> {
   return parsed.data;
 }
 
-export type AttachmentJob = ToolJob & { attachmentTaskId?: string };
+type AttachmentJob = ToolJob & { attachmentTaskId?: string };
 
 export function checkAttachmentTask(job: AttachmentJob, task: { id: string } | null, toChat: boolean): void {
   if (job.attachmentTaskId && (task?.id !== job.attachmentTaskId || toChat)) throw new ApiError(403, 'forbidden', 'This attachment permission is only for files on the task of this turn.', 'attachment_hidden');

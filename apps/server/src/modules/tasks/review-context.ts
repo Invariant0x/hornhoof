@@ -17,7 +17,7 @@ export { ReviewSha } from './review-schema.js';
 export const ReviewSubmission = z.object({ baseCommit: ReviewSha, branch: Branch.optional(), commit: ReviewSha.optional() }).strict();
 const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative() });
 /* Records made before checks went local also hold the author's test runs and check quality, which are left out. */
-export const ReviewRecord = z.object({
+const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
   authorId: z.string().uuid(), authorVendor: z.string().nullable(),
   status: z.enum(['pinned', 'degraded']), reason: z.string().nullable(),

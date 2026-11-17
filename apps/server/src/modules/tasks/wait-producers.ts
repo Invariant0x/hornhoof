@@ -106,7 +106,7 @@ export async function bindRequest(tx: Tx, task: Task, request: Request, actor: A
 export const endRequest = (tx: Tx, request: Pick<Request, 'id' | 'taskId'>, status: Request['status'], actor: Actor): Promise<void> =>
   endOpenSource(tx, { taskId: request.taskId, kind: 'person', sourceKey: requestSourceKey(request.id), outcome: 'resolved', proofRef: `request:${request.id}:${status}`, actor });
 
-export type WaitStep = { kind: string; actor: Actor; eventId: number };
+type WaitStep = { kind: string; actor: Actor; eventId: number };
 
 /* Questions taken back in this move no longer wait for anybody. */
 async function endWithdrawn(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {

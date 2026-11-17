@@ -443,7 +443,7 @@ export type PreparationContext = DescriptionContext & {
 export type BuilderSetup = { link: boolean; env: Record<string, string>; bin: string[] };
 export type PreparedDependencies = { entry: CacheEntry | null; receipt: { key: string | null; hit: boolean; fetched?: boolean } };
 type PreparedUnit = { definitions: ServiceDefinitions; artifacts: ServiceArtifacts };
-export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean; fetched?: boolean }[]; services: PreparedUnit[] };
+type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean; fetched?: boolean }[]; services: PreparedUnit[] };
 /* What a run needs, by default. A machine getting ready ahead of a run keeps services for it, and starts none of them; a
    manual command gets no services at all. */
 type PreparationScope = { serviceUnits?: boolean; freshServices?: boolean };
