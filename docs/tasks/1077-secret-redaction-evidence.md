@@ -1,101 +1,155 @@
-# Task 1077: development evidence
+# Task 1077: candidate and evidence
 
-The sections below describe the original candidate. A continuation record is appended at the end for the current branch; earlier checks prove only their original source version.
+Base: `73d4a6e9521059384503aa8f2d9a4942635d1568` (`turn-31`). Branch: `task-1077`.
+Executable sources checked: `e7121dd648e366376b47b5cb9457c92f3a832bde`. A later report-only commit is named in the submission. No integration or deployment has occurred.
 
-Base: `d44ecb8c7d3d0b6d7ce690e01c25046f0404b212` on `origin/turn-31`.
-Branch: `task-1077`. No integration or deployment is part of this submission.
+## Result and requirement checks
 
-## Behavior and checks
+- Shared credential detection masks task fields, comments, nested conversation data, letters and queued prompts before storing prose or its archive. Rules and `[hidden]` live in protocol; node imports them. [Protocol tests](../../packages/protocol/test/redaction.test.ts) passed 5 false-positive and credential checks; node `redact.test.ts`, `program-state-redaction.test.ts`, `exit-redaction.test.ts` passed 9. Relevant source/test bytes are unchanged by the later migration and browser-only commits.
+- [Stored prose](../../apps/server/test/stored-secrets.test.ts) passed 8 tests: every ingress, complete unique-marker scans of public/net and API responses, archived UTF-8 text, current person rights, stable masks, preserved service state and two-company isolation. The same marker remains in the other company's task, brief, history and cached tool answer.
+- [Merging copies](../../apps/server/test/secret-redaction-merge.test.ts) passed all 4 tests: both directions suppress stale prose and both directions keep the other company unchanged. Full table scans remain in the tests.
+- [Migration upgrade](../../apps/server/test/secret-redaction-migration.test.ts) passed 1 test: populated pre-0137 database, repeated migration, preserved prose and working suppression. It starts after 0136_outbound_contact_log.
+- [SQL rights](../../apps/server/test/secret-redaction-rights.test.ts) passed 1 test: agents cannot read/delete suppression records or call privileged helpers. [Outbound grants](../../apps/server/test/outbound-grants.test.ts) passed all 60 checks, including no privileged functions in public.
+- [Task panel](../../apps/web/test/TaskPanel.test.tsx) passed 45 checks after the final bidi markup edit, including success, empty/failure clearing, cancellation, permission and English/Russian vault links.
+- [Browser interaction](../../apps/web/e2e/hide-secret.spec.ts) passed 48 cases: Chromium 8 + 8, Firefox 8 + 8, WebKit 16, each command exit 0. Four shipped skins, English/Russian, 375/1440 px; each form is checked in LTR and RTL. Controls stay at least 44 px, text does not overflow, selection is sent exactly, marker/input disappear, mask and vault link appear, page errors stay absent. Narrow English and Russian RTL screenshots were inspected. Hint punctuation is isolated as a whole.
 
-- Task title, brief, body and comments are cleaned before storage or archival. `apps/server/test/stored-secrets.test.ts` checks task fields, comments and the replication journal.
-- Conversation events, inbox letters and queued prompts use the same credential patterns. The stored-secrets test checks nested event data, letters and prompts. Existing `events.test.ts` and `inbox.test.ts` passed 44 tests together.
-- The person-only endpoint validates the task selection, checks current authority again inside the transaction, records only a suppression fingerprint and length, scrubs prose and its copies, then records the actor and time without the selection. The stored-secrets test scans every table in `public` and `net` for a unique marker and checks the HTTP response, UTF-8 archives, short selections and stable masks.
-- `secret-redaction-merge.test.ts` merges an old value and a new copy from a disconnected database into the leader, then merges the suppression back into that disconnected database. Both databases are scanned for the marker, including merge conflicts and history.
-- `secret-redaction-migration.test.ts` upgrades a populated pre-change database, repeats the migration and checks suppression. Fresh database migration is also part of the test setup. Down migrations are not supported. The additive schema remains after an application rollback; an old application does not offer the new action.
-- `secret-redaction-rights.test.ts` checks that agent SQL cannot read or delete suppression records or execute the privileged functions. The unchanged outbound-grants tests keep privileged functions out of `public`; internal suppression functions live in `net` and have no PUBLIC execute right.
-- `packages/protocol/test/redaction.test.ts`: 5 passed, including ordinary prose, commit hashes, UUIDs and task numbers. Node `redact.test.ts`, `program-state-redaction.test.ts`, `exit-redaction.test.ts`: 9 passed.
-- `apps/web/test/TaskPanel.test.tsx`: 43 passed, including success, empty input, failure clearing and cancellation, and absence of the action without server permission.
-- Browser command: `PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test --config e2e/hide-secret.config.ts --workers=2`, in `apps/web`. 48 passed. Chromium, Firefox and WebKit; all 4 shipped skins; dynamically shortest and longest registered locales, currently English and Russian; 375 and 1440 px. Each form is measured in both LTR and RTL, with controls at least 44 px and no horizontal overflow. RTL is a direction check, not a claim that another language is shipped. The eight screenshots beside this report show the narrow forms in RTL.
+The initial two-company API and merge tests reproduced cross-company scrubbing. The head confirmed company-only scope. Fingerprints now filter by company, with ownership resolved for copied/partial rows, deleted-row history and job-owned cached messages. Unknown ownership never falls back to another company's fingerprints. Tests first failed on the vault offer, then passed with the link.
 
-## Design decisions and review findings fixed by the author
+## Commands and complete receipts
 
-Credential detection and the mask live in `packages/protocol/src/redaction.ts`; the node imports the mask. Diagnostic-only path hiding is not applied to stored prose.
+All five server files ran separately, one worker, verbose reporter. Prefix: `npx --no-install vitest run test/FILE --maxWorkers=1 --reporter=verbose` in apps/server. Complete passing receipts:
 
-A literal replacement over every string column was rejected after a regression demonstrated that selecting `active` could corrupt people's service status. Suppression operates on prose fields and their copied structures, preserving identities, statuses, keys and schema field names. Journal and merge records are cleaned according to their source table. The unchanged marker scan still verifies all stored prose copies in the fixture.
+- `stored-secrets.test.ts`: 8 passed, exit 0, 03:18:36–03:19:02 UTC; first case 5.263 s.
+- `secret-redaction-merge.test.ts`: 4 passed, exit 0, 03:19:36–03:20:28 UTC; cases 11.204, 4.958, 5.549 and 3.588 s.
+- `secret-redaction-migration.test.ts`: 1 passed, exit 0, 03:20:54–03:21:10 UTC; case 4.381 s.
+- `secret-redaction-rights.test.ts`: 1 passed, exit 0, 02:31:38–02:34:33 UTC.
+- `outbound-grants.test.ts`: 60 passed, exit 0, 02:34:48–02:37:06 UTC.
 
-The fingerprint has no reversible selected value. Database triggers prevent a stale write or merge from restoring a suppressed selection. The existing write gate and database table locks serialize the sweep with writers. This rare administrative operation scans stored prose; its large-database latency is not measured by this task.
+Browser command prefix in apps/web: `npx --no-install playwright test e2e/hide-secret.spec.ts --config e2e/hide-secret.config.ts --workers=1`. Complete final receipts add:
 
-## Scope and limitations
+- `--project=firefox --shard=1/2`: 8 passed, 03:11:23–03:12:07 UTC, exit 0.
+- `--project=firefox --shard=2/2`: 8 passed, 03:12:23–03:13:07 UTC, exit 0.
+- `--project=webkit`: 16 passed, 03:13:15–03:14:07 UTC, exit 0.
+- `--project=chromium --shard=1/2`: 8 passed, 03:16:23–03:17:16 UTC, exit 0.
+- `--project=chromium --shard=2/2`: 8 passed, 03:17:32–03:17:49 UTC, exit 0.
 
-No whole suite and no `run_tests` were run, as the assignment requires. Shared protocol, schema, route and translation changes have wider impact than the named local checks; the release owner retains the combined release checks. The automatic author wrapper is not used to start its broad shared-package selection. No coverage, CRAP, duplication or mutation score is claimed.
+The browser config serves a separately checked production build. Run `npm run build -w @hornhoof/web` before these commands, without editing web/protocol source between build and checks. The final build passed at 02:59:52 UTC. Browser geometry now reads both directions in one page evaluation; independent post-action expectations run together. Assertions, server ownership and runner limits are preserved. Browser timeouts remain 30 s, server startup 60 s, Vitest test/hook limits 20/10 s.
 
-These checks use isolated PGlite databases and browser API fixtures. They do not prove live physical replication or production latency. Historical encrypted backups, exported files and copies outside the live logical databases are not rewritten. The adjacent company password vault was absent from the original checked base. The continued candidate below offers its available Passwords page beside masked text.
+Web JS asset: `index-P9LtH8l8.js`, SHA-256 `752cc84e8a47d5f665d3a9dd52c2545f66683e1f20765300324d8131f2456a99`.
+CSS asset: `index-DPx40ky8.css`, SHA-256 `dc46fcb1b4d8a84ffeda8bd9fc9648e382241cb55e1d2ba6030a81a19e609835`.
 
-## Steps after the authorized ArSpatially deployment
+`npx --no-install vitest run test/TaskPanel.test.tsx --maxWorkers=1` in apps/web: 45 passed, exit 0 at 02:40:18 UTC. JSDOM printed its existing canvas getContext diagnostic. Shared protocol file passed 5; three named node caller files passed 9. No collection-only or interrupted result is counted as PASS.
 
-1. Sign in as the CEO, the CEO delegate, or a person running the task's department.
-2. Open task 267 and select only the password in its details or log.
-3. Choose **Hide secret**, verify the selected value in the private field, then choose **Hide everywhere**.
-4. Check that the task now shows `[hidden]` and its log records who hid the secret and when.
+## Static checks
 
-The person performs these steps. This task accesses no live ArSpatially server and changes no production record.
+- `npx --no-install tsc -p apps/node/tsconfig.json --noEmit`: exit 0.
+- `npx --no-install tsc -p packages/protocol/tsconfig.json --noEmit`: exit 0 at 02:07:53 UTC.
+- `npx --no-install tsc -p apps/web/tsconfig.json --noEmit`: exit 0 at 02:08:51 UTC; repeated after the final browser edits: exit 0 at 03:22:34 UTC.
+- `npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit`: exit 0 at 02:20:07 UTC, including tests. Six unknown raw SQL result types in stored-secrets.test.ts were fixed with explicit row shapes; assertions are unchanged.
+- `npm run build -w @hornhoof/node`, protocol, web, server: each exit 0 (02:07:53, 02:08:33, 02:09:09, 02:11:00 UTC). Latest separate web build also passed at 02:59:52 UTC. Vite warns about chunks over 500 kB; no threshold changed.
+- ESLint: 13 changed server TypeScript files, eight changed web files, node redact.ts, protocol redaction source/test all exit 0. Stored-secrets lint repeated after its type fix: exit 0 at 02:23:05 UTC. Final browser config/spec lint: exit 0 at 03:23:34 UTC.
+- `git diff --check`: clean before final report commit; final check is recorded in submission.
 
-## Check limits observed during authoring
+## Concerns and review boundary
 
-An earlier expanded caller run passed 263 tests and failed two: the public-schema definer invariant and a 20 s runner timeout in the first long-comment test. The schema invariant was fixed by moving the privileged helpers into `net`, preserving the original protection test. The updated outbound-grants file subsequently passed all 60 tests.
+Independent Review, Security and Tests still own their gates. Security must review company ownership resolution (especially deleted-row history), private SECURITY DEFINER helpers, transaction/table locking and the frozen-evidence exception. Fingerprints hold no reversible plaintext, but are sensitive and remain hidden from agents.
 
-Concurrent local checks also produced runner timeouts in first-time database setup. No application assertion or test timeout was relaxed. The broad server test-type project did not produce a passed receipt (one attempt exited 134 and a later memory-heavy attempt was stopped); application source types passed. These incomplete checks are not reported as passes. Final local receipts are attached to the task and identify the checked candidate.
+The action scans stored prose and copies; production latency on a large database is not measured. Tests use isolated PGlite databases and browser API fixtures, not live physical replication. Encrypted historical backups, exports and copies outside live logical databases are not rewritten.
 
+The initial caller run passed 136 and failed two: the then-combined merge test hit its runner limit; route-access rejected the base POST /api/attachments declaration. The former is now covered by four passing independent directions. The unchanged route-access file's declaration issue belongs to Ghost in #1196; #1173 was cancelled. The head said not to wait for #1196.
 
-## Continued candidate, 17 November
+Several earlier checks returned 143 without a final summary, including server types and browser runs. Operations receives that investigation through the head; no interrupted result is counted as PASS. A preview process survived one interruption; only its recorded PID 462861 and verified shell 462098 were stopped. Browser checks were split into short named-file commands, and final server checks ran individually in PTY without other author checks running. These facts do not establish the source of SIGTERM. Full raw receipts and checked source fingerprints accompany the task as hh-1077-current-checks.zip (SHA-256 d08208a39f19069ee728b730e1beaaa935a1cb2d3046c633ad45d74c14af75b4).
 
-The branch now takes turn-31 at 73d4a6e9521059384503aa8f2d9a4942635d1568. The unpublished table migration was generated again as 0137_secret_redactions, after 0136_outbound_contact_log. The incoming queue changes are preserved; this task adds only credential scrub calls there.
+Interrupted command records (UTC; a detection bound is not a measured signal time):
 
-The API and merge isolation tests first reproduced that the old suppression functions replaced the same marker in another company's text. The head confirmed the boundary: suppression and the sweep belong only to the company in the suppression row. The new functions filter fingerprints by that company, resolve company ownership for partial journal rows, cached tool answers and parked job messages, and never apply another company's fingerprints where ownership is unknown. The migration keeps these helpers private in net. Security must review this boundary and its lookup of deleted-row history.
+- `npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit` as the first command of the old combined package check: started 01:38:24; 143 observed around 01:40, no compiler output. All four packages subsequently passed separately.
+- `npm run build -w @hornhoof/web`, 01:53:33–01:54:09: child printed exit 0, outer tool returned 143. That discrepant receipt is superseded by later complete exit-0 builds.
+- `npx --no-install playwright test e2e/hide-secret.spec.ts --config e2e/hide-secret.config.ts --workers=2`: start 02:40:34, 143 detected by 02:46:54, no final summary (`task-1077-browser-build-final.log`).
+- Same browser command with `--workers=1`: start 02:47:37, 143 detected around 02:52:50, no final summary (`task-1077-browser-serial-final.log`).
+- Same one-worker command adding `--project=firefox`: start 03:00:41, 143 detected before 03:05:40, exact signal time not captured (`task-1077-browser-firefox-preview.log`).
+- Same one-worker command adding `--project=chromium` on the batched test: start 03:14:15, 143 detected before 03:16:23, before a case result (`task-1077-browser-chromium-batched.log`). The two final short Chromium commands subsequently passed.
+- The earlier five-file server run (`stored-secrets`, `secret-redaction-merge`, `secret-redaction-migration`, `secret-redaction-rights`, `outbound-grants`, one worker) returned 143 after printing some file passes; UTC was not recorded (`task-1077-company-green.log`). Its partial results are superseded by all five complete individual receipts above.
 
-The merge checks now cover each direction independently, preserving the complete table scans. The added two-company cases keep a matching marker in the other company's task while the receiving company's text is masked.
+No whole suite, run_tests, live ArSpatially access, shared-branch integration or deployment was performed. The automatic author wrapper's broad shared-package selection would violate this task's explicit ban on a whole run, so named local checks were used. No coverage, CRAP, duplication or mutation score is claimed. Release-wide proof belongs to the release owner on the combined candidate.
 
-The current web offers the company vault beside masked task text or history. New English and Russian tests first failed because the link was absent, then all 45 tests of TaskPanel.test.tsx passed. The browser file passed all 48 cases across Chromium, Firefox and WebKit, four shipped skins, English and Russian, phone and desktop widths, and LTR/RTL form geometry. No page errors or proxy failures were printed in that run. Those receipts precede the final RTL punctuation repair. A later screenshot showed the final period displaced at the start of the hint in RTL; the hint now has one bidi isolate, and the browser scenario measures the final punctuation order. Final browser evidence is recorded below.
+Migration 0137's when is greater than 0136's and its snapshot points to 0136's snapshot. Before authorized integration the integrator must set when at that moment, strictly after the last applied journal entry, and preserve matching number/snapshot order. If tracker 0139 integrates first, ask the head to renumber before merging. This author does not integrate.
 
-Local logs are kept with the task hand-in. The first ten-file server run passed 136 checks and failed two: the base's missing declaration on POST /api/attachments (Ghost's task 1196; 1173 was cancelled as a duplicate) and the previous combined two-direction merge test's 20 s runner limit. No timeout or assertion was weakened. The split merge checks then passed. A later five-file run printed passes for stored-secrets, the four merge checks and outbound-grants, but ended with code 143 before its final summary; the incomplete run is not a passed receipt. The current exact candidate is checked again after renumbering.
+## Person's steps after the authorized ArSpatially rollout
 
-Protocol redaction.test.ts passed 5 checks; node redact.test.ts, program-state-redaction.test.ts and exit-redaction.test.ts passed 9. Their relevant source files are unchanged by the later merge. Source and test types, lint and builds are recorded separately on the final candidate. The automatic author wrapper would select the whole shared-package suite, so it does not override this task's ban on a whole run; only explicitly named local files are run. No run_tests, shared-branch integration or live ArSpatially access is part of this work.
+1. Sign in as CEO, delegate, or a person running the task's department.
+2. Open task 267, select only the password in its details or log, and choose **Hide secret**.
+3. Check the private field, choose **Hide everywhere**, then check the mask and the log's actor/time entry.
 
-## Final local checks
+The person performs this action after rollout; no live record was accessed here.
 
-The five database test files are run separately with the verbose reporter, as requested by the head after the interrupted combined run. Codes 143 and stopped or uncollected runs do not count as PASS. The base route-access failure on POST /api/attachments is assigned to Ghost in task 1196; task 1173 is cancelled.
+## Timeout inventory requested by the head
 
-Migration 0137 has a `when` greater than the preceding 0136 and its snapshot points to the 0136 snapshot. The integrator must set `when` at integration time, strictly after the last applied journal entry, and keep the snapshot chain and migration numbering in the same order. If tracker 0139 integrates first, the head must renumber before integration. This branch is not integrated by this author.
+Compared with merge base `73d4a6e9521059384503aa8f2d9a4942635d1568`, every listed file was added by #1077. These are not classified as untouched base failures. All required current cases subsequently have complete GREEN receipts above. Each entry preserves the earlier run, test, reported duration and limit. Where UTC was not captured, it is explicitly unknown; a file's modification time is not substituted for an execution time. The first two merge cases also exceeded the existing 10 s teardown hook in the failed run.
 
-Completed static checks on the final executable sources:
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, ru, matrix, 375px; 34.7 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, ru, matrix, 1440px; 34.5 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, cyberpunk, 1440px; 36.9 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, cyberpunk, 375px; 36.8 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, light, 1440px; 35 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-build-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, light, 375px; 45.9 s (limit 30 s); changed since base: yes; start 2026-11-17T02:40:34.633645+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end no end timestamp.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, cyberpunk, 1440px; 33.5 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, cyberpunk, 375px; 34.2 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, light, 1440px; 44.5 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, light, 375px; 49.2 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, matrix, 375px; 39.9 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-final.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, matrix, 1440px; 40.7 s (limit 30 s); changed since base: yes; start 2026-11-17T02:10:00.937646+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=2']; end 2026-11-17T02:14:13.733766+00:00 EXIT -2.
+- `task-1077-browser-firefox-final.log`; `apps/web/e2e/hide-secret.config.ts`; web server startup; 60 s (limit 60 s); changed since base: yes; start 2026-11-17T02:57:14.235788+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--project=firefox', '--workers=1']; end 2026-11-17T02:58:28.393519+00:00 EXIT 1.
+- `task-1077-browser-firefox-part1.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, cyberpunk, 375px; 32.6 s (limit 30 s); changed since base: yes; start 2026-11-17T03:05:40.371974+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--project=firefox', '--workers=1', '--shard=1/2']; end 2026-11-17T03:09:38.970519+00:00 EXIT 1.
+- `task-1077-browser-firefox-part1.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, light, 375px; 34.1 s (limit 30 s); changed since base: yes; start 2026-11-17T03:05:40.371974+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--project=firefox', '--workers=1', '--shard=1/2']; end 2026-11-17T03:09:38.970519+00:00 EXIT 1.
+- `task-1077-browser-serial-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, cyberpunk, 375px; 33.3 s (limit 30 s); changed since base: yes; start 2026-11-17T02:47:37.236920+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=1']; end no end timestamp.
+- `task-1077-browser-serial-final.log`; `apps/web/e2e/hide-secret.spec.ts`; firefox: hides a selected secret, en, cyberpunk, 1440px; 33 s (limit 30 s); changed since base: yes; start 2026-11-17T02:47:37.236920+00:00 ['npx', '--no-install', 'playwright', 'test', 'e2e/hide-secret.spec.ts', '--config', 'e2e/hide-secret.config.ts', '--workers=1']; end no end timestamp.
+- `task-1077-merge-final.log`; `apps/server/test/secret-redaction-merge.test.ts`; keeps a secret suppressed when the leader receives a merge; 42.752 s (limit 20 s); changed since base: yes; start 2026-11-17T02:21:24.019395+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/secret-redaction-merge.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:26:57.164181+00:00 EXIT 1.
+- `task-1077-merge-final.log`; `apps/server/test/secret-redaction-merge.test.ts`; keeps a secret suppressed when the offline receives a merge; 36.512 s (limit 20 s); changed since base: yes; start 2026-11-17T02:21:24.019395+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/secret-redaction-merge.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:26:57.164181+00:00 EXIT 1.
+- `task-1077-merge-final.log`; `apps/server/test/secret-redaction-merge.test.ts`; keeps another company unchanged when the leader receives a suppression; 25.759 s (limit 20 s); changed since base: yes; start 2026-11-17T02:21:24.019395+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/secret-redaction-merge.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:26:57.164181+00:00 EXIT 1.
+- `task-1077-merge-final.log`; `apps/server/test/secret-redaction-merge.test.ts`; keeps another company unchanged when the offline receives a suppression; 27.424 s (limit 20 s); changed since base: yes; start 2026-11-17T02:21:24.019395+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/secret-redaction-merge.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:26:57.164181+00:00 EXIT 1.
+- `task-1077-migration-final.log`; `apps/server/test/secret-redaction-migration.test.ts`; upgrades an existing database without discarding prose and applies suppression after repeat migration; 35.405 s (limit 20 s); changed since base: yes; start 2026-11-17T02:27:15.178061+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/secret-redaction-migration.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:31:22.440628+00:00 EXIT 1.
+- `task-1077-rtl-preview-clock-red.log`; `apps/web/e2e/hide-secret.config.ts`; web server startup; 60 s (limit 60 s); changed since base: yes; start not recorded; end no end timestamp.
+- `task-1077-rtl-preview-red.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, matrix, 375px; 37.3 s (limit 30 s); changed since base: yes; start not recorded; end no end timestamp.
+- `task-1077-rtl-red.log`; `apps/web/e2e/hide-secret.spec.ts`; chromium: hides a selected secret, en, matrix, 375px; 33.3 s (limit 30 s); changed since base: yes; start not recorded; end no end timestamp.
+- `task-1077-stored-final.log`; `apps/server/test/stored-secrets.test.ts`; secrets in stored prose > masks tasks and comments before storing their copies; 29.485 s (limit 20 s); changed since base: yes; start 2026-11-17T02:11:44.355932+00:00 ['npx', '--no-install', 'vitest', 'run', 'test/stored-secrets.test.ts', '--maxWorkers=1', '--reporter=verbose']; end 2026-11-17T02:20:58.858385+00:00 EXIT 1.
 
-- `npx --no-install tsc -p apps/node/tsconfig.json --noEmit`: exit 0 (empty output).
-- `npx --no-install tsc -p packages/protocol/tsconfig.json --noEmit`: exit 0, 02:07:53 UTC.
-- `npx --no-install tsc -p apps/web/tsconfig.json --noEmit`: exit 0, 02:08:51 UTC.
-- `npm run build -w @hornhoof/node`: exit 0, 02:07:53 UTC.
-- `npm run build -w @hornhoof/protocol`: exit 0, 02:08:33 UTC.
-- `npm run build -w @hornhoof/web`: exit 0, 02:09:09 UTC; Vite reports 399 transformed modules and warns about chunks larger than 500 kB. No threshold changed.
-- `npm run build -w @hornhoof/server`: exit 0, 02:11:00 UTC.
-- ESLint on the 13 changed server TypeScript files, eight changed web files, node redaction file and protocol redaction source/test: exit 0. After the final hint and geometry assertion edits, web ESLint was repeated on `src/ui/HideSecret.tsx e2e/hide-secret.spec.ts`: exit 0, 02:09:00 UTC.
+## Changed paths
 
-The final browser repeat started at 02:10:00 UTC. Four Chromium cases timed out before the panel or page finished opening; the author interrupted the two active cases at 02:14:00 UTC. Result: 6 failed (including two interrupted cases), 42 did not run, command exit 130. The run never reached the secret action or new punctuation assertion. The prior 48-case passed receipt does not prove the final bidi edit. The temporary preview-server and clock experiments were reverted; no timeout or selection assertion changed.
-
-The earlier combined server test-type command started at 01:38:24 UTC and returned 143 without compiler output, observed around 01:40 UTC. That is not PASS. The head relayed the interruption to Operations. The separate package commands above preserve completed results; the server command is recorded separately below.
-
-Server types with tests (`npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit`) completed at 02:18:19 UTC with six TS18046 errors in stored-secrets.test.ts: raw SQL execute results were unknown. Explicit result shapes were added without changing any assertions. The repeated command completed at 02:20:07 UTC with exit 0.
-
-Separate stored-secrets command: `npx --no-install vitest run test/stored-secrets.test.ts --maxWorkers=1 --reporter=verbose`, 02:11:44–02:20:58 UTC, exit 1. Seven passed, including complete marker removal, archived text, stable masks, preserved service state, rights and company isolation. The first test, “masks tasks and comments before storing their copies”, hit the existing 20 s test limit (reported 29.485 s). Its assertions and timeout are unchanged. Total duration was 527.16 s, including transform and import. This receipt is not an all-pass result.
-
-After the SQL result type annotations, `npx --no-install eslint test/stored-secrets.test.ts` also passed with exit 0 at 02:23:05 UTC.
-
-Separate merge command: `npx --no-install vitest run test/secret-redaction-merge.test.ts --maxWorkers=1 --reporter=verbose`, 02:21:24–02:26:57 UTC, exit 1. Four tests exceeded the unchanged 20 s limit (42.752, 36.512, 25.759 and 27.424 s); the first two also exceeded the existing 10 s teardown hook limit at merge-fixture.ts:15. No failed value comparison was printed. This result leaves final merge execution unproved; the earlier interrupted five-file run printed four passes in 21.117 s for these same SQL helper sources before the migration-only renumbering, but is not an all-pass receipt.
-
-Separate migration command: `npx --no-install vitest run test/secret-redaction-migration.test.ts --maxWorkers=1 --reporter=verbose`, 02:27:15–02:31:22 UTC, exit 1. The upgrade/repeat migration test exceeded the unchanged 20 s limit (reported 35.405 s); no value-comparison failure was printed. Total duration 235.18 s. Renumbered migration execution remains a concern, not PASS.
-
-Separate rights command: `npx --no-install vitest run test/secret-redaction-rights.test.ts --maxWorkers=1 --reporter=verbose`, 02:31:38–02:34:33 UTC, exit 0. One passed: agents cannot select or delete suppression records or call the privileged text/row scrub functions. Duration 168.34 s including transform/import, test 15.409 s.
-
-Separate outbound-grants command: `npx --no-install vitest run test/outbound-grants.test.ts --maxWorkers=1 --reporter=verbose`, 02:34:48–02:37:06 UTC, exit 0. All 60 passed, including protected-table grants and absence of privileged public-schema functions. All five requested server files have now completed individually; none was left running.
-
-The final browser configuration builds the current checkout before starting Vite preview. This avoids on-demand module compilation inside the interaction's 30 s runner limit, and prevents a stale dist directory from supplying the tested UI. Server ownership, timeouts, selection assertions and API fixture checks are preserved. The earlier preview-only experiment did not build current sources and was reverted; the final build-first run is reported below.
-
-After the final bidi markup change, `npx --no-install vitest run test/TaskPanel.test.tsx --maxWorkers=1` passed all 45 checks, exit 0 at 02:40:18 UTC. The environment printed its existing “HTMLCanvasElement getContext() not implemented” diagnostic; no test failed. Total duration 108.72 s.
+- `apps/node/src/redact.ts`
+- `apps/server/drizzle/0137_secret_redactions.sql`
+- `apps/server/drizzle/meta/0137_snapshot.json`
+- `apps/server/drizzle/meta/_journal.json`
+- `apps/server/src/db/agent-sql.ts`
+- `apps/server/src/db/schema.ts`
+- `apps/server/src/modules/conversation/inbox.ts`
+- `apps/server/src/modules/conversation/queue.ts`
+- `apps/server/src/modules/events/store.ts`
+- `apps/server/src/modules/merge/rules.ts`
+- `apps/server/src/modules/tasks/engine.ts`
+- `apps/server/src/modules/tasks/hide-secret.ts`
+- `apps/server/src/modules/tasks/routes.ts`
+- `apps/server/test/secret-redaction-merge.test.ts`
+- `apps/server/test/secret-redaction-migration.test.ts`
+- `apps/server/test/secret-redaction-rights.test.ts`
+- `apps/server/test/stored-secrets.test.ts`
+- `apps/web/e2e/hide-secret.config.ts`
+- `apps/web/e2e/hide-secret.spec.ts`
+- `apps/web/src/i18n/en.ts`
+- `apps/web/src/i18n/ru.ts`
+- `apps/web/src/types.ts`
+- `apps/web/src/ui/HideSecret.tsx`
+- `apps/web/src/ui/TaskPanel.tsx`
+- `apps/web/src/ui/hide-secret.css`
+- `apps/web/test/TaskPanel.test.tsx`
+- `docs/tasks/1077-en-cyberpunk.png`
+- `docs/tasks/1077-en-light.png`
+- `docs/tasks/1077-en-matrix.png`
+- `docs/tasks/1077-en-pixel.png`
+- `docs/tasks/1077-ru-cyberpunk.png`
+- `docs/tasks/1077-ru-light.png`
+- `docs/tasks/1077-ru-matrix.png`
+- `docs/tasks/1077-ru-pixel.png`
+- `docs/tasks/1077-secret-redaction-evidence.md`
+- `docs/tasks/1077-secret-redaction.md`
+- `packages/protocol/src/redaction.ts`
+- `packages/protocol/test/redaction.test.ts`
