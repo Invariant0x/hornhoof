@@ -126,8 +126,8 @@ export async function writeFor(ctx: Ctx, me: Person, body: unknown, senderAgentI
 export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown, declared: number) {
   const { agentId, name } = FileQuery.parse(query);
   const agent = await addressee(ctx, me, agentId, await ownAgentOf(ctx, me.assistant!.id));
-  await checkPictureRoom(ctx, me.companyId, declared);
-  const taken = await received(ctx.config.filesDir, body);
+  const room = await checkPictureRoom(ctx, me.companyId, declared);
+  const taken = await received(ctx.config.filesDir, body, room);
   if (!taken.size) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
   return { file: await keepTaken(ctx.config.filesDir, taken, () => keepMessageFile(ctx, me, agent.id, taken, name ?? '')) };
 }

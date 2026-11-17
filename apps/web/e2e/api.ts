@@ -108,6 +108,9 @@ const ROUTES: Record<string, unknown> = {
   '/api/google-sheets': { google: null },
   /* What the departments send outside: nothing yet. Settings asks it to know whether to show External messaging. */
   '/api/outbound': { channels: [], messages: [], escalations: [], approvals: [] },
+  /* The company's saved sign-ins: none yet. Any person of the company reads them, and Settings asks to know whether to show
+     Passwords. */
+  '/api/vault': { entries: [] },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
