@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { agents, companies, departments, jobs, people, sessions, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, sessions, subscriptions } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { appFixture, as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
+import { appFixture, as, listen, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 
 await prepareSharedDatabase();
@@ -14,12 +15,16 @@ export async function vaultCompany() {
   const { app, db, config } = await testApp();
   await listen(app);
   const ready = await appFixture(app, 'vaultCompany', async () => {
-    const ceoSession = await setUpCompany(app);
-    const [acme] = await db.select().from(companies);
+    /* These tests exercise Vault, not onboarding or invitations. Seed the same access and session records directly;
+       their real API flows are checked in setup/people tests and cost hundreds of unrelated queries on a cold VM. */
+    const [acme] = await db.insert(companies).values({ name: 'Acme', inboxMode: 'direct' }).returning();
     const companyId = acme!.id;
-    const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
-    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    const [sub] = await db.select().from(subscriptions);
+    const [ceo, sam] = await db.insert(people).values([
+      { companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true },
+      { companyId, name: 'Sam', email: 'sam@acme.test', status: 'active', scopeKind: 'listed' },
+    ]).returning();
+    const [sub] = await db.insert(subscriptions).values({ companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Test plan', ownerPersonId: ceo!.id, status: 'ready', targetKind: 'company', secretEnc: encryptSecret('sk-test-vault-fixture', config.secret) }).returning();
+    const [orchestrator] = await db.insert(agents).values({ companyId, kind: 'orchestrator', name: 'Orchestrator', model: '', subscriptionId: sub!.id }).returning();
     const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
     const [nora, aide] = await db
       .insert(agents)
@@ -28,8 +33,12 @@ export async function vaultCompany() {
         { companyId, kind: 'assistant', name: 'Aide', model: '', subscriptionId: sub!.id },
       ])
       .returning();
-    const samSession = await invitePerson(app, ceoSession, { name: 'Sam', email: 'sam@acme.test', access: { departments: [sales!.id] } });
-    const [sam] = await db.select().from(people).where(eq(people.email, 'sam@acme.test'));
+    await db.insert(personAccess).values({ companyId, personId: sam!.id, departmentId: sales!.id });
+    const ceoSession = 'vault-ceo-session-0123456789abcdef', samSession = 'vault-sam-session-0123456789abcdef';
+    await db.insert(sessions).values([
+      { tokenHash: hashToken(ceoSession), personId: ceo!.id, expiresAt: new Date(Date.now() + 3_600_000) },
+      { tokenHash: hashToken(samSession), personId: sam!.id, expiresAt: new Date(Date.now() + 3_600_000) },
+    ]);
 
     const [other] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
     const [olaf] = await db.insert(people).values({ companyId: other!.id, name: 'Olaf', email: 'olaf@other.test', status: 'active', scopeKind: 'company', isOwner: false }).returning();
