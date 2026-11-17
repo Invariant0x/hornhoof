@@ -18,6 +18,9 @@ ownDatabases();
 const TAGS = (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
 const GATEWAY = TAGS.find(tag => tag.endsWith('_outbound'))!;
 const BEFORE_GATEWAY = TAGS[TAGS.indexOf(GATEWAY) - 1]!;
+/* The migration that drops the gateway's tables again, and the one just before it. */
+const DROP = TAGS.find(tag => tag.endsWith('_drop_outbound'))!;
+const BEFORE_DROP = TAGS[TAGS.indexOf(DROP) - 1]!;
 
 /* Every older install a test here starts from, made once as the file is collected. */
 await prepareInstalls([
@@ -31,6 +34,7 @@ await prepareInstalls([
   '0085_work_fast_cards',
   '0097_route_abilities',
   '0129_builtin_node_connections',
+  BEFORE_DROP,
 ]);
 
 describe('department owner and approval policy migration', () => {
@@ -146,6 +150,30 @@ describe('outbound gateway migration', () => {
     expect(n).toBeGreaterThan(0);
     await migrate(db, { migrationsFolder: target });
     expect((await db.execute(guards)).rows).toEqual([{ n }]);
+  });
+});
+
+describe('the migration that drops the outbound gateway', () => {
+  it('drops its tables with their rows, a mailbox sign-in among them, and the function that guarded them, leaving every other row', async () => {
+    const client = await olderInstall(BEFORE_DROP);
+    const db = drizzle(client);
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values ('Acme', true) returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code, owner_person_id) values (${company}, 'sales', 'SAL', ${person}) returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, updated_by) values (${company}, ${department}, 'message', 'every', ${person})`);
+    const channel = (await db.execute<{ id: string }>(sql`insert into outbound_channels (company_id, department_id, name, adapter, purpose, audience, created_by) values (${company}, ${department}, 'mail', 'smtp', 'sales', 'direct', ${person}) returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into outbound_accounts (company_id, department_id, channel_id, sender_domain, label, config_enc, created_by) values (${company}, ${department}, ${channel}, 'acme.example', 'sales', 'sealed sign-in', ${person})`);
+    await db.execute(sql`insert into model_checks (company_id, department_id, kind) values (${company}, ${department}, 'reply')`);
+    const kept = async () => Promise.all(['companies', 'people', 'departments', 'approval_policies'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await kept();
+
+    const target = await migrationsUpTo(DROP);
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect(await kept()).toEqual(before);
+    expect((await db.execute(sql`select tablename from pg_tables where schemaname = 'public' and tablename ~ '^(outbound_|support_|model_check)'`)).rows).toEqual([]);
+    expect((await db.execute(sql`select proname from pg_proc where proname = 'outbound_refuse_change'`)).rows).toEqual([]);
   });
 });
 

@@ -2,8 +2,7 @@ import { HIDDEN, SECRET } from '../../db/agent-sql.js';
 
 /* Whose a conflict is. The first five are the CEO's: people, what they reach, the plans and the machines the company
    runs on, and protected, the records only a person's guarded route or one of Hornhoof's own gateways writes (what
-   waits for people's decisions, the waits and their policies, the checks made by a model, the outbound gateway). Work
-   is the orchestrator's. */
+   waits for people's decisions, the waits and their policies). Work is the orchestrator's. */
 export type Topic = 'people' | 'access' | 'plans' | 'machines' | 'protected' | 'work';
 export const CEO_TOPICS: readonly Topic[] = ['people', 'access', 'plans', 'machines', 'protected'];
 
@@ -31,14 +30,6 @@ const rows = (topic: Topic, more: Omit<TableRule, 'kind' | 'topic'> = {}): Table
 const add = (topic: Topic): TableRule => ({ kind: 'add', topic });
 const skip = (topic: Topic): TableRule => ({ kind: 'skip', topic });
 const each = (names: readonly string[], rule: TableRule): Record<string, TableRule> => Object.fromEntries(names.map(name => [name, rule]));
-
-/* The gateway that sends for the company, and the support desk it answers: its payloads and contacts are private, and a
-   row of it stands for an approval, a receipt, a consent or a day's count. */
-const OUTBOUND = [
-  'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions',
-  'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_sampling_counters',
-  'support_tickets', 'support_classifications',
-];
 
 /* The rule of every table of public. A table this does not name stops a merge, so a new table is given its rule when it
    is made. */
@@ -76,10 +67,6 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   test_part_timings: add('work'),
   test_file_results: add('work'),
   test_suite_memory: add('work'),
-  outbound_contact_events: add('protected'),
-  outbound_events: add('protected'),
-  /* Who set up a department's messages, on a person's word: written once, and never changed. */
-  outbound_setup_events: add('protected'),
   autonomous_releases: { kind: 'add', topic: 'protected', task: 'task_id', hereOnly: ['verdict_event_id'] },
   /* The record of a turn's release stands for the approval of its commit, by a person or by the autonomous release log. */
   turn_releases: { kind: 'add', topic: 'protected', task: 'task_id' },
@@ -121,10 +108,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   machines: rows('machines'),
   computer_runs: rows('machines'),
 
-  ...each(['requests', 'task_waits', 'outbound_messages'], rows('protected', { task: 'task_id' })),
+  ...each(['requests', 'task_waits'], rows('protected', { task: 'task_id' })),
   ...each(['request_internal', 'proposals', 'approval_policies', 'wait_policies'], rows('protected')),
-  ...each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates'], rows('protected')),
-  ...each(OUTBOUND.filter(name => name !== 'outbound_messages'), rows('protected')),
 
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
@@ -152,8 +137,6 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   briefings: ['updated_at'],
   approval_policies: ['updated_at'],
   task_waits: ['updated_at'],
-  outbound_accounts: ['updated_at'],
-  outbound_messages: ['updated_at'],
   map_layouts: ['updated_at'],
   feedback_inbox: ['updated_at'],
   feedback_signals: ['signals', 'updated_at'],
@@ -180,18 +163,6 @@ export const CLOSING: Readonly<Record<string, readonly Closing[]>> = {
   computer_runs: [{ column: 'state', open: ['waiting', 'sent'], to: 'lost', at: 'done_at' }],
   test_runs: [{ column: 'status', open: ['running'], to: 'stopped', at: 'finished_at' }],
   test_parts: [{ column: 'status', open: ['queued', 'running'], to: 'stopped', at: 'finished_at', error: 'error' }],
-  /* A message that never went out is called off. Of one that was going out nobody knows whether it was taken, and a
-     person says so before its account sends again. */
-  outbound_messages: [
-    { column: 'status', open: ['scheduled', 'waiting_checks', 'waiting_approval', 'reserved'], to: 'cancelled', at: 'updated_at' },
-    { column: 'status', open: ['sending'], to: 'unknown', at: 'updated_at' },
-  ],
-  outbound_attempts: [
-    { column: 'status', open: ['reserved'], to: 'definitely_not_accepted', at: 'ended_at', also: { safe_code: 'not_sent' } },
-    { column: 'status', open: ['sending'], to: 'unknown', at: 'ended_at', also: { safe_code: 'connection_lost' } },
-  ],
-  model_check_evaluations: [{ column: 'status', open: ['queued', 'running'], to: 'incomplete', at: 'finished_at' }],
-  support_classifications: [{ column: 'status', open: ['pending'], to: 'unavailable', at: 'decided_at' }],
   /* A connection the source held open ended with the server that held it. */
   node_connections: [{ column: 'cause', open: [null], to: 'server_stopped', at: 'disconnected_at', also: { close_code: 1001 } }],
 };

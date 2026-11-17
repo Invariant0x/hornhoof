@@ -59,7 +59,7 @@ describe('the rule of each table in a merge', () => {
       expect([name, CEO_TOPICS.includes(rule.topic) || rule.kind === 'skip' || rule.kind === 'add']).toEqual([name, true]);
     }
     /* What a person's guarded route alone writes is the CEO's too, hidden or not. */
-    for (const name of ['requests', 'request_internal', 'proposals', 'approval_policies', 'wait_policies', 'task_waits', 'outbound_messages', 'model_checks']) expect([name, ceosConflict(name)]).toEqual([name, true]);
+    for (const name of ['requests', 'request_internal', 'proposals', 'approval_policies', 'wait_policies', 'task_waits']) expect([name, ceosConflict(name)]).toEqual([name, true]);
     for (const name of ['tasks', 'turns', 'agents', 'departments', 'jobs', 'notebook_notes', 'backlog_items']) expect([name, ceosConflict(name)]).toEqual([name, false]);
     /* One rule for whose a conflict is, wherever it is asked: the CEO's by its topic, whatever the orchestrator's SQL
        may not see, and a table this build has no rule for. */
@@ -75,11 +75,6 @@ describe('the rule of each table in a merge', () => {
     expect(closes('computer_runs')).toEqual([['waiting', 'lost'], ['sent', 'lost']]);
     expect(closes('test_runs')).toEqual([['running', 'stopped']]);
     expect(closes('test_parts')).toEqual([['queued', 'stopped'], ['running', 'stopped']]);
-    /* A message that never went out is called off; one that was going out, nobody knows. */
-    expect(closes('outbound_messages')).toEqual([['scheduled', 'cancelled'], ['waiting_checks', 'cancelled'], ['waiting_approval', 'cancelled'], ['reserved', 'cancelled'], ['sending', 'unknown']]);
-    expect(closes('outbound_attempts')).toEqual([['reserved', 'definitely_not_accepted'], ['sending', 'unknown']]);
-    expect(closes('model_check_evaluations')).toEqual([['queued', 'incomplete'], ['running', 'incomplete']]);
-    expect(closes('support_classifications')).toEqual([['pending', 'unavailable']]);
     expect(closes('node_connections')).toEqual([[null, 'server_stopped']]);
   });
 
@@ -92,7 +87,7 @@ describe('the rule of each table in a merge', () => {
     expect(tasks.referencedBy.some(fk => fk.table === 'turns' && fk.columns.join() === 'task_id')).toBe(true);
     expect(found.tables.get('map_returns')!.key).toEqual(['company_id', 'upstream_agent_id', 'downstream_agent_id']);
     /* A key of two columns that another table points at with two. */
-    expect(found.tables.get('outbound_attempts')!.fks.some(fk => fk.parent === 'outbound_messages' && fk.columns.join() === 'company_id,message_id' && fk.parentColumns.join() === 'company_id,id')).toBe(true);
+    expect(found.tables.get('request_internal')!.fks.some(fk => fk.parent === 'requests' && fk.columns.join() === 'company_id,request_id' && fk.parentColumns.join() === 'company_id,id')).toBe(true);
     const at = (name: string) => found.order.indexOf(name);
     expect(found.order.slice().sort()).toEqual([...found.tables.keys()].sort());
     expect(at('companies')).toBeLessThan(at('people'));

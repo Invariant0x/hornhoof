@@ -493,14 +493,14 @@ describe('the orchestrator reads and changes the database itself', () => {
     const [acme] = await db.select().from(companies);
     await db.insert(recoveryKeys).values({ companyId: acme!.id, recipient: 'age1recipientofthistest', madeBy: ceoId });
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT recipient FROM recovery_keys' })))[0].rows).toEqual([{ recipient: 'age1recipientofthistest' }]);
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT * FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT * FROM nodes', 'SELECT * FROM requests', 'SELECT * FROM public_links', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT machine_key FROM machines', 'SELECT * FROM assistants', 'SELECT * FROM assistant_events', 'SELECT * FROM tool_calls']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT * FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM nodes', 'SELECT * FROM requests', 'SELECT * FROM public_links', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT machine_key FROM machines', 'SELECT * FROM assistants', 'SELECT * FROM assistant_events', 'SELECT * FROM tool_calls']) {
       const res = await call(client, 'database', { sql });
       expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
     }
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT count(*)::int AS n FROM sessions' })))[0].rows).toEqual([{ n: expect.any(Number) }]);
     /* Every column of every table of Hornhoof, none left out. */
     const [{ rows: tables }] = JSON.parse(text(await call(client, 'database', { sql: "SELECT tablename FROM pg_tables WHERE schemaname = 'public'" }))) as [{ rows: { tablename: string }[] }];
-    expect(tables.length).toBeGreaterThan(100);
+    expect(tables.length).toBeGreaterThan(80);
     const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT * FROM "${tablename}" LIMIT 0`).join('; ') });
     expect([every.isError ?? false, text(every)]).toEqual([false, expect.stringContaining('"rows"')]);
   });
