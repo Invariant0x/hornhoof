@@ -20,7 +20,9 @@ const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
-export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
+/* mcpUrl carries the agent's secret in its path. A program that sends a bearer token from its environment, as Codex does, takes
+   mcpAddress, which carries none, and the secret itself. Neither goes on a command line, which any process of the machine reads. */
+export type AgentUrls = { mcpUrl: string; mcpAddress: string; secret: string; attachUrl: string; hookUrl: string };
 /* Hornhoof's answer to what a program sent its tools with no turn running, as /mcp gave it; null when it cannot be asked. */
 export type OutsideAnswer = { status: number; body: string };
 /* Asks Hornhoof over the node's own link, with the protocol version the program asked with. */
@@ -41,6 +43,11 @@ const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'com
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+
+/* The agent's secret a program sends as a bearer token to the tools address that carries none. */
+function bearerSecret(req: IncomingMessage): string | undefined {
+  return /^Bearer ([0-9a-f]+)$/.exec(req.headers.authorization ?? '')?.[1];
+}
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
    and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
@@ -112,7 +119,7 @@ export class Bridge {
       this.bySecret.set(secret, key);
     }
     const base = `http://127.0.0.1:${this.port}`;
-    return { mcpUrl: `${base}/mcp/${secret}`, attachUrl: `${base}/attach/${secret}`, hookUrl: `${base}/hook/${secret}` };
+    return { mcpUrl: `${base}/mcp/${secret}`, mcpAddress: `${base}/mcp`, secret, attachUrl: `${base}/attach/${secret}`, hookUrl: `${base}/hook/${secret}` };
   }
 
   /* The token of the agent's running turn, or null between turns. */
@@ -228,7 +235,8 @@ export class Bridge {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const asked = Date.now();
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
-    const [, kind, secret, event] = path!.split('/');
+    const [, kind, inPath, event] = path!.split('/');
+    const secret = inPath || (kind === 'mcp' && event === undefined ? bearerSecret(req) : undefined);
     const key = secret ? this.bySecret.get(secret) : undefined;
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = await this.peer(req);

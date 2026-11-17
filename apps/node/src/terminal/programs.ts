@@ -61,9 +61,17 @@ export function planToken(home: string): string | null {
   return readPrivate(join(home, CRED_FILES.claude_token))?.trim() || null;
 }
 
+/* Claude Code reads the address of its tools, with the agent's secret in it, from a file of the agent's folder that only the
+   agent's user reads, while its program runs: on the command line any process of the machine would read it. */
+export const claudeToolsFile = (workDir: string) => join(workDir, '.hh-mcp.json');
+
+export async function writeClaudeTools(workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
+  await fs.write(claudeToolsFile(workDir), JSON.stringify({ mcpServers: { hornhoof: { type: 'http', url: mcpUrl } } }));
+}
+
 export const claudeProgram: TermProgram = {
   kind: 'claude',
-  launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
+  launch({ bin, home, workDir, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
     const id = sessionId ?? randomUUID();
     const settings = {
       ...CLAUDE_UNSIGNED,
@@ -78,7 +86,7 @@ export const claudeProgram: TermProgram = {
       ...(sessionId ? ['--resume', sessionId] : ['--session-id', id]),
       '--strict-mcp-config',
       '--mcp-config',
-      JSON.stringify({ mcpServers: { hornhoof: { type: 'http', url: urls.mcpUrl } } }),
+      claudeToolsFile(workDir),
       '--settings',
       JSON.stringify(settings),
       ...(instructionsFile ? ['--append-system-prompt-file', instructionsFile] : []),
@@ -95,15 +103,18 @@ export const claudeProgram: TermProgram = {
    that question are lost and Enter answers it with the first choice, so the agent gets another model and the turn waits for nothing. */
 const CODEX_NO_MODEL_QUESTION = ['-c', 'notice.hide_rate_limit_model_nudge=true'];
 
+const CODEX_SECRET_ENV = 'HH_MCP_SECRET';
+
 export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    /* Codex sends the agent's secret from its environment as a bearer token, to the address that carries none. */
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpAddress)}`, '-c', `mcp_servers.hornhoof.bearer_token_env_var="${CODEX_SECRET_ENV}"`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
     const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', CODEX_MAIN_SCREEN, ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];
-    return { command, env: { CODEX_HOME: home, ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { CODEX_HOME: home, [CODEX_SECRET_ENV]: urls.secret, ...bridgeEnv(urls) }, sessionId };
   },
 };
 
