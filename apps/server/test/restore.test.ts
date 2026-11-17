@@ -323,8 +323,10 @@ describe('a restore from a backup', () => {
   });
 
   it('applies the carry only after a committed swap', async () => {
+    /* One company for every case, as a second one in this test would open a whole database of its own: each case brings
+       its own machine and certificate, the updater's word on its own swap, or none, and its own carry. */
+    const s = await stand();
     const attempt = randomUUID();
-    const carry: Carry = { people: [], invites: [], machines: [], serials: ['aa01'], recoveryKeys: [] };
     const cases: [Partial<RestoreStatus> | null, string, boolean][] = [
       [{ attempt, state: 'running', step: 'start' }, attempt, true],
       [{ attempt, state: 'done', step: 'start' }, attempt, true],
@@ -333,15 +335,17 @@ describe('a restore from a backup', () => {
       [{ attempt: randomUUID(), state: 'done', step: 'start' }, attempt, false],
       [null, attempt, false],
     ];
-    for (const [status, carried, applies] of cases) {
-      const s = await stand();
+    for (const [n, [status, carried, applies]] of cases.entries()) {
+      const serial = `aa0${n}`;
+      const carry: Carry = { people: [], invites: [], machines: [], serials: [serial], recoveryKeys: [] };
       const machine = await s.worker('mac');
-      await s.db.insert(certificates).values({ serial: 'aa01', machineId: machine, until: new Date(Date.now() + 86_400_000) });
+      await s.db.insert(certificates).values({ serial, machineId: machine, until: new Date(Date.now() + 86_400_000) });
+      rmSync(join(s.control, RESTORE_STATUS), { force: true });
       if (status) s.says(status);
       writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt: carried, carry }));
       await s.app.ctx.restores.afterSwap();
-      const [serial] = await s.db.select().from(certificates).where(eq(certificates.serial, 'aa01'));
-      expect([serial!.revokedAt !== null, existsSync(join(s.control, RESTORE_CARRY))], JSON.stringify(status)).toEqual([applies, false]);
+      const [held] = await s.db.select().from(certificates).where(eq(certificates.serial, serial));
+      expect([held!.revokedAt !== null, existsSync(join(s.control, RESTORE_CARRY))], JSON.stringify(status)).toEqual([applies, false]);
     }
   });
 
