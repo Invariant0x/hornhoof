@@ -18,6 +18,15 @@ it('lines up every isolated phrase with its block through one shared rule and no
   expect(RULES.filter(r => r.decls['text-align'] === 'match-parent').map(r => [r.media, r.selectors])).toEqual([[null, [':where([dir="auto"])']]]);
 });
 
+/* A channel's addresses stand apart from its buttons: a block under a line, with a heading of the panel's subheadings
+   (Design #1193). */
+it('draws the addresses of a channel as a block of their own under a line, with a heading of the display face', () => {
+  expect(decl('.outbound-contacts', 'border-block-start')).toBe('1px solid var(--line)');
+  expect(decl('.outbound-contacts > h4', 'font-family')).toBe('var(--f-display)');
+  expect(decl('.outbound-contacts > h4', 'font-weight')).toBe('600');
+  expect(decl('.outbound-contacts > h4', 'font-size')).toBe('14px');
+});
+
 it('reads container rules with the same condition as media rules', () => {
   expect(parse('@container card (min-width: 700px) { .blocks { display: grid; } }', null)).toEqual([
     { media: 'card (min-width: 700px)', selectors: ['.blocks'], decls: { display: 'grid' } },
