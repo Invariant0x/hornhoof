@@ -4,6 +4,7 @@ import type { Spot } from '../../auth/access.js';
 import { agents, companies, departments, goalEvents, goals, people, tasks, type GoalStatus } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { refuse, type Actor, type Tx } from '../tasks/engine.js';
+import type { TaskPlace } from '../tasks/sight.js';
 import { logOf, type LogLine } from '../tasks/views.js';
 import { nudgeTrackerKeepers } from './nudge.js';
 import { placeOwner, requireAnswersFor, spotOf } from './responsible.js';
@@ -140,13 +141,22 @@ export async function setGoalStatus(ctx: Live, companyId: string, actor: Actor, 
   return goal;
 }
 
+/* Whether the reader sees a task, as seesTask in sight.ts says it: only what they see counts in a goal's progress. */
+export type SeesTask = (task: TaskPlace) => boolean;
+
 /* Every goal of the company with its progress, by number. A task counts for the goal it serves and for every goal above
-   that one; work under a task serves its top task's goal. */
-export async function goalViews(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<GoalView[]> {
+   that one; work under a task serves its top task's goal. Only the tasks the reader sees count. */
+export async function goalViews(ctx: Pick<Ctx, 'db'>, companyId: string, sees: SeesTask): Promise<GoalView[]> {
   const rows = await ctx.db.select().from(goals).where(eq(goals.companyId, companyId)).orderBy(asc(goals.number));
   if (!rows.length) return [];
-  const work = await ctx.db.select({ id: tasks.id, parentId: tasks.parentId, goalId: tasks.goalId, status: tasks.status }).from(tasks).where(eq(tasks.companyId, companyId));
-  const counts = countUnder(rows, work);
+  const work = await ctx.db
+    .select({
+      id: tasks.id, parentId: tasks.parentId, goalId: tasks.goalId, status: tasks.status, departmentId: tasks.departmentId, productId: tasks.productId,
+      createdByPersonId: tasks.createdByPersonId, createdByAgentId: tasks.createdByAgentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId,
+    })
+    .from(tasks)
+    .where(eq(tasks.companyId, companyId));
+  const counts = countUnder(rows, work, sees);
   const placeIds = [...new Set(rows.flatMap(g => (g.departmentId ? [g.departmentId] : [])))];
   const places = new Map((placeIds.length ? await ctx.db.select().from(departments).where(inArray(departments.id, placeIds)) : []).map(d => [d.id, { id: d.id, name: deptName(d) }]));
   const personIds = [...new Set(rows.map(g => g.responsiblePersonId))];
@@ -174,9 +184,10 @@ export async function goalViews(ctx: Pick<Ctx, 'db'>, companyId: string): Promis
   });
 }
 
-type Counted = Pick<typeof tasks.$inferSelect, 'id' | 'parentId' | 'goalId' | 'status'>;
+type Counted = Pick<typeof tasks.$inferSelect, 'id' | 'parentId' | 'goalId' | 'status'> & TaskPlace;
 
-function countUnder(all: Pick<Goal, 'id' | 'parentGoalId'>[], work: Counted[]): Map<string, { done: number; total: number }> {
+/* The way up to a goal goes through every task, seen or not; only the tasks the reader sees are counted. */
+function countUnder(all: Pick<Goal, 'id' | 'parentGoalId'>[], work: Counted[], sees: SeesTask): Map<string, { done: number; total: number }> {
   const above = new Map(all.map(g => [g.id, g.parentGoalId]));
   const byId = new Map(work.map(t => [t.id, t]));
   const goalOf = (t: Counted): string | null => {
@@ -189,7 +200,7 @@ function countUnder(all: Pick<Goal, 'id' | 'parentGoalId'>[], work: Counted[]): 
   };
   const counts = new Map<string, { done: number; total: number }>();
   for (const t of work) {
-    if (t.status === 'cancelled') continue;
+    if (t.status === 'cancelled' || !sees(t)) continue;
     const seen = new Set<string>();
     for (let g = goalOf(t); g && !seen.has(g); g = above.get(g) ?? null) {
       seen.add(g);

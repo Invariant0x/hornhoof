@@ -2,11 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
+import { viewerOf } from '../../auth/agent-view.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { actorOf, requirePerson, type Person } from '../../auth/session.js';
 import { GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { refuse } from '../tasks/engine.js';
+import { seesTask } from '../tasks/sight.js';
 import { createGoal, editGoal, goalLog, goalViews, loadGoal, setGoalStatus, type GoalChange, type GoalGuard } from './goals.js';
 import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
 import { mayPlan } from './responsible.js';
@@ -66,9 +68,14 @@ const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard & PipelineGuar
 export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
+  /* The goals with their progress over the tasks this person sees. */
+  const goalsSeen = async (me: Person) => {
+    const viewer = await viewerOf(db, me);
+    return goalViews(ctx, me.companyId, t => seesTask(viewer, t));
+  };
   const goalsFor = async (me: Person) => {
     const may = await mayPlan(ctx, me);
-    return Promise.all((await goalViews(ctx, me.companyId)).map(async g => ({ ...g, mayEdit: await may(g.department?.id ?? null) })));
+    return Promise.all((await goalsSeen(me)).map(async g => ({ ...g, mayEdit: await may(g.department?.id ?? null) })));
   };
 
   app.get('/api/goals', async req => {
@@ -88,7 +95,7 @@ export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = NewGoalBody.parse(req.body);
     const goal = await createGoal(ctx, me.companyId, actorOf(me), personGuard(ctx, me), { ...goalChange(body), title: body.title, departmentId: body.department });
     reply.code(201);
-    return { goal: (await goalViews(ctx, me.companyId)).find(g => g.id === goal.id) };
+    return { goal: (await goalsSeen(me)).find(g => g.id === goal.id) };
   });
 
   app.patch('/api/goals/:id', async req => {
@@ -96,7 +103,7 @@ export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const body = GoalPatch.parse(req.body);
     await editGoal(ctx, me.companyId, actorOf(me), personGuard(ctx, me), id, goalChange(body), body.version);
-    return { goal: (await goalViews(ctx, me.companyId)).find(g => g.id === id) };
+    return { goal: (await goalsSeen(me)).find(g => g.id === id) };
   });
 
   app.put('/api/goals/:id/status', async req => {
@@ -104,7 +111,7 @@ export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const body = GoalStatusBody.parse(req.body);
     await setGoalStatus(ctx, me.companyId, actorOf(me), personGuard(ctx, me), id, body.status, body.version);
-    return { goal: (await goalViews(ctx, me.companyId)).find(g => g.id === id) };
+    return { goal: (await goalsSeen(me)).find(g => g.id === id) };
   });
 
   app.get('/api/pipelines', async req => {

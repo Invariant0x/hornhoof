@@ -49,7 +49,10 @@ const call = async (c: Client, name: string, args: Record<string, unknown> = {})
 describe('the tracker at its edges', () => {
   it('keeps the next round at least 15 minutes after the last one, however many changes nudge it', async () => {
     const { ctx, db, pia, dev, companyId } = await company();
-    const lastRound = new Date(Date.now() - 60_000);
+    /* The clock the server counts on, which only the test moves. */
+    let now = Date.parse('2026-03-02T09:00:00.000Z');
+    ctx.clock = () => now;
+    const lastRound = new Date(now - 60_000);
     await db.update(agents).set({ timerMinutes: 240, timerOrder: 'Go over the tracker.', timerAt: lastRound }).where(eq(agents.id, pia.id));
     const nextRound = async () => {
       const [a] = await db.select({ at: agents.timerAt, nudged: agents.timerNudgedAt }).from(agents).where(eq(agents.id, pia.id));
@@ -57,9 +60,10 @@ describe('the tracker at its edges', () => {
       return (a!.nudged!.getTime() - lastRound.getTime()) / 60_000;
     };
     await nudgeTrackerKeepers(ctx, { companyId, departmentId: dev.id });
-    expect(await nextRound()).toBeCloseTo(15, 1);
+    expect(await nextRound()).toBe(15);
+    now += 2 * 60_000;
     await nudgeTrackerKeepers(ctx, { companyId, departmentId: dev.id });
-    expect(await nextRound()).toBeCloseTo(15, 1);
+    expect(await nextRound()).toBe(15);
   });
 
   it('refuses two stages that name one stage, in words', async () => {

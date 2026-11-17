@@ -2419,6 +2419,7 @@ export const en = {
     goal_changed: 'Someone changed this goal meanwhile. Look at it again and retry.',
     goal_invalid: 'This goal does not fit here: a task serves a goal of the company or of its own department, a subtask serves the goal of the task above it, and a goal cannot be part of itself.',
     responsible_invalid: 'Only an active person of the company who reaches this place can answer for it.',
+    view_as_ceo_only: "Only the CEO or the CEO delegate looks at another person's tasks.",
     pipeline_unknown: 'This pipeline no longer exists. Reload the page.',
     pipeline_changed: 'Someone changed this pipeline meanwhile. Look at it again and retry.',
     pipeline_invalid: 'This pipeline or stage does not fit: every stage needs a name and one who does it, and a task joins a pipeline of its own department.',

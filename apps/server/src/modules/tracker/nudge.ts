@@ -15,7 +15,7 @@ const trackerSkills = (templates: Templates): string[] => [...templates.skills.v
 /* A task or goal of a department was made or changed status: the employees who keep its tracker, in it or its products,
    look soon. Their next round comes a few minutes on, never sooner than a while after their last round, and a round due
    sooner stays as it is. The one who made the change does not wake itself; one whose timer never ran keeps its first round. */
-export async function nudgeTrackerKeepers(ctx: { db: Db } & Partial<Pick<Ctx, 'templates'>>, place: { companyId: string; departmentId: string | null }, except?: string | null): Promise<void> {
+export async function nudgeTrackerKeepers(ctx: { db: Db } & Partial<Pick<Ctx, 'templates' | 'clock'>>, place: { companyId: string; departmentId: string | null }, except?: string | null): Promise<void> {
   if (!ctx.templates || !place.departmentId) return;
   const skills = trackerSkills(ctx.templates);
   if (!skills.length) return;
@@ -23,7 +23,9 @@ export async function nudgeTrackerKeepers(ctx: { db: Db } & Partial<Pick<Ctx, 't
   if (!dept) return;
   const products = ctx.db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.top));
   const minutes = (n: SQL | number) => sql`make_interval(mins => ${n})`;
-  const soon = sql`greatest(${agents.timerAt} + ${minutes(BETWEEN_ROUNDS_MINUTES)}, now() + ${minutes(AFTER_CHANGE_MINUTES)})`;
+  /* Now by the server's clock, which tests move, not the database's. */
+  const now = new Date((ctx.clock ?? Date.now)()).toISOString();
+  const soon = sql`greatest(${agents.timerAt} + ${minutes(BETWEEN_ROUNDS_MINUTES)}, ${now}::timestamptz + ${minutes(AFTER_CHANGE_MINUTES)})`;
   await ctx.db
     .update(agents)
     .set({ timerNudgedAt: sql`least(coalesce(${agents.timerNudgedAt}, 'infinity'::timestamptz), ${soon})` })

@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, goals, jobs, people, pipelines, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, assistants, companies, departments, goals, jobs, people, pipelines, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -69,6 +69,21 @@ describe('tracker tools', () => {
     expect(read.goals.map((g: { number: number; progress: number | null }) => [g.number, g.progress])).toEqual([[1, null], [2, 0.5]]);
   });
 
+  it("count in goals only the tasks the reader sees: never the work of a person's assistant", async () => {
+    const { db, companyId, dev, pia, ivanId, tools } = await company();
+    const [avaPerson] = await db.insert(people).values({ companyId, name: 'Ava', status: 'active', isAgent: true, assistantOf: ivanId, scopeKind: 'company' }).returning();
+    const [ava] = await db.insert(agents).values({ companyId, kind: 'assistant', name: 'Ava', model: '' }).returning();
+    await db.insert(assistants).values({ personId: avaPerson!.id, companyId, program: 'avaclone', agentId: ava!.id });
+    const [goal] = await db.insert(goals).values({ companyId, number: 1, departmentId: dev.id, title: 'Shop', responsiblePersonId: ivanId }).returning();
+    const task = (number: number, status: 'open' | 'done', hidden: boolean, parentId: string | null = null) =>
+      ({ companyId, number, title: `Task ${number}`, departmentId: dev.id, status, goalId: parentId ? null : goal!.id, parentId, closedAt: status === 'open' ? null : new Date(), ...(hidden ? { assigneeAgentId: ava!.id, executorAgentId: ava!.id } : {}) });
+    const [first] = await db.insert(tasks).values(task(1, 'open', false)).returning();
+    /* Ivan's assistant's work, open and done, on the goal and under visible work. */
+    await db.insert(tasks).values([task(2, 'done', false), task(3, 'open', true), task(4, 'done', true), task(5, 'done', true, first!.id)]);
+    const read = JSON.parse(text(await call(await tools(pia), 'goals')));
+    expect(read.goals.map((g: { number: number; done: number; total: number; progress: number | null }) => [g.number, g.done, g.total, g.progress])).toEqual([[1, 1, 2, 0.5]]);
+  });
+
   it('take goal, why, responsible person and pipeline on create_task and update_task', async () => {
     const { db, companyId, dev, head, bruno, ivanId, tools } = await company();
     await db.insert(goals).values({ companyId, number: 1, departmentId: dev.id, title: 'Shop', responsiblePersonId: ivanId });
@@ -100,15 +115,17 @@ describe('tracker tools', () => {
   });
 
   it('wake the product manager soon after a task of its department is made or changes status, once for many', async () => {
-    const { db, pia, work } = await company();
-    const hourAgo = new Date(Date.now() - 3_600_000);
+    const { ctx, db, pia, work } = await company();
+    /* The clock the server counts on, which only the test moves. */
+    let now = Date.parse('2026-03-02T09:00:00.000Z');
+    ctx.clock = () => now;
+    const hourAgo = new Date(now - 3_600_000);
     await db.update(agents).set({ timerMinutes: 240, timerOrder: 'Go over the tracker.', timerAt: hourAgo }).where(eq(agents.id, pia.id));
     await work();
     const [first] = await db.select({ at: agents.timerNudgedAt, last: agents.timerAt }).from(agents).where(eq(agents.id, pia.id));
-    const dueIn = (at: Date) => at.getTime() - Date.now();
-    expect(dueIn(first!.at!)).toBeGreaterThan(4 * 60_000);
-    expect(dueIn(first!.at!)).toBeLessThanOrEqual(5 * 60_000);
+    expect(first!.at!.getTime()).toBe(now + 5 * 60_000);
     expect(first!.last).toEqual(hourAgo);
+    now += 60_000;
     await work();
     const [second] = await db.select({ at: agents.timerNudgedAt }).from(agents).where(eq(agents.id, pia.id));
     expect(second!.at!.getTime()).toBe(first!.at!.getTime());

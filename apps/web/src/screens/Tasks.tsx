@@ -345,8 +345,13 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
-  const viewAs = me.person.isOwner || !!me.person.isCeoDelegate;
-  const who = place.personId ?? me.person.id;
+  /* View as is the CEO's and the CEO delegate's, as the server checks it; for anyone else an address naming a person still
+     shows their own screen. The map's way to a person's decisions stays everyone's: it picks among the decisions the person
+     sees anyway. */
+  const viewAs = me.canDecideCompany ?? (me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company'));
+  const viewed = viewAs ? (place.personId ?? null) : null;
+  const decisionsOf = viewed ?? (place.show === 'waits' ? (place.personId ?? null) : null);
+  const who = viewed ?? me.person.id;
   const whoName = people.find(p => p.id === who)?.name ?? t.tasks.someone;
   const other = who !== me.person.id;
   const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
@@ -421,7 +426,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       decisions={decisions}
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
-      personId={place.personId ?? null}
+      personId={decisionsOf}
       onClearPerson={clearPerson}
       tasks={waitsOnWho}
       onOpenTask={onOpenTask}
@@ -447,7 +452,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         goals={goals}
         pipelines={pipelines}
         tasks={all}
-        counts={{ waits: countOf(shownOf(decisions, place.personId ?? null), waitsOnWho), working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho), working: working.length }}
         open={drawer}
         onClose={() => setDrawer(false)}
       />
