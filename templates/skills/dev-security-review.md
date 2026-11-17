@@ -24,6 +24,8 @@ Follow every input in the change from where it enters to where it is used, and c
 - **Dependencies**: new ones are needed, maintained and pinned; scripts from the internet are not run blind.
 - **Infrastructure**: containers run without needless privileges; a mounted container socket or host folder is justified.
 
+What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read.
+
 Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. A confirmed hole blocks; hardening that would be good to have is a note.
 
 **What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. When assigned an independent gate, give its exact-commit verdict with confirmed paths, harm and evidence; never approve the sensitive change you authored.

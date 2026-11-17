@@ -11,9 +11,9 @@ import { heardBy, heardInFull } from './stream-view.js';
    company, who sees all of its work; the rest that names a place goes where the person reaches. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
   if ('spot' in m && m.type !== 'task' && !canReach(access, m.spot)) return false;
-  /* It carries nothing, so every person's screens load the access that is theirs to see; the orchestrator acting for
-     anyone sees none of it. */
-  if (m.type === 'computer' && me.via) return false;
+  /* It carries nothing, so every person's screens load the access that is theirs to see; a head acting for anyone sees
+     none of it. */
+  if (m.type === 'computer' && me.viaHead) return false;
   return m.type !== 'subscription.signin' || m.owner === me.id;
 }
 

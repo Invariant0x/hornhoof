@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { useStream } from '../live';
-import { useDepartmentTree, useTaskDepartments, useTasks } from '../tasks';
+import { useDepartmentTree } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, modelLine, Switch, STATUS_CLASS } from '../ui/Chip';
@@ -11,14 +11,12 @@ import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, Zoo
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
-import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
 import { DeptBranchesIfKept } from '../ui/DeptBranches';
 import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
-import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
@@ -59,7 +57,6 @@ type Props = {
   /* The people next to the CEO; those whose access lists this department reach it too. */
   deputies: PersonView[];
   selected: string | null;
-  selectedTask: string | null;
   /* The panel the schema leaves room for, on its side of the screen. */
   panel: 'window' | 'task' | null;
   /* The server's clock when it read the company, which times the yellow lines. */
@@ -70,6 +67,8 @@ type Props = {
   onOpenTask(taskId: string): void;
   /* A person's card opens the decisions screen showing theirs. */
   onOpenDecisions?(personId: string): void;
+  /* Its Tasks button opens the tracker at this department. */
+  onOpenTracker?(departmentId: string): void;
 };
 
 /* The agent window is on the right, settings and task details on the left. */
@@ -152,10 +151,10 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
   );
 }
 
-type Drawer = 'tasks' | 'about' | 'speed' | 'hire';
+type Drawer = 'about' | 'speed' | 'hire';
 
 const drawerTitle = (t: ReturnType<typeof useT>, drawer: Drawer | null): string =>
-  ({ speed: t.dept.speed, tasks: t.dept.tasksButton, hire: t.dept.hiring, about: t.dept.about })[drawer ?? 'about'];
+  ({ speed: t.dept.speed, hire: t.dept.hiring, about: t.dept.about })[drawer ?? 'about'];
 
 function Wire({ l }: { l: Line }) {
   const d = toD(l.pts);
@@ -180,56 +179,6 @@ function MemberLines({ s, toMember, stateOf, still }: { s: Schema; toMember(id: 
       if (!down) return null;
       return <LiveWay key={m.e.id} pts={state === 'yellow' ? [...down].reverse() : down} speed={PULSE_SPEED} tone={state === 'yellow' ? 'a' : 'c'} still={still} data={{ 'data-work': m.e.id }} />;
     }),
-  );
-}
-
-/* The department's open tasks, read only by people who have the department, and a new one for its head from people whose
-   access lists the department. */
-function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { department: Department; head: Employee | undefined; canGive: boolean; selected: string | null; onOpenTask(id: string): void }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const id = useId();
-  const { taskDepartments } = useTaskDepartments();
-  const { tasks, failure, load } = useTasks({ status: 'open', department: d.id }, Boolean(taskDepartments?.departments.some(x => x.id === d.id)));
-  const [writing, setWriting] = useState(false);
-
-  return (
-    <section aria-labelledby={`${id}-tasks`}>
-      <div className="dv-h">
-        <h3 id={`${id}-tasks`} className="sr">
-          {t.dept.tasks}
-        </h3>
-        {canGive && head && !writing && (
-          <button className="btn small ghost" type="button" onClick={() => setWriting(true)}>
-            {t.dept.newTask}
-          </button>
-        )}
-      </div>
-      {canGive && !head && <p className="muted">{t.dept.needsHead}</p>}
-      {writing && head && (
-        <NewTask
-          department={d}
-          head={head.title?.[language] === head.name ? null : head.name}
-          onCancel={() => setWriting(false)}
-          onCreated={task => {
-            setWriting(false);
-            load();
-            onOpenTask(task.id);
-          }}
-        />
-      )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {tasks && !tasks.length && <p className="muted">{t.dept.noTasks}</p>}
-      {tasks && tasks.length > 0 && (
-        <ul className="dv-tasks">
-          {[...tasks].sort(byState).map(task => (
-            <li key={task.id}>
-              <TaskRow task={task} on={selected === task.id} place={task.product?.name ?? ''} onOpen={onOpenTask} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 
@@ -279,14 +228,13 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
   const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
-  const head = d.employees.find(e => e.kind === 'head');
   const reach = [
     ...d.people,
     ...deputies.filter(p => !p.access.whole && (p.access.departments.some(x => x.id === d.id) || p.access.teams.some(x => x.departmentId === d.id))),
@@ -576,7 +524,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>
         <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
         <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
-        <button className={`hbtn glass${drawer === 'tasks' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'tasks'} onClick={() => setDrawer(drawer === 'tasks' ? null : 'tasks')}>
+        <button className="hbtn glass" type="button" onClick={() => onOpenTracker?.(d.id)}>
           {t.dept.tasksButton}
         </button>
         <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
@@ -595,7 +543,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           <DrawerHead title={drawerName} onClose={() => setDrawer(null)} />
           {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
-            {drawer === 'tasks' && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
             {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
               <>

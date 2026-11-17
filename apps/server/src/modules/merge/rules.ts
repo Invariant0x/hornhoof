@@ -84,6 +84,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
 
   agent_events: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq' },
   task_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id', task: 'task_id' },
+  goal_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id' },
   agent_changes: { kind: 'log', topic: 'work', match: 'id' },
   /* A letter the leader lacks joins an employee's inbox after its own letters; one both hold keeps how the leader read it. */
   agent_inbox: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq', task: 'task_id' },
@@ -128,6 +129,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
      leader gave another card stays out. */
   ...each(['feedback_inbox', 'feedback_signals'], rows('work')),
   tasks: rows('work', { number: ['company_id'], task: 'id' }),
+  goals: rows('work', { number: ['company_id'] }),
+  ...each(['pipelines', 'pipeline_stages'], rows('work')),
   turns: rows('work', { number: ['company_id'], task: 'task_id' }),
   test_runs: rows('work', { number: ['company_id'], task: 'task_id' }),
   notebook_notes: rows('work', { number: ['company_id', 'department_id'] }),
@@ -140,6 +143,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
    A name a table does not have is ignored. */
 export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   tasks: ['updated_at', 'version'],
+  goals: ['updated_at', 'version'],
+  pipelines: ['updated_at', 'version'],
   notebook_notes: ['updated_at'],
   improvements: ['updated_at'],
   briefings: ['updated_at'],
@@ -151,7 +156,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   feedback_inbox: ['updated_at'],
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
-  agents: ['context_used', 'timer_at'],
+  agents: ['context_used', 'timer_at', 'timer_nudged_at'],
   nodes: ['last_seen_at', 'status', 'version', 'boot', 'update_wait_since'],
   subscriptions: ['status', 'limits', 'models', 'limits_updated_at', 'lease_node_id'],
   machines: [

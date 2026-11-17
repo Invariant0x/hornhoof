@@ -31,7 +31,7 @@ describe('Tree plates', () => {
 
   it('uses the department Chip with the same text and a fixed size for every lane', () => {
     const department = TREE_ORG.departments.find(d => d.id === 'd2')!;
-    render(<LanguageProvider><DepartmentView me={ME} department={department} deputies={[]} selected={null} selectedTask={null} panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    render(<LanguageProvider><DepartmentView me={ME} department={department} deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
     const expected = document.querySelector('.schip')!.textContent;
     show();
     const chips = [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip')];

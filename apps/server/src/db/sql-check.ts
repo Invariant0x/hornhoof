@@ -116,8 +116,8 @@ async function parsed(text: string): Promise<unknown> {
 const READ_DIFFERENTLY = /[\0\uD800-\uDFFF]/u;
 const UNREADABLE = 'The text holds a NUL or a broken Unicode character, so it cannot be checked.';
 
-/* Stands between the orchestrator's text and the database: the database's rights are the first guard, this one sees what
-   rights cannot, such as COMMIT or SET. It throws SqlRefused for a text that may not run. */
+/* Stands between the head of Operations' text and the database: the database's rights are the first guard, this one sees
+   what rights cannot, such as COMMIT or SET. It throws SqlRefused for a text that may not run. */
 export async function checkAgentSql(text: string): Promise<void> {
   if (READ_DIFFERENTLY.test(text)) throw new SqlRefused('syntax', UNREADABLE);
   refuseWhatTheTreeHolds(await parsed(text));

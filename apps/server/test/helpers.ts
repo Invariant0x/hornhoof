@@ -15,7 +15,7 @@ import type { IssueCreator } from '../src/modules/feedback/github-issue.js';
 import type { ModelsReader } from '../src/modules/subscriptions/api-models.js';
 import type { BranchCreator, CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, gated, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
+import { gated, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
 import type { LeaseKind, LeaseSync } from '../src/db/net.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
@@ -59,18 +59,19 @@ export const viaLink = (token?: string) => ({
   cookies: (token ? { [LINK_SESSION_COOKIE]: token } : {}) as Record<string, string>,
 });
 
-/* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
-   hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
+/* Agents' database access on PGlite. PGlite has one user, a superuser, which is Hornhoof's own as the orchestrator's is;
+   Operations' role is taken with SET LOCAL ROLE: its rights hold, though a statement could take the superuser back, which
+   on Postgres a separate sign-in rules out. */
 export function agentSqlOn(client: PGlite): AgentSql {
-  const roles = { write: agentRole('postgres'), read: readerRole('postgres') };
+  const reader = readerRole('postgres');
   let granted: Promise<unknown> | null = null;
   return {
     run: async (text, mode, call) => {
-      granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
+      granted ??= client.exec(`${PUBLIC_REVOKES};\n${readerGrantsFor(reader)}`);
       await granted;
       return gated(mode, () => client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
-        await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
+        if (mode === 'read') await tx.query(`SET LOCAL ROLE "${reader}"`);
         const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
         if (mode === 'write' && call) {
           await tx.exec(PRE_COMMIT_SETTINGS);

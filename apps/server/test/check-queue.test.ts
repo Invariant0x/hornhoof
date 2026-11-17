@@ -8,6 +8,33 @@ const c = '10000000-0000-4000-8000-000000000003';
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('physical machine admission across subscription nodes', () => {
+  it('reads holders and FIFO waiters without admitting, releasing or changing a claim', async () => {
+    vi.useFakeTimers({ now: 1000 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const sent: CheckQueueReply[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, send: (_node, reply) => { sent.push(reply); } });
+    onTestFinished(() => queue.close());
+    queue.node('one', 'host', { cpus: 1, load: 0 });
+    queue.node('two', 'host', { cpus: 1, load: 0 });
+    queue.acquire('one', { type: 'check.acquire', id: a, label: 'first' });
+    await tick();
+    vi.setSystemTime(2000);
+    queue.acquire('two', { type: 'check.acquire', id: b, label: 'second' });
+    queue.acquire('two', { type: 'check.acquire', id: c, label: 'third' });
+    await tick();
+    const before = [...sent];
+    const view = queue.inspect('two')!;
+    expect(view).toMatchObject({ capacity: 1, holders: [{ node: 'one', request: { id: a }, queuedAt: 1000, startedAt: 1000 }], queue: [{ request: { id: b }, position: 1, queuedAt: 2000 }, { request: { id: c }, position: 2 }] });
+    view.holders[0]!.request.label = 'changed copy';
+    expect(queue.inspect('one')!.holders[0]!.request.label).toBe('first');
+    expect(sent).toEqual(before);
+    queue.release('one', a); await tick();
+    expect(queue.inspect('two')).toMatchObject({ holders: [{ request: { id: b }, startedAt: 2000 }], queue: [{ request: { id: c }, position: 1 }] });
+    queue.release('two', b); queue.release('two', c); await tick();
+    expect(queue.inspect('two')).toEqual({ capacity: 1, holders: [], queue: [] });
+    expect(queue.inspect('unknown')).toBeNull();
+  });
+
   it('refuses a request without a registered machine instead of leaving its caller waiting', () => {
     const sent: CheckQueueReply[] = [];
     const queue = new CheckCoordinator({ warmupMs: 0, send: (_node, reply) => { sent.push(reply); } });

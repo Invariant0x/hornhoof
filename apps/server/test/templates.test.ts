@@ -299,6 +299,12 @@ describe('templates', () => {
     expect(body('dev-qa-acceptance')).toMatch(/Never pass something because the tests are green/);
   });
 
+  /* Ivan's word of 17 November 2026: the orchestrator sees and does everything in the system. */
+  it.each(['dev-security-review', 'dev-security-fix', 'dev-threat-model', 'dev-review-diff', 'dev-review-verdict', 'ops-credential-vault'])(
+    '%s never takes what the orchestrator sees or does for a finding',
+    id => expect(body(id)).toContain("What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read."),
+  );
+
   it('keeps Operations diagnosis read-only and shortcuts outside protected actions', () => {
     expect(body('ops-intake')).toMatch(/database tool, which only reads[\s\S]*SQL and why/);
     expect(body('ops-intake')).toMatch(/two or three members at once/);
@@ -362,8 +368,8 @@ describe('templates', () => {
   });
 
   it('loads every role and skill', () => {
-    expect(roles).toHaveLength(54);
-    expect(skills).toHaveLength(182);
+    expect(roles).toHaveLength(64);
+    expect(skills).toHaveLength(183);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -555,7 +561,7 @@ describe('templates', () => {
 
   it('has a task watchdog and a failure collector in operations, each waking on its own timer with the tools to watch', () => {
     const ops = templates.roster('operations');
-    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS', 'OPS-PROGRAM']);
+    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS', 'OPS-PROGRAM', 'OPS-PM']);
     const watch = templates.roles.get('OPS-WATCH')!;
     const bugs = templates.roles.get('OPS-BUGS')!;
     expect([watch.timer?.minutes, bugs.timer?.minutes]).toEqual([10, 180]);
@@ -566,7 +572,7 @@ describe('templates', () => {
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
-    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM']);
   });
 
   it('tells the watchdog that a machine getting ready for an update waits and has not hung, while a silent program there is still silent', () => {
@@ -721,7 +727,7 @@ describe('templates', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
     /* The default roster has someone for every echelon: Architecture, Development, Review, Security and Tests. */
-    expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC']);
+    expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PM']);
     expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
     expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
@@ -734,7 +740,7 @@ describe('templates', () => {
     const asked: Record<string, string[]> = {
       top: ['DEV-ARCH', 'DEV-SEC'],
       deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA'],
-      fast: ['HHD-CAL', 'HHD-SUPPLY', 'MKT-SOCIAL', 'OPS-WATCH', 'SAL-SDR', 'SUP-T1'],
+      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1'],
     };
     for (const role of templates.roles.values()) {
       const tier = Object.keys(asked).find(key => asked[key]!.includes(role.id)) ?? 'standard';

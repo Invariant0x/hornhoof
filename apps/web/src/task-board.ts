@@ -9,8 +9,6 @@ export type HumanStatus = 'notStarted' | 'working' | 'review' | 'waiting' | 'wai
 export type Goal = { task: TaskLine; children: Goal[]; done: number; total: number; progress: number };
 /* Goals still going, and apart from them what is over. */
 export type Split = { open: Goal[]; closed: Goal[] };
-/* One department's goals; none for the orchestrator's own work. */
-export type DepartmentSection = { id: string; split: Split };
 /* Whether an open question on a task is the person's to answer. */
 export type Asks = (taskId: string) => boolean;
 /* The next release of a department getting ready: its goals still going and those done in its turn. */
@@ -19,9 +17,6 @@ export type Preparing = { turn: TurnView; going: Goal[]; done: Goal[] };
 export type Released = { turn: TurnView; goals: Goal[] };
 /* The next releases, the work outside every release and the releases out already, the newest first. */
 export type Releases = { preparing: Preparing[]; outside: Split; released: Released[] };
-/* What the tracker counts at a glance: goals waiting for the person's answer, goals going on now, and results ready for the
-   next releases. */
-export type Summary = { waitingYou: number; working: number; ready: number };
 
 export const NO_DEPARTMENT = 'none';
 export const ALL_DEPARTMENTS = 'all';
@@ -90,33 +85,15 @@ export function goals(tasks: TaskLine[]): Goal[] {
   return tasks.filter(t => !t.parentId || !ids.has(t.parentId)).sort((a, b) => a.number - b.number).map(task => grow(task, under));
 }
 
-/* Every goal of the trees by the id of its task, the related tasks deep down too. */
-export function indexGoals(nodes: Goal[], into = new Map<string, Goal>()): Map<string, Goal> {
-  for (const node of nodes) {
-    into.set(node.task.id, node);
-    indexGoals(node.children, into);
-  }
-  return into;
-}
-
 /* Goals still going by what needs people first, and those over, the newest first. */
 export function split(nodes: Goal[], asksYou?: Asks): Split {
   return { open: nodes.filter(g => !closed(g.task)).sort(byNeed(asksYou)), closed: nodes.filter(g => closed(g.task)).sort(newestFirst) };
 }
 
-/* The goals being worked on and those over. */
-export const inProgress = (tasks: TaskLine[], asksYou?: Asks): Split => split(goals(tasks), asksYou);
-
 /* The tasks of one department, of the orchestrator's own work, or of all of them. */
 export function inDepartment(tasks: TaskLine[], filter: string): TaskLine[] {
   if (filter === ALL_DEPARTMENTS) return tasks;
   return tasks.filter(t => (t.department?.id ?? NO_DEPARTMENT) === filter);
-}
-
-/* Every department given, in that order, with what is in progress in it; then the orchestrator's own work, when there is any. */
-export function byDepartment(tasks: TaskLine[], order: string[], asksYou?: Asks): DepartmentSection[] {
-  const ids = tasks.some(t => !t.department) ? [...order, NO_DEPARTMENT] : order;
-  return ids.map(id => ({ id, split: inProgress(inDepartment(tasks, id), asksYou) }));
 }
 
 /* A turn of a department that keeps a repository comes out as a release; that of one without stays outside releases. */
@@ -140,15 +117,5 @@ export function byRelease(tasks: TaskLine[], turns: TurnView[], asksYou?: Asks):
     })),
     outside: split(tree.filter(g => !releases(g)), asksYou),
     released: released.map(turn => ({ turn, goals: tree.filter(g => g.task.turn === turn.number).sort(newestFirst) })).filter(r => r.goals.length > 0),
-  };
-}
-
-/* What waits for the person's answer and what goes on now, in goals, and the results the next releases already hold. */
-export function summaryOf(tasks: TaskLine[], turns: TurnView[], asksYou?: Asks): Summary {
-  const going = goals(tasks).filter(g => !closed(g.task));
-  return {
-    waitingYou: going.filter(g => askingTask(g, asksYou) !== null).length,
-    working: going.filter(g => stateOf(g, asksYou) === 'working').length,
-    ready: turns.filter(t => t.status === 'open' && releasing(t)).reduce((sum, t) => sum + t.tasks.done, 0),
   };
 }

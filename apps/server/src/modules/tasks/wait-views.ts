@@ -26,7 +26,7 @@ export const waitView = (wait: TaskWait): TaskWaitView => ({
   stage: wait.sourceState.stage ?? null,
 });
 
-const prerequisiteOf = (wait: TaskWait): string | null => (wait.kind === 'after' ? wait.sourceKey.slice(afterSourceKey('').length) : null);
+export const prerequisiteOf = (wait: TaskWait): string | null => (wait.kind === 'after' ? wait.sourceKey.slice(afterSourceKey('').length) : null);
 
 /* The waits open on these tasks, what comes due first first, the ones with no date last. */
 export async function openWaitsOf(db: Db | Tx, taskIds: string[]): Promise<Map<string, TaskWait[]>> {

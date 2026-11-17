@@ -17,7 +17,7 @@ function renderShell() {
 }
 
 /* A tab of the main navigation, apart from the buttons of the same name inside a page. */
-const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 
 afterEach(() => {
   localStorage.clear();

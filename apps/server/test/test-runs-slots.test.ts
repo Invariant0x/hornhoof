@@ -1,0 +1,128 @@
+import { randomUUID } from 'node:crypto';
+import type { RunKind } from '@hornhoof/protocol';
+import { eq, sql } from 'drizzle-orm';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
+import { checkQueueLoad, closeCheckQueue, receiveCheckRequest, recordPartQueueWait } from '../src/modules/nodes/check-slots.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+import { company, idle } from './test-runs-company.js';
+
+await prepareSharedDatabase();
+
+async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
+  const c = await company();
+  const turn = await c.turn(c.bruno);
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+  const [owner] = await c.db.select().from(people).where(eq(people.isOwner, true));
+  const [machine] = await c.db.insert(machines).values({ companyId: c.task.companyId, personId: owner!.id, machineKey: 'slot-host', hostname: 'home-api' }).returning();
+  const [node] = await c.db.insert(nodes).values({ companyId: c.task.companyId, machineId: machine!.id, subscriptionId: turn.job.subscriptionId }).returning();
+  const id = nodeIdentity(node!.id);
+  vi.spyOn(c.app.ctx.hub, 'loadOf').mockImplementation(() => ({ ...idle({ cpus: 1, load: 0 }), at: Date.now() }));
+  vi.spyOn(c.app.ctx.hub, 'lastSeenAt').mockImplementation(() => Date.now());
+  await checkQueueLoad(c.app.ctx, id);
+  vi.setSystemTime(Date.now() + 90_001);
+  await checkQueueLoad(c.app.ctx, id);
+  const [privateTask] = hiddenHolder ? await c.db.insert(tasks).values({ ...c.task, id: randomUUID(), number: 2, departmentId: c.sales.id, assigneeAgentId: c.sam.id, executorAgentId: c.sam.id, createdByAgentId: c.sam.id, title: 'Private work' }).returning() : [];
+  const runs = await c.db.insert(testRuns).values([1, 2, 3].map(number => ({ companyId: c.task.companyId, number, taskId: number === 1 && privateTask ? privateTask.id : c.task.id, agentId: number === 1 && hiddenHolder ? c.sam.id : c.bruno.id, jobId: turn.job.id, kind: number === 1 ? 'work' as const : kind, command: 'make check', timeoutMs: 60_000, status: 'running' as const }))).returning();
+  const parts = await c.db.insert(testParts).values(runs.map(run => ({ companyId: c.task.companyId, runId: run.id, part: 1, status: 'running' as const, nodeId: node!.id, machineId: machine!.id, machineName: 'home-api' }))).returning();
+  const claims = parts.map(part => ({ type: 'check.acquire' as const, id: randomUUID(), label: `Run part ${part.id}` }));
+  const since = new Date().toISOString();
+  for (const claim of claims) await receiveCheckRequest(c.app.ctx, id, claim, sql`false`);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  await recordPartQueueWait(c.app.ctx, id, { type: 'tests.waiting', partId: parts[2]!.id, position: 2 });
+  const read = async () => JSON.parse((await turn.call(kind === 'tests' ? 'test_run' : 'work_run', { run: 3 })).text);
+  const release = async (index: number) => {
+    await receiveCheckRequest(c.app.ctx, id, { type: 'check.release', id: claims[index]!.id }, sql`false`);
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
+  return { c, turn, node, id, claims, parts, since, read, release };
+}
+
+describe('reading a part that waits for a machine check slot', () => {
+  it.each(['tests', 'work'] as const)('shows the current holder and ordered queue for %s, and updates on release', async kind => {
+    const s = await stand(kind);
+    const part = (await s.read()).parts[0];
+    expect(part).toMatchObject({ queuePosition: 2, checkSlot: { machine: 'home-api', state: 'queued', capacity: 1, position: 2, holders: [{ kind: 'work', run: 1, task: s.c.task.number, part: 1, since: s.since }], ahead: [{ kind, run: 2, part: 1, position: 1 }] } });
+    expect(part.waiting).toContain('home-api');
+    expect(part.waiting).toContain('Work run 1');
+    expect(part.waiting).toContain(`task ${s.c.task.number}`);
+    expect(part.waiting).toContain(s.since);
+    expect(part.waiting).toContain('Ahead:');
+    expect(part.waiting).not.toMatch(/[\r\n]/);
+    await s.release(0);
+    expect((await s.read()).parts[0]).toMatchObject({ queuePosition: 1, checkSlot: { state: 'queued', position: 1, holders: [{ kind, run: 2 }], ahead: [] } });
+    await s.release(1);
+    expect((await s.read()).parts[0]).toMatchObject({ queuePosition: 0, checkSlot: { state: 'running', position: 0, holders: [{ run: 3 }], ahead: [] } });
+    await s.release(2);
+    const empty = (await s.read()).parts[0];
+    expect(empty.checkSlot).toMatchObject({ state: 'not_recorded', holders: [], ahead: [] });
+    expect(empty.waiting).toContain('Queue is empty');
+  });
+
+  it('keeps inaccessible holders private and refuses an unrelated reader before showing slot details', async () => {
+    const s = await stand('tests', true);
+    const part = (await s.read()).parts[0];
+    expect(part.checkSlot.holders).toEqual([{ kind: 'unavailable', since: s.since, position: 0, releasing: false }]);
+    expect(part.waiting).toContain('details unavailable');
+    expect(JSON.stringify(part)).not.toContain('Private work');
+    expect(part.checkSlot.holders[0]).not.toHaveProperty('task');
+    const other = await s.c.turn(s.c.sam, null);
+    expect(await other.call('test_run', { run: 3 })).toMatchObject({ error: true, text: expect.stringContaining('There is no test run 3') });
+  });
+
+  it.each(['part label', 'line break'])('identifies an agent check by its task with a %s', async labelKind => {
+    const s = await stand();
+    await s.release(0); await s.release(1); await s.release(2);
+    await s.c.db.update(jobs).set({ nodeId: s.node!.id }).where(eq(jobs.id, s.turn.job.id));
+    const label = labelKind === 'part label' ? `Run part ${s.parts[2]!.id}` : 'eslint\ncheck';
+    const local = { type: 'check.acquire' as const, id: randomUUID(), jobId: s.turn.job.id, agentId: s.c.bruno.id, label };
+    await receiveCheckRequest(s.c.app.ctx, s.id, local, eq(jobs.id, s.turn.job.id));
+    expect((await s.read()).parts[0].checkSlot).toMatchObject({ state: 'not_recorded', position: null });
+    await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const part = (await s.read()).parts[0];
+    expect(part.checkSlot).toMatchObject({ state: 'queued', position: 1 });
+    expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', task: s.c.task.number, agent: 'Bruno', label: label.replace('\n', ' '), since: expect.any(String) }]);
+    expect(part.waiting).not.toMatch(/[\r\n]/);
+    const head = await s.c.turn(s.c.head, null);
+    const visible = JSON.parse((await head.call('test_run', { run: 3 })).text);
+    expect(visible.parts[0].checkSlot.holders).toMatchObject([{ kind: 'check', agent: 'Bruno', task: s.c.task.number }]);
+  });
+
+  it('keeps multiple predecessors in their FIFO order', async () => {
+    const s = await stand();
+    await s.release(2);
+    await s.c.db.update(jobs).set({ nodeId: s.node!.id }).where(eq(jobs.id, s.turn.job.id));
+    await receiveCheckRequest(s.c.app.ctx, s.id, { type: 'check.acquire', id: randomUUID(), jobId: s.turn.job.id, label: 'lint' }, eq(jobs.id, s.turn.job.id));
+    await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
+    const part = (await s.read()).parts[0];
+    expect(part.queuePosition).toBe(3);
+    expect(part.checkSlot.ahead.map((claim: { kind: string; position: number }) => [claim.kind, claim.position])).toEqual([['tests', 1], ['check', 2]]);
+  });
+
+  it('does not mistake an unrecorded part for an empty queue during startup', async () => {
+    const s = await stand();
+    closeCheckQueue(s.c.app.ctx);
+    const unknown = (await s.read()).parts[0];
+    expect(unknown.checkSlot).toMatchObject({ state: 'not_recorded', capacity: null, queued: null, position: null });
+    expect(unknown.waiting).toContain('Queue state is not recorded by this server');
+    await checkQueueLoad(s.c.app.ctx, s.id);
+    await receiveCheckRequest(s.c.app.ctx, s.id, { type: 'check.acquire', id: randomUUID(), label: 'another check' }, sql`false`);
+    const part = (await s.read()).parts[0];
+    expect(part.checkSlot).toMatchObject({ state: 'not_recorded', capacity: 0, queued: 1, position: null });
+    expect(part.waiting).not.toContain('Queue is empty');
+  });
+
+  it('does not attribute a part label claimed by another node to the part owner', async () => {
+    const s = await stand();
+    await s.release(0); await s.release(1); await s.release(2);
+    const [other] = await s.c.db.insert(nodes).values({ companyId: s.c.task.companyId, machineId: s.node!.machineId }).returning();
+    await receiveCheckRequest(s.c.app.ctx, nodeIdentity(other!.id), { ...s.claims[0]!, id: randomUUID() }, sql`false`);
+    await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const part = (await s.read()).parts[0];
+    expect(part.checkSlot.holders).toEqual([{ kind: 'unavailable', since: s.since, position: 0, releasing: false }]);
+  });
+});

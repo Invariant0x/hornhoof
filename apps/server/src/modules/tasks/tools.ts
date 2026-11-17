@@ -39,6 +39,9 @@ import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings
 import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
+import { requireTaskHead } from './echelons-update.js';
+import { editTask, seenOf, trackerSet } from '../tracker/edit.js';
+import { hasTrackerFields, TrackerFields, trackerInputOf } from '../tracker/tools.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
 type Agent = typeof agents.$inferSelect;
@@ -110,7 +113,7 @@ async function autoCommitReply(ctx: Ctx, task: Task, agentId: string, question: 
   return auto ? { text: auto.text, moved: auto.moved } : null;
 }
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -554,7 +557,8 @@ class TaskTools {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.tasks, input.improvement, input.backlog, scope);
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage })) })));
+          const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),
     );
@@ -614,7 +618,7 @@ class TaskTools {
       'create_task',
       {
         description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
       },
       async input =>
         this.run(async () => {
@@ -627,7 +631,7 @@ class TaskTools {
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
           await this.checkCreatedScope(agent, executor, input);
-          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small, ...(await trackerInputOf(this.ctx, this.job.companyId, input)) });
           return { text: await this.createdTaskText(moved.task, executor, architect), moved };
         }),
     );
@@ -636,11 +640,21 @@ class TaskTools {
   private registerUpdateTask(): void {
     this.server.registerTool('update_task', {
       description: 'The department head revises the current task or checking owner without returning it to the author. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
-      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
-    }, async ({ task: ref, after, afterPlans, ...changes }) => this.run(async () => {
+      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
+    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
-      const moved = await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
-      return { text: `Updated. ${await this.where(moved.task)}`, moved };
+      const tracker = { goal, responsible, why, due, pipeline, stage };
+      /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
+         either is written, so a refused part leaves the other as it was. With a change of the work, what the tracker
+         keeps is written in the same move, checked again there: both are in, or neither. */
+      const works = after !== undefined || Object.values(changes).some(v => v !== undefined);
+      const edit = hasTrackerFields(tracker) ? await trackerInputOf(this.ctx, this.job.companyId, tracker) : null;
+      if (!works) await requireTaskHead(this.ctx, task, agent.id);
+      if (edit) await trackerSet(this.ctx, task, edit);
+      const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }, edit ?? undefined) : undefined;
+      let row = moved?.task ?? task;
+      if (edit && !works) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, seenOf(row));
+      return { text: `Updated. ${await this.where(row)}`, moved };
     }));
   }
 

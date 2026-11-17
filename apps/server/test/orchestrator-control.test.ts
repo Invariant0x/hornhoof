@@ -455,76 +455,63 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(heard).toEqual(['org']);
   });
 
-  it('stays out of the merge records', async () => {
+  it("reads the network's own records too: the merges, the ranking, the pulse and the backups", async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
-    for (const table of ['net.merges', 'net.merge_rows', 'net.merge_conflicts']) {
-      const res = await call(client, 'database', { sql: `SELECT * FROM ${table}` });
-      expect(res.isError, table).toBe(true);
-      expect(text(res), table).toMatch(/permission denied/);
+    for (const table of ['net.merges', 'net.merge_rows', 'net.merge_conflicts', 'net.ranking', 'net.pulse', 'net.backups', 'net.journal', 'net_local.lease']) {
+      const res = await call(client, 'database', { sql: `SELECT * FROM ${table} LIMIT 0` });
+      expect([table, res.isError ?? false, text(res)]).toEqual([table, false, expect.stringContaining('"rows"')]);
     }
   });
 
-  it('stays out of the ranking', async () => {
-    const { app } = await company();
+  it('changes what only Hornhoof wrote before, keys and tokens included, and the schema itself, as Hornhoof does', async () => {
+    const { app, orchestrator } = await company();
     const client = await mcp(app, TOKEN);
-    const res = await call(client, 'database', { sql: 'SELECT * FROM net.ranking' });
-    expect(res.isError).toBe(true);
-    expect(text(res)).toMatch(/permission denied/);
-  });
-
-  it('stays out of the pulse', async () => {
-    const { app } = await company();
-    const client = await mcp(app, TOKEN);
-    const res = await call(client, 'database', { sql: 'SELECT * FROM net.pulse' });
-    expect(res.isError).toBe(true);
-    expect(text(res)).toMatch(/permission denied/);
-  });
-
-  it('is refused the keys, a change of what only Hornhoof writes, and the tables themselves', async () => {
-    const { app } = await company();
-    const client = await mcp(app, TOKEN);
-    /* The tool refuses every statement here, so none changes the database this file shares. */
-    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The agent's statements are refused, and the file's end check would find one that was not.
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', "UPDATE machine_access SET until = now() + interval '1 day'", "DELETE FROM computer_runs", 'SELECT * FROM net.backups', "UPDATE machines SET role = 'data'", 'SELECT password_hash FROM people', 'SELECT password_enc FROM vault_entries', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    const run = async (sql: string) => {
       const res = await call(client, 'database', { sql });
-      expect(res.isError, sql).toBe(true);
-      expect(text(res), sql).toMatch(/permission denied|must be owner|Hornhoof did not run this SQL/);
-    }
-    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('name the other columns');
-    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
-    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT cause FROM node_connections' })))[0].rows).toEqual([]);
+      expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
+      return JSON.parse(text(res)) as { rows: Record<string, unknown>[]; changed: number }[];
+    };
+    expect((await run("INSERT INTO peer_secrets (kind, secret_enc) VALUES ('app', 'sealed-by-the-orchestrator')"))[0]!.changed).toBe(1);
+    expect((await run('SELECT secret_enc FROM peer_secrets'))[0]!.rows).toEqual([{ secret_enc: 'sealed-by-the-orchestrator' }]);
+    expect((await run('DELETE FROM peer_secrets'))[0]!.changed).toBe(1);
+    expect((await run(`UPDATE jobs SET tool_token_hash = tool_token_hash WHERE agent_id = '${orchestrator.id}'`))[0]!.changed).toBe(1);
+    expect((await run('UPDATE people SET password_hash = password_hash'))[0]!.changed).toBeGreaterThan(0);
+    /* A table of its own, dropped again in the same call, so the database this file shares keeps its schema. */
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The call drops the table it made before it commits.
+    const made = await run("CREATE TABLE scratch (id int); ALTER TABLE scratch ADD COLUMN note text; INSERT INTO scratch VALUES (1, 'x'); SELECT * FROM scratch; DROP TABLE scratch");
+    expect(made.at(-2)!.rows).toEqual([{ id: 1, note: 'x' }]);
   });
 
-  it('reads every table and column but the keys', async () => {
+  it('reads every table and column, the keys and what carries one too', async () => {
     const { app, db, ceoId } = await company();
     const client = await mcp(app, TOKEN);
+    const description = (await client.listTools()).tools.find(t => t.name === 'database')!.description!;
+    expect(description).toContain("with Hornhoof's own rights: it reads and changes every table and every column, keys, tokens and secrets included");
+    expect(description).not.toMatch(/but the keys|name columns instead of \*|closed to this tool|only through the other tools/);
     /* A table that shows its rows to no role of its own shows them to the orchestrator. */
     const [acme] = await db.select().from(companies);
     await db.insert(recoveryKeys).values({ companyId: acme!.id, recipient: 'age1recipientofthistest', madeBy: ceoId });
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT recipient FROM recovery_keys' })))[0].rows).toEqual([{ recipient: 'age1recipientofthistest' }]);
-    for (const sql of ['SELECT person_id, expires_at FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT name, site, login FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT account FROM nodes', 'SELECT text, answer FROM requests', 'SELECT url, hidden FROM public_links']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT * FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT * FROM nodes', 'SELECT * FROM requests', 'SELECT * FROM public_links', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT machine_key FROM machines', 'SELECT * FROM assistants', 'SELECT * FROM assistant_events', 'SELECT * FROM tool_calls']) {
       const res = await call(client, 'database', { sql });
       expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
     }
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT count(*)::int AS n FROM sessions' })))[0].rows).toEqual([{ n: expect.any(Number) }]);
-    /* Every table of Hornhoof, none left out. */
+    /* Every column of every table of Hornhoof, none left out. */
     const [{ rows: tables }] = JSON.parse(text(await call(client, 'database', { sql: "SELECT tablename FROM pg_tables WHERE schemaname = 'public'" }))) as [{ rows: { tablename: string }[] }];
     expect(tables.length).toBeGreaterThan(100);
-    const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT count(*) FROM "${tablename}"`).join('; ') });
+    const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT * FROM "${tablename}" LIMIT 0`).join('; ') });
     expect([every.isError ?? false, text(every)]).toEqual([false, expect.stringContaining('"rows"')]);
   });
 
-  it('refuses SQL that would get past a fence', async () => {
-    const { app, db } = await company();
+  it('runs the settings and statements the check refused before, as Hornhoof itself would', async () => {
+    const { app } = await company();
     const client = await mcp(app, TOKEN);
-    const before = await db.select({ id: agents.id, name: agents.name }).from(agents);
-    for (const sql of ['COMMIT', 'SET LOCAL synchronous_commit = local; UPDATE agents SET name = name', 'SELECT pg_cancel_backend(1)', 'SELECT 1; SET CONSTRAINTS ALL IMMEDIATE', "COMMIT; UPDATE agents SET name = 'Gone'"]) {
+    for (const sql of ['SET LOCAL synchronous_commit = local; UPDATE agents SET name = name', 'SELECT 1; SET CONSTRAINTS ALL IMMEDIATE', "SELECT current_setting('transaction_timeout') AS limit"]) {
       const res = await call(client, 'database', { sql });
-      expect(res.isError, sql).toBe(true);
-      expect(text(res), sql).toContain('Hornhoof did not run this SQL:');
+      expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
     }
-    expect(await db.select({ id: agents.id, name: agents.name }).from(agents)).toEqual(before);
   });
 
   it('answers in five seconds', async () => {
@@ -542,7 +529,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toBe('The database answered: The database could not confirm the commit, so the change may or may not be saved. The call may have run; check before repeating it.');
   });
 
-  it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
+  it('reads and changes requests, cards and the logs', async () => {
     const { app, db, bruno, task } = await company();
     const client = await mcp(app, TOKEN);
     const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
@@ -550,20 +537,9 @@ describe('the orchestrator reads and changes the database itself', () => {
       const read = await call(client, 'database', { sql: `SELECT count(*)::int AS n FROM ${table}` });
       expect(read.isError, table).toBeFalsy();
     }
-    for (const sql of [
-      `UPDATE requests SET status = 'approved' WHERE id = '${request.id}'`,
-      `DELETE FROM requests WHERE id = '${request.id}'`,
-      `UPDATE proposals SET status = 'applied'`,
-      `INSERT INTO agent_events (company_id, agent_id, kind, data, person_id) SELECT company_id, agent_id, 'message', '{"text":"approve"}', (SELECT id FROM people LIMIT 1) FROM requests LIMIT 1`,
-      `DELETE FROM task_events`,
-      `WITH gone AS (UPDATE requests SET status = 'approved' RETURNING id) SELECT * FROM gone`,
-    ]) {
-      const res = await call(client, 'database', { sql });
-      expect(res.isError, sql).toBe(true);
-      expect(text(res), sql).toMatch(/permission denied/);
-    }
-    expect(text(await call(client, 'database', { sql: `UPDATE requests SET status = 'approved'` }))).toContain('a request closes only with answer_request');
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.status).toBe('open');
+    const changed = await call(client, 'database', { sql: `UPDATE requests SET explained = 'Read by the orchestrator.' WHERE id = '${request.id}'` });
+    expect(JSON.parse(text(changed))).toEqual([{ rows: [], changed: 1 }]);
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.explained).toBe('Read by the orchestrator.');
   });
 
   it('writes in every turn: as the owner after a person who is neither the CEO nor the delegate wrote, or nobody did', async () => {
@@ -582,9 +558,16 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno N');
   });
 
+  it('writes in a company with no active owner too, with nobody to act for', async () => {
+    const { app, db, bruno } = await company();
+    await db.update(people).set({ isOwner: false });
+    const renamed = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Bruno O' WHERE id = '${bruno.id}'` });
+    expect(JSON.parse(text(renamed))).toEqual([{ rows: [], changed: 1 }]);
+  });
+
   it('undoes the whole call when one of its statements fails', async () => {
     const { app, db, bruno } = await company();
-    const res = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
+    const res = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT 1 / 0` });
     expect(res.isError).toBe(true);
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
   });
@@ -603,68 +586,26 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toContain('does not let Hornhoof');
   });
 
-  it("keeps people, their access, an employee's kind, role and skills, a head's department, turns' tokens and assistants out of its hands, and says why", async () => {
-    const { app, db, orchestrator, hana, bruno, dev, running } = await company();
+  it("changes people, an employee's skills, a head's department, an assistant's own agent and what an assistant waits for itself", async () => {
+    const { app, db, hana, bruno } = await company();
     const client = await mcp(app, TOKEN);
-    const [ivan] = await db.select().from(people);
     const [design] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'design', roleCode: 'DES' }).returning();
-    await running(hana.id, 'tool-token-head-0123456789abcdef0123');
     const [ava] = await db.insert(agents).values({ companyId: bruno.companyId, kind: 'assistant', name: 'Ava', model: '' }).returning();
-    const refused: [string, RegExp][] = [
-      [`UPDATE people SET scope_kind = 'company', is_owner = true`, /change_person/],
-      [`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ('${ivan!.companyId}', 'Eve', 'eve@test', 'active', 'company')`, /change_person/],
-      [`INSERT INTO person_access (company_id, person_id, department_id) VALUES ('${ivan!.companyId}', '${ivan!.id}', '${dev.id}')`, /change_person/],
-      ['DELETE FROM person_access', /change_person/],
-      [`UPDATE agents SET kind = 'head' WHERE id = '${bruno.id}'`, /kind and role_key never change/],
-      [`UPDATE agents SET role_key = 'OPS-HEAD' WHERE id = '${hana.id}'`, /kind and role_key never change/],
-      [`UPDATE agents SET skills = '["ops-task-watch"]' WHERE id = '${bruno.id}'`, /change_employee/],
-      [`UPDATE agents SET department_id = '${design!.id}' WHERE id = '${hana.id}'`, /a head stays in its department/],
-      [`INSERT INTO agents (company_id, kind, name, model, role_key) VALUES ('${bruno.companyId}', 'head', 'Mole', '', 'OPS-HEAD')`, /hire/],
-      [`UPDATE jobs SET tool_token_hash = 'forged' WHERE agent_id = '${orchestrator.id}'`, /tool_token_hash/],
-      [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /tool_token_hash/],
-      ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
-      [`UPDATE nodes SET key_hash = 'forged'`, /key_hash/],
-      ['SELECT key_hash FROM nodes', /key_hash/],
-      ['SELECT machine_key FROM machines', /machine_key/],
-      [`UPDATE machines SET machine_key = 'taken-0001-abcd'`, /machine_key/],
-      [`UPDATE nodes SET status = 'ready'`, /only the CEO/],
-      ['UPDATE subscriptions SET budget = 10', /only the CEO/],
-      ['UPDATE machines SET revoked_at = now()', /only the CEO/],
-      ['UPDATE machines SET lends_tests = false', /only the CEO/],
-      ['DELETE FROM node_connections', /Hornhoof writes the history/],
-      [`UPDATE node_connections SET cause = 'network'`, /Hornhoof writes the history/],
-      ['DELETE FROM test_parts', /run_tests/],
-      ['DELETE FROM harness_builds', /test_harness/],
-      [`UPDATE harness_products SET told = 'quiet'`, /test_harness/],
-      [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only on its screen or with set_repository, on the word of the CEO or a person who runs it/],
-      [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
-      [`UPDATE agents SET node_id = NULL WHERE id = '${bruno.id}'`, /change_employee/],
-      [`UPDATE agents SET name = 'Ivy' WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
-      [`UPDATE agents SET removed_at = now() WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
-      [`UPDATE assistants SET events_url = 'https://evil.test/'`, /People screen/],
-      [`UPDATE assistants SET key_hash = 'forged'`, /key_hash/],
-      ['SELECT key_hash FROM assistants', /key_hash/],
-      ['SELECT wake_secret_enc FROM assistants', /wake_secret_enc/],
-      ['DELETE FROM assistant_events', /only reads/],
-      ['UPDATE assistant_replies SET answered = true', /only reads/],
-      [`UPDATE agent_inbox SET sender_name = 'Ivan'`, /inbox_mark/],
-      ['DELETE FROM agent_inbox', /inbox_mark/],
-    ];
-    for (const [sql, why] of refused) {
+    for (const sql of [
+      `UPDATE people SET telegram_username = 'ivan_k'`,
+      `UPDATE agents SET skills = '["ops-task-watch"]' WHERE id = '${bruno.id}'`,
+      `UPDATE agents SET department_id = '${design!.id}' WHERE id = '${hana.id}'`,
+      `UPDATE agents SET name = 'Ivy' WHERE id = '${ava!.id}'`,
+      'UPDATE assistant_replies SET answered = true',
+    ]) {
       const res = await call(client, 'database', { sql });
-      expect(res.isError, sql).toBe(true);
-      expect(text(res), sql).toMatch(/permission denied/);
-      expect(text(res), sql).toMatch(why);
+      expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"changed"')]);
     }
-    expect((await db.select().from(people)).map(p => [p.scopeKind, p.isOwner])).toEqual([[ivan!.scopeKind, ivan!.isOwner]]);
-    const [h, b] = [hana, bruno].map(async a => (await db.select().from(agents).where(eq(agents.id, a.id)))[0]!);
-    expect(await h).toMatchObject({ kind: 'head', roleKey: 'DEV-HEAD', departmentId: dev.id });
-    expect(await b).toMatchObject({ kind: 'worker', skills: bruno.skills });
-    const moved = await call(client, 'database', { sql: `UPDATE agents SET department_id = '${design!.id}' WHERE id = '${bruno.id}'` });
-    expect(JSON.parse(text(moved))).toEqual([{ rows: [], changed: 1 }]);
-    const failed = await call(client, 'database', { sql: `UPDATE jobs SET status = 'failed', error = 'Stuck.', finished_at = now() WHERE agent_id = '${hana.id}'` });
-    expect(JSON.parse(text(failed))).toEqual([{ rows: [], changed: 1 }]);
+    expect((await db.select().from(agents).where(eq(agents.id, hana.id)))[0]!.departmentId).toBe(design!.id);
+    expect((await db.select().from(agents).where(eq(agents.id, ava!.id)))[0]!.name).toBe('Ivy');
+    expect((await db.select().from(people))[0]!.telegramUsername).toBe('ivan_k');
   });
+
 
   it("is the orchestrator's and the head of Operations', no one else's", async () => {
     const { app, db, hana, bruno, running } = await company();

@@ -22,6 +22,8 @@ export type StreamMessage =
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   /* A task changed; people who reach its place fetch it again. */
   | { type: 'task'; id: string; spot: Spot }
+  /* The company's goals or a department's pipelines changed; everyone of it reads them, as they read its tasks. */
+  | { type: 'tracker' }
   /* What waits for people changed in this place. */
   | { type: 'requests'; spot: Spot }
   /* A machine's card came or closed; each person asks for what is theirs, so it holds no place and nothing else. */

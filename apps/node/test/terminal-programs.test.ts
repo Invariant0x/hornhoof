@@ -104,6 +104,15 @@ describe('Claude Code in a terminal', () => {
     }
   });
 
+  it('names Claude as co-author of no commit or pull request, new or resumed', () => {
+    for (const sessionId of [null, 'abc-1']) {
+      const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
+      const settings = JSON.parse(arg(command, '--settings')!);
+      expect(settings.attribution).toEqual({ commit: '', pr: '' });
+      expect(settings.includeCoAuthoredBy).toBe(false);
+    }
+  });
+
   it('thinks as hard as the agent was set to, or at the plan default when nothing is set', () => {
     const set = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, effort: 'max', instructionsFile: null, urls: URLS });
     expect(arg(set.command, '--effort')).toBe('max');

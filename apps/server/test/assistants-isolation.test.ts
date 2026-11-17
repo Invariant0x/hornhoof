@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { personColumns } from '../src/auth/session.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
+import { readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import {
   agentEvents,
   agents,
@@ -188,8 +188,7 @@ describe('SQL isolation of personal assistants from OPS-HEAD', () => {
     );
     expect(rows.map(r => r.tablename)).toEqual([...ASSISTANT_TABLES].sort());
     const reader = readerRole('postgres');
-    const writer = agentRole('postgres');
-    await client.exec(`${grantsFor(writer)};\n${readerGrantsFor(reader)}`);
+    await client.exec(readerGrantsFor(reader));
     for (const table of ASSISTANT_TABLES) {
       const tablePriv = await client.query<{ has: boolean }>(
         `SELECT has_table_privilege('${reader}', 'public.${table}', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS has`,
@@ -327,25 +326,20 @@ describe('SQL isolation of personal assistants from OPS-HEAD', () => {
     ).toEqual([]);
   });
 
-  it('preserves owner access to personal assistants and standard Orchestrator / CEO SQL access', async () => {
+  it('preserves owner access to personal assistants and the orchestrator\'s whole SQL access', async () => {
     const f = await sqlFixture();
 
-    /* Orchestrator in a CEO turn still sees agents rows (including assistant) while trigger protects assistant updates,
-       and still reads non-secret columns of assistant tables while secrets and writes stay closed. */
+    /* The orchestrator sees agents rows, the assistant's too, and reads and changes the assistant tables, as Hornhoof
+       itself (Ivan's word of 17 November 2026). */
     expect(
       resultRows(await callSql(f.orchClient, `SELECT id, name, kind FROM agents WHERE id = '${f.assistantAgent.id}'`)),
     ).toEqual([{ id: f.assistantAgent.id, name: 'Ava', kind: 'assistant' }]);
-    const updateAssistantAgent = await callSql(f.orchClient, `UPDATE agents SET name = 'Ivy' WHERE id = '${f.assistantAgent.id}'`);
-    expect(updateAssistantAgent.isError).toBe(true);
-    expect(resultText(updateAssistantAgent)).toMatch(/an assistant's own agent belongs to its owner/);
-
     expect(resultRows(await callSql(f.orchClient, 'SELECT person_id, program, agent_id FROM assistants'))).toEqual([
       { person_id: f.assistantPersonId, program: 'avaclone', agent_id: f.assistantAgent.id },
     ]);
     expect(resultRows(await callSql(f.orchClient, 'SELECT seq FROM assistant_seqs'))).toEqual([{ seq: 1 }]);
-    const writeSeq = await callSql(f.orchClient, 'UPDATE assistant_seqs SET seq = 99');
-    expect(writeSeq.isError).toBe(true);
-    expect(resultText(writeSeq)).toMatch(/permission denied/);
+    const writeSeq = await callSql(f.orchClient, 'UPDATE assistant_seqs SET seq = seq');
+    expect(writeSeq.isError).toBeFalsy();
 
     /* Owner and assistant API continue to work with the personal assistant and its own agent. */
     expect((await f.app.inject({ url: `/api/agents/${f.assistantAgent.id}/events`, ...as(f.ceoSession) })).statusCode).toBe(200);

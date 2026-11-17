@@ -24,6 +24,13 @@ describe('orchestrator instructions', () => {
     expect(ability('orch-company')).toMatch(/department names people see in their screen/i);
   });
 
+  /* Ivan's word of 17 November 2026: nothing is hidden from him and he may do anything, his own system included. */
+  it('says plainly that he can do anything in the company and in Hornhoof itself, sees everything and can change his own system', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/can do anything in the company and in Hornhoof itself/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/sees everything/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/can change (?:its|your) own system/);
+  });
+
   it('delivers every Russian department label from the CEO screen through the structure ability', () => {
     const structure = ability('orch-company');
     expect(structure).toContain("CEO's screen");

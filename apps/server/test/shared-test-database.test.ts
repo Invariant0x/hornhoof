@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { afterAll, describe, expect, inject, it, onTestFinished, vi } from 'vitest';
-import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
+import { readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { until } from './helpers-basic.js';
@@ -147,7 +147,7 @@ describe('what a test changes beyond rows', { shuffle: false }, () => {
 
   it('does not fail its file when it gave the same rights again, in another order', async () => {
     const db = await createTestDb();
-    await db.$client.exec(grantsFor(agentRole('postgres')));
+    await db.$client.exec(readerGrantsFor(reader));
     await expect(checkSharedDatabase()).resolves.toBeUndefined();
   });
 

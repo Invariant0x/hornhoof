@@ -40,10 +40,10 @@ const fresh = (prefix: string) => `${prefix}${randomBytes(32).toString('base64ur
 type Owner = Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>;
 
 /* Who sets up an assistant: its owner, or someone with the whole company. The key acts with all its owner's rights, so the
-   CEO's and the CEO delegate's are set up only by the CEO, as their Telegram is, and by the delegate for their own. Never
-   the orchestrator, nor an assistant. */
+   CEO's and the CEO delegate's are set up only by the CEO, as their Telegram is, and by the delegate for their own, or by
+   the orchestrator, which can do everything. Never a department's head, nor an assistant. */
 function guardManager(me: Person, owner: Owner): void {
-  if (me.via || me.assistant) throw new ApiError(403, 'forbidden', "An assistant is set up only from a person's own screen.", 'assistant_not_allowed');
+  if (me.viaHead || me.assistant) throw new ApiError(403, 'forbidden', "An assistant is set up only from a person's own screen.", 'assistant_not_allowed');
   if (owner.id === me.id) return;
   if ((owner.isOwner || owner.isCeoDelegate) && !me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO sets up the assistant of the CEO or the CEO delegate.', 'owner_locked');
   requireCompanyScope(me);

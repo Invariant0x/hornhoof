@@ -1,46 +1,55 @@
 import { expect, it } from 'vitest';
-import { agentRole, grantsFor, isKey } from '../src/db/agent-sql.js';
+import { dropFormerRole, formerAgentRole } from '../src/db/agent-sql.js';
+import { agentSqlOn } from './helpers.js';
 import { createTestDb, ownDatabases } from './helpers-db.js';
 
 ownDatabases();
 
-async function access() {
-  const { $client: client } = await createTestDb();
-  const role = agentRole('postgres');
-  await client.exec(grantsFor(role));
-  const run = (text: string) => client.transaction(async tx => {
-    await tx.exec(`SET LOCAL ROLE "${role}"`);
-    return tx.exec(text);
-  });
-  return { client, role, run };
-}
+/* Ivan's word of 17 November 2026: the orchestrator can do everything, as Hornhoof itself, so it reads and changes the
+   keys and the payloads that carry one. Operations still reads none of them and changes nothing. */
+const PAYLOADS = [
+  'SELECT data FROM assistant_events',
+  'SELECT answer FROM tool_calls',
+  'SELECT key_hash, wake_secret_enc FROM assistants',
+  'SELECT password_hash FROM people',
+  'SELECT tool_token_hash FROM jobs',
+  'SELECT key_hash, account FROM nodes',
+  'SELECT machine_key FROM machines',
+  'SELECT secret_enc FROM subscriptions',
+  'SELECT repo_token_enc FROM departments',
+  'SELECT token_enc FROM telegram_bots',
+  'SELECT key_enc FROM authority',
+  'SELECT secret_enc FROM peer_secrets',
+  'SELECT wrapped, salt, iv FROM person_keys',
+  'SELECT * FROM sessions',
+  'SELECT * FROM plan_credentials',
+  'SELECT password_enc FROM vault_entries',
+  'SELECT * FROM net.pulse',
+];
 
-it('keeps secrets closed through expressions and older grants while ordinary reads and writes stay open', async () => {
-  const { client, role, run } = await access();
-  for (const text of [
-    'SELECT data FROM assistant_events',
-    "SELECT e.data->'files' AS harmless FROM assistant_events e",
-    'SELECT to_jsonb(e) FROM assistant_events e',
-    'SELECT row_to_json(e) FROM assistant_events e',
-    'SELECT e.* FROM assistant_events e',
-    'SELECT answer FROM tool_calls',
-    'SELECT events_url, skills_url FROM assistants',
-    'SELECT to_jsonb(a) FROM assistants a',
-  ]) await expect(run(text), text).rejects.toThrow(/permission denied/);
-  expect((await run('SELECT id, seq, kind FROM assistant_events'))[0]!.rows).toEqual([]);
-  expect((await run('SELECT id, job_id FROM tool_calls'))[0]!.rows).toEqual([]);
-  expect((await run('SELECT person_id, program FROM assistants'))[0]!.rows).toEqual([]);
-  expect((await run('SELECT id, email, telegram_username FROM people'))[0]!.rows).toEqual([]);
-  const { rows } = await client.query<{ table_name: string; column_name: string; readable: boolean }>(`
-    SELECT table_name, column_name, has_column_privilege('${role}', quote_ident(table_name), column_name, 'SELECT') AS readable
-    FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position
-  `);
-  expect(rows.filter(row => isKey(row.column_name) && row.readable)).toEqual([]);
-  expect((await run('SELECT id, name FROM agents'))[0]!.rows).toEqual([]);
-  await expect(run('UPDATE agents SET name = name WHERE false')).resolves.toBeDefined();
-  await client.exec(`GRANT SELECT (data) ON assistant_events TO "${role}"; GRANT SELECT (password_hash) ON people TO "${role}"`);
-  await client.exec(grantsFor(role));
-  for (const text of ['SELECT data FROM assistant_events', 'SELECT password_hash FROM people']) {
-    await expect(run(text), text).rejects.toThrow(/permission denied/);
+it('lets the orchestrator read and change the keys and what carries one, and keeps them from Operations', async () => {
+  const sql = agentSqlOn((await createTestDb()).$client);
+  for (const text of PAYLOADS) {
+    expect((await sql.run(text, 'write'))[0]!.rows, text).toEqual([]);
+    await expect(sql.run(text, 'read'), text).rejects.toThrow(/permission denied/);
   }
+  await sql.run("INSERT INTO peer_secrets (kind, secret_enc) VALUES ('app', 'sealed-app-secret')", 'write');
+  expect((await sql.run('DELETE FROM peer_secrets', 'write'))[0]!.changed).toBe(1);
+});
+
+it('drops the role older builds gave the orchestrator, with its rights, policies and guards on agents, and again finds nothing to drop', async () => {
+  const { $client: client } = await createTestDb();
+  const role = formerAgentRole('postgres');
+  await client.exec(`CREATE ROLE "${role}" NOLOGIN;
+    GRANT SELECT ON peer_secrets TO "${role}"; GRANT SELECT (password_hash) ON people TO "${role}";
+    CREATE POLICY "${role}_agents" ON agents TO "${role}" USING (true);
+    CREATE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+    CREATE TRIGGER "${role}_head_stays" BEFORE UPDATE ON agents FOR EACH ROW EXECUTE FUNCTION hornhoof_head_stays();`);
+  await client.exec(dropFormerRole(role));
+  await client.exec(dropFormerRole(role));
+  const left = await client.query(`SELECT 'role' AS what FROM pg_roles WHERE rolname = '${role}'
+    UNION ALL SELECT 'policy' FROM pg_policies WHERE policyname = '${role}_agents'
+    UNION ALL SELECT 'trigger' FROM pg_trigger WHERE tgname LIKE '${role}%'
+    UNION ALL SELECT 'function' FROM pg_proc WHERE proname IN ('hornhoof_head_stays', 'hornhoof_assistant_kept')`);
+  expect(left.rows).toEqual([]);
 });
