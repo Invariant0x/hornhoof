@@ -21,7 +21,7 @@ The provenance JSON contains exact commands, working directories, session ids an
 
 Reconstruction and limits
 
-The three *-from-candidate.patch files and snapshot hashes were computed now by reversing the exact later recorded text patches, in memory, from the pinned candidate. They are explicitly retrospective. They are not hashes captured at launch or an independent test run. Applying one to an isolated copy of the candidate reconstructs the described earlier tracked-file state.
+The three *-from-candidate.patch.json files and snapshot hashes were computed now by reversing the exact later recorded text patches, in memory, from the pinned candidate. They are explicitly retrospective. They are not hashes captured at launch or an independent test run. Reading a patch field and applying that unified diff to an isolated copy of the candidate reconstructs the described earlier tracked-file state.
 
 The reconstructed core state differs from the candidate in four paths: AgentCard.tsx, browser config, browser scenario and the plan. The callers state differs in only the browser scenario and the plan. The earlier full card run also precedes the server fixture repairs and has six differing paths. All credited browser parts have no tracked-path difference from the candidate.
 
