@@ -19,7 +19,8 @@
       "exit": 0,
       "tests": 47,
       "log": "1227/server.log",
-      "sha256": "15a7cdb681efcc06f78d1b6c88a37e9d546af5119c30724fa6ce9c1f890b1ac2"
+      "sha256": "15a7cdb681efcc06f78d1b6c88a37e9d546af5119c30724fa6ce9c1f890b1ac2",
+      "originalSha256": "15a7cdb681efcc06f78d1b6c88a37e9d546af5119c30724fa6ce9c1f890b1ac2"
     },
     {
       "name": "web",
@@ -28,7 +29,8 @@
       "exit": 0,
       "tests": 46,
       "log": "1227/web.log",
-      "sha256": "f82e322dbc70580c760c2ec3b10e18b0222110323699c1c8467d02d9dfbb3b50"
+      "sha256": "f82e322dbc70580c760c2ec3b10e18b0222110323699c1c8467d02d9dfbb3b50",
+      "originalSha256": "f82e322dbc70580c760c2ec3b10e18b0222110323699c1c8467d02d9dfbb3b50"
     },
     {
       "name": "protocol",
@@ -37,7 +39,8 @@
       "exit": 0,
       "tests": 8,
       "log": "1227/protocol.log",
-      "sha256": "1da2ce30818bebe2d2424ddcd9a0a4551ab062d2abfbaaadb128f191f69bc210"
+      "sha256": "1da2ce30818bebe2d2424ddcd9a0a4551ab062d2abfbaaadb128f191f69bc210",
+      "originalSha256": "1da2ce30818bebe2d2424ddcd9a0a4551ab062d2abfbaaadb128f191f69bc210"
     },
     {
       "name": "node",
@@ -46,7 +49,8 @@
       "exit": 0,
       "tests": 2,
       "log": "1227/node.log",
-      "sha256": "8bd83be4658d453ecfd3d07b5e784375bb9bb5f55c08edfad7c77611cf932321"
+      "sha256": "8bd83be4658d453ecfd3d07b5e784375bb9bb5f55c08edfad7c77611cf932321",
+      "originalSha256": "8bd83be4658d453ecfd3d07b5e784375bb9bb5f55c08edfad7c77611cf932321"
     },
     {
       "name": "server-types",
@@ -55,7 +59,8 @@
       "exit": 0,
       "tests": null,
       "log": "1227/server-types.log",
-      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
+      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30",
+      "originalSha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
     },
     {
       "name": "web-types",
@@ -64,7 +69,8 @@
       "exit": 0,
       "tests": null,
       "log": "1227/web-types.log",
-      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
+      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30",
+      "originalSha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
     },
     {
       "name": "build",
@@ -73,7 +79,8 @@
       "exit": 0,
       "tests": null,
       "log": "1227/build.log",
-      "sha256": "25e2c0f259837e1e88461b4f7b22805941e6da8f71eea53f3b9fc9a65dd262bd"
+      "sha256": "c990cda67833062a1b91c1f78d3e586eed82baf3b3afc61804b475456cd7e27b",
+      "originalSha256": "25e2c0f259837e1e88461b4f7b22805941e6da8f71eea53f3b9fc9a65dd262bd"
     },
     {
       "name": "lint",
@@ -82,7 +89,8 @@
       "exit": 0,
       "tests": null,
       "log": "1227/lint.log",
-      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
+      "sha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30",
+      "originalSha256": "2a3954627795f50423fd88b74045fed1aa6fcc709aa93aa4113bc4d4ac5d9a30"
     }
   ],
   "superseded": [
@@ -106,5 +114,6 @@
       "exit": 143,
       "result": "Interrupted, not PASS"
     }
-  ]
+  ],
+  "logFormatting": "Only trailing line whitespace and trailing blank lines normalized; originalSha256 binds the captured output before formatting."
 }

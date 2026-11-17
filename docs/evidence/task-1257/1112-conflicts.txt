@@ -9,7 +9,7 @@ changed in both
 @@ -40,10 +40,17 @@
    return dept;
  }
- 
+
 +<<<<<<< .our
  /* The rule of each channel. One nobody set asks nothing for what goes out, as defaultRule says for the rest. */
  export async function departmentRules(db: Pick<Db, 'select'>, departmentId: string) {
@@ -22,7 +22,7 @@ changed in both
 +  return APPROVAL_CHANNELS.map(channel => ({ channel, ...(channel === 'commit' ? { mode: 'every' as const } : ruleOf(rows.find(r => r.channel === channel))) }));
 +>>>>>>> .their
  }
- 
+
  /* The active person who owns the department now with their name; null means the CEO. */
 changed in both
   base   100644 bf0846b5f448247a8ee8085d581d4a53b86184a2 apps/server/src/modules/departments/routes.ts
@@ -34,12 +34,12 @@ changed in both
    const forWhom = (on: Delegation | undefined) => (on ? { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq } : {});
 +  /* The acting agent keeps its own decision; a person's card stays with its author, otherwise the orchestrator. */
 +  const appliedTo = (on: Delegation | undefined, proposalAgentId: string | null, orchestrator: { id: string } | null) => on?.agentId ?? proposalAgentId ?? orchestrator?.id;
- 
+
    app.post('/api/departments/build', async (req, reply) => {
      const me = await requirePerson(req, db);
 @@ -351,7 +353,7 @@
      if (result.hired.length) await tryPlaceOperator(ctx, me.companyId);
- 
+
      const orchestrator = await orchestratorOf(ctx, me.companyId);
 -    const agentId = result.agentId ?? orchestrator?.id;
 +    const agentId = appliedTo(on, result.agentId, orchestrator);
@@ -48,7 +48,7 @@ changed in both
          companyId: me.companyId,
 @@ -536,7 +538,7 @@
      await tryPlaceOperator(ctx, me.companyId);
- 
+
      const orchestrator = await orchestratorOf(ctx, me.companyId);
 -    const agentId = result.agentId ?? orchestrator?.id;
 +    const agentId = appliedTo(on, result.agentId, orchestrator);
@@ -65,7 +65,7 @@ changed in both
 @@ -62,7 +62,11 @@
    plan?: WaitPlan | undefined;
  };
- 
+
 +<<<<<<< .our
  /* The rule of a channel of the task's department; a task of no department goes by the rule nobody set. */
 +=======
@@ -89,13 +89,13 @@ changed in both
 @@ -246,13 +254,13 @@
    );
  }
- 
+
 -const NO_PERSON = 'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the CEO or the CEO delegate, or for a rule the department\'s owner.';
 +const NO_PERSON = 'No active owner is available, or input for this turn is still being recorded. Nothing was changed. Check the department owner or the CEO.';
  const NOT_YOURS = 'This department is not yours. Nothing was changed. You set only your own department\'s approvals and wait dates.';
- 
+
  type Change = (url: string, payload: object) => Promise<ReturnType<typeof say>>;
- 
+
 -/* A change calls the route the screen calls, as the person whose words the agent's turn answers now, under the input lock, so
 -   the route allows it what that person may, and no employee, timer or task can ask for it. */
 +/* A change calls the screen's route under the input lock with the agent's current principal: a head's department owner,
@@ -105,11 +105,11 @@ changed in both
      withInputLock(ctx, job.agentId, async () => {
 @@ -265,7 +273,7 @@
  }
- 
+
  const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
 -const HEAD_WHO = 'Only for your own department, and only in a turn that answers a person who runs it or the CEO, as their decision.';
 +const HEAD_WHO = 'Only for your own department, in any turn with its named owner\'s rights, or the CEO\'s when it has none. No fresh human message is needed. Follow its rules and notebook.';
- 
+
  /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */
  function registerPolicyTools(server: McpServer, change: Change, who: string, mine: (department: string) => boolean): void {
 @@ -287,7 +295,7 @@
@@ -127,7 +127,7 @@ changed in both
   their  100644 70b5517e3ad66409a28880b1397b486a3a657b83 apps/server/test/approval-policy.test.ts
 @@ -15,10 +15,17 @@
  const ruleFor = (c: C, departmentId: string, channel: string) => c.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, departmentId), eq(approvalPolicies.channel, channel as never)));
- 
+
  describe('reading and changing a department\'s approval policy', () => {
 +<<<<<<< .our
    it('asks nothing for what goes out, every commit, and a new kind of the rest while nobody set a rule, and stores nothing for that', async () => {
@@ -146,7 +146,7 @@ changed in both
 @@ -124,7 +131,11 @@
      return (over: Record<string, unknown> = {}) => call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
    };
- 
+
 +<<<<<<< .our
    it('asks for a new kind on a channel with no rule, and sends it to the CEO with no owner', async () => {
 +=======
@@ -158,7 +158,7 @@ changed in both
 @@ -203,9 +214,8 @@
      expect(await openRequests(c)).toHaveLength(1);
    });
- 
+
 -  it('asks only for a new kind: a kind goes free once approved, however it is typed', async () => {
 +  it('defaults to asking only for a new kind: a kind goes free once approved, however it is typed', async () => {
      const c = await company();
@@ -169,7 +169,7 @@ changed in both
 @@ -217,6 +227,18 @@
      expect(await openRequests(c)).toHaveLength(1);
    });
- 
+
 +  it('keeps an explicit every rule asking after a kind was approved', async () => {
 +    const c = await company();
 +    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'every' });
@@ -201,7 +201,7 @@ changed in both
  import { ME, serveApi } from './api';
  import { around, focusRing, offences, sizes } from './owner-screens-look';
  import type { Measured } from './owner-screens-sizes';
- 
+
 -const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 +const MESSAGES: Record<Language, Messages> = { en, ru };
 +
@@ -216,7 +216,7 @@ changed in both
    company: ME.company,
    orchestrator: null,
 @@ -55,7 +64,7 @@
- 
+
  /* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would.
     A theme is a skin's id; dark, a name no skin has, is Cyberpunk. Right to left as a shipped RTL language would set it. */
 -async function open(page: Page, lang: 'en' | 'ru', theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
@@ -227,7 +227,7 @@ changed in both
 @@ -115,13 +124,35 @@
    expect(scroll.drawer, 'the panel has no sideways scroll').toBeLessThanOrEqual(scroll.inner);
  }
- 
+
 -for (const lang of ['en', 'ru'] as const) {
 +for (const lang of CHECKED_LOCALES) {
    for (const theme of ['light', 'dark'] as const) {
@@ -262,7 +262,7 @@ changed in both
          await part.screenshot({ path: info.outputPath(`approvals-ceo-${width}-${lang}-${theme}.png`) });
          await fitsTheScreen(page, width);
 @@ -190,9 +221,9 @@
- 
+
  /* The person who runs the department, not the CEO, in both skins, both languages, at a desk and on a phone, and right to
     left: the switch says its state in a word beside it, Design's rules hold, and the panel is drawn whole for Design. */
 -type Look = { lang: 'en' | 'ru'; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
@@ -315,7 +315,7 @@ changed in both
   their  100644 18f180441da6a36d2fa6777633ae33811824318f apps/web/test/ApprovalPolicy.test.tsx
 @@ -26,6 +26,16 @@
  const rowOf = (channel: keyof typeof t.channels) => within(screen.getByRole('group', { name: t.channels[channel] }));
- 
+
  describe('ApprovalPolicy', () => {
 +  it('explains the default while keeping the department rules supplied by the server', async () => {
 +    mockApi({ [POLICY]: [200, ceoView({ rules: [{ channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }, { channel: 'commit', mode: 'every' }] })] });
@@ -337,7 +337,7 @@ changed in both
 @@ -24,6 +24,7 @@
  ]);
  export type ApprovalRule = z.infer<typeof ApprovalRule>;
- 
+
 +<<<<<<< .our
  /* What goes out of the company: messages, the prices in them and publications. A department sends them by itself; one that
     wants to approve its own sets a rule for them. */
@@ -350,10 +350,10 @@ changed in both
 +/* A channel nobody set a rule for asks only for a kind nobody approved yet. */
 +export const DEFAULT_APPROVAL_RULE: ApprovalRule = { mode: 'new_kinds' };
 +>>>>>>> .their
- 
+
  /* What the database keeps of a rule. */
  export type StoredApprovalRule = { mode: ApprovalMode; limitAmount: number | null; limitUnit: string | null };
- 
+
 +<<<<<<< .our
  /* A rule of a channel as it is stored. Without a limit a mode of limits asks every time, never passes everything. */
  export function ruleOf(stored: StoredApprovalRule | undefined, channel: ApprovalChannel): ApprovalRule {
@@ -374,7 +374,7 @@ changed in both
   their  100644 c44ca2e9ae90dce9d7825f22ae87d38ad65dfca0 packages/protocol/test/approval-policy.test.ts
 @@ -48,6 +48,7 @@
  });
- 
+
  describe('ruleOf', () => {
 +<<<<<<< .our
    it('asks nothing for what goes out (messages, prices in them, publications) on a channel with no rule yet: a department that wants to approve its own sets a rule', () => {
@@ -400,7 +400,7 @@ changed in both
 +>>>>>>> .their
    });
  });
- 
+
 changed in both
   base   100644 eb4052ac129b246850593cb952f2df040ab68917 templates/skills/hh-head.md
   our    100644 344327b2eb3f9adeb74a8dcc3cc2f882972a251b templates/skills/hh-head.md
@@ -408,17 +408,17 @@ changed in both
 @@ -6,10 +6,14 @@
  ---
  You can communicate a department's decisions and needs to its company coordinator.
- 
+
 +<<<<<<< .our
  Your department runs itself: what a person who runs it decides about its units, products, staff, hiring and how it writes to people outside (which mailboxes and accounts, who writes from each, what it publishes), you do yourself, in that turn or a later one, without the orchestrator or the CEO. Use "tell_orchestrator" for decisions beyond your authority (forwarding those in the orchestrator's authority promptly instead of holding them in your own queue), work another department must own (never as your department's task) and timer results not delivered by the tracker. Use "propose_improvement" for noticed improvements instead of expanding a task. When your department keeps no repository, ask for one once, saying what it keeps: with "tell_orchestrator", which creates the first one with the company's saved key, or a person who runs the department connects one on its screen. Members push every branch at once; which of the pushed branches go into the main branch and when, and how the repository is laid out, you decide within your department's route.
 +=======
 +Your department runs itself. In any turn you act inside your department with the rights of its named owner, or the CEO when it has none, without waiting for a new message from a person. Decide its units, products, staff, hiring, approval and wait rules, and outbound messages (channels, their limits and autoSend, who writes from each account, and publishing its catalog, with the outbound_ tools) under its rules and notebook. Department changes, hires and outbound settings record you and whose rights you used; an employee card's history shows only whose rights you used. Another department stays outside your authority. Ask a person only for a decision its rules reserve for them or an action only they can perform. By default, approval is for a new kind of work; a kind already approved follows the department policy. Exact commit approval, consent, suppression and required outbound checks still apply. Use "tell_orchestrator" for decisions beyond your authority (forwarding those in the orchestrator's authority promptly instead of holding them in your own queue), work another department must own (never as your department's task) and timer results not delivered by the tracker. Use "propose_improvement" for noticed improvements instead of expanding a task. When your department keeps no repository, ask for one once, saying what it keeps: with "tell_orchestrator", which creates the first one with the company's saved key, or a person who runs the department connects one on its screen. Members push every branch at once; which of the pushed branches go into the main branch and when, and how the repository is laid out, you decide within your department's route.
 +>>>>>>> .their
- 
+
  Your department runs its own turns, one open at a time: the open turn is its next release. Work flows: give out each task at once, the work of a new goal from the people who run it too; nothing waits for a turn, and a task joins it only as its result is accepted into the turn branch. A product or sub-unit with a repository of its own goes to its own main line. When the next release is ready, record it with release_turn before main moves; the version tag on main closes the turn by itself, and the next one opens at once.
- 
+
  Read the task before reporting: state the proved result, unresolved blocker and requested decision, describing actual checks rather than an assumed review or release chain. Do not send the orchestrator a separate message repeating a task report (Hornhoof delivers it), and use only communication tools your account has.
- 
+
 -Give work only to employees that are on; switch one on only on the word of a person who runs the department. For an external event, call "wait_for" with its owner and an ISO deadline within two hours, then end the turn; completion of "run_tests" or "run_work", an actual message or the deadline resumes it, so never fill quiet time with duplicate status turns.
 +Give work only to employees that are on; switch one on when your department's rules allow it. For an external event, call "wait_for" with its owner and an ISO deadline within two hours, then end the turn; completion of "run_tests" or "run_work", an actual message or the deadline resumes it, so never fill quiet time with duplicate status turns.
 changed in both
@@ -426,9 +426,9 @@ changed in both
   our    100644 2a5daf851e463e584cfd30f9b8a762f8759c7644 templates/skills/hh-questions.md
   their  100644 9d2f86e31e42222c37cf964aa03b23f67d47624c templates/skills/hh-questions.md
 @@ -8,8 +8,13 @@
- 
+
  Keep routine questions, blockers, missing tools and unclear briefs inside first: ask your department head (or the orchestrator if no head is active or across departments), and send runtime trouble to Operations. Never ask a person to stop a turn or write done. Three turns without progress go to the head or orchestrator first, never a person. Thinking on a running turn with live heartbeats is normal work, not a stall.
- 
+
 +<<<<<<< .our
  - **Explicit human classification**: items reach people only when the active head or orchestrator explicitly classifies them as `ready_result` (exact 40-character commit after gates, ready design option images, or ready structure/staffing proposal) or `human_only_action` (an irreversible deletion, which needs the CEO's yes; or what only that person knows or holds: their own payment, password, account or subscription-owner sign-in, a manual action on a machine, their taste in a text the first time, or a real choice between directions). Nothing that goes out of the company (letters, mailings, posts, messages, comments) is a human_only_action: the department does it itself. Never send a person a card to do or confirm what the company can do itself. Operations cannot classify trouble for people; "blocked" never promotes a question, and completion reports are status reports, not approval cards.
  - **Authority**: internal resolution uses internal authority, records the resolving employee or agent without needing a recent human message, and never approves a release, impersonates a person, fabricates delegation or rewrites closed answers or approvals.
@@ -446,7 +446,7 @@ changed in both
 @@ -7,10 +7,18 @@
  ---
  Use this ability to publish for the department: a post, a reply, an announcement, a newsletter or a page. No program publishes for you: you do it like a person.
- 
+
 +<<<<<<< .our
  1. **Where**: social networks and comments go through the company's connected phones, so ask for the phone queue; a site or a newsletter goes through its own page or mailbox. The accounts the department publishes from are listed in its git, and their sign-ins are only in the vault.
  2. **Records in git**: keep what was published, where, when and from which account in the department's repository, in whatever format suits the work. Mark each post or reply at once and commit, so any colleague can see it and go on.
@@ -460,7 +460,7 @@ changed in both
 +4. **Frozen revision**: dispatch only the approved bytes through the server and within the assignment's authority. Any wording or source change creates a new revision requiring a new approval.
 +5. **Delivery and correction**: read delivery state. An `unknown` result requires destination verification before retrying. Notify the authorized owner promptly of a live error with a proposed correction; never delete or overwrite public records without approval.
 +>>>>>>> .their
- 
+
  Return what was published, where, and the commit that records it.
 changed in both
   base   100644 5918263883cbc81bc1e08ac312ff23c2cd7e7547 templates/skills/sal-outbound-approval.md
@@ -469,7 +469,7 @@ changed in both
 @@ -7,11 +7,19 @@
  ---
  Use this ability to write to people outside the company: an email, a direct message, a follow-up, a sequence or a proposal. No program sends for you: you write like a person, from the department's own mailbox or account.
- 
+
 +<<<<<<< .our
  1. **Records in git**: every record of contact with people outside lives in the department's repository, in whatever format suits the work, so any agent of the department can open it, see what was done to whom and go on. A mailing, for example, can be a table with a row per person and a status. Mark each action there at once and commit: whom you wrote, when and from which mailbox; that you checked the replies at the time the task set and nobody answered.
  2. **Mailboxes**: the mailboxes and accounts the department writes from are listed in its git, and their sign-ins are only in the vault. Send and read mail directly through the mailbox, with any mail client or its web page, when it can be reached without trouble. Social networks and comments go through the company's connected phones: ask for the phone queue.
@@ -484,7 +484,7 @@ changed in both
 +4. **Safe delivery**: dispatch only within the assignment and approved scope. Read status; an `unknown` result holds quota and the sending account until a human checks the receiving side. Never resend blindly.
 +5. **Restricted commitments**: custom prices, discounts, legal terms, contract changes and unapproved delivery promises require the authorized human decision. A human signs contracts.
 +>>>>>>> .their
- 
+
  Return what was sent, to whom, and the commit that records it.
 changed in both
   base   100644 eadac67893d7f62e21bdd188cf627804d7927e44 templates/skills/sup-support-policy.md
@@ -493,7 +493,7 @@ changed in both
 @@ -15,4 +15,8 @@
  - **Never promise restricted commitments**: do not promise a refund, credit, price, discount, contract change, legal position, delivery date or fix date in support replies.
  - **A person decides what is theirs**: refunds, credits, legal questions, account ownership, personal data requests such as export or deletion, and security cases go to the department owner (or the CEO when no owner is set). That is a real decision of a person; everything else support does itself.
- 
+
 +<<<<<<< .our
  Nothing support sends waits for a person's yes unless the department itself set an approval rule for it. The head or a person gives the task; when it is unclear what to do next, ask a person. For an assigned policy review, return the forbidden commitments, the cases that wait for a person and any gaps in the help articles.
 +=======
@@ -505,7 +505,7 @@ changed in both
   their  100644 7ec93a6d2dcf626e35b48b7b414b55992f69005b templates/skills/sup-work-pipeline.md
 @@ -40,5 +40,10 @@
  ## Descriptions and measures
- 
+
  - For each queue in scope, record what comes in, in which languages, its response targets, where these checks stand and the sample its owner set. Keep it in the department notebook.
 +<<<<<<< .our
  - Name the department's own measures, such as the share of replies and the time to first reply, in the department description: the head sets it with "change_department" (about) when a person who runs the department agrees. The pipeline report of a turn says when a department has no description.
