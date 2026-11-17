@@ -195,23 +195,27 @@ export async function workerOn(c: Company, config: WorkerConfig, over: Partial<W
   };
   onTestFinished(stop);
   const { front } = await keeper.start();
-  removeStep = manualTime() ? registerStep(async () => {
-    keeper.parts().certificates['look']();
-    const link = keeper.parts().link;
-    link['look']();
-    for (const kept of link['kept']) if (kept.session) link['hello'](kept.session, kept);
-    keeper['look']();
-    await keeper['tunnel']?.['tick']();
-    if (!c.stopped() && keeper.status().leader && !keeper.status().disconnected) {
-      await keeper['doorWork'];
-      await keeper['readView']();
-      await keeper['report']();
-      await keeper['carrier'].tick();
-      await keeper['holder'].round();
-    } else await keeper['holder'].survive();
-  }) : () => undefined;
+  removeStep = manualTime() ? registerStep(() => workerRound(c, keeper)) : () => undefined;
   const status = () => keeper.status();
   return { keeper, front, lines, stop, status };
+}
+
+/* One round of a worker's keeper, taken by the test instead of its timers: its certificate, its link to the leader, its
+   look and tunnel, and, while it has a leader, the view, the report, the computer's carrier and the backups it holds. */
+export async function workerRound(c: Company, keeper: WorkerKeeper): Promise<void> {
+  keeper.parts().certificates['look']();
+  const link = keeper.parts().link;
+  link['look']();
+  for (const kept of link['kept']) if (kept.session) link['hello'](kept.session, kept);
+  keeper['look']();
+  await keeper['tunnel']?.['tick']();
+  if (!c.stopped() && keeper.status().leader && !keeper.status().disconnected) {
+    await keeper['doorWork'];
+    await keeper['readView']();
+    await keeper['report']();
+    await keeper['carrier'].tick();
+    await keeper['holder'].round();
+  } else await keeper['holder'].survive();
 }
 
 export async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}, more: Partial<WorkerConfig> = {}) {
