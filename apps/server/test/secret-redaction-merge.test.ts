@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { companies, people, secretRedactions, tasks } from '../src/db/schema.js';
+import type { Db } from '../src/db/client.js';
 import { runMerge } from '../src/modules/merge/apply.js';
+import { fingerprintOf, hideSecretIn } from '../src/modules/tasks/hide-secret.js';
 import { ownDatabases } from './helpers-db.js';
 import { pgliteSource, twoSides, type Side } from './merge-fixture.js';
 
@@ -26,9 +27,11 @@ it.each(['leader', 'offline'] as const)('keeps a secret suppressed when the %s r
   const marker = 'oldForkMarker1077!';
   const [original] = await leader.db.insert(tasks).values({ companyId, number: 1, title: 'Original', body: marker }).returning();
   const offline = await fork();
-  await leader.db.insert(secretRedactions).values({ companyId, personId: person!.id, fingerprint: createHash('sha256').update(marker).digest('hex'), characters: marker.length });
+  /* Hidden on the leader as the action does it; the copy goes on writing the value meanwhile. */
+  await leader.db.transaction(tx => hideSecretIn(tx as unknown as Db, companyId, person!.id, marker));
+  await withoutMarker(leader, marker);
   await offline.db.update(tasks).set({ body: `offline ${marker}` }).where(eq(tasks.id, original!.id));
-  await offline.db.insert(tasks).values({ companyId, number: 2, title: 'Offline copy', body: marker });
+  const [only] = await offline.db.insert(tasks).values({ companyId, number: 2, title: 'Offline copy', body: marker }).returning();
   const [target, incoming] = receiver === 'leader' ? [leader, offline] : [offline, leader];
   const merge = await target.client.query<{ id: string }>("insert into net.merges (source, label) values ('machine:other', 'other') returning id");
   const source = await pgliteSource(incoming.client, 'other');
@@ -38,6 +41,9 @@ it.each(['leader', 'offline'] as const)('keeps a secret suppressed when the %s r
     await source.close();
   }
   await withoutMarker(target, marker);
+  /* The row only the copy had is hidden the moment either side holds both the row and the fingerprint. */
+  expect((await target.db.select().from(tasks).where(eq(tasks.id, only!.id)))[0]!.body).toBe('[hidden]');
+  expect(await target.db.select().from(secretRedactions)).toHaveLength(1);
 });
 
 it.each(['leader', 'offline'] as const)('keeps another company unchanged when the %s receives a suppression', async receiver => {
@@ -50,7 +56,8 @@ it.each(['leader', 'offline'] as const)('keeps another company unchanged when th
     { companyId: other!.id, number: 1, title: 'Theirs', body: marker },
   ]).returning();
   const offline = await fork();
-  await leader.db.insert(secretRedactions).values({ companyId: company!.id, personId: person!.id, fingerprint: createHash('sha256').update(marker).digest('hex'), characters: marker.length });
+  const { fingerprint, characters, window_hash: windowHash } = fingerprintOf(marker);
+  await leader.db.insert(secretRedactions).values({ companyId: company!.id, personId: person!.id, fingerprint, characters, windowHash });
   await offline.db.update(tasks).set({ body: `${marker} copy` }).where(eq(tasks.id, mine!.id));
   const [target, incoming] = receiver === 'leader' ? [leader, offline] : [offline, leader];
   const merge = await target.client.query<{ id: string }>("insert into net.merges (source, label) values ('machine:other', 'other') returning id");

@@ -1,5 +1,7 @@
 # Task 1077: candidate and evidence
 
+The checks below are the author's, on the first design. Review replaced the trigger design afterwards; see the Review redesign section of [the task document](1077-secret-redaction.md) and the Review submission for the checks of the current candidate.
+
 Base: `73d4a6e9521059384503aa8f2d9a4942635d1568` (`turn-31`). Branch: `task-1077`.
 Executable sources checked: `e7121dd648e366376b47b5cb9457c92f3a832bde`. A later report-only commit is named in the submission. No integration or deployment has occurred.
 
@@ -77,7 +79,7 @@ Migration 0137's when is greater than 0136's and its snapshot points to 0136's s
 ## Person's steps after the authorized ArSpatially rollout
 
 1. Sign in as CEO, delegate, or a person running the task's department.
-2. Open task 267, select only the password in its details or log, and choose **Hide secret**.
+2. Open task 267, select only the password in its details or log (at least 8 characters), and choose **Hide secret**.
 3. Check the private field, choose **Hide everywhere**, then check the mask and the log's actor/time entry.
 
 The person performs this action after rollout; no live record was accessed here.

@@ -13705,6 +13705,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "window_hash": {
+          "name": "window_hash",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "person_id": {
           "name": "person_id",
           "type": "uuid",
