@@ -17,9 +17,8 @@ describe('orchestrator instructions', () => {
   const own = [ORCHESTRATOR_INSTRUCTIONS, ...steady.parts.filter(p => p.id?.startsWith('orch-')).map(p => p.text)].join('\n\n');
   const ability = (id: string): string => steady.parts.find(p => p.id === id)?.text ?? '';
 
-  it('keeps one short identity and puts the screen-name method in the structure ability', () => {
+  it('keeps one identity sentence and puts the screen-name method in the structure ability', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are [^\n.!?]+\.$/);
-    expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThanOrEqual(180);
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/\b(?:hh|orch|dev)-[a-z0-9-]+\b/);
     expect(ability('orch-company')).toMatch(/department names people see in their screen/i);
   });

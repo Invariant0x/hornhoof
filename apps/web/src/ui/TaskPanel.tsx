@@ -1,3 +1,4 @@
+import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { taskWaitText } from './task-wait';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -17,6 +18,7 @@ import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { HideSecret } from './HideSecret';
 import { resetDuration } from './reset';
 import { PhoneRecordings } from './PhoneRecordings';
 
@@ -118,7 +120,7 @@ const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string
   away: awayText,
   call: callText,
 };
-const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
+const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => field(e.data, 'secretHidden') === true ? t.tasks.hideSecret.done : systemText[e.kind]?.(t, e, when) || e.text;
 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
@@ -256,7 +258,7 @@ type Words = { states: Record<string, string>; names: (id: string) => string | u
 
 /* A log line in words: who did what, with its text and, for work handed in, the evidence. The tracker's own lines, a status
    change, an edit or work passed on to someone else, say it all in their title. */
-export function LogEntry({ entry, when, words }: { entry: TaskLogLine; when: (at: string) => string; words: Words }) {
+export function LogEntry({ entry, when, words, task, onChanged }: { entry: TaskLogLine; when: (at: string) => string; words: Words; task?: TaskDetail; onChanged?: () => void }) {
   const t = useT();
   const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names);
   const said = own !== null || entry.kind === 'created' ? null : lineText(t, entry, when) || null;
@@ -269,6 +271,7 @@ export function LogEntry({ entry, when, words }: { entry: TaskLogLine; when: (at
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
+      {task?.mayHideSecret && onChanged && (said || evidence) && <HideSecret taskId={task.id} onChanged={onChanged} />}
       {entry.kind === 'call' && <CallParts data={entry.data} />}
     </li>
   );
@@ -372,6 +375,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
   const [editing, setEditing] = useState(false);
   const when = (at: string) => momentText(language, at);
   const closed = task.status === 'done' || task.status === 'cancelled';
+  const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
   const people = mapPeople(org);
   const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };
   const { version, revision } = task;
@@ -381,6 +385,8 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
     <>
       <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
       <TaskHeader task={task} org={org} />
+      {task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} />}
+      {masked && <p className="muted"><a href="/settings/passwords">{t.tasks.hideSecret.vault}</a></p>}
       <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
       {task.why && (
         <section className="tp-why" aria-label={t.tracker.card.why}>
@@ -416,7 +422,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
         <h4>{t.tasks.log}</h4>
         <ol className="tp-log" aria-label={t.tasks.log}>
           {task.log.map((e, i) => (
-            <LogEntry key={i} entry={e} when={when} words={words} />
+            <LogEntry key={i} entry={e} when={when} words={words} task={task} onChanged={onChanged} />
           ))}
         </ol>
       </section>

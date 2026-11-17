@@ -53,3 +53,22 @@ it('drops the role older builds gave the orchestrator, with its rights, policies
     UNION ALL SELECT 'function' FROM pg_proc WHERE proname IN ('hornhoof_head_stays', 'hornhoof_assistant_kept')`);
   expect(left.rows).toEqual([]);
 });
+
+/* The orchestrator uses the application's own connection, including suppression fingerprints. Operations keeps no
+   access to the suppression records. */
+it('lets the orchestrator read hidden-value fingerprints and keeps them from Operations', async () => {
+  const sql = agentSqlOn((await createTestDb()).$client);
+  for (const text of [
+    'SELECT fingerprint FROM secret_redactions',
+    'SELECT characters FROM secret_redactions',
+    'SELECT window_hash FROM secret_redactions',
+    'SELECT r.* FROM secret_redactions r',
+    'SELECT to_jsonb(r) FROM secret_redactions r',
+    "SELECT id FROM secret_redactions WHERE fingerprint = 'x'",
+    'SELECT id FROM secret_redactions WHERE characters > 7',
+    'SELECT id, company_id, person_id, created_at FROM secret_redactions',
+  ]) {
+    expect((await sql.run(text, 'write'))[0]!.rows, text).toEqual([]);
+    await expect(sql.run(text, 'read'), text).rejects.toThrow(/permission denied/);
+  }
+});

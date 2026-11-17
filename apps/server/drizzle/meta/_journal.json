@@ -981,6 +981,20 @@
       "when": 1794924583251,
       "tag": "0141_one_shot_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794924583252,
+      "tag": "0142_machine_access_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794924583253,
+      "tag": "0143_secret_redactions",
+      "breakpoints": true
     }
   ]
 }
