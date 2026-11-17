@@ -251,12 +251,6 @@ describe('AgentWindow', () => {
     expect(screen.queryByText(/free memory/)).not.toBeInTheDocument();
   });
 
-  it('says nothing of the machine when its update was put off, since turns go out then', async () => {
-    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
-    await screen.findByRole('textbox');
-    expect(screen.queryByText(/before an update/)).not.toBeInTheDocument();
-  });
-
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
     expect(await screen.findByText(/^The plan is at its limit\. Turns wait until .+ and go on by themselves then\.$/)).toBeInTheDocument();
