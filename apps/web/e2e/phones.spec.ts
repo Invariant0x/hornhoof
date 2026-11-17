@@ -16,7 +16,9 @@ async function words(language: Language): Promise<Messages> {
 
 async function setup(page: Page, language: Language, skin: string) {
   const t = await words(language);
-  await page.clock.install({ time: NOW });
+  /* The page's clock runs from the moment it is installed until it is paused, however briefly on a busy machine, and a
+     pause cannot go back: it starts a minute before NOW, longer than a test may take, and stands still at NOW. */
+  await page.clock.install({ time: NOW - 60_000 });
   await page.clock.pauseAt(NOW);
   await serveApi(page);
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
@@ -48,42 +50,40 @@ async function fits(host: Locator) {
   for (const r of result) { expect(r.height, r.text ?? '').toBeGreaterThanOrEqual(44); expect(r.overflow, r.text ?? '').toBeLessThanOrEqual(1); }
 }
 
-for (const width of [375, 1440]) {
-  test(`register, watch and Stop at ${width}px in every shipped theme and language`, async ({ page }, info) => {
+/* Each shipped theme and language is a test of its own: each loads the page anew, and eight loads in one test took a busy
+   machine past the time a test has. The title names the language, not its id, so the run of a release checks every
+   theme and language at 1440px as before, and the full run the 375px ones. */
+for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const language of LANGUAGES) {
+  test(`register, watch and Stop at ${width}px in the ${skin.id} theme, ${language.name}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 });
-    for (const skin of BUILTIN_SKINS) for (const language of LANGUAGES) {
-      const t = await setup(page, language.id, skin.id);
-      const section = page.getByRole('region', { name: t.phones.heading });
-      await expect(section.getByText(t.phones.empty, { exact: true })).toBeVisible();
-      await section.getByRole('button', { name: t.phones.add, exact: true }).click();
-      const form = section.getByRole('form', { name: t.phones.add });
-      await form.getByRole('button', { name: t.phones.find, exact: true }).click();
-      await expect(form.getByLabel(t.phones.name, { exact: true })).toBeFocused();
-      await expect(form.getByLabel(t.phones.name, { exact: true })).toHaveAttribute('aria-invalid', 'true');
-      await form.getByLabel(t.phones.name, { exact: true }).fill(phone.name);
-      await form.getByLabel(t.phones.address, { exact: true }).fill('192.168.1.80:5555');
-      await fits(form);
-      if (info.project.name === 'phones-chromium' && skin.id === 'cyberpunk' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`add-${width}.png`), fullPage: true });
-      await form.getByRole('button', { name: t.phones.find, exact: true }).click();
-      await expect(form.getByText(t.phones.devices.device, { exact: true })).toBeVisible();
-      await form.getByRole('button', { name: t.phones.add, exact: true }).click();
-      const card = section.getByRole('article', { name: phone.name });
-      await expect(card).toBeVisible();
-      await card.getByRole('button', { name: t.phones.watch }).click();
-      await expect(card.getByText(t.phones.noPicture).first()).toBeVisible();
-      await fits(card);
-      await card.getByRole('button', { name: t.phones.stop, exact: true }).click();
-      await expect(card.getByText(t.phones.paused, { exact: true })).toBeVisible();
-      await expect(card.getByRole('button', { name: t.phones.resume })).toBeEnabled();
-      // Neither shipped language is RTL; this checks the same controls in a synthetic RTL direction.
-      await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
-      await fits(card);
-      expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-      if (info.project.name === 'phones-chromium' && skin.id === 'light' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`stopped-${width}.png`), fullPage: true });
-      // The fixture deliberately keeps /api/stream open; navigation disposes that request.
-      await page.goto('about:blank');
-      await page.unrouteAll({ behavior: 'ignoreErrors' });
-    }
+    const t = await setup(page, language.id, skin.id);
+    const section = page.getByRole('region', { name: t.phones.heading });
+    await expect(section.getByText(t.phones.empty, { exact: true })).toBeVisible();
+    await section.getByRole('button', { name: t.phones.add, exact: true }).click();
+    const form = section.getByRole('form', { name: t.phones.add });
+    await form.getByRole('button', { name: t.phones.find, exact: true }).click();
+    await expect(form.getByLabel(t.phones.name, { exact: true })).toBeFocused();
+    await expect(form.getByLabel(t.phones.name, { exact: true })).toHaveAttribute('aria-invalid', 'true');
+    await form.getByLabel(t.phones.name, { exact: true }).fill(phone.name);
+    await form.getByLabel(t.phones.address, { exact: true }).fill('192.168.1.80:5555');
+    await fits(form);
+    if (info.project.name === 'phones-chromium' && skin.id === 'cyberpunk' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`add-${width}.png`), fullPage: true });
+    await form.getByRole('button', { name: t.phones.find, exact: true }).click();
+    await expect(form.getByText(t.phones.devices.device, { exact: true })).toBeVisible();
+    await form.getByRole('button', { name: t.phones.add, exact: true }).click();
+    const card = section.getByRole('article', { name: phone.name });
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: t.phones.watch }).click();
+    await expect(card.getByText(t.phones.noPicture).first()).toBeVisible();
+    await fits(card);
+    await card.getByRole('button', { name: t.phones.stop, exact: true }).click();
+    await expect(card.getByText(t.phones.paused, { exact: true })).toBeVisible();
+    await expect(card.getByRole('button', { name: t.phones.resume })).toBeEnabled();
+    // Neither shipped language is RTL; this checks the same controls in a synthetic RTL direction.
+    await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    await fits(card);
+    expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    if (info.project.name === 'phones-chromium' && skin.id === 'light' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`stopped-${width}.png`), fullPage: true });
   });
 }
 
