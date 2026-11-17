@@ -6,10 +6,10 @@ import { readGrant, type Grant } from '../computer/grant.js';
 import { Hourly, readJson, reasonOf, writePrivately } from './machine-keys.js';
 
 /* How often the keeper asks while its machine's access is open or a command of it is out, and how often otherwise. */
-export const OPEN_EVERY_MS = 2_000;
-export const CLOSED_EVERY_MS = 15_000;
+const OPEN_EVERY_MS = 2_000;
+const CLOSED_EVERY_MS = 15_000;
 /* With no answer of the app for this long, since the start or the last one, the machine closes: it cannot hear a close. */
-export const DEAF_MS = 60_000;
+const DEAF_MS = 60_000;
 /* How long one request may take. */
 export const ASK_MS = 10_000;
 /* The updater is alive when it touched its file within this, as the app took it before. */

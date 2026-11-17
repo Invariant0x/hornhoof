@@ -11,7 +11,7 @@ import { adapterOf, directImports, impactEnvironment, selectTests } from '../aut
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
 import { complexityAt, prepare, sourceDigest } from '../author-check/wired.mjs';
-import { cloneWithModules, shareModules } from '../author-check/modules.mjs';
+import { cloneWithModules, installedFrom, shareModules } from '../author-check/modules.mjs';
 import { tracked } from './tracked-files.mjs';
 
 const SHA = '1'.repeat(40), BASE = '2'.repeat(40);
@@ -629,7 +629,7 @@ test('a problem of the selection makes tests unavailable, and a migration withou
 
 function runner(overrides = {}) {
   const lines = [], calls = [];
-  return { lines, calls, log: line => lines.push(line), head: () => SHA, hasCommit: () => false, exists: () => true,
+  return { lines, calls, log: line => lines.push(line), head: () => SHA, hasCommit: () => false,
     exec: async (program, args) => { calls.push([program, ...args]); return { code: 0, output: '' }; },
     prepare: async () => null, makePlan: () => ({ sha: SHA, base: BASE, changes: [], hunks: {}, grown: {} }),
     check: async () => ({ code: 0 }), ...overrides };
@@ -699,7 +699,6 @@ test('the real command runner reports the exit code, its output, and a program t
     writeFileSync(join(dir, 'x.txt'), 'text');
     assert.equal(ports.read('x.txt'), 'text');
     assert.equal(ports.read('none.txt'), null);
-    assert.equal(ports.exists('x.txt'), true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -725,7 +724,7 @@ test('the real git port reads commits, a plan of a real repository included', { 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('preparing a run installs only what is missing and builds again what was built from other sources', async () => {
+test('preparing a run installs only what is missing or from another lockfile, and builds again what was built from other sources', async () => {
   const asked = [];
   const PROTOCOL = 'packages/protocol/dist/.built-from', NODE = 'apps/node/dist/.built-from';
   const ports = ({ have = [], stamps = {}, sources = {}, code = 0, shared = false } = {}) => {
@@ -733,7 +732,7 @@ test('preparing a run installs only what is missing and builds again what was bu
     return {
       files,
       shareModules: () => { if (shared) asked.push('shared'); return shared; },
-      exists: path => have.includes(path),
+      installed: () => have.includes('node_modules'),
       read: path => files[path] ?? null,
       write: (path, text) => { files[path] = text; },
       digest: paths => paths.map(path => `${path}=${sources[path] ?? 'a'}`).join(','),
@@ -869,6 +868,22 @@ test('moving a checked fixture to ordinary docs still checks its former readers'
   assert.ok(result.packages.length > 0);
 });
 
+/* A lockfile as npm writes it, and what npm keeps in node_modules of what it installed from one: the packages it put there,
+   without the workspace itself and without a package the lockfile names only for another machine. */
+const lockfile = ({ zod = '3.0.0' } = {}) => JSON.stringify({ lockfileVersion: 3, packages: {
+  '': { name: 'root', workspaces: ['packages/*'] },
+  'packages/protocol': { name: '@hornhoof/protocol', version: '1.0.0' },
+  'node_modules/@hornhoof/protocol': { resolved: 'packages/protocol', link: true },
+  'node_modules/zod': { version: zod, resolved: `https://registry.npmjs.org/zod/-/zod-${zod}.tgz` },
+  'node_modules/@types/node': { version: '22.0.0', dev: true },
+  'node_modules/@esbuild/linux-x64': { version: '0.25.0', dev: true, optional: true, os: ['linux'] },
+} });
+const installedLock = (more = {}) => {
+  const { packages } = JSON.parse(lockfile());
+  delete packages['']; delete packages['node_modules/@esbuild/linux-x64'];
+  return JSON.stringify({ lockfileVersion: 3, packages: { ...packages, ...more } });
+};
+
 /* A clone installed from a lockfile, and a worktree of it at the same lockfile: a package, a scope of packages, a link to a
    workspace package, a command in .bin, a tool's cache and a workspace's own folder of packages. */
 function cloneAndWorktree({ sameLock = true } = {}) {
@@ -879,9 +894,9 @@ function cloneAndWorktree({ sameLock = true } = {}) {
     make(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
     make(join(root, 'packages/protocol/index.js'), `export const where = '${root}';`);
   }
-  make(join(clone, 'package-lock.json'), 'lock 1');
-  make(join(tree, 'package-lock.json'), sameLock ? 'lock 1' : 'lock 2');
-  make(join(clone, 'node_modules/.package-lock.json'), 'lock 1');
+  make(join(clone, 'package-lock.json'), lockfile());
+  make(join(tree, 'package-lock.json'), sameLock ? lockfile() : lockfile({ zod: '4.0.0' }));
+  make(join(clone, 'node_modules/.package-lock.json'), installedLock());
   make(join(clone, 'node_modules/zod/index.js'), 'zod');
   make(join(clone, 'node_modules/@types/node/index.d.ts'), 'types');
   make(join(clone, 'node_modules/.vite/cache'), 'cache');
@@ -908,6 +923,43 @@ test('a worktree takes the packages its clone installed from the same lockfile, 
   } finally { rmSync(top, { recursive: true, force: true }); }
 });
 
+test('packages count as installed from the lockfile npm installed them from, whatever it left out for another machine', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-installed-'));
+  const at = (lock, installed) => {
+    rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
+    writeFileSync(join(dir, 'package-lock.json'), lock);
+    if (installed !== null) { mkdirSync(join(dir, 'node_modules'), { recursive: true }); writeFileSync(join(dir, 'node_modules/.package-lock.json'), installed); }
+    return installedFrom(dir);
+  };
+  try {
+    assert.equal(at(lockfile(), installedLock()), true);
+    assert.equal(at(lockfile({ zod: '4.0.0' }), installedLock()), false, 'a package the lockfile moved to another version');
+    assert.equal(at(lockfile(), installedLock({ 'node_modules/left-pad': { version: '1.0.0' } })), false, 'a package the lockfile no longer names');
+    const { packages } = JSON.parse(installedLock());
+    delete packages['node_modules/@types/node'];
+    assert.equal(at(lockfile(), JSON.stringify({ packages })), false, 'a package the lockfile names that is not there');
+    const bumped = JSON.parse(lockfile());
+    bumped.packages['packages/protocol'].version = '1.1.0';
+    assert.equal(at(JSON.stringify(bumped), installedLock()), true, 'a workspace at its next version installs nothing new');
+    assert.equal(at(lockfile(), null), false, 'nothing installed');
+    assert.equal(at(lockfile(), 'half a file'), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a worktree takes its clone\'s packages in place of its own from an older lockfile, and they count as installed', () => {
+  const { top, clone, tree, git } = cloneAndWorktree();
+  try {
+    mkdirSync(join(tree, 'node_modules/zod'), { recursive: true });
+    writeFileSync(join(tree, 'node_modules/zod/index.js'), 'old zod');
+    writeFileSync(join(tree, 'node_modules/.package-lock.json'), installedLock({ 'node_modules/zod': { version: '2.0.0' } }));
+    assert.equal(installedFrom(tree), false);
+    assert.equal(shareModules(tree, git), true);
+    assert.equal(realpathSync(join(tree, 'node_modules/zod')), join(clone, 'node_modules/zod'));
+    assert.equal(installedFrom(tree), true);
+    assert.ok(lstatSync(join(tree, 'node_modules/.package-lock.json')).isFile(), 'its own record, which an npm run in the worktree may write');
+  } finally { rmSync(top, { recursive: true, force: true }); }
+});
+
 test('a worktree of another lockfile, a clone itself or one whose clone installed nothing installs on its own', () => {
   const other = cloneAndWorktree({ sameLock: false });
   const same = cloneAndWorktree();
@@ -916,6 +968,8 @@ test('a worktree of another lockfile, a clone itself or one whose clone installe
     assert.throws(() => lstatSync(join(other.tree, 'node_modules')), /ENOENT/);
     assert.equal(cloneWithModules(same.clone, () => `${same.clone}/.git\n`), null, 'a clone is no worktree of itself');
     assert.equal(cloneWithModules(same.tree, () => { throw new Error('not a git repository'); }), null);
+    writeFileSync(join(same.clone, 'node_modules/.package-lock.json'), installedLock({ 'node_modules/zod': { version: '2.0.0' } }));
+    assert.equal(cloneWithModules(same.tree, same.git), null, 'a clone whose packages are from another lockfile');
     rmSync(join(same.clone, 'node_modules/.package-lock.json'));
     assert.equal(cloneWithModules(same.tree, same.git), null, 'a clone whose install did not finish');
   } finally { for (const { top } of [other, same]) rmSync(top, { recursive: true, force: true }); }

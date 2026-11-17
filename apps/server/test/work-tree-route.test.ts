@@ -8,7 +8,7 @@ import type { DepartmentTree } from '../src/modules/tasks/tree.js';
 import { treeFacts } from '../src/modules/tasks/tree-facts.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks } from './development-echelons-verification.js';
+import { verified } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
@@ -73,10 +73,7 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     await submit(ctx, executor, taskId, code);
     await verdict(ctx, rita.id, taskId, { pass: true, reviewedCommit: HEAD, comment: 'Checked the candidate.' });
     if ((await snapshot(taskId)).stage === 'security') await verdict(ctx, sid.id, taskId, { pass: true, reviewedCommit: HEAD, comment: 'Checked the declared risk.' });
-    const task = await loadTask(db, taskId);
-    const checks = await candidateChecks({ ctx, db, task, tester }, await snapshot(taskId), HEAD);
-    const run = await checks.run();
-    await report(ctx, tester.id, taskId, checks.verified([run.id]));
+    await report(ctx, tester.id, taskId, verified(await snapshot(taskId)));
     const ready = await snapshot(taskId);
     return report(ctx, head.id, taskId, { done: true, summary: 'Observed the checked candidate in turn-4.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };

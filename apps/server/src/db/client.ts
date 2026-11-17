@@ -24,7 +24,7 @@ export const KEEPER_NAME = 'hornhoof-keeper';
 const APP_SETTINGS = '-c transaction_timeout=5s -c client_min_messages=warning';
 const appSettings = (fenced: boolean | undefined): string => (fenced ? `${APP_SETTINGS} -c ${FENCED}=on` : APP_SETTINGS);
 
-export type PoolOptions = { statementTimeoutMs?: number; fenced?: boolean };
+type PoolOptions = { statementTimeoutMs?: number; fenced?: boolean };
 
 /* pg lets an address's options and application_name replace the ones given beside it, and a fence must not depend on what
    an address says. */

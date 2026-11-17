@@ -3,6 +3,7 @@ import { OPERATOR_PICTURE_BYTES } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agents, attachments, programOperatorCases, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { requestProgramView } from './rpc.js';
@@ -18,7 +19,7 @@ export async function refreshCasePicture(ctx: Ctx, row: Case): Promise<void> {
   if (!view || view.result !== 'ok') return;
   const { rendered } = renderPicture(view, await pictureSecrets(ctx, row.companyId));
   await operatorTransaction(ctx, async tx => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, row.agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
     await storeCasePicture(tx, row, rendered.png);
   });
 }

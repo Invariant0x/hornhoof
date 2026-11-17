@@ -47,6 +47,11 @@ const NOWHERE = 'host=/nonexistent';
    pg_<subscription>_<table>, and a table whose rows were going over when a cut came stays at data copy. */
 const LEFT_ORIGINS = `SELECT o.roname::text AS name FROM pg_replication_origin o JOIN pg_subscription_rel r ON o.roname = format('pg_%s_%s', r.srsubid, r.srrelid)
   WHERE r.srsubid = $1::oid AND r.srsubstate = 'd' AND NOT EXISTS (SELECT FROM pg_stat_subscription w WHERE w.subid = r.srsubid AND w.relid = r.srrelid)`;
+/* The leader's slots of the same tables, by the name Postgres gives them: pg_<subscription>_sync_<table>_<this database
+   server's system id>. Postgres makes a table's slot anew when its first copy starts again, so the old one only takes a
+   place on the leader: the copy names them in its report, and the leader drops them. */
+const LEFT_SLOTS = `SELECT format('pg_%s_sync_%s_%s', r.srsubid, r.srrelid, (SELECT system_identifier FROM pg_control_system())) AS name FROM pg_subscription_rel r
+  WHERE r.srsubid = $1::oid AND r.srsubstate = 'd' AND NOT EXISTS (SELECT FROM pg_stat_subscription w WHERE w.subid = r.srsubid AND w.relid = r.srrelid) ORDER BY r.srrelid`;
 /* Whether a file is there, by its path. Its size is asked, and not the whole answer: a row is null to Postgres
    unless every field of it is set, and a file's time of creation never is on Linux. */
 export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL AS there';
@@ -56,8 +61,10 @@ export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'd
 
 /* What a copy says of itself in its keeper's report. at: the leader's pulse it holds. name: the name of its
    subscription, its slot on the leader and its connection there. old: the attempt whose database waits to be merged. */
-/* old.led: the number of the term the old database led the company under, when it did. */
-export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null };
+/* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is
+   made, the leader's slots of its tables whose first copy broke off, for the leader to drop; none said while there are
+   none. */
+export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
@@ -539,7 +546,13 @@ export class CopyMaker {
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
-    this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
+    this.said = { ...this.making(progress, this.kept.old ? await this.oldPulse() : null), ...(await this.leftSlots(sql, sub.oid)) };
+  }
+
+  /* The leader's slots of tables whose first copy broke off, to name in the report; nothing when there are none. */
+  private async leftSlots(sql: Sql, oid: number): Promise<{ left?: string[] }> {
+    const { rows } = await sql.query<{ name: string }>(LEFT_SLOTS, [oid]);
+    return rows.length ? { left: rows.map(row => row.name) } : {};
   }
 
   /* How many tables the subscription takes, and how many of them got through their first copy; each look counts

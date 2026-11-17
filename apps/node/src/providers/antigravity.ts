@@ -22,9 +22,9 @@ export const SIGNED_OUT = /authentication failed or timed out|authentication req
    before agy's prompt shows, never from a conversation above it. */
 const SETUP_COLORS = /Choose your color scheme:[\s\S]*\[Next\]/;
 const SETUP_TERMS = /\[Previous\][ \t]+\[Done\]/;
-export type AgySetupStep = 'colors' | 'terms';
+type AgySetupStep = 'colors' | 'terms';
 
-export function agySetupStep(screen: string): AgySetupStep | null {
+function agySetupStep(screen: string): AgySetupStep | null {
   if (SETUP_TERMS.test(screen)) return 'terms';
   return SETUP_COLORS.test(screen) ? 'colors' : null;
 }
@@ -179,7 +179,7 @@ export function agyInput(parameters: unknown): string {
   return isRecord(parameters) && typeof parameters.CommandLine === 'string' ? parameters.CommandLine : inputText(parameters);
 }
 
-export const AGY_LIMITS_WAIT_MS = 15_000;
+const AGY_LIMITS_WAIT_MS = 15_000;
 const AGY_WINDOWS: Record<string, string> = {
   '5h': 'five_hour',
   '1d': 'one_day',
@@ -271,7 +271,7 @@ export function agyUsageLimits(page: unknown): Limits | null {
   return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows, complete: true };
 }
 
-export type AgyLimitsOptions = { bin?: string; home: string; tools: string; user?: JobUser | null; timeoutMs?: number; signal?: AbortSignal };
+type AgyLimitsOptions = { bin?: string; home: string; tools: string; user?: JobUser | null; timeoutMs?: number; signal?: AbortSignal };
 
 /* Asks agy for the plan's quota buckets in an empty folder of its home, so no repository rules or MCP servers load. */
 export async function agyPlanLimits({ bin: givenBin, home, tools, user = null, timeoutMs = AGY_LIMITS_WAIT_MS, signal }: AgyLimitsOptions): Promise<Limits | null> {
@@ -351,14 +351,14 @@ async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir
 
 /* How long the node looks at a new agy for its first-run setup or its prompt. An agy that shows neither by then is not held
    for its setup: a turn's start looks at its screen too. */
-export const SETUP_LOOK_MS = 30_000;
+const SETUP_LOOK_MS = 30_000;
 
 type Look = { bin: string; home: string; env: NodeJS.ProcessEnv; user: JobUser | null };
 
 /* Whether agy shows its first-run setup when it starts here as a turn starts it. Its screen is the one mark of it: agy
    1.4.12 keeps none the node could read, as the settings.json that a person's Done left on a machine held just {}. The node
    presses nothing on it, and closes it at once. Each look has a tmux server of its own, which starts agy with this env. */
-export async function setupShown({ bin, home, env, user }: Look): Promise<boolean> {
+async function setupShown({ bin, home, env, user }: Look): Promise<boolean> {
   const dir = agentDir(join(home, '.hh-setup-check'), user);
   const command = [bin, '--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: [dir] })];
   const tmux = new Tmux({ socket: `hh-setup-${randomUUID()}`, env });

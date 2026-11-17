@@ -336,23 +336,24 @@ function SentPicture({ id, name }: { id: string; name: string }) {
 }
 
 /* A file that is no picture, by its name, to download. */
-function SentFile({ id, name }: { id: string; name: string }) {
+function SentFile({ id, name, big }: { id: string; name: string; big?: boolean }) {
   const t = useT();
+  const said = big ? ` · ${t.tasks.bigFile}` : '';
   return (
-    <a className="t-file" href={`/api/attachments/${id}`} download={name} aria-label={t.window.downloadFile(name)} title={t.window.downloadFile(name)}>
+    <a className="t-file" href={`/api/attachments/${id}`} download={name} aria-label={`${t.window.downloadFile(name)}${said}`} title={`${t.window.downloadFile(name)}${said}`}>
       <FileIcon />
-      <span>{name}</span>
+      <span>{`${name}${said}`}</span>
     </a>
   );
 }
 
 /* The pictures and files of a person's message, whether its text is folded or not; a picture opens large, a file downloads. */
 export function SentPictures({ data }: { data: unknown }) {
-  const pictures = (data as { pictures?: { id: string; name: string; file?: boolean }[] } | null)?.pictures ?? [];
+  const pictures = (data as { pictures?: { id: string; name: string; file?: boolean; big?: boolean }[] } | null)?.pictures ?? [];
   if (!pictures.length) return null;
   return (
     <div className="t-pics">
-      {pictures.map(p => (p.file ? <SentFile key={p.id} id={p.id} name={p.name} /> : <SentPicture key={p.id} id={p.id} name={p.name} />))}
+      {pictures.map(p => (p.file ? <SentFile key={p.id} id={p.id} name={p.name} big={p.big} /> : <SentPicture key={p.id} id={p.id} name={p.name} />))}
     </div>
   );
 }

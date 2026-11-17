@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { z } from 'zod';
+import type { Checker } from '../../checker.js';
 import { reasonOf } from './machine-keys.js';
 
 /* What a keeper wrote down in its folder of something it is in the middle of, as a switch of the server. A note that
@@ -9,7 +9,7 @@ export class NoteUnreadable extends Error {}
 
 /* The note at that path, of that shape: null when there is none. Throws NoteUnreadable when the file is there and
    cannot be opened, or holds something else than the keeper wrote. what: how the note is named in the line. */
-export function readNote<T>(path: string, shape: z.ZodType<T>, what: string): T | null {
+export function readNote<T>(path: string, shape: Checker<T>, what: string): T | null {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');

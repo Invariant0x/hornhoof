@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { jobs } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 
@@ -11,7 +12,7 @@ export const NOT_DELIVERED = 'message_not_delivered';
 
 /* An employee's message that neither went into a turn nor waits in its recipient's line: why, as a code a failure collector
    groups by, to whom, and the task the sender named. */
-export type Undelivered = { reason: string; recipient: string; task: number | string | null };
+type Undelivered = { reason: string; recipient: string; task: number | string | null };
 
 /* What Hornhoof keeps of it with the sender's turn, as the result of the call that sent it. */
 export const UndeliveredRecord = z.object({
@@ -38,7 +39,7 @@ export const messageNotDelivered = (reason: string): ApiError =>
   new ApiError(409, 'conflict', 'The message did not reach the employee. Check its window and try again.', 'agent_not_ready', { undelivered: reason });
 
 async function runningTurn(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<string | null> {
-  const [turn] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
+  const [turn] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   return turn?.id ?? null;
 }
 

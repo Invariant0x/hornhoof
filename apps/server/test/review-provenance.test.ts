@@ -1,24 +1,19 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, taskEvents, taskRoutes, tasks, testParts, turns } from '../src/db/schema.js';
+import { agents, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { BASE, FIRST, SECOND, fixture, rejectedFinding } from './review-fixture.js';
 
 describe('pinned review provenance', () => {
-  it('delivers the author run ID, exact SHA, verified part counts and computed gate counts', async () => {
-    const { ctx, task, author, run, event } = await fixture();
-    const good = await run(FIRST, 1);
-    const stale = await run(SECOND, 2);
-    await submit(ctx, author.id, task.id, { summary: 'Done', evidence: 'Both runs passed', review: { baseCommit: BASE } });
-    expect((await event('submitted')).data.review).toMatchObject({
-      commit: FIRST, branch: `task-${task.number}`, authorId: author.id,
-      runs: expect.arrayContaining([
-        expect.objectContaining({ id: good.id, number: 1, commit: FIRST, verified: true, parts: { passed: 1, failed: 0, other: 0 } }),
-        expect.objectContaining({ id: stale.id, number: 2, commit: SECOND, verified: false }),
-      ]),
-    });
+  it('delivers the exact SHA, branch, author and change of the pinned candidate, and no test runs', async () => {
+    const { ctx, task, author, event } = await fixture();
+    await submit(ctx, author.id, task.id, { summary: 'Done', evidence: 'Local tests passed', review: { baseCommit: BASE } });
+    const review = (await event('submitted')).data.review;
+    expect(review).toMatchObject({ commit: FIRST, branch: `task-${task.number}`, authorId: author.id, source: { baseCommit: BASE, commit: FIRST, paths: ['logic/totals.ts'] } });
+    expect(review).not.toHaveProperty('runs');
+    expect(review).not.toHaveProperty('quality');
   });
 
   it('rejects a verdict claiming a different commit without recording it', async () => {
@@ -38,22 +33,13 @@ describe('pinned review provenance', () => {
     expect((await event('submitted')).data.review).toEqual(submitted.data.review);
   });
 
-  it('gives the immutable evidence to the reviewer through the task tool', async () => {
-    const { ctx, task, author, run, tools } = await fixture();
-    const good = await run(FIRST, 1);
+  it('gives the immutable candidate to the reviewer through the task tool', async () => {
+    const { ctx, task, author, tools } = await fixture();
     await submit(ctx, author.id, task.id, { summary: 'Done', evidence: 'Checks', review: { baseCommit: BASE } });
     const response = await (await tools()).callTool({ name: 'task', arguments: { task: task.number } });
     expect(response.isError).toBeFalsy();
     const content = response.content as { type: string; text: string }[];
-    expect(JSON.parse(content[0]!.text)).toMatchObject({ review: { commit: FIRST, runs: [expect.objectContaining({ id: good.id, verified: true })] } });
-  });
-
-  it('does not certify a passed run whose actual part failed', async () => {
-    const f = await fixture();
-    const run = await f.run(FIRST, 1);
-    await f.db.update(testParts).set({ status: 'failed', exitCode: 1 }).where(eq(testParts.runId, run.id));
-    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Run says passed', review: { baseCommit: BASE } });
-    expect((await f.event('submitted')).data.review).toMatchObject({ runs: [expect.objectContaining({ id: run.id, verified: false, parts: { passed: 0, failed: 1, other: 0 } })] });
+    expect(JSON.parse(content[0]!.text)).toMatchObject({ review: { commit: FIRST, authorId: author.id } });
   });
 
   it('keeps one verdict under concurrent retries', async () => {

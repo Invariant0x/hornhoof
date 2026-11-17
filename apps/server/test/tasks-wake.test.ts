@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { idOnly, only } from '../src/db/selections.js';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -79,7 +80,7 @@ describe('a person who speaks to an agent directly', () => {
 
   it("does not let a person answer an internal stuck request through the agent's terminal", async () => {
     const c = await stuck();
-    expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
+    expect(await c.db.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
     expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting', silent: SILENT_TURNS }]);
@@ -92,7 +93,7 @@ describe('a person who speaks to an agent directly', () => {
     await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
     expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
-    expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
+    expect(await c.db.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
   });
 
   it("answers the agent's question with a message in its window, and leaves a commit to approve open", async () => {
@@ -109,7 +110,7 @@ describe('a person who speaks to an agent directly', () => {
       { kind: 'approval', status: 'open', answer: null, answeredBy: null },
     ]);
     /* The message's own turn, and the task's after it. */
-    expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.agentId, bruno.id)).orderBy(asc(jobs.createdAt))).map(j => j.taskId)).toEqual([null, mine.id]);
+    expect((await db.select(only(jobs, 'taskId')).from(jobs).where(eq(jobs.agentId, bruno.id)).orderBy(asc(jobs.createdAt))).map(j => j.taskId)).toEqual([null, mine.id]);
   });
 });
 
@@ -193,6 +194,8 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
+    const takesSkillFiles = c.ctx.hub.takesSkillFiles.bind(c.ctx.hub);
+    vi.spyOn(c.ctx.hub, 'takesSkillFiles').mockImplementation(id => rexs(id) || takesSkillFiles(id));
     const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();
@@ -219,7 +222,7 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
   });
 
-  it("waits for the reset once Bruno's turns worked on it, as what he did may not be pushed yet", async () => {
+  it("keeps the work with Bruno once his turns worked on it, as what he did may not be pushed yet, and he goes on on a fallback plan", async () => {
     for (const before of ['a turn', 'a long refused turn'] as const) {
       const { db, bruno, rex, task, turnsOf } = await withPeer({}, before);
       expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], before).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
@@ -227,11 +230,12 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     }
   });
 
-  it('waits for the reset when the one who could take it is in a team that takes only urgent work', async () => {
+  it('keeps the work with Bruno, who goes on on the free plan as a fallback, when the one who could take it is in a team that takes only urgent work', async () => {
     const { db, bruno, rex, task, turnsOf } = await withPeer({ urgentOnly: true });
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
     expect(await turnsOf(rex.id)).toEqual([]);
-    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]).toMatchObject({ subscriptionId: rex.subscriptionId });
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued' || j.status === 'running').map(j => [j.taskId, j.subscriptionId])).toEqual([[task.id, rex.subscriptionId]]);
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
@@ -467,7 +471,7 @@ describe("Hornhoof's note that a task stands still", () => {
 
   it('asks the member head to answer the internal stuck request', async () => {
     const c = await stuck();
-    const [note] = await c.db.select({ id: requests.id }).from(requests);
+    const [note] = await c.db.select(idOnly(requests)).from(requests);
     const asked = (await c.turnsOf(c.head.id)).filter(j => j.prompt.includes(note!.id));
     expect(asked).toHaveLength(1);
     expect(asked[0]!.prompt).toContain('comment');
@@ -562,7 +566,7 @@ describe('waking agents for their tasks', () => {
     const longAgo = () => db.update(jobs).set({ error: 'agent_failed', startedAt: new Date(Date.now() - 10 * 60_000) }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
     for (let i = 0; i < SILENT_TURNS + 1; i++) await finish(bruno.id, longAgo, 'failed');
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
-    expect(await db.select({ kind: taskEvents.kind }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
+    expect(await db.select(only(taskEvents, 'kind')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
     expect(await db.select().from(requests)).toEqual([]);
     const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(1);
@@ -576,7 +580,7 @@ describe('waking agents for their tasks', () => {
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
     const noTools = () => db.update(jobs).set({ error: 'agent_failed', failure: { kind: 'tools', text: 'The program has no Hornhoof tools in this session.', retryable: true } }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
     await finish(bruno.id, noTools, 'failed');
-    expect(await db.select({ kind: taskEvents.kind }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
+    expect(await db.select(only(taskEvents, 'kind')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
     const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(1);
@@ -794,14 +798,17 @@ describe("a plan's share for tasks", () => {
     const { ctx, db, builtin, bruno, task, resetsAt } = await plan(0.85);
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
     await marked(builtin);
-    expect(builtin.queued()).toBe(0);
-    expect((await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, bruno.id)))).toEqual([{ status: 'queued' }]);
+    /* Nothing of Bruno's goes to the machine: the one turn there is the orchestrator's, told once that no fallback has room. */
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect(builtin.queued()).toBe(1);
+    expect((await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator!.id))).map(j => j.prompt)).toEqual([expect.stringContaining('no fallback plan has room for its employees, so their work waits: Bruno.')]);
+    expect((await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.agentId, bruno.id)))).toEqual([{ status: 'queued' }]);
     expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: resetsAt, limitUntil: null });
   });
 
   it("still sends a person's own message on such a plan", async () => {
     const { ctx, builtin, bruno, companyId } = await plan(0.85);
-    const [person] = await ctx.db.select({ id: people.id }).from(people);
+    const [person] = await ctx.db.select(idOnly(people)).from(people);
     await enqueueTurn(ctx, { companyId, agentId: bruno.id, prompt: 'Ivan (CEO): How far are you?', createdBy: person!.id });
     expect((await nextRun(builtin)).prompt).toContain('How far are you?');
   });
@@ -820,10 +827,10 @@ describe("a plan's share for tasks", () => {
       : (await r.db.select().from(agents).where(eq(agents.kind, 'orchestrator')))[0]!;
     const mine = kind === 'head'
       ? await r.task(agent.id)
-      : (await createTask(r.ctx, { personId: (await r.db.select({ id: people.id }).from(people))[0]!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: null, assigneeAgentId: agent.id })).task;
+      : (await createTask(r.ctx, { personId: (await r.db.select(idOnly(people)).from(people))[0]!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: null, assigneeAgentId: agent.id })).task;
     await wakeAll(r.ctx, [{ agentId: agent.id, taskId: mine.id, why: 'assigned' }]);
     expect((await nextRun(r.builtin)).prompt).toContain('Checkout API');
-    expect(await r.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agent.id))).toEqual([{ status: 'running' }]);
+    expect(await r.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.agentId, agent.id))).toEqual([{ status: 'running' }]);
   });
 });
 
@@ -893,7 +900,7 @@ describe('a head', () => {
     const count = async (taskId: string, kind: 'continued' | 'interrupted') => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, kind)))).length;
     /* Its own task gets the retry, which waits on it, so it does not go on a second way. */
     expect([await count(payments.id, 'interrupted'), await count(payments.id, 'continued')]).toEqual([1, 0]);
-    expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(isNotNull(jobs.retryOf))).map(j => j.taskId)).toEqual([payments.id]);
+    expect((await db.select(only(jobs, 'taskId')).from(jobs).where(isNotNull(jobs.retryOf))).map(j => j.taskId)).toEqual([payments.id]);
     expect([await count(refunds.id, 'interrupted'), await count(refunds.id, 'continued')]).toEqual([0, 0]);
     expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });

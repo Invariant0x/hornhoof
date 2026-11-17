@@ -1,0 +1,6 @@
+{
+  "origin": "Synthetic tmux boundary sample; not an incident recording",
+  "command": ["list-panes", "-s", "-t", "=a-own", "-F", "#{pane_pid}"],
+  "stderr": "error connecting to /tmp/tmux-1000/hh (Connection refused)",
+  "recoveredStdout": "100\n"
+}

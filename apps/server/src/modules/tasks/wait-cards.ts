@@ -4,13 +4,14 @@ import type { Ctx } from '../../app.js';
 import type { AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
 import { tasks, taskWaits, turns, waitNotices } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ownNote, taskSpot } from './engine.js';
 import { pageAfter, type WaitPlace } from './wait-views.js';
 
 /* The cards kept for a person about waits past their dates: only their own, of what they reach, until they say they saw them.
    Seeing one decides nothing: no question it speaks of is answered, and no approval is given or changed. */
 
-export type WaitCardKind = 'late' | 'final_review' | 'goal_risk' | 'turn_summary' | 'release_tag';
+type WaitCardKind = 'late' | 'final_review' | 'goal_risk' | 'turn_summary' | 'release_tag';
 /* words: what Hornhoof wrote for them, which holds no words of the work itself. turn: the turn a summary or a tag is of, with
    the version it came out as; tag: the version a tag that released nothing names, and why. A screen says them in the
    person's language. */
@@ -18,7 +19,7 @@ export type WaitCard = {
   id: string; about: WaitCardKind; taskId: string | null; number: number | null; kind: WaitSourceKind | null; level: number | null; words: string; at: string;
   turn: { number: number; version: string | null } | null; tag: { version: string; why: 'unrecorded' | 'stale' } | null;
 };
-export type CardPage = { cards: WaitCard[]; next: string | null };
+type CardPage = { cards: WaitCard[]; next: string | null };
 
 const aboutOf = (card: typeof waitNotices.$inferSelect): WaitCardKind => {
   if (card.guard.tag) return 'release_tag';
@@ -64,7 +65,7 @@ export async function acknowledgeCard(ctx: Pick<Ctx, 'db'>, personId: string, id
     const [card] = await tx.select().from(waitNotices).where(and(eq(waitNotices.id, id), eq(waitNotices.personId, personId), isNotNull(waitNotices.deliveredAt))).for('update');
     if (!card) return false;
     if (card.acknowledgedAt) return true;
-    const [wait] = card.waitId ? await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
+    const [wait] = card.waitId ? await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
     await tx.update(waitNotices).set({ acknowledgedAt: now, acknowledgedByPersonId: personId }).where(eq(waitNotices.id, id));
     const taskId = wait?.taskId ?? card.guard.turn?.taskId;
     if (taskId) await ownNote(tx, { id: taskId, companyId: card.companyId }, { kind: 'wait_card', text: 'A person said they saw their card about this task.', data: { notice: id, personId, acknowledged: true } });

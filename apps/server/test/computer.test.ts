@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
 import { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
@@ -71,7 +72,7 @@ function withWait(c: Pick<Company, 'app' | 'control' | 'machine'>, waitMs: numbe
 
 const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
 /* The commands that wait for the machine's keeper or are out with it. */
-const pending = (db: Company['db']) => db.select({ id: computerRuns.id }).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
+const pending = (db: Company['db']) => db.select(idOnly(computerRuns)).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
@@ -564,7 +565,7 @@ describe('access to the computer the server runs on', () => {
     ]);
   });
 
-  it('is opened and closed by the CEO and the delegate alone, never by another person or through the orchestrator', async () => {
+  it('is opened and closed by the CEO, the delegate and the orchestrator, never by another person', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator } = c;
     const lena = await invitePerson(app, ceo, { name: 'Lena', email: 'lena@example.com', access: { whole: true } });
@@ -573,12 +574,14 @@ describe('access to the computer the server runs on', () => {
       const byLena = await app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(lena) });
       expect(byLena.statusCode).toBe(403);
       expect(byLena.json().error.reason).toBe('not_machine_owner');
-      expect((await app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
     }
-    /* She sees it without the buttons; the orchestrator does not see it. */
+    /* She sees it without the buttons. */
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(lena) })).json()).toMatchObject({ available: true, canAnswer: false });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
     expect(await accessOf(c)).toBeUndefined();
+    const inside = { headers: orchestratorHeaders(owner!.id, orchestrator.id) };
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...inside })).json()).toMatchObject({ available: true, canAnswer: true });
+    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...inside })).json()).toMatchObject({ canAnswer: true, until: expect.any(String) });
+    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...inside })).json()).toMatchObject({ until: null });
 
     const [lenaRow] = await db.select().from(people).where(eq(people.name, 'Lena'));
     await app.inject({ method: 'PUT', url: `/api/people/${lenaRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });

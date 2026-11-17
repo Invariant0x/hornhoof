@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
-import type { JobView, Me, ShownCommand, SubView } from '../types';
+import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
+import { PlanFallbacks } from '../ui/PlanFallbacks';
 import { Ask } from '../ui/Ask';
 import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
 import { usePlanCommands } from './use-plan-commands';
@@ -236,6 +237,9 @@ type PlanControls = {
   note: SignNote | null;
   keying: boolean;
   setBudget: (sub: SubView, budget: number | null) => unknown;
+  setFallbacks: (sub: SubView, fallbacks: PlanFallback[]) => unknown;
+  /* Every plan of the company this person sees, which a plan's fallbacks are named from. */
+  plans: SubView[];
   runTest: (sub: SubView) => unknown;
   makeOrchestrator: (sub: SubView) => unknown;
   signIn: (sub: SubView, fresh: boolean) => unknown;
@@ -257,7 +261,6 @@ type PlanProps = { sub: SubView; me: Me; controls: PlanControls };
 
 function PlanSettings({ sub: s, me, controls }: PlanProps) {
   const t = useT();
-  if (s.kind !== 'personal') return null;
   const editable = s.owner.id === me.person.id || me.person.scopeKind === 'company';
   const select = (
     <select className="sel" aria-label={t.subs.shareLabel(subName(t, s))} value={s.budget === null ? '' : String(s.budget)} onChange={e => controls.setBudget(s, e.target.value ? Number(e.target.value) : null)}>
@@ -265,7 +268,10 @@ function PlanSettings({ sub: s, me, controls }: PlanProps) {
       {SHARES.map(n => <option key={n} value={String(n)}>{`${n}%`}</option>)}
     </select>
   );
-  return <Part title={t.tables.settings}><Facts items={[[t.subs.share, editable ? select : s.budget === null ? t.subs.shareAll : `${s.budget}%`]]} /></Part>;
+  return <>
+    {s.kind === 'personal' && <Part title={t.tables.settings}><Facts items={[[t.subs.share, editable ? select : s.budget === null ? t.subs.shareAll : `${s.budget}%`]]} /></Part>}
+    <Part title={t.subs.fallbacks}><PlanFallbacks sub={s} plans={controls.plans} editable={editable || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} /></Part>
+  </>;
 }
 
 function TestButtons({ sub: s, me, controls: c }: PlanProps) {
@@ -510,6 +516,12 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
       setSubs(list => replaceSubscription(list, subscription, 'update'));
     });
 
+  const setFallbacks = (sub: SubView, fallbacks: PlanFallback[]) =>
+    run(async () => {
+      const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { fallbacks });
+      setSubs(list => replaceSubscription(list, subscription, 'update'));
+    });
+
   const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);
 
   const stopSignIn = (on: Signing) =>
@@ -578,7 +590,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
+            setBudget, setFallbacks, plans: subs, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />

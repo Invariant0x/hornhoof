@@ -16,7 +16,7 @@ import { ANSWER_MS, nextUpdateStep, PROMISE_MS, type UpdateAction, type UpdateMe
    does is written down first, so a keeper that starts again in the middle goes on. */
 
 export const LEAD_UPDATE = 'lead-update.json';
-export const UPDATING_PATH = '/peer/updating';
+const UPDATING_PATH = '/peer/updating';
 const EVERY_MS = 250;
 const NOT_CONFIRMED = 'The copies did not confirm the last changes';
 

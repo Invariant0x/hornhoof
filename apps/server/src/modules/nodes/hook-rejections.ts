@@ -3,6 +3,7 @@ import { and, eq, isNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { nodeOfAgent } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { sameNode, type NodeIdentity } from './hub.js';
@@ -34,7 +35,7 @@ function repeated(ctx: Ctx, msg: Rejection, now: number): boolean {
 export async function hookRejected(ctx: Ctx, id: NodeIdentity, msg: Rejection, scope: SQL): Promise<void> {
   const agent = await ownedAgent(ctx, id, msg.agentKey);
   if (!agent || repeated(ctx, msg, Date.now())) return;
-  const [job] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), scope)).limit(1);
+  const [job] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), scope)).limit(1);
   if (job) {
     await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: job.id, kind: 'hook_rejected', data: { event: msg.event, reason: msg.reason } });
   } else {

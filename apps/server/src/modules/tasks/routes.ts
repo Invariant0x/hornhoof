@@ -1,3 +1,4 @@
+import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -77,10 +78,13 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
   if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-  /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
+  /* The orchestrator answers for the person its turn answers, under its input lock, checked again as it is kept; its call
+     of its own is the owner's answer, which says the orchestrator gave it. */
   const on = delegationOf(me);
   requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
-  const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on, me.assistant ? { assistant: me.assistant.id } : {}));
+  const own = me.via && !on ? me.via : undefined;
+  const actor = own ? { personId: me.id } : actorOf(me);
+  const done = await lockedFor(ctx, on, () => answer(ctx, actor, id, body, on, { ...(me.assistant ? { assistant: me.assistant.id } : {}), ...(own ? { orchestrator: own } : {}) }));
   await wakeAll(ctx, done.wakes);
   /* An agent switched off while it waited for this answer leaves the work now. */
   await leaveIfOff(ctx, done.request.agentId);
@@ -200,7 +204,7 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
    work stays outside releases. Only the yes or no, never the repository. */
 async function releasesTurns(db: Db, departmentId: string | null): Promise<boolean> {
   if (!departmentId) return false;
-  const [department] = await db.select({ repoUrl: departments.repoUrl }).from(departments).where(eq(departments.id, departmentId));
+  const [department] = await db.select(only(departments, 'repoUrl')).from(departments).where(eq(departments.id, departmentId));
   return !!department?.repoUrl;
 }
 
@@ -305,10 +309,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
       if (!canReach(await accessOf(db, me), { departmentId: dept.id })) throw refuse(403, 'not_your_department', "Only the CEO, the CEO delegate and the people of this department give it work. Ask one of them, or the orchestrator.");
       if (body.product) {
-        const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
+        const [product] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
         if (!product) throw refuse(404, 'department_unknown', 'This product does not exist.');
       }
-      [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
+      [assignee] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
     /* A task the person does not see is no task to come after, as for anything else they name. */
@@ -345,7 +349,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = ReplanBody.parse(req.body);
-    const [seen] = await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
+    const [seen] = await db.select(only(taskWaits, 'taskId')).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
     if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
     const task = await changed(me, seen.taskId);
     const viewer = await viewerOf(db, me);

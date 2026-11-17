@@ -162,7 +162,7 @@ it('retains a person task file while its task stays open, and expires only the o
   const values = { companyId: c.company.id, agentId: c.worker.id, personId: c.ceo.id, bytes: Buffer.from('Full text.'), size: 10, createdAt: old };
   const [file] = await c.db.insert(attachments).values({ ...values, taskId: c.task.id, name: 'person-report.txt', mediaType: 'text/plain' }).returning();
   await c.db.insert(attachments).values({ ...values, mediaType: 'image/png' });
-  expect(await dropOldFiles(c.db, new Date())).toBe(1);
+  expect(await dropOldFiles(c.app.ctx, new Date())).toBe(1);
   expect(await c.files()).toHaveLength(1);
   expect((await c.files())[0]!.id).toBe(file!.id);
 });

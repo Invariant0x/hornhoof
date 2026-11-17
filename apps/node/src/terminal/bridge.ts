@@ -1,17 +1,22 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
 import { ToolsMemory } from './tools-memory.js';
 
-/* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
+/* Hook and tool calls are short. A file an agent sends or fetches passes as it comes, whatever its size. */
 const MAX_BODY = 4 * 1024 * 1024;
-const MAX_FILE = 51 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
+/* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
+   calls, and with Node's 5 seconds its next call on a connection the bridge was closing broke with ECONNRESET. */
+const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
@@ -35,7 +40,7 @@ const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
 const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
-const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
    and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
@@ -67,19 +72,20 @@ export class Bridge {
   /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
   private readonly refusals: HookFailures;
   private readonly memory = new ToolsMemory();
+  private readonly policies = new Map<string, Map<string, ToolPrivacyPolicy>>();
 
   constructor(
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
   }
 
   async start(): Promise<void> {
-    const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
+    const server = createServer({ keepAliveTimeout: KEEP_ALIVE_MS }, (req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
       if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
     });
@@ -181,7 +187,7 @@ export class Bridge {
     const hint = `${key}:${peer.pid ?? 'legacy'}`;
     let found = known.get(hint);
     if (!found) {
-      found = this.owns(key, peer).catch(() => false);
+      found = this.owns(key, peer).catch(error => { known.delete(hint); throw error; });
       known.set(hint, found);
     }
     return found;
@@ -228,22 +234,26 @@ export class Bridge {
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
-    if (kind === 'attach' && event !== undefined && event !== 'file') return reply(res, 404, '');
+    if (!attachmentPath(kind, event)) return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
-       caller closing its socket; it is never applied until ownership succeeds. */
-    const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
-    void reading.catch(() => {});
+       caller closing its socket; it is never applied until ownership succeeds. A file is not kept: it waits unread until
+       then, and goes on to Hornhoof as it comes. */
+    const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
+    void reading?.catch(() => {});
     if (!(await owned)) {
       if (kind === 'hook' && event) this.options.unowned?.(key, event);
       return this.refused(req, res, 403, 'owner check failed');
     }
-    const body = await reading;
+    const body = reading ? await reading : Buffer.alloc(0);
+    await this.observeSensitive(key, kind, body);
+    /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
+    if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
     if (known !== null) return this.answered(res, key, body, known, asked);
-    const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
+    const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : await this.attachmentTokenFor(key, req.method, event);
     if (!token) return kind === 'mcp' ? this.noTools(res, key, body, asked) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {
@@ -251,17 +261,38 @@ export class Bridge {
       if (typeof v === 'string') headers[h] = v;
     }
     const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
-    const up = await this.forward(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) }, onlyReading(kind, req.method, body));
+    const sent = req.method === 'GET' || req.method === 'HEAD' ? {} : kind === 'attach' ? { body: Readable.toWeb(req) as ReadableStream<Uint8Array>, duplex: 'half' } : { body: new Uint8Array(body) };
+    const up = await this.forward(target, { method: req.method, headers, ...sent } as RequestInit, onlyReading(kind, req.method, body));
     const out: Record<string, string> = {};
     for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
       const v = up.headers.get(h);
       if (v) out[h] = v;
     }
-    const answer = Buffer.from(await up.arrayBuffer());
     res.writeHead(up.status, out);
+    if (kind === 'attach') return pipeline(up.body ? Readable.fromWeb(up.body as never) : Readable.from([]), res);
+    const answer = Buffer.from(await up.arrayBuffer());
+    await this.observeSensitive(key, kind, body, answer);
+    if (kind === 'mcp' && up.ok) this.keepTools(key, body, answer);
     res.end(answer);
-    if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  private attachmentTokenFor(key: string, method: string | undefined, event: string | undefined): Promise<string | undefined> {
+    const token = this.tokens.get(key);
+    if (token || method !== 'POST' || event !== undefined) return Promise.resolve(token);
+    return this.attachmentToken(key);
+  }
+
+  /* The program may still work after the host lost its turn token. Ask on the same authenticated node link as MCP,
+     without opening a turn: the server grants only a file upload to that agent's existing running task turn. Never
+     keep this permission as a tool token or across requests. */
+  private async attachmentToken(key: string): Promise<string | undefined> {
+    const answer = await this.options.outside?.(key, JSON.stringify({ jsonrpc: '2.0', id: 'attachment', method: 'attachments/token' }), undefined);
+    if (answer?.status !== 200) return undefined;
+    try {
+      const value = JSON.parse(answer.body) as { result?: { token?: unknown } };
+      return typeof value.result?.token === 'string' ? value.result.token : undefined;
+    } catch { return undefined; }
   }
 
   /* A call that only reads goes again after a short outage, a few times with growing pauses; a write is never sent twice,
@@ -291,14 +322,15 @@ export class Bridge {
     const version = req.headers['mcp-protocol-version'];
     const got = await outside(key, body.toString('utf8'), typeof version === 'string' ? version : undefined).catch(() => null);
     if (!got) return false;
-    reply(res, got.status, got.body);
     const answer = Buffer.from(got.body);
+    await this.observeSensitive(key, 'mcp', body, answer);
+    reply(res, got.status, got.body);
     /* Turned away as it connects, by the machine installing its build or the agent no longer here: it keeps no tools. */
     if (got.status !== 200 || !resultsOnly(answer)) {
       if (JOINING.some(method => asks(body, method))) this.refusedAt.set(key, asked);
       return true;
     }
-    this.memory.keep(key, body, answer);
+    this.keepTools(key, body, answer);
     if (asks(body, 'tools/list')) this.heardList(key, asked);
     return true;
   }
@@ -307,6 +339,33 @@ export class Bridge {
   private answered(res: ServerResponse, key: string, body: Buffer, known: string, asked: number): void {
     reply(res, known ? 200 : 202, known);
     if (asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  toolPolicy(key: string, name: string): ToolPrivacyPolicy | undefined {
+    for (const [registered, policy] of this.policies.get(key) ?? []) {
+      if (name === registered || name.endsWith(`__${registered}`) || name.endsWith(`.${registered}`)) return policy;
+    }
+    return toolPrivacy(name);
+  }
+
+  private async observeSensitive(key: string, kind: string, body: Buffer, answer?: Buffer): Promise<void> {
+    if (kind !== 'mcp') return;
+    const call = observedCall(body);
+    if (!call) return;
+    const target = privateToolCall(call.name, call.input, name => this.toolPolicy(key, name));
+    /* Cleanup failure stops forwarding; it must never be swallowed as a malformed response. */
+    if (target.policy?.sensitive) await this.options.sensitive?.(key, target.name, target.input, answer ? decodedAnswer(answer) : undefined, target.policy);
+  }
+
+  private keepTools(key: string, body: Buffer, answer: Buffer): void {
+    this.memory.keep(key, body, answer);
+    if (!asks(body, 'tools/list')) return;
+    try {
+      const result = JSON.parse(answer.toString('utf8')) as { result?: { tools?: { name?: unknown; _meta?: ToolPrivacyPolicy }[] } };
+      const policies = this.policies.get(key) ?? new Map<string, ToolPrivacyPolicy>();
+      for (const tool of result.result?.tools ?? []) if (privatePolicy(tool)) policies.set(tool.name, tool._meta);
+      this.policies.set(key, policies);
+    } catch { /* A malformed listing supplies no new privacy policies. */ }
   }
 
   /* A call the node cannot answer for Hornhoof with no turn open: a tool call gets words the agent reads, and a program
@@ -458,3 +517,20 @@ function hookFailure(status: number): string {
 }
 
 const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';
+
+function observedCall(body: Buffer): { name: string; input: unknown } | null {
+  try {
+    const call = JSON.parse(body.toString('utf8')) as { method?: string; params?: { name?: string; arguments?: unknown } };
+    const name = call.params?.name;
+    return call.method === 'tools/call' && typeof name === 'string' ? { name, input: call.params?.arguments } : null;
+  } catch { return null; }
+}
+
+function decodedAnswer(answer: Buffer): unknown {
+  try { return JSON.parse(answer.toString('utf8')); } catch { return undefined; }
+}
+
+function privatePolicy(tool: { name?: unknown; _meta?: ToolPrivacyPolicy }): tool is { name: string; _meta: ToolPrivacyPolicy } {
+  return typeof tool.name === 'string' && (tool._meta?.sensitive === true || tool._meta?.delegatesTool === true);
+}
