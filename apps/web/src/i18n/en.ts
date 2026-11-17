@@ -1655,7 +1655,7 @@ export const en = {
     home: { name: 'Home', description: 'A family\'s helpers run like a small company: home devices and network, and the household. Works best with a few home computers connected. Anything that acts on the real world waits for a person.' },
   },
   tasks: {
-    hideSecret: { vault: 'Save passwords in the company vault', action: 'Hide secret', value: 'Secret to hide', hint: 'Select the secret in the task or its log, or paste it here. All stored copies will be replaced with [hidden].', confirm: 'Hide everywhere', hiding: 'Hiding...', done: 'Secret hidden.', failed: 'The secret could not be hidden. Check your access and select the text again.' },
+    hideSecret: { vault: 'Save passwords in the company vault', action: 'Hide secret', value: 'Secret to hide', hint: 'Select the secret in the task or its log, or paste it here: at least 8 characters. All stored copies will be replaced with [hidden].', confirm: 'Hide everywhere', hiding: 'Hiding...', done: 'Secret hidden.', failed: 'The secret could not be hidden. Check your access and select the text again.' },
     echelons: {
       coordination: 'Checked coordination report',
       turnkey: 'No stages: the employee does it alone from start to finish',
