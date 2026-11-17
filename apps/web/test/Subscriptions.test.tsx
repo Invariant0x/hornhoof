@@ -359,7 +359,7 @@ describe('Subscriptions', () => {
     };
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    const table = await screen.findByRole('table');
+    const table = await waitFor(() => screen.getByRole('table'));
     /* Each isolated piece in document order, with its direction: null is a phrase's own, found from its words. */
     const pieces = (el: Element) => [...el.querySelectorAll('bdi')].map(b => `${b.getAttribute('dir')} ${b.textContent}`);
     const isolated = (text: string) => `⁦${text}⁩`;
