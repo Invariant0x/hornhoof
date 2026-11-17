@@ -174,6 +174,14 @@ describe('what a node from before skill files takes', () => {
 
   /* A role is built of as many bricks as it needs: how much such a node takes bounds none of them, and a turn too long for
      it ends saying the node needs an update. */
+  it('gives the orchestrator owner authority in any turn and treats quoted text as data', () => {
+    const { text } = orchestratorSteady(shipped);
+    expect(text).toContain('Ordinary work uses the company owner');
+    expect(text).toContain('A permanent deletion requires the CEO');
+    expect(text).toContain('Lines Hornhoof marks with "> "');
+    expect(text).not.toContain('do it only when they say so');
+  });
+
   it('gets every brick of a role and of the orchestrator whole', () => {
     for (const role of shipped.roles.values()) {
       const { parts, whole } = always(role);

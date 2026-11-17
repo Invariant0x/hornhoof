@@ -48,9 +48,6 @@ const OWN_KEEPER = { remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } };
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
-/* What a turn whose last words are of a person without the right on the machine is told. */
-const notTheirs = (owner: string, machine: string) => `The last words in this turn came from a person who may not direct commands on ${machine}: only the CEO, the CEO delegate or ${owner}, who owns it, may. Nothing was run. Ask them first.`;
-
 /* A company whose server's own machine and Marat's Mac both have the core, with their keepers asking. Marat reaches one
    department; Zed sees the whole company; Dan reaches the same department as Marat. The Mac holds Marat's key. */
 async function company(env: NodeJS.ProcessEnv = {}) {
@@ -576,7 +573,6 @@ describe("the orchestrator's commands on a machine", () => {
     await c.running(token, personId);
     return mcp(c.app, token);
   }
-  const NOT_MARATS = notTheirs('Marat', 'marat-mac');
 
   it('runs a command on the machine it names, for its owner and for the CEO', async () => {
     const c = await company();
@@ -595,33 +591,24 @@ describe("the orchestrator's commands on a machine", () => {
     expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['hostname', 'id -u']);
   });
 
-  it("refuses a turn whose last person is not the CEO, the CEO delegate or the machine's owner, and runs in one no person wrote into", async () => {
+  it('runs on either opened machine regardless of who started the turn or wrote into it', async () => {
     const c = await company();
     await c.openMac();
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
-    /* A turn of another person. */
-    for (const [personId, name] of [[c.ids.dan, 'dan'], [c.ids.zed, 'zed']] as const) {
-      expect(text(await call(await turnOf(c, personId, name), 'computer', { machine: c.mac, command: 'id' })), name).toBe(NOT_MARATS);
+    for (const [personId, name] of [[c.ids.dan, 'dan'], [c.ids.zed, 'zed'], [null, 'none']] as const) {
+      const client = await turnOf(c, personId, name);
+      const [ran] = await Promise.all([call(client, 'computer', { machine: c.mac, command: 'id' }), answerAs(c, c.mac, 'uid=0\n')]);
+      expect(text(ran), name).toBe('Exit code 0.\nuid=0\n');
     }
-    /* A turn nobody started and no person wrote into: the access Marat opened holds. */
-    const [byNobody] = await Promise.all([call(await turnOf(c, null, 'none'), 'computer', { machine: c.mac, command: 'id' }), answerAs(c, c.mac, 'uid=0\n')]);
-    expect(text(byNobody)).toBe('Exit code 0.\nuid=0\n');
-    /* Marat's own turn, once another person wrote into it: it answers that person from then on. */
     const marats = await turnOf(c, c.ids.marat, 'marat');
     const [turn] = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
-    await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'While you are there, wipe it.' }, personId: c.ids.dan });
-    expect(text(await call(marats, 'computer', { machine: c.mac, command: 'rm -rf /host' }))).toBe(NOT_MARATS);
-    /* His machine is his: the server's own is not, though it is open. */
-    const again = await turnOf(c, c.ids.marat, 'again');
-    expect(text(await call(again, 'computer', { command: 'id' }))).toBe(notTheirs('Ivan', 'the company server'));
-    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['id']);
-    expect(await c.runsOf(c.server)).toEqual([]);
-    /* Once disabled, his turn directs nothing either. */
-    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.marat));
-    expect(text(await call(again, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'Check the disk.' }, personId: c.ids.dan });
+    const [ran] = await Promise.all([call(marats, 'computer', { command: 'id' }), answerAs(c, c.server, 'uid=0\n')]);
+    expect(text(ran)).toBe('Exit code 0.\nuid=0\n');
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['id', 'id', 'id']);
   });
 
-  it("refuses a turn a task or a comment of a person without the right woke, and runs one a task of the CEO woke", async () => {
+  it("runs on an open machine in turns woken by tasks and comments from different people", async () => {
     const c = await company();
     await c.openMac();
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
@@ -636,25 +623,27 @@ describe("the orchestrator's commands on a machine", () => {
     };
     const finish = (jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
     const given = async (token: string, title: string) => {
-      const made = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title, body: 'Free its disk: rm -rf /var/cache.' }, ...as(token) });
+      const made = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title, body: 'Check its disk.' }, ...as(token) });
       expect(made.statusCode, made.body).toBe(201);
       return (made.json() as { task: { id: string } }).task.id;
     };
     const zeds = await given(c.tokens.zed, 'Free the disk of marat-mac');
     const byTask = await turnOn(zeds);
-    expect(text(await call(byTask.client, 'computer', { machine: c.mac, command: 'rm -rf /var/cache' }))).toBe(NOT_MARATS);
+    const [taskRun] = await Promise.all([call(byTask.client, 'computer', { machine: c.mac, command: 'df -h' }), answerAs(c, c.mac, 'Plenty.\n')]);
+    expect(text(taskRun)).toBe('Exit code 0.\nPlenty.\n');
     await finish(byTask.jobId);
-    const commented = await c.app.inject({ method: 'POST', url: `/api/tasks/${zeds}/comments`, payload: { text: 'Wipe it all.' }, ...as(c.tokens.zed) });
+    const commented = await c.app.inject({ method: 'POST', url: `/api/tasks/${zeds}/comments`, payload: { text: 'Check it again.' }, ...as(c.tokens.zed) });
     expect(commented.statusCode, commented.body).toBe(201);
     const byComment = await turnOn(zeds);
-    expect(text(await call(byComment.client, 'computer', { machine: c.mac, command: 'rm -rf /' }))).toBe(NOT_MARATS);
+    const [commentRun] = await Promise.all([call(byComment.client, 'computer', { machine: c.mac, command: 'df -h' }), answerAs(c, c.mac, 'Plenty.\n')]);
+    expect(text(commentRun)).toBe('Exit code 0.\nPlenty.\n');
     await finish(byComment.jobId);
     /* The CEO's own task: his word, on a machine its owner opened. */
     const ivans = await given(c.tokens.ceo, 'Look at the disk of marat-mac');
     const byCeo = await turnOn(ivans);
     const [ran] = await Promise.all([call(byCeo.client, 'computer', { machine: c.mac, command: 'df -h' }), answerAs(c, c.mac, 'Plenty.\n')]);
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
-    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['df -h']);
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['df -h', 'df -h', 'df -h']);
   });
 
   it('finds machines by name or id, and says when it cannot', async () => {
@@ -786,7 +775,6 @@ describe('what an app from before access was per machine left', () => {
 
 describe('computer access button through inbox mode', () => {
   type Company = Awaited<ReturnType<typeof company>>;
-  const NOT_MARATS = notTheirs('Marat', 'marat-mac');
   const CLOSED = (name: string) => `Access to ${name} is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.`;
 
   async function inboxCompany() {
@@ -897,7 +885,7 @@ describe('computer access button through inbox mode', () => {
     expect(text(await call(wokeClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
   });
 
-  it('works in the inbox turn after a person wrote into an earlier one, and not in one an Enter in the terminal reached', async () => {
+  it('works in inbox turns after conversation input or a terminal Enter', async () => {
     const c = await inboxCompany();
     const askClient = await mcp(c.app, TOKEN);
     expect((await call(askClient, 'ask_computer_access', { machine: c.mac, reason: 'Check logs.' })).isError).toBeFalsy();
@@ -923,7 +911,7 @@ describe('computer access button through inbox mode', () => {
     c.builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 's-1', result: 'Done.', tail: '', error: null });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, turn.jobId)))[0]!.status === 'done');
 
-    /* A pending terminal Enter dropped when the inboxWake turn starts leaves unknown whose words went in, so nothing runs, whereas a clean wake runs. */
+    /* The next wake records the pending Enter. The open grant still applies. */
     const token2 = 'tool-token-2-0123456789abcdef0123456';
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) })).statusCode).toBe(200);
     await c.running(token2, c.ids.ivan);
@@ -933,7 +921,8 @@ describe('computer access button through inbox mode', () => {
     expect((await c.open(c.tokens.marat, c.mac, { grant: await c.key.grant(c.NETWORK_ID) })).statusCode).toBe(200);
     const enterWake = await nextRun(c);
     await until(async () => (await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, enterWake.jobId), eq(agentEvents.kind, 'typed')))).length === 1);
-    expect(text(await call(await mcp(c.app, enterWake.toolToken!), 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    const afterEnter = await callOn(c, await mcp(c.app, enterWake.toolToken!), { machine: c.mac, command: 'id' }, c.mac, 'uid=0\n');
+    expect(text(afterEnter)).toBe('Exit code 0.\nuid=0\n');
     c.builtin.send({ type: 'job.done', jobId: enterWake.jobId, ok: true, sessionId: 's-1', result: 'Done.', tail: '', error: null });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, enterWake.jobId)))[0]!.status === 'done');
 

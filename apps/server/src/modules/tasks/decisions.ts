@@ -104,11 +104,11 @@ const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAns
 
 /* What the orchestrator asks of people: his pending cards, for people who see the whole company and see him, and his
    requests for machines. A request for a machine shows to its owner, whose it is to answer, whether they see him or
-   not, and to the people who see the whole company and see him. Only a screen of a person takes it. */
+   not, and to the people who see the whole company and see him. The orchestrator reads the same cards with the owner's rights. */
 async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ cards: ProposalRow[]; computers: Decisions['computers'] }> {
   const { db } = ctx;
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
-  if (!orchestrator || me.via) return { cards: [], computers: [] };
+  if (!orchestrator || me.viaHead) return { cards: [], computers: [] };
   const seesHim = seesAgentId(viewer, orchestrator.id);
   const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
   /* Most of the time no machine is asked for, and nothing of the machines is read. */
@@ -128,7 +128,7 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
   const found = (await db.execute(sql`SELECT m.id, m.label, m.source, count(*)::int AS open,
       (SELECT r.dumped_at FROM net.restores r WHERE m.source = 'kept:' || r.kept ORDER BY r.at DESC LIMIT 1) AS after
     FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge
-    WHERE c.picked IS NULL AND c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)})
+    WHERE c.picked IS NULL AND (c.op = 'delete' OR c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)}))
     GROUP BY m.id ORDER BY m.created_at, m.source`)) as unknown as { rows: { id: string; label: string; open: number; after: string | Date | null }[] };
   if (found.rows.length === 0) return [];
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));

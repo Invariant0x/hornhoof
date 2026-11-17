@@ -7,6 +7,17 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
+- Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
+- The orchestrator can use an open machine grant whoever started the turn or last wrote.
+- Choosing access for every agent opens the machine for the selected duration in one step.
+- The orchestrator can see personal assistants and their conversations while each assistant takes orders from its person.
+- The orchestrator can read and settle ordinary merge conflicts, and only a direct CEO choice can pick a permanent deletion.
+- A department head can enable a skill that grants only department tracker work.
+- The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
+
 ### Changed
 
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.

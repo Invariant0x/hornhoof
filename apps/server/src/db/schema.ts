@@ -126,6 +126,9 @@ export const people = pgTable(
     /* Deleted by the CEO: off the lists and the map, with no sign-in, email or Telegram, while the old tasks and answers
        that name them keep pointing here. */
     removedAt: timestamp('removed_at', { withTimezone: true }),
+    deletionApprovedBy: uuid('deletion_approved_by').references((): AnyPgColumn => people.id),
+    deletionApprovedAt: timestamp('deletion_approved_at', { withTimezone: true }),
+    deletionCompletedAt: timestamp('deletion_completed_at', { withTimezone: true }),
   },
   t => [
     index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId),

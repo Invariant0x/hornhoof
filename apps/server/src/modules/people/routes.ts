@@ -1,4 +1,5 @@
-import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { inLane } from '@hornhoof/protocol';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { passResponsibility } from '../tracker/upgrade.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -18,7 +19,7 @@ import { releaseAssistantAgent, removeAssistantAgent } from '../assistants/setup
 import { onAgent } from '../conversation/queue.js';
 import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
-import { disconnectMachines, refuseLeader } from '../nodes/disconnect.js';
+import { disconnectMachines, finishDisconnectedMachines, refuseLeader } from '../nodes/disconnect.js';
 import { removeSubscription } from '../subscriptions/routes.js';
 import { personView, personViews } from './views.js';
 
@@ -139,7 +140,7 @@ async function delegateTarget(db: Db, me: Person, id: string, isCeoDelegate: boo
 export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' | 'companyId'>): Promise<{ token: string; person: Person }> {
   const token = newToken();
   const person = await db.transaction(async tx => {
-    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null, isCeoDelegate: false }).where(and(eq(people.id, personId), eq(people.companyId, by.companyId))).returning(personColumns);
+    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null, isCeoDelegate: false }).where(and(eq(people.id, personId), eq(people.companyId, by.companyId), isNull(people.removedAt))).returning(personColumns);
     if (!row) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
@@ -198,31 +199,65 @@ export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Pr
   await passResponsibility(ctx, person.companyId, personId);
 }
 
-/* A person or an assistant leaves the company for good: their account ends as when disabled, and with it their sign-in,
-   invites, keys and own plans; an assistant's own agent leaves too, and so do the person's own assistants. The row stays,
-   with its name, for the old tasks and answers that point at it, and leaves the lists and the map. Its email and Telegram
-   are free for someone else. */
-export async function removePerson(ctx: Ctx, personId: string, by: Person): Promise<void> {
-  const { db } = ctx;
-  const helpers = await db.select(idOnly(people)).from(people).where(and(eq(people.assistantOf, personId), isNull(people.removedAt)));
-  for (const { id } of helpers) await removePerson(ctx, id, by);
-  const now = new Date();
-  await db.transaction(async tx => {
-    await tx.update(people).set({ removedAt: now, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null }).where(eq(people.id, personId));
-    await tx.update(invites).set({ usedAt: now }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
-    await tx.delete(personKeys).where(eq(personKeys.personId, personId));
-    await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(eq(assistants.personId, personId));
+const DeleteApproval = z.strictObject({ approve: z.literal(true) });
+const unknownPerson = () => new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+const deletionNeedsCeo = () => new ApiError(403, 'forbidden', 'The CEO must approve this permanent deletion.', 'deletion_needs_ceo');
+const humanCeo = (me: Person): boolean => me.isOwner && !me.via && !me.assistant;
+
+async function deletionTarget(tx: Db, me: Person, id: string) {
+  const [target] = await tx.select().from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId))).for('update');
+  if (!target || target.deletionCompletedAt) throw unknownPerson();
+  if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be deleted.', 'owner_locked');
+  return target;
+}
+
+/* First, put the target and its assistants out of reach in one commit with the CEO's decision. The retained rows
+   continue to name them in old work. An unfinished row remains available to this operation after a restart. */
+async function beginDeletion(ctx: Ctx, id: string, by: Person): Promise<string[]> {
+  return ctx.db.transaction(async tx => {
+    const target = await deletionTarget(tx, by, id);
+    const recorded = target.deletionApprovedBy === by.id && target.deletionApprovedAt;
+    if (!recorded && !humanCeo(by)) throw deletionNeedsCeo();
+    const helpers = await tx.select(idOnly(people)).from(people)
+      .where(and(eq(people.assistantOf, id), eq(people.companyId, by.companyId), isNull(people.deletionCompletedAt)));
+    const ids = [...helpers.map(h => h.id), id];
+    const theirs = await tx.select(idOnly(machines)).from(machines).where(and(inArray(machines.personId, ids), isNull(machines.revokedAt)));
+    await refuseLeader(tx, ctx.config, theirs.map(m => m.id));
+    const now = new Date();
+    await tx.update(people).set({
+      removedAt: sql`coalesce(${people.removedAt}, ${now.toISOString()}::timestamptz)`,
+      status: 'disabled', isCeoDelegate: false, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null,
+    }).where(inArray(people.id, ids));
+    if (!recorded) await tx.update(people).set({ deletionApprovedBy: by.id, deletionApprovedAt: now }).where(eq(people.id, id));
+    await tx.update(invites).set({ usedAt: now }).where(and(inArray(invites.personId, ids), isNull(invites.usedAt)));
+    await tx.delete(sessions).where(inArray(sessions.personId, ids));
+    await tx.delete(personKeys).where(inArray(personKeys.personId, ids));
+    await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(inArray(assistants.personId, ids));
+    return ids;
   });
-  await disablePerson(ctx, personId, by);
-  /* Their own plans run on their sign-in; a key they added for the company is the company's and stays. */
-  const plans = await db.select().from(subscriptions).where(and(eq(subscriptions.ownerPersonId, personId), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
+}
+
+/* Every cleanup can be repeated until it finishes. Only then is the removal marked complete. */
+async function finishDeletion(ctx: Ctx, personId: string, by: Person): Promise<void> {
+  const { db } = ctx;
+  const place = eq(machines.personId, personId);
+  const revoked = await db.select(idOnly(machines)).from(machines).where(and(place, isNotNull(machines.revokedAt)));
+  if (revoked.length) await finishDisconnectedMachines(ctx, revoked.map(m => m.id));
+  const live = await db.select(idOnly(machines)).from(machines).where(and(place, isNull(machines.revokedAt)));
+  await disconnectMachines(ctx, live.map(m => m.id));
+  const [person] = await db.select(personColumns).from(people).where(eq(people.id, personId));
+  if (person) await releasePlansOf(ctx, person, by);
+  const plans = await db.select().from(subscriptions).where(and(eq(subscriptions.ownerPersonId, personId), eq(subscriptions.kind, 'personal')));
   for (const plan of plans) await removeSubscription(ctx, plan);
+  await passResponsibility(ctx, by.companyId, personId);
   await removeAssistantAgent(ctx, personId, by);
+  await db.update(people).set({ deletionCompletedAt: new Date() }).where(eq(people.id, personId));
 }
 
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
   const acceptAttempts = limiter();
+  const deletions = new Map<string, Promise<unknown>>();
 
   /* Finds an invite that can still be accepted, or explains why not. */
   async function openInvite(token: string) {
@@ -368,6 +403,9 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     await cutReplication(ctx.replication, leaving);
 
     const changed = await db.transaction(async tx => {
+      const [live] = await tx.select(idOnly(people)).from(people)
+        .where(and(eq(people.id, id), isNull(people.removedAt))).for('update');
+      if (!live) throw unknownPerson();
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
       if (body.name !== undefined && body.name !== target.name) {
         await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
@@ -393,20 +431,29 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { person: await personView(db, person) };
   });
 
-  /* The CEO deletes a person or an assistant for good, by himself or through the orchestrator: never himself, nor a person
-     whose machine runs the company server, which moves first. */
+  /* A CEO can record a yes for the orchestrator to carry out later. The People screen's own Delete action is also a yes. */
+  app.post('/api/people/:id/delete-approval', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!humanCeo(me)) throw deletionNeedsCeo();
+    const { id } = IdParams.parse(req.params);
+    DeleteApproval.parse(req.body);
+    await db.transaction(async tx => {
+      await deletionTarget(tx, me, id);
+      await tx.update(people).set({ deletionApprovedBy: me.id, deletionApprovedAt: new Date() }).where(eq(people.id, id));
+    });
+    return reply.code(204).send();
+  });
+
   app.delete('/api/people/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO deletes a person.', 'not_owner');
+    if (!me.isOwner || me.viaHead || me.assistant) throw new ApiError(403, 'forbidden', 'Only the CEO deletes a person.', 'not_owner');
     const { id } = IdParams.parse(req.params);
-    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt)));
-    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
-    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be deleted.', 'owner_locked');
-    const theirs = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
-    await refuseLeader(db, config, theirs.map(m => m.id));
-    await removePerson(ctx, id, me);
-    ctx.bus.accessChanged(me.companyId);
-    ctx.bus.publish(me.companyId, { type: 'org' });
+    await inLane(deletions, me.companyId, async () => {
+      const ids = await beginDeletion(ctx, id, me);
+      ctx.bus.accessChanged(me.companyId);
+      ctx.bus.publish(me.companyId, { type: 'org' });
+      for (const personId of ids) await finishDeletion(ctx, personId, me);
+    });
     return reply.code(204).send();
   });
 
@@ -422,7 +469,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [person] = await db
       .update(people)
       .set({ isCeoDelegate })
-      .where(and(eq(people.id, id), isCeoDelegate ? DELEGABLE : undefined))
+      .where(and(eq(people.id, id), isNull(people.removedAt), isCeoDelegate ? DELEGABLE : undefined))
       .returning(personColumns);
     if (!person) throw notDelegable();
     if (person.isCeoDelegate !== target.isCeoDelegate) {

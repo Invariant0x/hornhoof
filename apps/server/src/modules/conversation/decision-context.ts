@@ -1,24 +1,22 @@
-import { and, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agentInbox, agents, departments, jobs, machineAccess, machines, people, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agentInbox, agents, departments, jobs, machineAccess, machines, people } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { activeClickGrants, answeredWords, byPerson, incomingWords, machineSpeaker, wordsForTurn } from './turn-words.js';
+import { activeClickGrants, answeredWords, machineSpeaker, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
-/* The orchestrator uses the CEO or delegate its turn answers, otherwise the active company owner. A head acts in its own
-   department in any turn with its active named owner's rights, otherwise the active CEO's. Department rules and notebook
-   restrict what it decides; its tools still enforce the department boundary. No fresh human message is needed for either
-   standing authority. Pending input and stopped turns have no principal. Machine access keeps its own rule below. */
+/* The orchestrator always acts as the active company owner. A head acts in its department with the rights of its
+   named owner, or the active CEO if it has none. Turn words still record who spoke. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
@@ -27,7 +25,7 @@ type Reader = Pick<Db, 'select'> | Tx;
 export type Principal = { personId: string; sourceSeq: number | null };
 
 /* What the orchestrator or a head acts on when it takes a decision: its turn and the principal it found when it asked. */
-export type Delegation = { agentId: string; jobId: string; personId: string; sourceSeq: number | null };
+export type Delegation = { agentId: string; jobId: string; personId: string; sourceSeq: number | null; standing?: true };
 
 /* The agents whose turns answer a person: the orchestrator, and a department's head, which its department's people run. */
 const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orchestrator', 'head'];
@@ -56,56 +54,30 @@ async function headOwner(db: Reader, companyId: string, departmentId: string): P
   return owner && (await runsDepartment(db, owner, departmentId)) ? { personId: owner.id, sourceSeq: null } : null;
 }
 
-/* The same standing authority for decisions and management, resolved again whenever a write rechecks its delegation. */
-async function asOwner(db: Reader, turn: Words, found: Principal | null): Promise<Principal | null> {
-  if (turn.job.agentKind === 'head') {
-    if (!turn.job.departmentId) return null;
-    const named = await headOwner(db, turn.job.companyId, turn.job.departmentId);
-    if (named) return named;
-    found = null;
-  } else if (found && (await actingCeo(db, found.personId))) return found;
-  const [owner] = await db
-    .select(idOnly(people))
-    .from(people)
-    .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
-    .limit(1);
-  return owner ? { personId: owner.id, sourceSeq: null } : found;
+async function activeOwner(db: Reader, companyId: string): Promise<Principal | null> {
+  const [owner] = await db.select(idOnly(people)).from(people)
+    .where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
+  return owner ? { personId: owner.id, sourceSeq: null } : null;
 }
 
-/* Whom the turn answers by its words alone, before applying standing authority: what the marks of an Enter keep. */
+/* Whom the turn answers by its words alone: what the marks of an Enter keep. */
 async function wordsPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
   return turn && answered(turn);
 }
 
 export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
-  const turn = await turnWords(db, jobId);
-  return turn && asOwner(db, turn, answered(turn));
+  const [job] = await db.select({ kind: agents.kind, companyId: jobs.companyId, departmentId: agents.departmentId, status: jobs.status, step: jobs.kind, pending: jobs.decisionInputPending })
+    .from(jobs).innerJoin(agents, and(eq(agents.id, jobs.agentId), eq(agents.companyId, jobs.companyId)))
+    .where(and(eq(jobs.id, jobId), isNull(agents.removedAt)));
+  if (!job) return null;
+  if (job.kind === 'orchestrator') return activeOwner(db, job.companyId);
+  if (job.kind !== 'head' || job.status !== 'running' || job.step !== 'conversation' || job.pending || !job.departmentId) return null;
+  return (await headOwner(db, job.companyId, job.departmentId)) ?? activeOwner(db, job.companyId);
 }
 
-/* How a check finds the person a call goes for: decisionPrincipal, or standingPrincipal for running the company. */
 export type FindPrincipal = (db: Reader, jobId: string) => Promise<Principal | null>;
-
-/* Management uses the same standing authority as decisions. The orchestrator can retain the last CEO or delegate's words
-   from an earlier turn; a head always uses its current department owner, otherwise the active CEO. */
-export async function standingPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
-  const turn = await turnWords(db, jobId);
-  if (!turn) return null;
-  const found = turn.said.some(byPerson) || (turn.said.length === 0 && turn.job.createdBy) ? answered(turn) : await earlierPrincipal(db, turn.job.agentId!);
-  return asOwner(db, turn, found);
-}
-
-/* The last person who wrote or typed to the agent; null when nobody did, or an Enter cleared it. */
-async function earlierPrincipal(db: Reader, agentId: string): Promise<Principal | null> {
-  const words = await db
-    .select({ seq: agentEvents.seq, personId: agentEvents.personId, kind: agentEvents.kind, data: agentEvents.data })
-    .from(agentEvents)
-    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'typed']), incomingWords, or(isNotNull(agentEvents.personId), eq(agentEvents.kind, 'typed'))))
-    .orderBy(desc(agentEvents.seq))
-    .limit(20);
-  const last = words.find(byPerson);
-  return last?.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
-}
+export const standingPrincipal = decisionPrincipal;
 
 const answered = ({ job, said }: Words): Principal | null => answeredWords(job.createdBy, said);
 
@@ -120,6 +92,7 @@ const contextChanged = () => new ApiError(409, 'conflict', 'Someone else wrote i
 
 /* The turn still goes for the same person through the same message, at the moment the decision is kept. */
 export async function checkDelegation(db: Reader, d: Delegation, find: FindPrincipal = decisionPrincipal): Promise<void> {
+  if (d.standing) return;
   const now = await find(db, d.jobId);
   if (!now) throw contextMissing();
   if (now.personId !== d.personId || now.sourceSeq !== d.sourceSeq) throw contextChanged();
@@ -166,14 +139,7 @@ async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: 
   return owner?.status === 'active' ? personId : null;
 }
 
-/* For a machine whose owner keeps its access open, the orchestrator works there in any running turn of its own: one a
-   notice, an employee's letter or a wake started, a retry and every later turn, with no new word of the CEO. Only the last
-   person whose words came into the turn can take it away: someone who may not direct commands there, as an Enter in the
-   terminal or words that may have gone in unkept do, since whose they were is not known. A notice of a person's task,
-   comment or answer, and a letter of theirs that woke an inbox turn, are their words; words of an origin Hornhoof cannot
-   name, with no person, no sender or a notice of a kind it does not know, take it away too. A turn no words came into goes
-   by whoever started it. Who the commands go for: that person, or the owner. A click answers no question, so this takes
-   no decision and asks for nothing else. */
+/* For workers the machine's grant must cover every agent. The current speaker check below is for workers and heads. */
 async function machineTurnAllowed(db: Reader, turn: Words, ownerPersonId: string, machineId: string | undefined): Promise<boolean> {
   if (turn.job.agentKind !== 'worker') return true;
   if (!machineId) return false;
@@ -183,7 +149,7 @@ async function machineTurnAllowed(db: Reader, turn: Words, ownerPersonId: string
 }
 
 export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string, machineId?: string): Promise<string | null> {
-  const turn = await turnWords(db, jobId, [...ANSWERS_PEOPLE, 'worker']);
+  const turn = await turnWords(db, jobId, ['head', 'worker']);
   if (!turn) return null;
   if (!(await machineTurnAllowed(db, turn, ownerPersonId, machineId))) return null;
   const said = turn.said.map(machineSpeaker).find(speaker => speaker !== undefined);
@@ -206,23 +172,6 @@ async function lettersSpeaker(db: Reader, job: { id: string; agentId: string | n
   const [only] = people;
   return people.size === 1 && only ? only : null;
 }
-
-/* The CEO or the CEO delegate who gave their own answer in a task's card to a question about machines, while that task is
-   still open, or null. Their recorded answer lets the orchestrator change machines for that task as their words in its
-   own turn would; it is no permission for anything else. */
-export async function cardPrincipal(db: Reader, companyId: string, requestId: string): Promise<string | null> {
-  const [found] = await db
-    .select({ topic: requests.decisionTopic, status: requests.status, answeredBy: requests.answeredBy, byAgent: requests.answeredByAgentId, task: tasks.status })
-    .from(requests)
-    .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.id, requestId), eq(requests.companyId, companyId)));
-  if (!found || found.topic !== 'machines' || !['answered', 'approved'].includes(found.status)) return null;
-  if (!found.answeredBy || found.byAgent || found.task === 'done' || found.task === 'cancelled') return null;
-  return actingCeo(db, found.answeredBy);
-}
-
-/* Whether the turn answers the CEO or the CEO delegate, now. */
-export const answersCeoOrDelegate = async (db: Reader, jobId: string, find: FindPrincipal = decisionPrincipal): Promise<boolean> => (await ceoPrincipal(db, jobId, find)) !== null;
 
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
    never goes by a principal that new words changed already. Separate from the agent's queue line; nothing inside takes it
@@ -312,16 +261,15 @@ export const alsoKept =
     await then(tx, stored);
   };
 
-/* What a call of the orchestrator or a head decides on: the person its turn answers, found by Hornhoof. The orchestrator's
-   call of its own decides as the owner, with no turn to check. A person's own screen gives none. */
+/* A head's department principal is checked again. For the orchestrator the job records who acted. */
 export function delegationOf(me: { id: string; via?: string; viaHead?: true; decision?: { jobId: string; sourceSeq: number | null } }): Delegation | undefined {
   if (!me.via || (!me.viaHead && !me.decision)) return undefined;
   if (!me.decision) throw contextMissing();
-  return { agentId: me.via, personId: me.id, ...me.decision };
+  return { agentId: me.via, personId: me.id, ...me.decision, ...(!me.viaHead ? { standing: true as const } : {}) };
 }
 
-/* The decision is kept under the input lock of the orchestrator or head that takes it, and at once from a person's screen. */
-export const lockedFor = <T>(ctx: Pick<Ctx, 'db'>, on: Delegation | undefined, fn: () => Promise<T>): Promise<T> => (on ? withInputLock(ctx, on.agentId, fn) : fn());
+/* A head's decision is kept under its input lock. */
+export const lockedFor = <T>(ctx: Pick<Ctx, 'db'>, on: Delegation | undefined, fn: () => Promise<T>): Promise<T> => (on && !on.standing ? withInputLock(ctx, on.agentId, fn) : fn());
 
 /* At the moment a decision is kept: the turn still goes for the same person, who still may take it. */
 export async function stillDecides(db: Reader, companyId: string, personId: string, subject: DecisionSubject, on: Delegation | undefined, find: FindPrincipal = decisionPrincipal): Promise<void> {

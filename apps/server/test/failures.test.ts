@@ -112,7 +112,7 @@ describe('named turn failures', () => {
     await expect(enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Wait for the review.', createdBy: null, message: { personId: null, text: 'Wait for the review.', from: 'agent', by: c.head.id } })).rejects.toThrow('Message save failed.');
     save.mockRestore();
     expect(await c.jobOf(id)).toMatchObject({ decisionInputPending: true });
-    expect(await decisionPrincipal(c.db, id)).toBeNull();
+    expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
 
     await c.fail(id, failure(kind, kind !== 'crash'));
     const retry = (await c.turnsOf(orchestrator!.id)).find(j => j.continueOf === id)!;
