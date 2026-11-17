@@ -1,6 +1,6 @@
 # Task 1253: read machine check admission
 
-Known behaviour, risk class none, small turnkey task. Base: cf8b05fed0a2c80cb8cd6794d579bc4abcc8397c. Integration waits for v0.31.0 and the next turn branch; do not push turn-31.
+Known behaviour, risk class none, small turnkey task. Initial base: cf8b05fed0a2c80cb8cd6794d579bc4abcc8397c. The head's later instruction requires rebasing only our task commits onto the released main / turn-32, without merging old turn-31 history. Integration uses fast-forward turn-32, never turn-31.
 
 The read tools test_run and work_run add checkSlot and a one-line waiting explanation to an assigned part whose execution has not started. The existing queuePosition stays available. Example contract for a queued part:
 
@@ -24,6 +24,6 @@ CheckCoordinator.inspect returns detached snapshots without refreshing, admittin
 
 Details are resolved from the claim's Run part label or authenticated job, bound to the actual node. runState checks the reader before enrichment. Holder and predecessor details also require the same company and existing run/task read authority; otherwise only kind unavailable, since, position and releasing are shown. Raw unknown labels, node identities and job IDs are not returned. Labels and names in the explanation are collapsed to one line.
 
-The response is built from current memory on every read. After release it shows the new holder and position; after tests.started it no longer adds waiting details. A missing claim is not inferred to be active from the last stored position: it is marked not_recorded. Empty and unavailable coordinator state have explicit explanations. queued counts the whole observed machine queue; ahead names only requests before the caller's recorded claim, in FIFO order.
+The response is built from current memory on every read. After release it shows the new holder and position; after tests.started it no longer adds waiting details. A missing claim is not inferred to be active from the last stored position: it is marked not_recorded with checkSlot.position null. Only the legacy queuePosition retains the last reported position when no live claim is recorded. Empty and unavailable coordinator state have explicit explanations. queued counts the whole observed machine queue; ahead names only requests before the caller's recorded claim, in FIFO order. An authenticated job is identified as an agent check even when its label happens to match a run part.
 
 Requirement evidence: check-queue.test.ts covers detached, side-effect-free reads, FIFO order and empty state with controlled time. test-runs-slots.test.ts drives both real MCP read tools on isolated database records, checks holder and task attribution, ordered predecessors, release updates, empty/startup queues, and permission redaction. Original scheduler/watchdog tests and named testruns neighbours remain part of the local checks. Whole-suite validation belongs to the release owner.
