@@ -43,7 +43,7 @@ export type StreamMessage =
   /* The orchestrator's request for the computer the server runs on, or its access, changed; only the CEO hears it. */
   | { type: 'computer' }
   /* How a plan's sign-in on one of its machines ended; it goes to the plan's owner alone. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code: number | null; line: string | null; owner: string };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

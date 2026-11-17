@@ -4,8 +4,10 @@ import { useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { AgentTerminal } from './AgentTerminal';
 
-/* What a sign-in that did not finish says, in the person's language. */
-export function signInError(t: Messages, error: string | null): string {
+/* What a sign-in that did not finish says, in the person's language: its program's code and last line when it ended
+   early and the machine gave one, otherwise the plain words of why. */
+export function signInError(t: Messages, { error, code = null, line = null }: { error: string | null; code?: number | null; line?: string | null }): string {
+  if (line) return t.subs.signInEnded(code, line);
   const key = (Object.keys(SIGNIN_ERRORS) as SigninError[]).find(k => SIGNIN_ERRORS[k] === error);
   return t.subs.signInErrors[key ?? 'other'];
 }
@@ -31,7 +33,7 @@ export function SignInPanel({ subId, program, nodeId, hostname, onEnd, onStop }:
   }, []);
   useStream(m => {
     if (m.type !== 'subscription.signin' || m.subscriptionId !== subId || m.nodeId !== nodeId) return;
-    onEnd(m.ok ? null : signInError(t, m.error));
+    onEnd(m.ok ? null : signInError(t, m));
   });
   return (
     <div className="signin" ref={box}>

@@ -152,6 +152,19 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('says under the plan why a sign-in ended early: its code and what its program said last', async () => {
+    const stream = fakeStream();
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
+    const line = 'Error: claude native binary not installed. Either postinstall did not run ... or the platform-native optional dependency was not downloaded (--omit=optional)';
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The sign-in ended before it finished, so nothing changed.', code: 1, line, owner: 'p1' });
+    expect(await screen.findByText(`The sign-in ended with code 1, so nothing changed. The program said: ${line}`)).toBeInTheDocument();
+    expect(screen.queryByText('The sign-in ended before it finished, so nothing changed.')).not.toBeInTheDocument();
+  });
+
   it('brings the sign-in window into view when it opens, below a long card', async () => {
     const shown: Element[] = [];
     const before = Element.prototype.scrollIntoView;

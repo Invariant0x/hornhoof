@@ -105,8 +105,9 @@ export const LOGIN_KEY = 'login';
 
 /* A sign-in on a node of a plan ended. Its owner hears how; on success the node seals the new sign-in, under the plan's
    next number, for each of the plan's nodes that has a key, itself too, so a node that joins later can get it from any
-   of them. A Codex plan then runs on that machine. */
-export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: string | null): Promise<void> {
+   of them. A Codex plan then runs on that machine. A sign-in whose program ended early says its code and the last line
+   it said, as the node masked it. */
+export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: string | null, early: { code: number | null; line: string | null } = { code: null, line: null }): Promise<void> {
   const { db } = ctx;
   const [node] = await db
     .select({ plan: subscriptions.id, provider: subscriptions.provider, credVersion: subscriptions.credVersion, owner: subscriptions.ownerPersonId, companyId: subscriptions.companyId })
@@ -126,6 +127,6 @@ export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: str
     if (recipients.length) ctx.hub.send(nodeIdentity(nodeId), { type: 'cred.seal', kind, version: node.credVersion + 1, recipients });
   }
   await settlePlans(db, [node.plan]);
-  ctx.bus.publish(node.companyId, { type: 'subscription.signin', subscriptionId: node.plan, nodeId, ok, error, owner: node.owner });
+  ctx.bus.publish(node.companyId, { type: 'subscription.signin', subscriptionId: node.plan, nodeId, ok, error, code: early.code, line: early.line, owner: node.owner });
   ctx.bus.publish(node.companyId, { type: 'org' });
 }

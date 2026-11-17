@@ -12,7 +12,9 @@ function ProgramVersion({ program }: { program: ProgramInfo }) {
   const t = useT();
   return <div>{program.version ?? t.machines.programVersionUnknown}
     {program.updating && <small>{t.machines.programUpdating}</small>}
-    {program.failed && <small><span className="update-error">{t.machines.programUpdateFailed}</span></small>}
+    {program.failed && !program.repair && <small><span className="update-error">{t.machines.programUpdateFailed}</span></small>}
+    {program.repair === 'reinstalling' && <small>{t.machines.programReinstalling}</small>}
+    {program.repair === 'broken' && <small><span className="update-error">{t.machines.programBroken(program.reason ?? null)}</span></small>}
   </div>;
 }
 
