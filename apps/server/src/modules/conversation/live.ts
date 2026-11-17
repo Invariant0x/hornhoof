@@ -4,6 +4,7 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
@@ -60,7 +61,7 @@ export async function sayLive(
 export async function answersSomeoneElse(ctx: Pick<Ctx, 'db'>, running: { id: string; createdBy: string | null }, source?: MessageSource): Promise<boolean> {
   const personId = source?.personId;
   if (!personId) return false;
-  const chats = await ctx.db.select({ chatId: telegramReplies.chatId }).from(telegramReplies).where(eq(telegramReplies.jobId, running.id));
+  const chats = await ctx.db.select(only(telegramReplies, 'chatId')).from(telegramReplies).where(eq(telegramReplies.jobId, running.id));
   if (chats.length) {
     const [me] = await ctx.db.select({ telegram: people.telegramUserId }).from(people).where(eq(people.id, personId));
     if (chats.some(c => c.chatId !== me?.telegram)) return true;

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, people, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { checkRoom, FILE_BYTES } from './attachments.js';
 import type { Actor, Tx } from './engine.js';
@@ -52,7 +52,7 @@ async function archive(db: Db | Tx, task: Scope, author: Owner, kind: string, fi
   const name = `${kind}-${field}-${sha256}.txt`;
   const [existing] = await db.select().from(attachments).where(and(eq(attachments.companyId, task.companyId), eq(attachments.taskId, task.id), eq(attachments.agentId, author.agentId), author.personId ? eq(attachments.personId, author.personId) : isNull(attachments.personId), eq(attachments.name, name), eq(attachments.mediaType, 'text/plain'), isNull(attachments.operatorCaseId))).limit(1);
   if (existing && digest(existing.bytes) === sha256) return { field, id: existing.id, name, size: bytes.length, sha256 };
-  const [row] = await db.select({ number: tasks.number }).from(tasks).where(eq(tasks.id, task.id));
+  const [row] = await db.select(only(tasks, 'number')).from(tasks).where(eq(tasks.id, task.id));
   await checkRoom({ db, config }, task.companyId, { id: task.id, number: row!.number }, bytes.length);
   const [file] = await db.insert(attachments).values({ companyId: task.companyId, taskId: task.id, ...author, name, mediaType: 'text/plain', bytes, size: bytes.length }).returning({ id: attachments.id });
   return { field, id: file!.id, name, size: bytes.length, sha256 };

@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { clearNodeWords, pump } from '../conversation/queue.js';
 import { afterLeave, cutReplication, holdsSecrets } from '../copies/scope.js';
 import { ApiError } from '../../errors.js';
@@ -18,7 +19,7 @@ import { liveNode, settlePlans } from './nodes.js';
 export async function refuseLeader(db: Db, config: Config, machineIds: string[]): Promise<void> {
   const leader = machineIds.length > 0 ? await findThisMachine(db, config) : null;
   if (!leader || !machineIds.includes(leader.id)) return;
-  const [row] = await db.select({ hostname: machines.hostname }).from(machines).where(eq(machines.id, leader.id));
+  const [row] = await db.select(only(machines, 'hostname')).from(machines).where(eq(machines.id, leader.id));
   throw new ApiError(409, 'conflict', `${row?.hostname || 'This machine'} runs the company server. Move the server to another machine first.`, 'leader', { host: row?.hostname ?? '' });
 }
 

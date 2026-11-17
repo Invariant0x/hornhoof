@@ -2,7 +2,7 @@ import type { WorkLine } from '@hornhoof/protocol';
 import { and, asc, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, jobs, mapReturns, requests, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { GONE_ALONG } from '../conversation/queue.js';
 
 /* The lines of the company map, kept apart from the pulses of single messages: a line is blue while the one below works on
@@ -83,7 +83,7 @@ async function orchestratorOf(db: Reader, companyId: string): Promise<string | n
 /* The head of the employee's department, of the department holding it when it works on a product. */
 async function headOf(db: Reader, agent: Agent): Promise<string | null> {
   if (!agent.departmentId) return null;
-  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
+  const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(eq(departments.id, agent.departmentId));
   const top = dept?.parentId ?? agent.departmentId;
   const [head] = await db
     .select(idOnly(agents))
