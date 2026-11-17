@@ -15,6 +15,19 @@ async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author, 
 }
 
 describe('the echelon public tools', () => {
+  it('assigns only the named future stage through update_task and reports an ineligible checker', async () => {
+    const f = await fixture();
+    const next = await f.hire('Next reviewer', 'worker', 'DEV-REV', f.claude.id, 'claude-opus-5-5');
+    const tools = await client(f, f.head);
+    const assigned = await tools.call('update_task', { task: f.task.number, stage: 'review', ownerAgentId: next.id });
+    expect(assigned.isError).not.toBe(true);
+    expect((await loadTask(f.db, f.task.id)).assigneeAgentId).toBe(f.author.id);
+    expect((await f.detail()).echelons.stages.find(step => step.stage === 'review')?.ownerAgentId).toBe(next.id);
+    const rejected = await tools.call('update_task', { task: f.task.number, stage: 'review', ownerAgentId: f.author.id });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content[0]!.text).toContain('cannot check its own result');
+    expect((await f.detail()).echelons.stages.find(step => step.stage === 'review')?.ownerAgentId).toBe(next.id);
+  });
   it('accepts architectAgentId through create_task and names the actual Architecture owner', async () => {
     const f = await fixture();
     const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');

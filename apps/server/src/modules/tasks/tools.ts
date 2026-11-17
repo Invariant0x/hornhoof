@@ -4,6 +4,7 @@ import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
@@ -634,8 +635,8 @@ class TaskTools {
 
   private registerUpdateTask(): void {
     this.server.registerTool('update_task', {
-      description: 'The department head revises the current task or checking owner without returning it to the author. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
-      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+      description: 'The department head revises the current task or checking owner without returning it to the author. With stage and ownerAgentId, assigns an eligible owner to a future pending stage without moving or waking the current owner; producer, model capability, ability and scope rules still apply. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
+      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), stage: z.enum(ECHELON_STAGES).optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
     }, async ({ task: ref, after, afterPlans, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
       const moved = await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
