@@ -164,10 +164,9 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* The machine that led is gone before this keeper starts, as when the server was handed over and never taken, or
        the leader stopped: no view comes, and whoever asks this machine where it stands must still get in. */
     const f = await follower(c, {}, () => c.stop());
-    const ports = await Promise.race([f.keeper.peerPorts(), new Promise<null>(resolve => setTimeout(() => resolve(null), 3000))]);
-    expect(ports).not.toBeNull();
+    const ports = await f.keeper.peerPorts();
     /* Its own certificate is one of the company's, and the list it kept is the one the leader signed. */
-    expect(await askingAt(ports!.data, f.config.dir)('GET', '/peer/hello')).toMatchObject([200, { role: 'data', lead: false }]);
+    expect(await askingAt(ports.data, f.config.dir)('GET', '/peer/hello')).toMatchObject([200, { role: 'data', lead: false }]);
   });
 
   it('takes no lease and runs no link', async () => {
