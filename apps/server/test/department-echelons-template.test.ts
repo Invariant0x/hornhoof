@@ -72,6 +72,17 @@ describe('the route of every department template', () => {
     expect(templates.skills.get('hh-head')!.body).toMatch(/push every branch at once[^.]*pushed branches go into the main branch[^.]*how the repository is laid out, you decide/);
   });
 
+  it('marks a stage one-shot: how many calls run it at once, and the brief of the judge that reads their answers', () => {
+    const marked = '  - { stage: development }\n  - { stage: review, ability: hh-check-work, oneShot: { fanOut: 3, judge: "Keep only the findings that are real." } }';
+    expect(loadTemplates(withRoute('marketing', marked)).stagesOf('marketing').stages).toEqual([
+      { stage: 'development', ability: null },
+      { stage: 'review', ability: 'hh-check-work', oneShot: { fanOut: 3, judge: 'Keep only the findings that are real.' } },
+    ]);
+    expect(loadTemplates(withRoute('marketing', '  - { stage: development, oneShot: { fanOut: 2 } }')).stagesOf('marketing').stages).toEqual([{ stage: 'development', ability: null, oneShot: { fanOut: 2, judge: null } }]);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: development, oneShot: { fanOut: 0 } }'))).toThrow(/marketing\.md/);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: development, oneShot: { judge: "Pick one." } }'))).toThrow(/marketing\.md/);
+  });
+
   it('takes a department made from no template through the route of Development', () => {
     expect(templates.stagesOf(null)).toBe(templates.stagesOf('development'));
   });

@@ -471,56 +471,10 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       await setUpOnScreen(io, { bin, home, env: env(), user, recordingsDir: join(dirname(tools), '.hh-recordings'), person });
     },
 
-    async run(input: RunInput): Promise<RunResult> {
-      const args = [`--print=${input.prompt}`, '--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
-      if (input.sessionId) args.push('--conversation', input.sessionId);
-      if (input.model) args.push('--model', input.model);
-      if (input.effort) args.push('--effort', input.effort);
+    run: runAgy,
 
-      /* agy takes MCP servers from settings files only, and the token as a header in them: the folder's own file, which
-         only the program's user reads, for this run alone. */
-      const mcpJson = join(input.workDir, '.agents', 'mcp_config.json');
-      if (input.tools) {
-        agentDir(join(input.workDir, '.agents'), user);
-        const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
-        writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
-      }
-      if (input.instructions) tellAgy(input, input.instructions, user);
-
-      let sessionId: string | null = input.sessionId;
-      let result: Record<string, unknown> | null = null;
-      const read = agyStream();
-      const done = await runProgram({
-        bin,
-        args,
-        env: { ...env(), ...input.env },
-        user,
-        cwd: input.workDir,
-        timeoutMs: input.timeoutMs,
-        signal: input.signal,
-        onLine(line) {
-          const ev = objectLine(line);
-          if (!ev) return;
-          for (const event of read(ev)) input.onEvent?.(event);
-          const step = isRecord(ev.step_update) ? ev.step_update : isRecord(ev.result) ? ev.result : ev;
-          if (typeof step.conversation_id === 'string' && step.conversation_id) sessionId = step.conversation_id;
-          if (ev.event === 'result' && isRecord(ev.result)) result = ev.result;
-        },
-      }).finally(() => {
-        if (input.tools) rmSync(mcpJson, { force: true });
-      });
-
-      /* Assigned in onLine, which TypeScript does not follow. */
-      const final = result as Record<string, unknown> | null;
-      const answer = typeof final?.response === 'string' ? final.response.trimEnd() : '';
-      const ended = withProgramExit(done.output, done);
-      /* The result tells what the whole turn used. */
-      const tokens = agyTokens(final?.usage);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
-      if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
-      const said = typeof final?.error === 'string' ? final.error : '';
-      return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null, tokens };
-    },
+    /* Print mode is agy's one call: a new conversation that answers once and exits. */
+    oneCall: input => runAgy({ ...input, sessionId: null }),
 
     async secrets() {
       return tokenFiles(home).flatMap(file => {
@@ -535,4 +489,55 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       });
     },
   };
+
+  async function runAgy(input: RunInput): Promise<RunResult> {
+    const args = [`--print=${input.prompt}`, '--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
+    if (input.sessionId) args.push('--conversation', input.sessionId);
+    if (input.model) args.push('--model', input.model);
+    if (input.effort) args.push('--effort', input.effort);
+
+    /* agy takes MCP servers from settings files only, and the token as a header in them: the folder's own file, which
+       only the program's user reads, for this run alone. */
+    const mcpJson = join(input.workDir, '.agents', 'mcp_config.json');
+    if (input.tools) {
+      agentDir(join(input.workDir, '.agents'), user);
+      const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
+      writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
+    }
+    if (input.instructions) tellAgy(input, input.instructions, user);
+
+    let sessionId: string | null = input.sessionId;
+    let result: Record<string, unknown> | null = null;
+    const read = agyStream();
+    const done = await runProgram({
+      bin,
+      args,
+      env: { ...env(), ...input.env },
+      user,
+      cwd: input.workDir,
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+      onLine(line) {
+        const ev = objectLine(line);
+        if (!ev) return;
+        for (const event of read(ev)) input.onEvent?.(event);
+        const step = isRecord(ev.step_update) ? ev.step_update : isRecord(ev.result) ? ev.result : ev;
+        if (typeof step.conversation_id === 'string' && step.conversation_id) sessionId = step.conversation_id;
+        if (ev.event === 'result' && isRecord(ev.result)) result = ev.result;
+      },
+    }).finally(() => {
+      if (input.tools) rmSync(mcpJson, { force: true });
+    });
+
+    /* Assigned in onLine, which TypeScript does not follow. */
+    const final = result as Record<string, unknown> | null;
+    const answer = typeof final?.response === 'string' ? final.response.trimEnd() : '';
+    const ended = withProgramExit(done.output, done);
+    /* The result tells what the whole turn used. */
+    const tokens = agyTokens(final?.usage);
+    if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
+    if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
+    const said = typeof final?.error === 'string' ? final.error : '';
+    return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null, tokens };
+  }
 }

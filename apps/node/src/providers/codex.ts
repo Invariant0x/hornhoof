@@ -184,54 +184,59 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       await interactiveLogin(bin, ['login', '--device-auth'], env(null), io, user);
     },
 
-    async run(input: RunInput): Promise<RunResult> {
-      const model = [...(api ? endpointArgs(api) : []), ...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
-      /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
-      const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
-      const told = toldPlace('codex', input);
-      if (input.instructions) writePrivate(told.file, told.head + input.instructions + '\n', user);
-      const args = input.sessionId
-        ? ['exec', 'resume', ...mcp, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
-        : ['exec', ...mcp, ...FLAGS, '-C', input.workDir, ...model, '--', input.prompt];
+    run: input => runCodex(input, false),
 
-      let sessionId: string | null = input.sessionId;
-      let answer = '';
-      let completed = false;
-      let failure = '';
-      let tokens: TurnTokens | null = null;
-      const done = await runProgram({
-        bin,
-        args,
-        env: { ...env(input.secret, input.tools?.token ?? null), ...input.env },
-        cwd: input.workDir,
-        timeoutMs: input.timeoutMs,
-        signal: input.signal,
-        user,
-        onLine(line) {
-          const ev = objectLine(line) as { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string; usage?: unknown } | null;
-          if (!ev) return;
-          for (const event of codexEvents(ev)) input.onEvent?.(event);
-          if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
-          if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') answer = ev.item.text ?? '';
-          if (ev.type === 'turn.completed') {
-            completed = true;
-            tokens = addTokens(tokens, openaiTokens(ev.usage));
-          }
-          if (ev.type === 'turn.failed') failure = ev.error?.message ?? 'The turn failed.';
-          if (ev.type === 'error' && ev.message) failure = ev.message;
-        },
-      });
-
-      const ended = withProgramExit(done.output, done);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
-      if (completed && done.code === 0) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
-      const error = SIGNED_OUT.test(failure || done.output) ? 'not_logged_in' : 'agent_failed';
-      return { ok: false, sessionId, result: answer, ...ended, error, limits: null, tokens };
-    },
+    /* exec is Codex's one call; ephemeral keeps its thread nowhere, so the next call remembers nothing of it. */
+    oneCall: input => runCodex({ ...input, sessionId: null }, true),
 
     async secrets() {
       if (mode === 'api_key') return secret ? [secret] : [];
       return tokensIn(join(home, 'auth.json'));
     },
   };
+
+  async function runCodex(input: RunInput, once: boolean): Promise<RunResult> {
+    const model = [...(api ? endpointArgs(api) : []), ...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
+    /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
+    const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
+    const told = toldPlace('codex', input);
+    if (input.instructions) writePrivate(told.file, told.head + input.instructions + '\n', user);
+    const args = input.sessionId
+      ? ['exec', 'resume', ...mcp, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
+      : ['exec', ...(once ? ['--ephemeral'] : []), ...mcp, ...FLAGS, '-C', input.workDir, ...model, '--', input.prompt];
+
+    let sessionId: string | null = input.sessionId;
+    let answer = '';
+    let completed = false;
+    let failure = '';
+    let tokens: TurnTokens | null = null;
+    const done = await runProgram({
+      bin,
+      args,
+      env: { ...env(input.secret, input.tools?.token ?? null), ...input.env },
+      cwd: input.workDir,
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+      user,
+      onLine(line) {
+        const ev = objectLine(line) as { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string; usage?: unknown } | null;
+        if (!ev) return;
+        for (const event of codexEvents(ev)) input.onEvent?.(event);
+        if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
+        if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') answer = ev.item.text ?? '';
+        if (ev.type === 'turn.completed') {
+          completed = true;
+          tokens = addTokens(tokens, openaiTokens(ev.usage));
+        }
+        if (ev.type === 'turn.failed') failure = ev.error?.message ?? 'The turn failed.';
+        if (ev.type === 'error' && ev.message) failure = ev.message;
+      },
+    });
+
+    const ended = withProgramExit(done.output, done);
+    if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
+    if (completed && done.code === 0) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
+    const error = SIGNED_OUT.test(failure || done.output) ? 'not_logged_in' : 'agent_failed';
+    return { ok: false, sessionId, result: answer, ...ended, error, limits: null, tokens };
+  }
 }

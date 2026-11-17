@@ -17,4 +17,4 @@ Consequently the transfer retains the current agent-sql.ts and adds secret_redac
 
 The tracker merge retains updateTask's optional tracker argument alongside credential masking; task detail retains mayEdit/version/revision alongside mayHideSecret. The exported LogEntry keeps the tracker's words and accepts optional task/action props for the hide control.
 
-Task 1119 uses migration 0141 after 0140. Secret redaction uses 0142 after 0141. Original SQL is unchanged; snapshots retain every predecessor table, indices and journal entries. Checks and final integration commits are pending.
+After the next upstream advance to f11102899, one-shot calls occupy 0141. The head reserved 0142 for machine access, 0143 for secrets and 0144 for employee history. Task 1119 uses 0142 after 0141 and secret redaction uses 0143 after 0142. Original SQL is unchanged; snapshots retain every predecessor table, indices and journal entries. Checks and final integration commits are pending.

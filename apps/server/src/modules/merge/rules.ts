@@ -137,7 +137,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   turns: rows('work', { number: ['company_id'], task: 'task_id' }),
   test_runs: rows('work', { number: ['company_id'], task: 'task_id' }),
   notebook_notes: rows('work', { number: ['company_id', 'department_id'] }),
-  ...each(['jobs', 'attachments', 'task_routes'], rows('work', { task: 'task_id' })),
+  ...each(['jobs', 'attachments', 'task_routes', 'one_shot_calls'], rows('work', { task: 'task_id' })),
   /* Its source_key names an event by a number of each side, so the logs go first. */
   map_returns: rows('work', { task: 'source_task_id', after: ['task_events', 'agent_events'] }),
 };
