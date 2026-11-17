@@ -661,7 +661,9 @@ async function pinCommit(ctx: Ctx, kind: RunKind, branch: string | undefined, fo
   if (kind !== 'tests' || !found || !branch) return { branch: branch ?? null, commitSha: null };
   const at = await ctx.readCommit(found.repo, { branch });
   if ('problem' in at) throw refuse(409, 'repo_invalid', at.problem);
-  return at;
+  /* A shared run checks a release, and a release is a branch: a tag of the same name is none. */
+  if (at.tag) throw refuse(409, 'tests_not_release', `${branch} is a tag of the repository, not a branch: shared test runs go only to the branch main, a turn's branch turn-<number> or a release-<name> branch.`);
+  return { branch: at.branch, commitSha: at.commitSha };
 }
 
 async function runRepository(ctx: Ctx, task: Task, input: RunInput, kind: RunKind): Promise<Awaited<ReturnType<typeof repoAt>>> {

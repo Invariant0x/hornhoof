@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, tasks } from '../src/db/schema.js';
+import { agents, departments, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { releasing } from './turn-release-fixture.js';
@@ -9,6 +9,7 @@ const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
 
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
+type Part = typeof testParts.$inferSelect;
 
 describe('the release step of a turn', () => {
   it('records the release of the open turn before main moves: its commit, main under it, its full run, its tasks and the approval', async () => {
@@ -67,6 +68,38 @@ describe('the release step of a turn', () => {
     const given = await f.fullRun(run);
     await f.approve();
     expect(await f.recordRelease({ runId: given.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
+  });
+
+  /* Only a run of the product's tests proves a release: of the full profile its manifest names, with a receipt on the commit of every
+     part. A command of its own proves nothing, however it ended. */
+  it('refuses a passed run of a command of its own, with no product and no receipts, though a person approved the commit', async () => {
+    const f = await releasing();
+    const run = await f.fullRun({ command: 'printf smoke-{part}-{parts}' });
+    await f.approve();
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
+    expect(result.text).toContain("it ran the command printf smoke-{part}-{parts} rather than the product's tests");
+  });
+
+  it.each<[string, (part: Part) => Partial<Part>]>([
+    ['a part with no receipt', () => ({ environmentReceipt: null })],
+    ['a receipt of another commit', part => ({ environmentReceipt: { ...part.environmentReceipt!, commitSha: EXTRA } })],
+    ['a receipt of another profile', part => ({ environmentReceipt: { ...part.environmentReceipt!, profile: 'fast' } as Part['environmentReceipt'] })],
+  ])("refuses a run of the product with %s: a release needs every part's receipt on its commit", async (_what, change) => {
+    const f = await releasing();
+    const run = await f.fullRun();
+    const [part] = await f.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(testParts.part);
+    await f.db.update(testParts).set(change(part!)).where(eq(testParts.id, part!.id));
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining("it is no run of the product's full profile with a passed receipt of every part on this commit") as unknown });
+  });
+
+  it("refuses a run of the product's profile that is not its full run", async () => {
+    const f = await releasing();
+    const run = await f.fullRun();
+    await f.db.update(testRuns).set({ environmentSnapshot: { ...run.environmentSnapshot!, profile: 'fast' } }).where(eq(testRuns.id, run.id));
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining("it is no run of the product's full profile") as unknown });
   });
 
   it('refuses a full run when a newer run of the same commit failed', async () => {
@@ -171,6 +204,14 @@ describe('the release step with autonomous release on', () => {
     const run = await f.fullRun();
     f.repo.cut.add(`${BASE}..${f.R}`);
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('approves no release on a passed run of a command of its own, and logs nothing', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const run = await f.fullRun({ command: 'printf smoke-{part}-{parts}' });
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
     expect(await journal(f)).toEqual([]);
   });
 

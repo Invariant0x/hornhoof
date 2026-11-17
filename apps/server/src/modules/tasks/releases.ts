@@ -12,6 +12,7 @@ import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
+import { wholeProductRun } from './autonomous-release.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
    turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
@@ -39,8 +40,9 @@ export function newerVersion(a: string, b: string): boolean {
   return false;
 }
 
-/* A whole run of R's release: of the turn branch at R, with no one suite, every part passed, taking only what its release proved, and
-   no newer run of R failed since. */
+/* A whole run of R's release: of the turn branch at R, of the product's tests in the full profile its manifest names, with no one
+   suite, every part passed with its receipt on R, taking only what its release proved, and no newer run of R failed since. A run of a
+   command of its own proves no release. */
 async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<void> {
   const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
@@ -49,6 +51,8 @@ async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, de
   if (problem) throw notFull(problem);
   const parts = await db.select(only(testParts, 'status')).from(testParts).where(eq(testParts.runId, run.id));
   if (!allPartsPassed(run, parts)) throw notFull('not every part of it passed');
+  if (run.command !== '') throw notFull(`it ran the command ${run.command} rather than the product's tests`);
+  if (!(await wholeProductRun(db, run, turn.companyId, departmentId, commit))) throw notFull("it is no run of the product's full profile with a passed receipt of every part on this commit");
   const [newer] = await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }

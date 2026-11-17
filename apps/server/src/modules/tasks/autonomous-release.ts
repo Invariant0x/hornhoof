@@ -142,6 +142,14 @@ function checksWholeRelease(run: Run, snapshot: Snapshot): boolean {
   return !fullRun || (scope.profile === fullRun.profile && ofItsRelease(run.fileCache));
 }
 
+/* A run of the product's tests that checks its release whole on commit: the snapshot of the product described there, its full
+   profile, and every part passed with its receipt on that commit. A run of a command of its own is none, however it ended. */
+export async function wholeProductRun(db: QueryDb, run: Run, companyId: string, departmentId: string, commit: string): Promise<boolean> {
+  if (run.command !== '') return false;
+  const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
+  return completeRunParts(parts, run, companyId, commit) && validFullProductRun(run, parts, companyId, departmentId, commit);
+}
+
 async function validFullProductRun(run: Run, parts: Part[], companyId: string, departmentId: string, commit: string): Promise<boolean> {
   const snapshot = matchingSnapshot(run, companyId, departmentId, commit);
   if (!snapshot || !checksWholeRelease(run, snapshot)) return false;
