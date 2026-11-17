@@ -1,10 +1,11 @@
 import type { AgentEvent } from './index.js';
 
-export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean };
+export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean; secretExecution?: boolean };
 /* Registration and telemetry use the same definitions. No secret value belongs to replay or a transcript. */
 export const PRIVATE_TOOLS = {
   entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: [], secretOutput: ['password', 'code'] } },
   save: { name: 'vault_save', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: [] } },
+  phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },
 } as const;
 
 export const PRIVATE_TOOL_NOTE = 'Sensitive tool data hidden. The turn output is hidden too.';
@@ -20,7 +21,7 @@ export const isSensitiveTool = (name: string): boolean => toolPrivacy(name)?.sen
 /* Routing and typed discriminants are identities, not report text. A one-character password must not change a task
    reference or turn an event's kind into a different protocol message. */
 const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider|wait)$|(?:Id|Ids|Sha|Commit|Kind|Class|Type|State|Status)$/;
-const PROSE = new Set(['text', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql']);
+const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql', 'caption', 'comment']);
 
 /* Values live only in the current turn's memory, for text that must still reach people. Short passwords and OTPs count
    too. JSON-escaped forms cover text nested in tool replies without putting a value in a persistent redactor. */
@@ -46,6 +47,9 @@ export class PrivateValues {
   }
 
   hide<T>(value: T): T {
+    /* Media is an opaque payload for the authorized caller, not text to rewrite. Its tool's privacy policy decides
+       whether it may be persisted. A password fragment may coincidentally occur in base64. */
+    if (value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio')) return value;
     if (typeof value === 'string') {
       if (this.values.has(value)) return '[hidden]' as T;
       if (/^\s*[[{]/.test(value)) {
@@ -86,6 +90,17 @@ export class ToolPrivacy {
   readonly values = new PrivateValues();
   private readonly outputFields = new Set<string>();
   private plainOutput = false;
+  private readonly executions = new Set<string>();
+
+  /* Only the server's remembered vault values enable execution. Once typed, later captures of the same tool can show
+     the value too. The program cannot opt into this by passing a flag. */
+  execution(name: string, input: unknown): boolean {
+    if (!this.sensitive) return false;
+    if (this.executions.has(name)) return true;
+    if (JSON.stringify(this.values.input(input)) === JSON.stringify(input)) return false;
+    this.executions.add(name);
+    return true;
+  }
 
   input(name: string, input: unknown, policy = toolPrivacy(name)): void {
     if (!policy?.sensitive) return;

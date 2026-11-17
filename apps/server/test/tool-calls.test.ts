@@ -5,7 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Ctx } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
@@ -19,6 +19,9 @@ import { listen, setLease, setUpCompany, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 
 await prepareSharedDatabase();
+
+/* Our keeper check consumes DNS answers; it does not wait for a system resolver to time out on keeper.invalid. */
+vi.mock('node:dns/promises', () => ({ lookup: async (host: string) => [{ address: host === 'localhost' ? '127.0.0.1' : '192.0.2.40', family: 4 }] }));
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
 

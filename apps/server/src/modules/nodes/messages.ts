@@ -339,7 +339,8 @@ function privateTurnMessage(ctx: Pick<Ctx, 'db'>, msg: NodeMessage, sensitive: b
   if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
   const values = privateTurn(ctx.db, msg.jobId)?.values;
   if (msg.type === 'job.event') {
-    const event = privateToolEvent(msg.event, sensitive, !values);
+    /* Only MCP marks an issued value. A node can ask for more masking, never grant secret execution or invent issuance. */
+    const event = privateToolEvent(msg.event.kind === 'tool' ? { kind: 'tool', name: msg.event.name, input: msg.event.input, ...(msg.event.sensitive ? { sensitive: true as const } : {}) } : msg.event, sensitive, !values);
     return { ...msg, event: values?.hide(event) ?? event };
   }
   if (sensitive) return { ...msg, result: values?.text(msg.result) ?? PRIVATE_TOOL_NOTE, tail: PRIVATE_TOOL_NOTE, ...(msg.failure ? { failure: { ...msg.failure, text: values?.text(msg.failure.text) ?? PRIVATE_TOOL_NOTE } } : {}) };

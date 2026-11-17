@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { agentEvents, attachments, computerRuns, jobs, taskEvents, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { INVOCATION } from '../src/modules/tools/calls.js';
@@ -16,6 +16,8 @@ const PASSWORD = 'pw-marker-8f02bd';
 /* The RFC 6238 seed of SHA1: at 1111111109 s its six-digit code is 081804, one second before the next period. */
 const CODE = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
 const AT = 1111111109_000;
+
+vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: '127.0.0.1', family: 4 }] }));
 
 type ToolReply = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const answer = (reply: ToolReply) => JSON.parse(reply.content[0]!.text) as Record<string, unknown>;

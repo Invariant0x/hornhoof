@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { PRIVATE_COMMAND_REFUSED, PRIVATE_TURN_LOST, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
@@ -57,12 +58,13 @@ export const MAY_HAVE_RUN = 'Hornhoof could not confirm this change. The call ma
 export const TOO_LARGE = 'This call ran, but its answer was too large to keep. Look at its result again.';
 export const ID_TAKEN = 'This call id belongs to another job, so the call did not run. Send it again.';
 
-type Answer = { content: { type: 'text'; text: string }[]; isError?: boolean; [more: string]: unknown };
+type Answer = CallToolResult;
 export type ToolProtection = {
   lost?: boolean;
   sensitive(name: string, policy: ToolPrivacyPolicy, input: unknown, answer?: Answer): Promise<void>;
   input<T>(value: T): T;
   hide<T>(value: T): T;
+  execution(name: string, input: unknown): boolean;
 };
 const say = (text: string): Answer => ({ content: [{ type: 'text', text }], isError: true });
 
@@ -140,7 +142,7 @@ export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: s
   const register = server.registerTool.bind(server) as (name: string, config: Config, handler: (...given: unknown[]) => Promise<Answer>) => unknown;
   server.registerTool = ((name: string, config: Config, handler: (...given: unknown[]) => Promise<Answer>) => {
     if (protection?.lost) return register(name, config, READ_TOOLS.has(name) && name !== 'database' ? handler : async () => say(PRIVATE_TURN_LOST));
-    if (config._meta?.sensitive) return register(name, config, async (...given) => {
+    const privateCall = async (...given: unknown[]): Promise<Answer> => {
       await protection?.sensitive(name, config._meta!, given.length > 1 ? given[0] : undefined);
       /* Neither replay state nor a tool source: even a retry after a committed audit write must check access again.
          Unexpected errors can hold input or output in their message or cause, so they leave no detail. */
@@ -150,7 +152,7 @@ export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: s
         return answer;
       }
       catch { return say('The sensitive tool could not complete. Its details are hidden.'); }
-    });
+    };
     const run = async (...given: unknown[]) => {
       if (given.length > 1 && protection) {
         const hidden = protection.input(given[0]);
@@ -160,6 +162,10 @@ export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: s
       const answer = await handler(...given);
       return protection?.hide(answer) ?? answer;
     };
-    return register(name, config, invocation ? (...given) => once({ db: ctx.db, jobId: job.id, id: invocation, name }, () => run(...given)) : run);
+    return register(name, config, (...given) => {
+      const input = given.length > 1 ? given[0] : undefined;
+      if (config._meta?.sensitive || (config._meta?.secretExecution && protection?.execution(name, input))) return privateCall(...given);
+      return invocation ? once({ db: ctx.db, jobId: job.id, id: invocation, name }, () => run(...given)) : run(...given);
+    });
   }) as McpServer['registerTool'];
 }
