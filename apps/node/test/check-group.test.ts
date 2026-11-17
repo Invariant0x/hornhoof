@@ -60,6 +60,18 @@ it.each([
   await pending;
 });
 
+it('never signals an unanchored group after its original leader disappeared', async () => {
+  vi.useFakeTimers();
+  const group = recorded([{ ...descendant, started: '999' }]);
+  const pending = group.run();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(group.kill).not.toHaveBeenCalled();
+  expect(group.block).toHaveBeenCalled();
+  group.gone();
+  await vi.advanceTimersByTimeAsync(25);
+  await pending;
+});
+
 it('reaps an idle parked leader immediately without a grace for a command that already ended', async () => {
   vi.useFakeTimers();
   const group = recorded([leader]);

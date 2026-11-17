@@ -44,8 +44,7 @@ export async function assertCheckGroup(group: CheckGroup, uid: number, caller: n
 }
 
 /* Signals run as the group's user, including when the node is root. The identity guard and kill are in one synchronous
-   helper turn: a late signal cannot use a stale process-table scan to target a recycled group id. A surviving original
-   member is an identity anchor when the leader itself already exited. */
+   helper turn. Without the original waiting leader, cleanup refuses to signal a possibly recycled group id. */
 const SIGNAL_GROUP = String.raw`
 const fs = require('node:fs');
 const [pid, started, group, uid, signal] = process.argv.slice(1);
@@ -60,7 +59,8 @@ export async function signalCheckGroup(group: CheckGroup, uid: number, gid: numb
   const members = await checkGroupMembers(group);
   if (!members.length || members.some(member => member.uid !== uid || member.session !== group.pid || BigInt(member.started) < BigInt(group.started)
     || (member.pid === group.pid && member.started !== group.started))) return false;
-  const anchor = members.find(member => member.pid === group.pid) ?? members[0]!;
+  const anchor = members.find(member => member.pid === group.pid && member.started === group.started);
+  if (!anchor) return false;
   const child = spawn(process.execPath, ['-e', SIGNAL_GROUP, String(anchor.pid), anchor.started, String(group.pid), String(uid), signal], { uid, gid, env: {}, stdio: 'ignore' });
   const [code] = await once(child, 'exit') as [number | null];
   return code === 0;
@@ -84,7 +84,7 @@ export async function cleanCheckGroup(group: CheckGroup, uid: number, cleanup: C
       let members: GroupProcess[] | null = null;
       try { members = await cleanup.list(group); } catch { /* An unreadable process table is not proof of cleanup. */ }
       if (members?.length === 0) return;
-      const safe = members !== null && members.every(member => member.uid === uid && member.session === group.pid && BigInt(member.started) >= BigInt(group.started))
+      const safe = members !== null && members.some(member => member.pid === group.pid && member.started === group.started) && members.every(member => member.uid === uid && member.session === group.pid && BigInt(member.started) >= BigInt(group.started))
         && !members.some(member => member.pid === group.pid && member.started !== group.started);
       if (safe) {
         const signal = !term ? 'SIGTERM' : !killed && (elapsed >= 5000 || members.every(member => member.pid === group.pid)) ? 'SIGKILL' : null;
