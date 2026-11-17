@@ -12,7 +12,7 @@ import type { HireLine } from '../tools/staff.js';
 export type Hired = { id: string; name: string; role: string; title: string };
 
 /* Who a hire is by: a person, the orchestrator for one, or Hornhoof itself, which is neither. */
-export type HiredBy = { personId: string | null; byOrchestrator: boolean };
+export type HiredBy = { personId: string | null; byOrchestrator: boolean; actingAgentId?: string | null };
 
 /* A hire that names no model runs the one its role's tier asks for on its plan, by name, and the strongest in a turnkey
    team: the stages of a task's route take only a model they know. With no plan yet it stays the program's default until it gets one. */

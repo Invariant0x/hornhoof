@@ -1,7 +1,7 @@
 import { OfflinePlan } from './OfflineMachine';
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { cutLine } from '../restarts';
 import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
@@ -105,6 +105,11 @@ function Interruptions({ list, headingId, when }: { list: AgentCardView['interru
 }
 
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
+
+function changeAuthor(t: Messages, change: AgentCardView['changes'][number]): string | null {
+  if (change.actingAgent) return t.agent.byHead(change.actingAgent.name, change.personName);
+  return change.byOrchestrator ? t.agent.byOrchestrator : change.personName;
+}
 
 const hasSubUnits = (card: AgentCardView) => card.kind === 'worker' && Boolean(card.teams?.length || card.team);
 
@@ -517,7 +522,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
             <h4 id={`${id}-history`}>{t.agent.history}</h4>
             <ul>
               {card.changes.map((c, i) => (
-                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, c.byOrchestrator ? t.agent.byOrchestrator : c.personName, when(c.at))}</li>
+                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, changeAuthor(t, c), when(c.at))}</li>
               ))}
             </ul>
           </section>
