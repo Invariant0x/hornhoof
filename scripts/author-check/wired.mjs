@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { exitCodeOf, parseCrapEdn } from './judge.mjs';
-import { shareModules } from './modules.mjs';
+import { installedFrom, shareModules } from './modules.mjs';
 import { buildPlan, cwdOf } from './plan.mjs';
 import { fastSuites, selectTests } from './select.mjs';
 import { realPorts } from './main.mjs';
@@ -64,12 +64,11 @@ function filesUnder(root, path) {
 const npm = async (ports, args) => (await ports.exec('npm', args, { cwd: '.' })).code === 0;
 
 /* The check runs in a workspace that is used again, so what it imports is built again whenever its files have changed since
-   it was built; dependencies are installed only when missing, and a worktree takes those its clone installed from the same
-   lockfile. --ignore-scripts keeps the scripts of the dependencies off, and the repository's own prepare with them: a package
-   needs what that links. */
+   it was built; dependencies are installed only when missing or installed from another lockfile, and a worktree takes those
+   its clone installed from the same lockfile. --ignore-scripts keeps the scripts of the dependencies off, and the
+   repository's own prepare with them: a package needs what that links. */
 export async function prepare(ports) {
-  const missing = !ports.exists('node_modules');
-  const install = !missing ? [] : ports.shareModules?.() ? [['run', '-s', 'prepare']] : [['ci', '--ignore-scripts'], ['run', '-s', 'prepare']];
+  const install = ports.installed() ? [] : ports.shareModules?.() ? [['run', '-s', 'prepare']] : [['ci', '--ignore-scripts'], ['run', '-s', 'prepare']];
   for (const args of install) if (!(await npm(ports, args))) return 'prepare_failed';
   for (const build of BUILDS) {
     const digest = ports.digest(build.from);
@@ -115,6 +114,6 @@ async function check(args, plan, ports, root) {
 
 export function wiredPorts(root) {
   const ports = realPorts(root);
-  const built = { ...ports, digest: paths => sourceDigest(root, paths), shareModules: () => shareModules(root, ports.git) };
+  const built = { ...ports, digest: paths => sourceDigest(root, paths), installed: () => installedFrom(root), shareModules: () => shareModules(root, ports.git) };
   return { ...ports, prepare: () => prepare(built), makePlan: args => makePlan(args, ports), check: (args, plan) => check(args, plan, ports, root) };
 }

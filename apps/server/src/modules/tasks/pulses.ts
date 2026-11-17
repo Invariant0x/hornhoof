@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import type { Endpoint } from '../events/bus.js';
 import type { Actor, Task } from './engine.js';
 
@@ -24,7 +25,7 @@ async function holderSpot(ctx: Live, task: Task): Promise<Endpoint | null> {
     return task.createdByPersonId ? { kind: 'person', id: task.createdByPersonId } : agentSpot(ctx, task.createdByAgentId);
   }
   if (task.status === 'waiting') {
-    const [owner] = await ctx.db.select({ id: people.id }).from(people).where(and(eq(people.companyId, task.companyId), eq(people.isOwner, true)));
+    const [owner] = await ctx.db.select(idOnly(people)).from(people).where(and(eq(people.companyId, task.companyId), eq(people.isOwner, true)));
     return owner ? { kind: 'person', id: owner.id } : null;
   }
   return agentSpot(ctx, task.assigneeAgentId);

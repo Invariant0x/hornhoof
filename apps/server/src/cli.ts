@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { loadConfig, type Config } from './config.js';
 import { APP_NAME, openDb, type Db } from './db/client.js';
 import { companies, people } from './db/schema.js';
+import { idOnly } from './db/selections.js';
 import { ApiError } from './errors.js';
 import { linkOf, publicUrl, saveLink, tunnelSettings, writeTunnelSettings } from './modules/link/link.js';
 import { Relay } from './modules/link/relay.js';
@@ -39,7 +40,7 @@ async function printSetupLink({ db, config, print }: Deps): Promise<number> {
 /* Takes over a link made before at hornhoof.org, by hand or by another install: its name comes as the argument and its
    key on the input, so the key stays out of the shell history. The relay is only asked whether it holds the name. */
 async function takeLink(name: string | undefined, { db, config, print, read }: Deps): Promise<number> {
-  const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+  const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
   if (!company) {
     print('Hornhoof is not set up yet. Open it in the browser to set it up.');
     return 1;

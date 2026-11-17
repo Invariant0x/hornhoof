@@ -1,7 +1,8 @@
 import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
+import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type PlanFallback, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
@@ -25,6 +26,8 @@ export type SubView = {
   limits: Limits | null;
   limitsUpdatedAt: string | null;
   budget: number | null;
+  /* The plans its employees go on to at its limit, in order; empty for any plan of the company that may serve them. */
+  fallbacks: PlanFallback[];
   isOrchestrator: boolean;
   /* The account each machine's program is signed in to: the address only for the plan's owner and the CEO.
      tier when all machines say the same one; accountsDiffer when they are on different ones. */
@@ -47,7 +50,7 @@ export type SubView = {
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 /* Who asks for the view: the address of a plan's account goes to its owner and to the CEO. */
-export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string };
+export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string; viaHead?: true };
 
 /* The tier all these accounts are on, and whether they are on different accounts or tiers. */
 export function agreed(accounts: Account[]): { tier: string | null; differ: boolean } {
@@ -58,7 +61,7 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
 
 /* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
    work runs. */
-export type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
 
 export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
   node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);
@@ -74,6 +77,7 @@ const columns = {
   limits: subscriptions.limits,
   limitsUpdatedAt: subscriptions.limitsUpdatedAt,
   budget: subscriptions.budget,
+  fallbacks: subscriptions.fallbacks,
   credVersion: subscriptions.credVersion,
   leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
@@ -115,8 +119,8 @@ function ownerDepartments(ownerId: string, access: (typeof personAccess.$inferSe
 }
 
 function accountViews(mine: NodeRow[], accountOf: Map<string, Account | null>, viewer: Viewer | null, ownerId: string): Pick<SubView, 'accounts' | 'tier' | 'accountsDiffer'> {
-  /* The address goes to the plan's owner and the CEO, never to an agent acting for them. */
-  const sees = viewer !== null && !viewer.via && (viewer.id === ownerId || viewer.isOwner === true);
+  /* The address goes to the plan's owner and the CEO, and to the orchestrator acting for the CEO: never to a head. */
+  const sees = viewer !== null && !viewer.viaHead && (viewer.id === ownerId || viewer.isOwner === true);
   const signed = mine.flatMap(node => {
     const account = accountOf.get(node.id);
     return account ? [{ node, account }] : [];
@@ -152,7 +156,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
   const listedOwners = [...new Set(rows.filter(r => r.kind === 'personal' && r.ownerScopeKind !== 'company').map(r => r.ownerId))];
   const access = listedOwners.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedOwners)) : [];
   const orderedDepts = deptRows.map(d => d.id);
-  const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
+  const [orchestrator] = await db.select(only(agents, 'subscriptionId')).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
   const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account }).from(nodes).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
   const accountOf = new Map(told.map(n => [n.id, n.account]));
@@ -176,6 +180,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       limits: currentLimits(r.limits ?? null, r.limitsUpdatedAt),
       limitsUpdatedAt: r.limitsUpdatedAt?.toISOString() ?? null,
       budget: r.budget,
+      fallbacks: r.fallbacks,
       isOrchestrator: orchestrator?.subscriptionId === r.id,
       ...accountViews(mine, accountOf, viewer, r.ownerId),
       signedInOnce: r.kind === 'personal' && r.credVersion > 0,

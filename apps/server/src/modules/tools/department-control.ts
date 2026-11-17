@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders } from '../../auth/internal.js';
 import { agents, departments, teams } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import type { AgentCard } from '../agents/routes.js';
 import { AgentPatch } from '../agents/routes.js';
 import { standingPrincipal } from '../conversation/decision-context.js';
@@ -142,7 +143,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     },
     async ({ teams: units, products, removeProducts = [], about }) => {
       if (!own) return say(outside('This'), true);
-      const mine = new Set((await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.parentId, own), eq(departments.companyId, job.companyId)))).map(d => d.id));
+      const mine = new Set((await ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.parentId, own), eq(departments.companyId, job.companyId)))).map(d => d.id));
       const stranger = removeProducts.find(id => !mine.has(id));
       if (stranger) return say(outside(`The product ${stranger}`), true);
       const items = [
@@ -165,7 +166,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
       inputSchema: { team: Id('sub-unit'), urgentOnly: z.boolean() },
     },
     async ({ team, urgentOnly }) => {
-      const [unit] = own ? await ctx.db.select({ id: teams.id }).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, own), eq(teams.companyId, job.companyId))) : [];
+      const [unit] = own ? await ctx.db.select(idOnly(teams)).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, own), eq(teams.companyId, job.companyId))) : [];
       if (!unit) return say(outside(`The sub-unit ${team}`), true);
       return asPerson({ method: 'PATCH', url: `/api/departments/${own}/teams/${team}`, payload: { urgentOnly } });
     },

@@ -9,7 +9,7 @@ it('commits consecutive run numbers and every task and part across independent P
   const fixture = await runFixture(pg, { barrier: true });
   const pids = await Promise.all(fixture.actors.map(actor => backendPid(actor.pool)));
   expect(new Set(pids).size).toBe(2);
-  const started = Promise.all(fixture.actors.map((actor, index) => startRun(actor.ctx, actor.job, { task: actor.task.number, command: `task-${actor.task.number} --shard={part}/{parts}`, parts: index + 2 })));
+  const started = Promise.all(fixture.actors.map((actor, index) => startRun(actor.ctx, actor.job, { task: actor.task.number, branch: `release-${actor.task.number}`, command: `task-${actor.task.number} --shard={part}/{parts}`, parts: index + 2 })));
   pg.cleanup(async () => { fixture.repository.release(); await started.catch(() => {}); });
   await Promise.race([fixture.repository.ready, started.then(() => { throw new Error('Runs completed before the repository barrier released'); })]);
   expect(fixture.repository.requests()).toBe(2);
@@ -21,7 +21,7 @@ it('commits consecutive run numbers and every task and part across independent P
   expect(new Set(runs.map(run => run.id)).size).toBe(2);
   for (const [index, actor] of fixture.actors.entries()) {
     const run = runs.find(row => row.taskId === actor.task.id)!;
-    expect(run).toMatchObject({ companyId: fixture.companyId, agentId: actor.job.agentId, jobId: actor.job.id, departmentId: fixture.departmentId, command: `task-${actor.task.number} --shard={part}/{parts}`, parts: index + 2, branch: `task-${actor.task.number}`, commitSha: FIXTURE_COMMIT });
+    expect(run).toMatchObject({ companyId: fixture.companyId, agentId: actor.job.agentId, jobId: actor.job.id, departmentId: fixture.departmentId, command: `task-${actor.task.number} --shard={part}/{parts}`, parts: index + 2, branch: `release-${actor.task.number}`, commitSha: FIXTURE_COMMIT });
     expect(replies[index]).toContain(`Test run ${run.number} of #${actor.task.number}`);
     const parts = await pg.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
     expect(parts.map(part => ({ companyId: part.companyId, runId: part.runId, part: part.part, status: part.status }))).toEqual(Array.from({ length: index + 2 }, (_, part) => ({ companyId: fixture.companyId, runId: run.id, part: part + 1, status: 'queued' })));

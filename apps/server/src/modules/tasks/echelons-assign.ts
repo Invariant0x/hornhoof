@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, departments, subscriptions } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -11,7 +12,7 @@ import { modelCapability, modelProvider, reviewEligibility, sameChecker, type Ch
 type Reader = { db: Ctx['db'] | Tx };
 
 export async function departmentHead(db: Reader['db'], task: Task): Promise<string> {
-  const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt)).limit(1);
+  const [head] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt)).limit(1);
   if (!head) throw new ApiError(409, 'conflict', 'The department needs a head to receive this stage result.', 'task_invalid');
   return head.id;
 }
@@ -52,7 +53,7 @@ export async function uncheckable(db: Reader['db'], task: Pick<Task, 'companyId'
   if (!task.departmentId || !authorId) return false;
   const [department] = await db.select({ key: departments.templateKey }).from(departments).where(and(eq(departments.id, task.departmentId), eq(departments.companyId, task.companyId)));
   if (!department?.key || department.key === 'development') return false;
-  const [author] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
+  const [author] = await db.select(only(agents, 'kind')).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
   if (!author || author.kind === 'head') return false;
   return !(await hasChecker(db, { id: authorId, companyId: task.companyId, departmentId: task.departmentId }, ability));
 }
@@ -75,6 +76,27 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
   return eligible.find(identity => identity.provider !== producer.provider) ?? eligible[0] ?? null;
 }
 
+async function securityOrigin(db: Reader['db'], task: Task, producer?: CheckerIdentity | null): Promise<CheckerIdentity | null> {
+  if (producer) return producer;
+  const authorId = task.executorAgentId ?? task.assigneeAgentId;
+  return authorId ? agentIdentity(db, task.companyId, authorId) : null;
+}
+
+/* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
+async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string, producer?: CheckerIdentity | null): Promise<string | null> {
+  if (!task.departmentId) return null;
+  const origin = await securityOrigin(db, task, producer);
+  const checker = origin ? await checkerFor({ db }, task, origin, ability, null) : null;
+  return checker ? checker.agentId : null;
+}
+
+export async function populateSecurityOwner(db: Reader['db'], task: Task, state: Route['state'], producer?: CheckerIdentity | null): Promise<Route['state']> {
+  const step = state.security.required ? state.stages.find(item => item.stage === 'security') : undefined;
+  if (!step || step.ownerAgentId || !state.abilities.security) return state;
+  const ownerAgentId = await initialSecurityOwner(db, task, state.abilities.security, producer);
+  return ownerAgentId ? { ...state, stages: state.stages.map(item => item.stage === 'security' ? { ...item, ownerAgentId } : item) } : state;
+}
+
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   const ability = route.state.stage ? route.state.abilities[route.state.stage] : undefined;
@@ -86,6 +108,6 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
 /* Inside the transaction that commits a checker's result: the card is held until it commits, so a model, subscription
    or ability change either lands before this read and refuses the result, or waits until the result is in. */
 export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
-  if (task.assigneeAgentId) await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
+  if (task.assigneeAgentId) await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
   return checkingIdentity({ db: tx }, task, route, candidate);
 }

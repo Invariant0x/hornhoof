@@ -1,0 +1,8 @@
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/dry.edn
+DUPLICATE score=1.00
+  apps/server/src/modules/assistants/mcp.ts:27-35
+  apps/server/src/modules/vault/tools.ts:20-28
+
+DUPLICATE score=0.85
+  apps/server/src/modules/computer/tools.ts:36-39
+  apps/server/src/modules/conversation/queue.ts:325-328

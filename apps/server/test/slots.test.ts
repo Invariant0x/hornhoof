@@ -104,6 +104,33 @@ describe("the leader's slots", () => {
     expect(await at(4 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([sync]);
   });
 
+  it("drops at its next sweep the slot of a table whose first copy broke off, as its copy named it, and keeps a table's slot that is read", async () => {
+    const broken = 'pg_16384_sync_16500_7';
+    const catching = 'pg_16384_sync_16501_7';
+    const again = 'pg_16384_sync_16502_7';
+    const read = 'pg_16384_sync_16503_7';
+    const s = server(
+      [
+        { name: broken, active: false, pid: null },
+        /* Its copy is through and it catches up between two starts of its worker: nobody reads it this minute, and its
+           copy does not name it. */
+        { name: catching, active: false, pid: null },
+        /* Named in a report from before its copy started again: its rows go over now. */
+        { name: again, active: false, pid: null, copying: true },
+        { name: read, active: true, pid: 31 },
+      ],
+      [],
+    );
+    const named = [broken, again, read, 'copy_aaaaaaaaaaaaaaaa_1', 'pg_16384_sync_16599_7'];
+    const since = new Map<string, number>();
+    expect(await sweepSlots(s.sql, () => undefined, since, 0, named)).toEqual([broken]);
+    expect(s.did).toEqual([`drop ${broken}`]);
+    /* A slot nobody named still goes after its ten minutes, as before. */
+    expect(await sweepSlots(s.sql, () => undefined, since, SYNC_SLOT_IDLE_MS - 1, [])).toEqual([]);
+    expect(await sweepSlots(s.sql, () => undefined, since, SYNC_SLOT_IDLE_MS, [])).toEqual([catching]);
+    expect(s.slots.map(slot => slot.name)).toEqual([again, read]);
+  });
+
   it('says so when a slot will not go, and tries again with the next sweep', async () => {
     const s = server([{ name: slotOf(A, 1), active: true, pid: 11 }], [], [slotOf(A, 1)]);
     const lines: string[] = [];

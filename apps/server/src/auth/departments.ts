@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { departments, teams } from '../db/schema.js';
+import { idOnly, only } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import { accessOf, type Access } from './access.js';
 import { actsAsCeo } from './decisions.js';
@@ -30,7 +31,7 @@ export async function departmentsHad(db: Pick<Db, 'select'>, me: Pick<Person, 'i
 
 /* A top-level department of the person's company that is theirs: 404 for one that is not there, 403 for another one's. */
 export async function requireDepartmentHad(db: Pick<Db, 'select'>, me: Pick<Person, 'id' | 'companyId' | 'scopeKind'>, id: string): Promise<DepartmentRow> {
-  const [there] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId), isNull(departments.parentId)));
+  const [there] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId), isNull(departments.parentId)));
   if (!there) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
   const had = (await departmentsHad(db, me)).find(d => d.id === id);
   if (!had) throw new ApiError(403, 'forbidden', 'This department is not one you have.', 'not_your_department');
@@ -43,7 +44,7 @@ export async function requireDepartmentHad(db: Pick<Db, 'select'>, me: Pick<Pers
 export async function runsDepartment(db: Pick<Db, 'select'>, me: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status' | 'isOwner' | 'isCeoDelegate'>, departmentId: string | null): Promise<boolean> {
   if (actsAsCeo(me)) return true;
   if (!departmentId) return false;
-  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, me.companyId)));
+  const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, me.companyId)));
   if (!dept) return false;
   return (await accessOf(db, me)).owns?.has(dept.parentId ?? departmentId) === true;
 }

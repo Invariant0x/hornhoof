@@ -5,10 +5,10 @@ import type { MachineRole } from '../../db/schema.js';
 import { toPem } from '../tls/x509.js';
 import { UUID } from '../../net/proxy.js';
 
-export const AUTHORITY_YEARS = 20;
+const AUTHORITY_YEARS = 20;
 export const CERT_DAYS = 30;
 export const RENEW_AFTER_DAYS = 7;
-export const SKEW_MS = 5 * 60_000;
+const SKEW_MS = 5 * 60_000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CRL_BACK_DAYS = 1;
@@ -23,8 +23,8 @@ const NAMES_NO_MACHINE = 'This certificate names no machine of a company.';
 
 export type Authority = { certPem: string; keyPem: string };
 export type Issued = { certPem: string; serial: string; until: Date };
-export type IssueRequest = { machineId: string; role: MachineRole; signKey: string; now?: Date };
-export type CertFacts = { machineId: string; role: MachineRole; serial: string; notBefore: Date; notAfter: Date; signKey: string };
+type IssueRequest = { machineId: string; role: MachineRole; signKey: string; now?: Date };
+type CertFacts = { machineId: string; role: MachineRole; serial: string; notBefore: Date; notAfter: Date; signKey: string };
 
 function yearsLater(from: Date, years: number): Date {
   const later = new Date(from);
@@ -37,7 +37,7 @@ function commonName(value: string): x509.JsonName {
   return [{ CN: [value] }];
 }
 
-async function authorityExtensions(publicKey: CryptoKey): Promise<x509.Extension[]> {
+async function authorityExtensions(publicKey: webcrypto.CryptoKey): Promise<x509.Extension[]> {
   return [
     new x509.BasicConstraintsExtension(true, 0, true),
     new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
@@ -47,7 +47,7 @@ async function authorityExtensions(publicKey: CryptoKey): Promise<x509.Extension
 
 export async function makeAuthority(companyId: string, now: Date = new Date()): Promise<Authority> {
   const notBefore = new Date(now.getTime() - SKEW_MS);
-  const keys = (await webcrypto.subtle.generateKey(ED25519, true, ['sign', 'verify'])) as CryptoKeyPair;
+  const keys = (await webcrypto.subtle.generateKey(ED25519, true, ['sign', 'verify'])) as webcrypto.CryptoKeyPair;
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     name: commonName(`Hornhoof company ${companyId}`),
     notBefore,
@@ -69,13 +69,13 @@ function readSpki(signKey: string): KeyObject | null {
   }
 }
 
-function ed25519PublicKey(signKey: string): CryptoKey {
+function ed25519PublicKey(signKey: string): webcrypto.CryptoKey {
   const key = readSpki(signKey);
   if (key?.asymmetricKeyType !== 'ed25519') throw new Error(NOT_ED25519);
   return key.toCryptoKey(ED25519, true, ['verify']);
 }
 
-function signingKeyOf(authority: Authority): CryptoKey {
+function signingKeyOf(authority: Authority): webcrypto.CryptoKey {
   return createPrivateKey(authority.keyPem).toCryptoKey(ED25519, false, ['sign']);
 }
 

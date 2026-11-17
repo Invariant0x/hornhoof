@@ -48,6 +48,21 @@ const job = (over: Partial<Extract<ServerMessage, { type: 'job.run' }>> = {}): E
 const ok = (over: Partial<RunResult> = {}): RunResult => ({ ok: true, sessionId: 'sess-1', result: 'ready', output: '', error: null, limits: null, ...over });
 
 describe('runJob', () => {
+  it.each(['vault_save', 'vault_entry'])('hides %s inputs, results and raw completion output before sending them', async name => {
+    fakeClock();
+    const marker = 'private-vault-marker-1178';
+    const events: AgentEvent[] = [];
+    const adapter = fakeAdapter(async input => {
+      input.onEvent!({ kind: 'tool', name: `hornhoof.${name}`, input: JSON.stringify({ password: marker }) });
+      input.onEvent!({ kind: 'tool_result', ok: true, summary: JSON.stringify({ password: marker }) });
+      return ok({ result: marker, output: marker, failure: { kind: 'unknown', text: marker, retryable: false } });
+    });
+    const done = await runJob(adapter, job(), mkdtempSync(join(tmpdir(), 'hh-private-')), { onEvent: event => events.push(event) });
+    expect(events).toHaveLength(2);
+    expect(JSON.stringify({ events, done })).not.toContain(marker);
+    expect(done.tail).toMatch(/hidden/i);
+  });
+
   it('keeps the last 4096 bytes of output and hides secrets in it and in the result', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(async () => ok({ result: `token ${SECRET}`, output: 'x'.repeat(10000) + ` leaked ${SECRET} and sk-job-secret-999` }));

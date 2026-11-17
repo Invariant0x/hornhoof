@@ -74,6 +74,20 @@ it('takes one input for each look', async () => {
   expect(c.state.typed).toEqual(['keys:Enter']);
 });
 
+it("keeps an operator's look good while Hornhoof looks at the same program, and the first input ends every look", async () => {
+  const c = fixture();
+  const operator = await c.look();
+  c.later(10_000);
+  const hornhoof = await c.look();
+  expect(await c.type(operator.snapshot!, ['Enter'])).toMatchObject({ result: 'applied' });
+  expect(await c.type(hornhoof.snapshot!, ['Enter'])).toMatchObject({ result: 'refused', reason: 'snapshot_stale' });
+  const looks = [];
+  for (let i = 0; i < 9; i++) looks.push(await c.look());
+  expect(await c.type(looks[0]!.snapshot!, ['Enter'])).toMatchObject({ result: 'refused', reason: 'snapshot_stale' });
+  expect(await c.type(looks[8]!.snapshot!, ['Escape'])).toMatchObject({ result: 'applied' });
+  expect(c.state.typed).toEqual(['keys:Enter', 'keys:Escape']);
+});
+
 it('refuses a look that is 30 seconds old, or of a program that was started again since', async () => {
   const c = fixture();
   const old = await c.look();
@@ -130,4 +144,12 @@ it('gives no snapshot of a pane out of bounds', async () => {
   const c = fixture();
   c.state.cells = 'x'.repeat(OPERATOR_CELLS_BYTES + 1);
   expect(await c.look()).toMatchObject({ result: 'refused', reason: 'input_not_proven', snapshot: null });
+});
+
+
+it('passes the completed-response proof without changing the visible terminal cells', async () => {
+  const c = fixture();
+  const completion = 'a'.repeat(64);
+  c.state.facts = { ...c.state.facts!, completion };
+  expect(await c.look()).toMatchObject({ completion, cells: c.state.cells });
 });

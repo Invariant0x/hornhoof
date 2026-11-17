@@ -8,10 +8,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 /* The tools whose handlers only read. Not among them, though they sound like reads: `computer_result`, which gives up
    a command whose keeper never came for it; `pipeline_report`, which may keep a snapshot of a turn; `program_screen`,
-   which keeps a picture of the screen it shows. */
+   which keeps a picture of the screen it shows. `api` reads a page as ever there, and its route turns a change away. */
 export const READ_TOOLS: ReadonlySet<string> = new Set([
-  'company', 'staffing_options', 'tasks', 'task', 'turns', 'agents', 'failures', 'test_run', 'work_run', 'notebook', 'improvements', 'database', 'view', 'pool',
-  'machines', 'briefing', 'backlog', 'merge_conflicts', 'outbound_status', 'outbound_options', 'approval_policy', 'test_harness',
+  'company', 'staffing_options', 'tasks', 'task', 'turns', 'agents', 'failures', 'test_run', 'work_run', 'notebook', 'improvements', 'database', 'api', 'pool',
+  'machines', 'briefing', 'backlog', 'merge_conflicts', 'outbound_status', 'outbound_options', 'approval_policy', 'test_harness', 'find_tool', 'source', 'logs',
 ]);
 
 /* What a tool that changes something answers on a machine that only reads for a moment, should a call reach it past
@@ -36,6 +36,9 @@ export function cutOff(server: McpServer, o: { text?: string; keep?: ReadonlySet
 /* The name of the tool a request calls: the params.name of a JSON-RPC body whose method is tools/call, else none. */
 export function callName(body: unknown): string | null {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
-  const { method, params } = body as { method?: unknown; params?: { name?: unknown } | null };
-  return method === 'tools/call' && typeof params?.name === 'string' ? params.name : null;
+  const { method, params } = body as { method?: unknown; params?: { name?: unknown; arguments?: { name?: unknown } } | null };
+  if (method !== 'tools/call' || typeof params?.name !== 'string') return null;
+  /* A tool the orchestrator calls through use_tool is judged as itself. */
+  const through = params.name === 'use_tool' ? params.arguments?.name : undefined;
+  return typeof through === 'string' ? through : params.name;
 }

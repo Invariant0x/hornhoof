@@ -10,6 +10,7 @@ import { readNote } from './notes.js';
 import { TermShape } from './sql-words.js';
 import type { Taking } from './switch-step.js';
 import { above, nextWatchStep, nextWindow, NO_WINDOW, promiseAnswer, SILENT_MS, TAKE_MS, type Poll, type WatchSample, type Window } from './takeover-step.js';
+import { Ticker } from './ticker.js';
 
 /* The watch a machine that keeps a copy holds over the machine it follows. Each second it looks at the company's name
    at hornhoof.org, at the relay's health, at what answers at the company's link and at the leader's beats. When the
@@ -74,8 +75,7 @@ export type WatcherOptions = {
 };
 
 export class Watcher {
-  private timer: NodeJS.Timeout | null = null;
-  private stopped = false;
+  private readonly ticks: Ticker;
   private working = false;
   private probing = false;
   private readonly started: number;
@@ -98,20 +98,17 @@ export class Watcher {
 
   constructor(private readonly opts: WatcherOptions) {
     this.clocks = opts.now ?? (() => ({ wall: Date.now(), mono: performance.now() }));
+    this.ticks = new Ticker(() => this.tick(), opts.everyMs ?? EVERY_MS);
     this.started = this.clocks().mono;
     this.term = readFollowed(opts.dir);
   }
 
   start(): void {
-    if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => void this.tick(), this.opts.everyMs ?? EVERY_MS);
-    this.timer.unref();
+    this.ticks.start();
   }
 
   stop(): void {
-    this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.ticks.stop();
   }
 
   /* True from the turn it decided to take the server over. */
@@ -171,7 +168,7 @@ export class Watcher {
 
   /* One look, each second. A look that fails changes nothing, and is said once an outage. */
   async tick(): Promise<void> {
-    if (this.stopped || this.working || this.decided) return;
+    if (this.ticks.stopped || this.working || this.decided) return;
     this.working = true;
     try {
       await this.look();

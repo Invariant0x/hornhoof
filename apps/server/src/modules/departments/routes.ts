@@ -1,3 +1,4 @@
+import { idOnly, only } from '../../db/selections.js';
 import { notificationMessage } from '../events/notifications.js';
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { ensureOpenTurn } from '../tasks/turn-department.js';
@@ -119,7 +120,7 @@ async function structureSubject(db: Db, companyId: string, body: z.infer<typeof 
   const changed: string[] = [];
   for (const item of body.items) {
     if (isNew(item)) return CARD;
-    const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
+    const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
     if (item.remove && !dept?.parentId) return CARD;
     changed.push(dept?.parentId ?? item.department);
   }
@@ -129,7 +130,7 @@ async function structureSubject(db: Db, companyId: string, body: z.infer<typeof 
 /* Checks that a sub-unit belongs to this department of this company before changing or removing it. */
 async function requireDepartmentTeam(tx: Db | Tx, companyId: string, departmentId: string, teamId: string): Promise<void> {
   const [team] = await tx
-    .select({ id: teams.id })
+    .select(idOnly(teams))
     .from(teams)
     .where(and(eq(teams.id, teamId), eq(teams.departmentId, departmentId), eq(teams.companyId, companyId)));
   if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
@@ -139,7 +140,7 @@ async function requireDepartmentTeam(tx: Db | Tx, companyId: string, departmentI
 export async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, teamId: string): Promise<string[]> {
   await requireDepartmentTeam(tx, me.companyId, departmentId, teamId);
   const members = await tx
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId), isNull(agents.removedAt)));
   await tx.update(agents).set({ teamId: null }).where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId)));
@@ -302,7 +303,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .insert(departments)
             .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
-          await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
+          await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
           await ensureOpenTurn(tx, me.companyId, dept!.id);
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
@@ -314,7 +315,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [dept] = await tx.select().from(departments).where(eq(departments.id, item.department));
         if (!dept) continue;
         if (item.remove) {
-          const inside = [dept.id, ...(await tx.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
+          const inside = [dept.id, ...(await tx.select(idOnly(departments)).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
           /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
           await tx
             .update(agents)
@@ -525,7 +526,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const heads = lines.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
       if (heads.length > 1) throw invalid(`${deptName(dept)} can have one head; the card has ${heads.length}.`);
       if (heads.length) {
-        const [head] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
+        const [head] = await tx.select(only(agents, 'name')).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
         if (head) throw invalid(`${deptName(dept)} already has a head, ${head.name}.`);
       }
 

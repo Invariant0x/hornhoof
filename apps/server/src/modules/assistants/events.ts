@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { assistantEvents, assistantSeqs, type AssistantEventKind } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -39,7 +40,7 @@ export async function eventsAfter(db: Db, assistantId: string, after: number): P
 
 /* The number of the assistant's newest event, or 0 before its first: what comes later is read after it. */
 export async function lastSeqOf(db: Db, assistantId: string): Promise<number> {
-  const [last] = await db.select({ seq: assistantEvents.seq }).from(assistantEvents).where(eq(assistantEvents.assistantId, assistantId)).orderBy(desc(assistantEvents.seq)).limit(1);
+  const [last] = await db.select(only(assistantEvents, 'seq')).from(assistantEvents).where(eq(assistantEvents.assistantId, assistantId)).orderBy(desc(assistantEvents.seq)).limit(1);
   return last?.seq ?? 0;
 }
 

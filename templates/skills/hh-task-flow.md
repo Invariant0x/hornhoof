@@ -6,7 +6,7 @@ kind: core
 ---
 You can carry an assigned task from its current brief to a proved submission.
 
-Read "task" first: its body and current log govern the work. Work within the assignment's scope, permissions, checks and merge route; an assignment can widen what is checked, never move change checks to "run_tests". The task's actual gates decide whether another employee must approve a result; having this ability does not add a downstream chain.
+Read "task" first: its body and current log govern the work. Work within the assignment's scope, permissions, checks and merge route. The task's actual gates decide whether another employee must approve a result; having this ability does not add a downstream chain.
 
 1. Do what the body asks and check what changed. On `small: true` work, make the change and its check and report a line; a shared turn review exists only when assigned. Required approvals never disappear because a task is small.
 2. Use "submit" with what changed, the exact checked version and the actual output or record proving it. When work returns, address its blocking findings, run the affected checks and submit again. Everything you make, letters, texts, layouts and tables as well as code, goes into the task's repository as files in a commit, so that every version is kept. Push every commit and every branch you make as soon as it is made, finished or not, so that no work lives only on your machine; pushing merges nothing into the main branch. Hand work in as a document only while your department keeps no repository, where task.echelons says document: attach the files with `hh-attach`, hand them in with "submit" and name no commit.

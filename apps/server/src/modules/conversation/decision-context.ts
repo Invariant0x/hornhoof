@@ -6,6 +6,7 @@ import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -57,7 +58,7 @@ async function asOwner(db: Reader, turn: Words, found: Principal | null): Promis
   if (turn.job.agentKind !== 'orchestrator') return found;
   if (found && (await actingCeo(db, found.personId))) return found;
   const [owner] = await db
-    .select({ id: people.id })
+    .select(idOnly(people))
     .from(people)
     .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
     .limit(1);
@@ -156,7 +157,7 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
    owner while active. */
 async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
   if (personId !== ownerPersonId) return actingCeo(db, personId);
-  const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
+  const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, personId));
   return owner?.status === 'active' ? personId : null;
 }
 
@@ -273,7 +274,7 @@ class TurnStopped extends Error {}
 
 /* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
 async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
-  const [job] = await tx.select({ id: jobs.id }).from(jobs)
+  const [job] = await tx.select(idOnly(jobs)).from(jobs)
     .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('no key update');
   if (!job) throw new TurnStopped();
   await inputKept(tx, jobId);
@@ -298,9 +299,9 @@ export const alsoKept =
   };
 
 /* What a call of the orchestrator or a head decides on: the person its turn answers, found by Hornhoof. The orchestrator's
-   call of its own, as the owner, decides nothing. A person's own screen gives none. */
-export function delegationOf(me: { id: string; via?: string; decision?: { jobId: string; sourceSeq: number | null } }): Delegation | undefined {
-  if (!me.via) return undefined;
+   call of its own decides as the owner, with no turn to check. A person's own screen gives none. */
+export function delegationOf(me: { id: string; via?: string; viaHead?: true; decision?: { jobId: string; sourceSeq: number | null } }): Delegation | undefined {
+  if (!me.via || (!me.viaHead && !me.decision)) return undefined;
   if (!me.decision) throw contextMissing();
   return { agentId: me.via, personId: me.id, ...me.decision };
 }

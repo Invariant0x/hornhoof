@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, HTTPMethods } from 'fastify';
 import { z } from 'zod';
+import { idOnly } from '../../db/selections.js';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
@@ -34,14 +35,14 @@ type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true;
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
 
-/* Answers longer than this are cut, so one view does not fill the orchestrator's context. */
+/* Answers longer than this are cut, so one page does not fill the orchestrator's context. */
 const MAX_ANSWER = 30_000;
 
-/* Pages the orchestrator does not read with view: live streams, files and sign-in. */
-const UNREAD = /^\/api\/(stream|attachments|auth|invites|setup|nodes)(\/|$)|\/terminal$/;
+/* Routes that stream for as long as someone listens, with no answer to wait for: the live stream and the sockets. */
+const STREAMS = /^\/api\/(stream|nodes\/socket)$|\/terminal$/;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
-const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or view.`);
+const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or api.`);
 
 /* The tools that change people, their access, money or the company's reach. What is not forbidden is allowed, and the
    orchestrator can do everything in the company (Ivan's rule of 16 November 2026): he uses them in any turn, as the CEO
@@ -125,15 +126,21 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     });
 
   tool(
-    'view',
-    'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/task-departments, /api/tasks?status=all&department=<department id, or none for your own>, /api/tasks/<id>, /api/departments/<id>/backlog, ' +
-      '/api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), /api/agents/<id>/events (its conversation), ' +
-      '/api/departments/<id>/roster, /api/updates, /api/link (the public link), /api/link/names/<name> (whether a name for it is free) and /api/repo-host (the GitHub owner whose key creates the company\'s repositories; /api/org shows each department\'s as repoHost).',
-    { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },
-    ({ path }) => {
+    'api',
+    "Calls any route of Hornhoof's API as the company's owner and gives its answer: whatever a person can do in Hornhoof's screens, and what they read there. " +
+      'method is GET by default; path starts with /api/, with its query; body is the JSON the route takes. Pages worth reading: /api/org, /api/people, /api/subscriptions, /api/machines, /api/task-departments, ' +
+      '/api/tasks?status=all&department=<department id, or none for your own>, /api/tasks/<id>, /api/departments/<id>/backlog, /api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), ' +
+      "/api/agents/<id>/events (its conversation), /api/departments/<id>/roster, /api/updates, /api/link (the public link), /api/link/names/<name> (whether a name for it is free) and /api/repo-host (the GitHub owner whose key creates the company's repositories).",
+    {
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+      path: z.string().trim().min(1).max(2000).describe('The route, starting with /api/.'),
+      body: z.unknown().optional().describe('The JSON body, for a route that takes one.'),
+    },
+    ({ method = 'GET', path, body }) => {
       const url = new URL(path, 'http://hornhoof');
-      if (!url.pathname.startsWith('/api/') || UNREAD.test(url.pathname)) return `${url.pathname} is not a page view reads. Use an /api/ page from the list.`;
-      return { method: 'GET', url: url.pathname + url.search };
+      if (!url.pathname.startsWith('/api/')) return `${url.pathname} is no route of the API: it starts with /api/.`;
+      if (STREAMS.test(url.pathname)) return `${url.pathname} streams without end, so it has no answer to give. Read the pages it streams from instead.`;
+      return { method, url: url.pathname + url.search, ...(body === undefined ? {} : { payload: body }) };
     },
   );
 
@@ -284,7 +291,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     { machine: Id('machine'), subscription: Id('subscription'), ...PERMISSION },
     ({ machine, subscription, permission }) => ({ method: 'POST', url: `/api/machines/${machine}/plans`, payload: { subscription }, permission }),
   );
-  tool('test_subscription', 'Sends a tiny prompt through a subscription to prove it works; view /api/jobs/<id> for the answer.', { subscription: Id('subscription') }, ({ subscription }) => ({
+  tool('test_subscription', 'Sends a tiny prompt through a subscription to prove it works; read /api/jobs/<id> with api for the answer.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'POST',
     url: `/api/subscriptions/${subscription}/test`,
   }));
@@ -402,7 +409,7 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
   const [owner] = personId
     ? [{ id: personId }]
     : await ctx.db
-        .select({ id: people.id })
+        .select(idOnly(people))
         .from(people)
         .where(and(eq(people.companyId, job.companyId), eq(people.isOwner, true)));
   if (!owner) return say('This company has no owner to act for.', true);

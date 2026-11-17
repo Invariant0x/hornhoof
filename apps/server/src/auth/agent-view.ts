@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { agents, assistants, departments, people, subscriptions } from '../db/schema.js';
+import { idOnly } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import type { MessageEnvelope, MessageParty } from '../modules/events/parties.js';
 import type { EventView } from '../modules/events/store.js';
@@ -36,7 +37,7 @@ export type AgentViewer = {
 
 /* Where the agent works and the plan it runs on. A terminal passes the plan its program really lives on. assistant: the
    agent's id, when it is an assistant's own. */
-export type AgentPlace = { subscriptionId: string | null; spot: Spot; assistant?: string };
+type AgentPlace = { subscriptionId: string | null; spot: Spot; assistant?: string };
 
 /* Whether the place is in a department this person owns. */
 export function ownsPlace(viewer: Pick<AgentViewer, 'access'>, spot: Spot): boolean {
@@ -81,13 +82,13 @@ export async function viewerOf(db: Db, me: Person): Promise<AgentViewer> {
   /* Only the orchestrator's call sees all; a head's call for a person sees what that person sees. */
   if (viaOrchestrator(me) || actsAsCeo(me)) return { full: true, personId: me.id, access, plans: new Set(), agents: own, own, apart };
   const plans = new Set(
-    (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.companyId, me.companyId), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)))).map(p => p.id),
+    (await db.select(idOnly(subscriptions)).from(subscriptions).where(and(eq(subscriptions.companyId, me.companyId), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)))).map(p => p.id),
   );
   const onPlans = plans.size ? await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.subscriptionId, [...plans]))) : [];
   const seen = await Promise.all(onPlans.map(async a => (canReach(access, await agentSpot(db, a)) ? [a.id] : [])));
   /* Every agent of an owned department, of its products and of its sub-units, placed there or in a sub-unit itself. */
-  const units = access.owns?.size ? [...access.owns, ...(await db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, [...access.owns]))).map(d => d.id)] : [];
-  const owned = units.length ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.departmentId, units))) : [];
+  const units = access.owns?.size ? [...access.owns, ...(await db.select(idOnly(departments)).from(departments).where(inArray(departments.parentId, [...access.owns]))).map(d => d.id)] : [];
+  const owned = units.length ? await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.departmentId, units))) : [];
   return { full: false, personId: me.id, access, plans, agents: new Set([...seen.flat(), ...owned.map(a => a.id), ...own]), own, apart };
 }
 

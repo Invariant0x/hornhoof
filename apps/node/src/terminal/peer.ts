@@ -17,6 +17,22 @@ export function procOwner(proc: string): OwnerFactory {
 
 const LOCAL = '0100007F';
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
+type TerminalSession = { session: number; tty: number };
+
+async function terminalSession(proc: string, pid: number): Promise<TerminalSession | null> {
+  const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8').catch(() => '');
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+  const session = Number(fields[3]), tty = Number(fields[4]);
+  return Number.isSafeInteger(session) && session > 0 && Number.isSafeInteger(tty) && tty > 0 ? { session, tty } : null;
+}
+
+/* Reparenting changes ppid, but not the kernel session or controlling terminal. An outside process cannot join this
+   session. Require its live leader to be the exact pane pid tmux named, not merely another process on the same tty. */
+async function inPaneSession(proc: string, caller: TerminalSession | null, roots: number[]): Promise<boolean> {
+  if (!caller || !roots.includes(caller.session)) return false;
+  const leader = await terminalSession(proc, caller.session);
+  return leader?.session === caller.session && leader.tty === caller.tty;
+}
 
 /* The socket of the caller's end, from the kernel's table of TCP connections. */
 export async function socketOf(proc: string, { port, bridgePort }: Peer): Promise<string | null> {
@@ -49,7 +65,7 @@ async function holds(proc: string, pid: number, link: string): Promise<boolean> 
 
 /* Agents of one plan share a Linux user, so the secret in a bridge address is no proof: any of them can read another's
    command line. The kernel tells which process holds the caller's end of the connection, and the call is the agent's
-   only when that process runs under the agent's own pane. */
+   only when that process runs under the agent's own pane or in that pane's live terminal session. */
 export function fromAgent(panes: (key: string) => Promise<number[]>, proc = '/proc'): Owns {
   return async (key, peer) => {
     const inode = peer.acceptedInode === undefined ? await socketOf(proc, peer) : peer.acceptedInode;
@@ -66,7 +82,9 @@ export function fromAgent(panes: (key: string) => Promise<number[]>, proc = '/pr
 async function hintedOwner(proc: string, pid: number, link: string, panes: () => Promise<number[]>): Promise<boolean> {
   if (!Number.isSafeInteger(pid) || pid <= 0 || !(await holds(proc, pid, link))) return false;
   const lineage = await ancestors(proc, pid);
-  return (await panes()).some(root => lineage.has(root));
+  const caller = await terminalSession(proc, pid);
+  const roots = await panes();
+  return roots.some(root => lineage.has(root)) || inPaneSession(proc, caller, roots);
 }
 
 async function ancestors(proc: string, pid: number): Promise<Set<number>> {
@@ -90,6 +108,9 @@ async function underPanes(proc: string, roots: number[], link: string): Promise<
     seen.add(pid);
     if (await holds(proc, pid, link)) return true;
     queue.push(...(tree.get(pid) ?? []));
+  }
+  for (const pids of tree.values()) for (const pid of pids) {
+    if (!seen.has(pid) && await inPaneSession(proc, await terminalSession(proc, pid), roots) && await holds(proc, pid, link)) return true;
   }
   return false;
 }

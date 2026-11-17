@@ -274,7 +274,7 @@ describe('Machines', () => {
 
   it('keeps machine notes ahead of built-in notes and uses built-in resources when its machine has none', async () => {
     const machine = { ...MACHINES[0]!, online: false, load: null, browserError: 'machine browser reason', drain: { state: 'restarting' as const, since: '2026-11-04T17:00:00.000Z' } };
-    lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'postponed', turnsLeft: 2, partsLeft: 0, retryAt: '2026-11-04T18:00:00.000Z' } } }] });
+    lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'waiting', turnsLeft: 2, partsLeft: 0, since: '2026-11-04T18:00:00.000Z' } } }] });
     render(<Machines me={ME} />);
     const mac = await openCard('dev-laptop');
     expect(fact(await screen.findByRole('region', { name: 'All machines together' }), 'Machines online')).toBe('1 of 1');
@@ -283,7 +283,7 @@ describe('Machines', () => {
     expect(within(mac).getByText(/machine browser reason/, { selector: 'p' })).toBeInTheDocument();
     expect(within(mac).queryByText(/builtin browser reason/)).not.toBeInTheDocument();
     expect(within(mac).getByText('Updating now: the machine restarts and takes work again by itself')).toBeInTheDocument();
-    expect(within(mac).queryByText(/update is postponed/)).not.toBeInTheDocument();
+    expect(within(mac).queryByText(/before the update/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(1);
   });
 
@@ -1066,17 +1066,16 @@ describe('Machines', () => {
 
   describe('waiting before an update', () => {
     const at = (hour: number, minute: number) => new Date(2026, 10, 4, hour, minute).toISOString();
-    const waiting = (turnsLeft: number, partsLeft = 0) => ({ state: 'waiting' as const, turnsLeft, partsLeft, until: at(21, 30) });
-    const postponed = { state: 'postponed' as const, turnsLeft: 2, partsLeft: 0, retryAt: at(22, 5) };
+    const waiting = (turnsLeft: number, partsLeft = 0) => ({ state: 'waiting' as const, turnsLeft, partsLeft, since: at(21, 30) });
     const restarting = { state: 'restarting' as const, since: at(21, 0) };
     const onMachine = (drain: unknown, over: Partial<(typeof MACHINES)[number]> = {}): [number, unknown] => [200, { machines: [{ ...MACHINES[0]!, ...over, drain }], builtin: null }];
     /* The table's own row, not the row its open card sits in. */
     const macRow = () => screen.getAllByRole('row', { name: 'dev-laptop' }).find(row => row.getAttribute('aria-label') === 'dev-laptop')!;
 
     it.each([
-      ['en', 'Waiting for agents to finish before the update: 3 turns left, until 21:30', 'Waiting to update'],
-      ['ru', 'Ждет конца работы агентов перед обновлением: осталось 3 хода, до 21:30', 'Ждет обновления'],
-    ])('says in the card and the row how many turns are left and until when in %s', async (language, line, mark) => {
+      ['en', 'Waiting since 21:30 for agents to finish before the update: 3 turns left. It takes no new work until then', 'Waiting to update'],
+      ['ru', 'С 21:30 ждет конца работы агентов перед обновлением: осталось 3 хода. До тех пор новой работы не берет', 'Ждет обновления'],
+    ])('says in the card and the row how many turns are left and since when in %s', async (language, line, mark) => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(3)) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
@@ -1086,14 +1085,14 @@ describe('Machines', () => {
     });
 
     it.each([
-      ['en', 1, 0, 'Waiting for agents to finish before the update: 1 turn left, until 21:30'],
-      ['en', 0, 0, 'Waiting for agents to finish before the update: 0 turns left, until 21:30'],
-      ['en', 0, 1, 'Waiting for agents to finish before the update: 1 run part left, until 21:30'],
-      ['en', 2, 3, 'Waiting for agents to finish before the update: 2 turns and 3 run parts left, until 21:30'],
-      ['ru', 1, 0, 'Ждет конца работы агентов перед обновлением: остался 1 ход, до 21:30'],
-      ['ru', 5, 0, 'Ждет конца работы агентов перед обновлением: осталось 5 ходов, до 21:30'],
-      ['ru', 0, 1, 'Ждет конца работы агентов перед обновлением: осталась 1 часть прогона, до 21:30'],
-      ['ru', 2, 5, 'Ждет конца работы агентов перед обновлением: осталось 2 хода и 5 частей прогона, до 21:30'],
+      ['en', 1, 0, 'Waiting since 21:30 for agents to finish before the update: 1 turn left. It takes no new work until then'],
+      ['en', 0, 0, 'Waiting since 21:30 for agents to finish before the update: 0 turns left. It takes no new work until then'],
+      ['en', 0, 1, 'Waiting since 21:30 for agents to finish before the update: 1 run part left. It takes no new work until then'],
+      ['en', 2, 3, 'Waiting since 21:30 for agents to finish before the update: 2 turns and 3 run parts left. It takes no new work until then'],
+      ['ru', 1, 0, 'С 21:30 ждет конца работы агентов перед обновлением: остался 1 ход. До тех пор новой работы не берет'],
+      ['ru', 5, 0, 'С 21:30 ждет конца работы агентов перед обновлением: осталось 5 ходов. До тех пор новой работы не берет'],
+      ['ru', 0, 1, 'С 21:30 ждет конца работы агентов перед обновлением: осталась 1 часть прогона. До тех пор новой работы не берет'],
+      ['ru', 2, 5, 'С 21:30 ждет конца работы агентов перед обновлением: осталось 2 хода и 5 частей прогона. До тех пор новой работы не берет'],
     ])('words the count in %s for %i turns and %i run parts', async (language, turns, parts, line) => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(turns, parts)) });
@@ -1119,18 +1118,6 @@ describe('Machines', () => {
     });
 
     it.each([
-      ['en', 'The update is postponed: agents did not finish in time. Next try at 22:05', 'Update postponed'],
-      ['ru', 'Обновление отложено: агенты не успели закончить работу. Следующая попытка в 22:05', 'Обновление отложено'],
-    ])('says an update was postponed and when it tries again in %s', async (language, line, mark) => {
-      localStorage.setItem('hh-lang', language);
-      lists({ 'GET /api/machines': onMachine(postponed) });
-      render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      const mac = await openCard('dev-laptop');
-      expect(within(mac).getByText(line)).toBeInTheDocument();
-      expect(within(macRow()).getByText(mark)).toBeInTheDocument();
-    });
-
-    it.each([
       ['en', 'Updating now: the machine restarts and takes work again by itself', 'Updating'],
       ['ru', 'Идет обновление: машина перезапустится и сама снова возьмет работу', 'Обновляется'],
     ])('tells a restart for the update from a lost machine in %s', async (language, line, mark) => {
@@ -1147,21 +1134,21 @@ describe('Machines', () => {
       lists({ 'GET /api/machines': onMachine(drain) });
       render(<Machines me={ME} />);
       const mac = await openCard('dev-laptop');
-      expect(within(mac).queryByText(/before the update|postponed|Updating now/)).not.toBeInTheDocument();
+      expect(within(mac).queryByText(/before the update|Updating now/)).not.toBeInTheDocument();
       expect(within(macRow()).queryByText('Waiting to update')).not.toBeInTheDocument();
     });
 
     it('shows the wait of the built-in node on its own card', async () => {
       lists({}, { ...BUILTIN, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
-      expect(within(await openCard('Built-in node')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
+      expect(within(await openCard('Built-in node')).getByText(/Waiting since 21:30 for agents to finish before the update: 2 turns left\./)).toBeInTheDocument();
       expect(within(card('dev-laptop')).queryByText(/before the update/)).not.toBeInTheDocument();
     });
 
     it('shows the wait of the built-in node on the machine it runs on', async () => {
       lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' }, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
-      expect(within(await openCard('dev-laptop')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
+      expect(within(await openCard('dev-laptop')).getByText(/Waiting since 21:30 for agents to finish before the update: 2 turns left\./)).toBeInTheDocument();
     });
   });
 });
@@ -1416,6 +1403,8 @@ describe('the filter groups and search of Machines (#1020)', () => {
     showIn(language);
     await screen.findByRole('table');
     const t = { en, ru }[language];
+    /* The phones under the machines have loaded, so the machines' count is the one status line. */
+    await screen.findByText(t.phones.empty);
 
     const pool = screen.getByRole('region', { name: t.machines.pool });
     const figures = [...pool.querySelectorAll('.pool-facts dd')];

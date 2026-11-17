@@ -2,7 +2,9 @@ import { EndSourceWait, ReplanWait, signalsOnce, SyncSourceWaits, validSourceKey
 import { and, asc, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { runsDepartment } from '../../auth/departments.js';
+import type { Checker } from '../../checker.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
 
@@ -16,7 +18,7 @@ export type TaskWait = typeof taskWaits.$inferSelect;
 
 export const waitForSourceKey = (operation: string) => `wait_for:${operation}`;
 export const operationSourceKey = (operation: string) => `operation:${operation}`;
-export const runSourceKey = (run: string) => `run:${run}`;
+const runSourceKey = (run: string) => `run:${run}`;
 export const afterSourceKey = (task: string) => `task:${task}`;
 export const requestSourceKey = (request: string) => `request:${request}`;
 export const reviewSourceKey = (task: string, stage: string, candidate: string, reviewer: string) => `review:${task}:${stage}:${candidate}:${reviewer}`;
@@ -25,7 +27,7 @@ const OPEN_STATES = ['active', 'legacy_needs_plan'] as const;
 const isOpen = (wait: TaskWait): boolean => wait.endedAt === null;
 const staleSource = () => refuse(409, 'task_changed', 'This source has moved on since what you read.');
 
-function parsed<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
+function parsed<T>(schema: Checker<T>, input: unknown): T {
   const result = schema.safeParse(input);
   if (!result.success) throw refuse(400, 'task_invalid', `A wait needs a real source, a real owner and a whole plan: ${result.error.issues[0]!.message}`);
   return result.data;
@@ -58,12 +60,12 @@ async function lockedTask(tx: Tx, taskId: string): Promise<Task> {
 }
 
 async function isAgentOf(tx: Tx, companyId: string, agentId: string, working: boolean): Promise<boolean> {
-  const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), ...(working ? [isNull(agents.removedAt)] : [])));
+  const [agent] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), ...(working ? [isNull(agents.removedAt)] : [])));
   return Boolean(agent);
 }
 
 async function isPersonOf(tx: Tx, companyId: string, personId: string, working: boolean): Promise<boolean> {
-  const [person] = await tx.select({ id: people.id }).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId), ...(working ? [eq(people.status, 'active')] : [])));
+  const [person] = await tx.select(idOnly(people)).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId), ...(working ? [eq(people.status, 'active')] : [])));
   return Boolean(person);
 }
 
@@ -82,7 +84,7 @@ async function requireOwner(tx: Tx, companyId: string, owner: WaitOwnerBinding):
 
 async function requirePlan(tx: Tx, companyId: string, plan: WaitPlan): Promise<void> {
   if (!(await isOfCompany(tx, companyId, plan.provenance.actor, false))) throw refuse(400, 'task_invalid', 'A plan\'s dates must come from someone of this company.');
-  const [head] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, plan.finalReview.headAgentId), eq(agents.companyId, companyId), eq(agents.kind, 'head'), isNull(agents.removedAt)));
+  const [head] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, plan.finalReview.headAgentId), eq(agents.companyId, companyId), eq(agents.kind, 'head'), isNull(agents.removedAt)));
   if (!head) throw refuse(400, 'task_invalid', 'The final review of a plan needs a real head of this company.');
 }
 
@@ -295,7 +297,7 @@ export async function recordRunWait(tx: Tx, run: RunSource, stage: RunStage, at:
 /* A run moved to another stage. A stage with a policy has a clock of its own, from now; without one the dates it has stay. */
 export async function moveRunStage(tx: Tx, run: RunSource, stage: RunStage, at: Date): Promise<void> {
   const sourceKey = runSourceKey(run.id);
-  const [seen] = await tx.select({ sourceState: taskWaits.sourceState }).from(taskWaits).where(and(eq(taskWaits.taskId, run.taskId), eq(taskWaits.sourceKey, sourceKey), inArray(taskWaits.state, OPEN_STATES)));
+  const [seen] = await tx.select(only(taskWaits, 'sourceState')).from(taskWaits).where(and(eq(taskWaits.taskId, run.taskId), eq(taskWaits.sourceKey, sourceKey), inArray(taskWaits.state, OPEN_STATES)));
   if (!seen || seen.sourceState.stage === stage) return;
   const task = await lockedTask(tx, run.taskId);
   const wait = await lastOfSource(tx, task, 'run', sourceKey);
@@ -338,7 +340,7 @@ function replanned(wait: TaskWait, valid: ReplanWait): { owner: WaitOwnerBinding
 export async function replanWait(tx: Tx, input: ReplanWait & { actor: Actor }): Promise<TaskWait> {
   const { actor, ...source } = input;
   const valid = parsed(ReplanWait, source);
-  const [seen] = await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, valid.waitId));
+  const [seen] = await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, valid.waitId));
   if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
   const task = await lockedTask(tx, seen.taskId);
   const [wait] = await tx.select().from(taskWaits).where(eq(taskWaits.id, valid.waitId)).for('update');
@@ -362,12 +364,12 @@ export async function setWaitStage(tx: Tx, input: { taskId: string; kind: WaitSo
   return kept!;
 }
 
-export type FinalReviewStep = { wait: TaskWait; ordinal: number; skipped: number };
+type FinalReviewStep = { wait: TaskWait; ordinal: number; skipped: number };
 
 /* The final review due now, once: whoever holds this step writes its one notice in the same transaction. The sequence goes on
    from its anchor and no promise moves. A source that signals once stands at the top level after it, with none left. */
 export async function claimFinalReview(tx: Tx, input: { waitId: string; expectedGeneration: number; at: Date }): Promise<FinalReviewStep | null> {
-  const [seen] = await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, input.waitId));
+  const [seen] = await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, input.waitId));
   if (!seen) return null;
   const task = await lockedTask(tx, seen.taskId);
   const [wait] = await tx.select().from(taskWaits).where(eq(taskWaits.id, input.waitId)).for('update');

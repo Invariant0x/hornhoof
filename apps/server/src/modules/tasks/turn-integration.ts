@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { companies, departments, turns } from '../../db/schema.js';
+import { companies, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
@@ -15,7 +16,7 @@ type Turn = typeof turns.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 /* The repository the result is in and the branch it goes to: its department's open turn, opened if it has none, or its own
    main line. None where it keeps no repository. */
@@ -27,18 +28,6 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id)
     ?? await ctx.db.transaction(async tx => { await lockCompany(tx, task.companyId); return ensureOpenTurn(tx, task.companyId, found.department.id); });
   return { repo: found.repo, branch: `turn-${turn.number}`, turn };
-}
-
-/* Whether the result goes to its own main line straight, read without opening any turn: the first of its product and
-   department that keeps a repository is a part of a department. A top-level department's results join its open turn, and
-   one that keeps no repository has nothing to integrate. */
-export async function goesStraightToMain(db: Ctx['db'] | Tx, task: Pick<Task, 'productId' | 'departmentId'>): Promise<boolean> {
-  for (const id of [task.productId, task.departmentId]) {
-    if (!id) continue;
-    const [d] = await db.select({ repoUrl: departments.repoUrl, parentId: departments.parentId }).from(departments).where(eq(departments.id, id));
-    if (d?.repoUrl) return d.parentId !== null;
-  }
-  return false;
 }
 
 /* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,
@@ -68,7 +57,7 @@ export async function headOf(ctx: Reader, repo: Repo, branch: string): Promise<s
 
 type Maker = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'readBranches' | 'createBranch'>>;
 type Heads = Awaited<ReturnType<NonNullable<Ctx['readBranches']>>>;
-export type TurnBranch = { head: string; made: boolean } | { problem: string };
+type TurnBranch = { head: string; made: boolean } | { problem: string };
 
 /* Where a turn's branch is made from: the commit the turn starts from, else the release it came from, else main's head. */
 const startOf = (turn: Turn, heads: Record<string, string>, main: string): string | undefined => turn.startCommit ?? turn.baseCommit ?? heads[main];

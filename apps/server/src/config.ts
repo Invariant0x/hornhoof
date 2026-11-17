@@ -31,8 +31,6 @@ export type Config = {
   image: string;
   registryUrl?: string;
   updateCheckMs: number;
-  nodeDrainMs: number;
-  nodeUpdateRetryMs: number;
   nodeLeaderHoldMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
@@ -67,6 +65,8 @@ export type Config = {
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
   harnessDir?: string;
   harnessBytes: number;
+  /* Where a file over 50 MB lives, on this machine's disk. No folder: such a file is turned away. */
+  filesDir?: string;
   /* The ACME directory the link's certificate comes from; null with certificates off. */
   acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
@@ -107,13 +107,9 @@ const Env = z.object({
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
-  /* Just under the 99th percentile of the turns that ended well, 5438 s in a week of them on 2026-11-04, and a turn has
-     run for a while when the wait starts; a held node works again after that. */
-  NODE_DRAIN_MS: milliseconds('NODE_DRAIN_MS', 1, '5400000').default(5_400_000),
-  /* Long enough for 90% of the turns that waited for the node to run and end before it holds them again. */
-  NODE_UPDATE_RETRY_MS: milliseconds('NODE_UPDATE_RETRY_MS', 1, '900000').default(900_000),
-  /* How long a node that waits for an update keeps new turns of the orchestrator and the heads off it. Replacing a free
-     node takes under a minute, so past this the node has work that runs on. */
+  /* How long the orchestrator and the heads wait for a machine next to install the server's build, and for a node an
+     updater was told is free while it does not stop. Replacing a free node takes under a minute. A node that waits for
+     its work to end before an update takes none of their turns, however long. */
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
@@ -133,6 +129,7 @@ const Env = z.object({
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
+  FILES_DIR: z.preprocess(unset, z.string().min(1).optional()),
   HARNESS_MB: wholeNumber(1, 100_000_000, 'HARNESS_MB must be a whole number of megabytes, like 20480.'),
   ACME_DIRECTORY: z.preprocess(
     unset,
@@ -216,15 +213,13 @@ function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScri
 }
 
 /* Intervals and limits, with their defaults. */
-function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeDrainMs' | 'nodeUpdateRetryMs' | 'nodeLeaderHoldMs'> {
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeLeaderHoldMs'> {
   return {
     port: set.PORT ?? 8080,
     nodePingMs: set.NODE_PING_MS ?? 20000,
     streamPingMs: set.STREAM_PING_MS ?? 25000,
     runsPerHost: set.MAX_RUNS_PER_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
-    nodeDrainMs: set.NODE_DRAIN_MS,
-    nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
   };
 }
@@ -254,6 +249,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     keeper: set.HORNHOOF_KEEPER === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     ...harnessSettings(set),
+    ...(set.FILES_DIR ? { filesDir: set.FILES_DIR } : {}),
     hostId: set.HORNHOOF_HOST_ID ?? null,
     machineId: set.HORNHOOF_MACHINE_ID ?? null,
     ownerKey: set.HORNHOOF_OWNER_KEY && isP256(set.HORNHOOF_OWNER_KEY) ? set.HORNHOOF_OWNER_KEY : null,

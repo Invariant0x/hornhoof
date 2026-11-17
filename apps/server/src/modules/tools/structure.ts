@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agents, departments, personAccess, subscriptions, tasks, teams } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 import { outboundRecordsOf } from '../outbound/extension.js';
 
@@ -49,7 +50,7 @@ async function checkItemTeams(db: Db, companyId: string, dept: DeptRow, list: Te
   const ids = list.flatMap(t => (typeof t === 'string' ? [] : [t.id]));
   if (!ids.length) return null;
   const existing = new Set(
-    (await db.select({ id: teams.id }).from(teams).where(and(eq(teams.companyId, companyId), eq(teams.departmentId, dept.id)))).map(t => t.id),
+    (await db.select(idOnly(teams)).from(teams).where(and(eq(teams.companyId, companyId), eq(teams.departmentId, dept.id)))).map(t => t.id),
   );
   const missing = ids.find(id => !existing.has(id));
   return missing ? `There is no sub-unit with id ${missing} in ${deptName(dept)}. Call company to see the current ids.` : null;
@@ -62,21 +63,21 @@ async function checkChangeItem(db: Db, companyId: string, all: DeptRow[], byId: 
   if (dept.templateKey === 'operations') return 'Operations is always there and cannot be removed.';
   const inside = [dept.id, ...all.filter(d => d.parentId === dept.id).map(d => d.id)];
   const staffed = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNull(agents.removedAt)));
   if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
-  const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
+  const teamIds = (await db.select(idOnly(teams)).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
   const places = [...inside, ...teamIds];
   const [person] = await db
-    .select({ id: personAccess.id })
+    .select(idOnly(personAccess))
     .from(personAccess)
     .where(or(inArray(personAccess.departmentId, inside), teamIds.length ? inArray(personAccess.teamId, teamIds) : undefined));
   if (person) return `People work in ${deptName(dept)}; move them first.`;
-  const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
+  const [key] = await db.select(idOnly(subscriptions)).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
   if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
   const [busy] = await db
-    .select({ id: tasks.id })
+    .select(idOnly(tasks))
     .from(tasks)
     .where(and(inPlaces(companyId, dept, inside), or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])))
     .limit(1);

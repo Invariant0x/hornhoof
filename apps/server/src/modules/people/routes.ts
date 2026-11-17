@@ -10,6 +10,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions, personKeys } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { releaseAssistantAgent } from '../assistants/setup.js';
@@ -59,7 +60,7 @@ function telegramChange(input: string | null | undefined, now: TelegramColumns):
 /* A Telegram account speaks to the bots as the person it is set for, so it is set from a person's own screen: for
    themselves, or by whoever changes that person, and for the CEO or the CEO delegate only by the CEO. */
 function guardTelegram(me: Person, target: Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>): void {
-  if (me.via) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen.');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen, or by the orchestrator.');
   if (target.id !== me.id && (target.isOwner || target.isCeoDelegate) && !me.isOwner) {
     throw new ApiError(403, 'forbidden', 'Only the CEO sets who the CEO or the CEO delegate is in Telegram.', 'owner_locked');
   }
@@ -153,9 +154,9 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
    lets go of the plan and waits for another; the orchestrator is company-wide, so it needs an owner with the whole company. */
 async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status'>, by: Person): Promise<void> {
   const { db } = ctx;
-  const theirs = (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, owner.id), eq(subscriptions.kind, 'personal')))).map(s => s.id);
+  const theirs = (await db.select(idOnly(subscriptions)).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, owner.id), eq(subscriptions.kind, 'personal')))).map(s => s.id);
   if (!theirs.length) return;
-  const bound = await db.select({ id: agents.id }).from(agents).where(and(inArray(agents.subscriptionId, theirs), isNull(agents.removedAt)));
+  const bound = await db.select(idOnly(agents)).from(agents).where(and(inArray(agents.subscriptionId, theirs), isNull(agents.removedAt)));
   const access = await accessOf(db, owner);
   let freed = false;
   for (const { id } of bound) {
@@ -188,7 +189,7 @@ export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Pr
     return row;
   });
   if (!person) return;
-  const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, personId), isNull(machines.revokedAt)));
+  const theirs = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.personId, personId), isNull(machines.revokedAt)));
   await disconnectMachines(ctx, theirs.map(m => m.id));
   const [owner] = by ? [by] : await db.select(personColumns).from(people).where(and(eq(people.companyId, person.companyId), eq(people.isOwner, true)));
   if (owner) await releasePlansOf(ctx, person, owner);
@@ -331,7 +332,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
        company server is not disabled: the server moves first. */
     if (status === 'disabled') {
       delete changes.status;
-      const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
+      const theirs = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
       await refuseLeader(db, config, theirs.map(m => m.id));
     }
 
@@ -364,11 +365,11 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { person: await personView(db, person) };
   });
 
-  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off: only from the CEO's own
-     screen, never the orchestrator's tool. The mark needs an active person with the whole company. */
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off, by himself or through the
+     orchestrator. The mark needs an active person with the whole company. */
   app.put('/api/people/:id/ceo-delegate', async req => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
+    if (!me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
     const { id } = IdParams.parse(req.params);
     const { isCeoDelegate } = DelegateBody.parse(req.body);
     const target = await delegateTarget(db, me, id, isCeoDelegate);

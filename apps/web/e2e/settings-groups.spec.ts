@@ -4,9 +4,11 @@ import { LANGUAGES } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { builtinSkin } from '../src/skins/registry';
 import { builtinFile, skinText } from '../src/skins/validate';
+import type { VaultEntry } from '../src/ui/Vault';
 import { ME, serveApi } from './api';
+import { cutByNavigation } from './look-steps';
 
-/* The short account menu, Settings as Design's variant A draws it (Profile first, then four groups) and About with
+/* The short account menu, Settings as Design's variant A draws it (Profile first, then five groups) and About with
    writing to the developers, as a person meets them: in a light and a dark skin, in the longest and the shortest shipped
    language and right to left, at the widths of a desktop, a laptop, a small laptop and a phone. Every group keeps its
    parts on one shared edge and its buttons on the end edge of the column, every field, list and button is a 44 px target,
@@ -25,6 +27,7 @@ const GROUPS = [
   { id: 'profile', path: '/settings/profile' },
   { id: 'appearance', path: '/settings' },
   { id: 'integrations', path: '/settings/integrations' },
+  { id: 'passwords', path: '/settings/passwords' },
   { id: 'messaging', path: '/settings/messaging' },
   { id: 'company', path: '/settings/company' },
 ] as const;
@@ -46,6 +49,7 @@ const OUTBOUND = {
   approvals: [],
 };
 const GOOGLE = { kind: 'service_account', account: 'sheets-bot@acme.iam.gserviceaccount.com', shareEmail: 'ivan@acme.com', keyLast4: '9876' };
+const EMPTY_VAULT: { entries: VaultEntry[] } = { entries: [] };
 const FORBIDDEN = { status: 403, json: { error: { code: 'forbidden', message: 'Forbidden.' } } };
 /* A person who sees only some departments: no company link, no backups, no company keys. */
 const LISTED = { ...ME, person: { ...ME.person, name: 'Lisa', email: 'lisa@acme.com', title: 'Designer', scopeKind: 'listed', isOwner: false } };
@@ -57,8 +61,7 @@ async function prepare(page: Page, lang: string, skin: string, width: number, pe
     localStorage.setItem('hh-theme', skin);
   }, { lang, skin });
   const problems: string[] = [];
-  /* WebKit reports a request that the test's own next page.goto cuts off as a page error; that is the test, not the page. */
-  page.on('pageerror', error => { if (!error.message.endsWith('due to access control checks.')) problems.push(error.message); });
+  page.on('pageerror', error => { if (!cutByNavigation(page, error)) problems.push(error.message); });
   /* The updates the CEO's banner asks for are left unanswered, as the server of a test gives none; a person without the
      whole company is refused what is not theirs, as the server does. */
   const refused = person === 'listed' ? ['/api/google-sheets', '/api/repo-host'] : [];
@@ -70,6 +73,7 @@ async function prepare(page: Page, lang: string, skin: string, width: number, pe
   await page.route('**/api/version', route => route.fulfill({ json: { version: '0.24.0', commit: 'c6bd5a8', migrations: 1 } }));
   await page.route('**/api/updates/current', route => route.fulfill({ json: { version: '0.24.0', commit: 'c6bd5a8' } }));
   await page.route('**/api/outbound', route => route.fulfill({ json: OUTBOUND }));
+  await page.route('**/api/vault', route => route.fulfill({ json: EMPTY_VAULT }));
   await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' } }));
   if (person === 'listed') {
     await page.route('**/api/me', route => route.fulfill({ json: LISTED }));
@@ -287,6 +291,7 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     expect(tones.main, `${look}: Save a key, the one action of a record with no key, is the main button`).toEqual([[t.repoHost.save, true]]);
   }
   if (group === 'messaging') await expect(dialog.getByRole('heading', { name: 'Sales Mail', exact: true })).toBeVisible();
+  if (group === 'passwords') await expect(dialog.getByText(t.vault.none, { exact: true })).toBeVisible();
   if (group === 'company') {
     await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
     expect((await tonesOf(page)).danger, `${look}: Remove link is pink, last of its row`).toEqual([[t.settings.remove, true, true]]);
@@ -305,7 +310,7 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
 
 for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) {
   const look = `${lang}-ltr-${skin}-${width}`;
-  test(`the short menu, Settings with Profile first and its four groups, and About: ${look}`, async ({ page }, info) => {
+  test(`the short menu, Settings with Profile first and its five groups, and About: ${look}`, async ({ page }, info) => {
     test.setTimeout(180_000);
     const t = MESSAGES[lang];
     const problems = await prepare(page, lang, skin, width);
@@ -336,7 +341,7 @@ for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) 
 
 for (const skin of SKINS) for (const width of RTL_WIDTHS) {
   const look = `en-rtl-${skin}-${width}`;
-  test(`Settings mirrored right to left, Profile first and four groups: ${look}`, async ({ page }, info) => {
+  test(`Settings mirrored right to left, Profile first and five groups: ${look}`, async ({ page }, info) => {
     test.setTimeout(180_000);
     const problems = await prepare(page, 'en', skin, width);
     for (const { id, path } of GROUPS) {
@@ -381,7 +386,7 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
     await expect(page.locator('.account-menu').getByRole('button')).toHaveText([t.settings.menu, t.about.menu, t.shell.logOut]);
     await shot(page, info, `menu-person-${look}`);
-    const shown: GroupId[] = ['profile', 'appearance', 'messaging'];
+    const shown: GroupId[] = ['profile', 'appearance', 'passwords', 'messaging'];
     for (const id of shown) {
       await openGroup(page, t, id, GROUPS.find(group => group.id === id)!.path, 'ltr', shown);
       await checkGroup(page, t, id, `${look} ${id}`);

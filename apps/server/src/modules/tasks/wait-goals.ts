@@ -3,6 +3,7 @@ import type { Notification, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { people, requests, taskEvents, tasks, turns } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { CLOSED, note, refuse, type Actor, type Request, type Task, type Tx } from './engine.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { lastOfSource, requestSourceKey, type TaskWait } from './wait-state.js';
@@ -27,7 +28,7 @@ export async function openGoal(db: Ctx['db'] | Tx, companyId: string, ref: GoalR
 }
 
 async function activeCeo(tx: Tx, companyId: string): Promise<string | null> {
-  const [ceo] = await tx.select({ id: people.id }).from(people).where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active')));
+  const [ceo] = await tx.select(idOnly(people)).from(people).where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active')));
   return ceo?.id ?? null;
 }
 
@@ -91,7 +92,7 @@ function resultLine(task: Task, recorded: Set<string>): string {
 }
 
 async function summaryWords(tx: Tx, turn: Turn, roots: Task[]): Promise<string> {
-  const reports = await tx.select({ taskId: taskEvents.taskId }).from(taskEvents).where(and(inArray(taskEvents.taskId, roots.map(t => t.id)), inArray(taskEvents.kind, ['report', 'submitted'])));
+  const reports = await tx.select(only(taskEvents, 'taskId')).from(taskEvents).where(and(inArray(taskEvents.taskId, roots.map(t => t.id)), inArray(taskEvents.kind, ['report', 'submitted'])));
   const recorded = new Set(reports.map(r => r.taskId));
   /* Of the work the release took in, and of the release itself, as a goal about the turn is said on work going into it. */
   const danger = await tx.select({ number: tasks.number, impact: requests.goalImpact }).from(requests).innerJoin(tasks, eq(tasks.id, requests.taskId))
