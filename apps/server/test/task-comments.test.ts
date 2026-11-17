@@ -7,7 +7,10 @@ import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { BUILTIN } from './builtin.js';
 import { until } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
 import { waitCompany } from './wait-company.js';
+
+await prepareSharedDatabase();
 
 describe('comments use the employee input path', () => {
   it('delivers a head comment to the current executor without an external wait', async () => {
