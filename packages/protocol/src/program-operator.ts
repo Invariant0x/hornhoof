@@ -25,8 +25,8 @@ export const OperatorError = z.enum(['operator_forbidden', 'program_busy', 'inpu
 export type OperatorError = z.infer<typeof OperatorError>;
 export const OperatorDelivery = z.object({ id: z.uuid(), ordinal: z.number().int().positive() }).strict();
 export type OperatorDelivery = z.infer<typeof OperatorDelivery>;
-export const OperatorDeliveryPhase = z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled']);
-export type OperatorDeliveryPhase = z.infer<typeof OperatorDeliveryPhase>;
+const OperatorDeliveryPhase = z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled']);
+type OperatorDeliveryPhase = z.infer<typeof OperatorDeliveryPhase>;
 
 const count = z.number().int().nonnegative();
 const opaque = z.string().min(16).max(128);
@@ -34,7 +34,7 @@ const identity = { agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.u
 const evidence = { ...identity, evidenceId: z.uuid(), ordinal: count };
 export const OperatorQuestion = z.object({ id: z.uuid(), kind: z.enum(['permission', 'protected', 'work']), tool: z.string().max(100).nullable(), text: z.string().max(4096), callId: z.string().max(128).nullable() }).strict();
 export type OperatorQuestion = z.infer<typeof OperatorQuestion>;
-export const OperatorExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() }).strict();
+const OperatorExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() }).strict();
 const screenCells = { cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) };
 export const OperatorInputLine = z.enum(['empty', 'text', 'unknown']);
 /* What the input row holds: nothing, only Hornhoof's own words that never went, anyone else's words, or what nobody can read. */
@@ -45,7 +45,7 @@ export type OperatorInputLine = z.infer<typeof OperatorInputLine>;
 export const OperatorCheck = z.object({ input: OperatorInputLine, screen: z.object(screenCells).strict().nullable() }).strict();
 export type OperatorCheck = z.infer<typeof OperatorCheck>;
 
-export const OperatorNodeMessages = [
+const OperatorNodeMessages = [
   z.object({ type: z.literal('program.delivery'), ...evidence, deliveryId: z.uuid(), deliveryOrdinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), phase: OperatorDeliveryPhase, elapsedMs: count, wordsDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ type: z.literal('program.launch'), ...evidence, phase: z.enum(['attempt', 'started', 'failed']), elapsedMs: count }).strict(),
   z.object({ type: z.literal('program.operator_needed'), ...evidence, reason: OperatorReason, deliveryId: z.uuid().nullable(), questionId: z.uuid().nullable().optional(), evidenceKey: z.string().min(1).max(128), elapsedMs: count, sinceLaunchMs: count.nullable(), exit: OperatorExit.nullable(), check: OperatorCheck.optional() }).strict().refine(frame => frame.reason !== 'question_waiting' || Boolean(frame.questionId && frame.evidenceKey === frame.questionId)),
@@ -65,7 +65,7 @@ export type ProgramView = Extract<OperatorNodeMessage, { type: 'program.view' }>
 export type ProgramInputResult = Extract<OperatorNodeMessage, { type: 'program.input_result' }>;
 export type OperatorRecoveryState = Extract<OperatorNodeMessage, { type: 'program.recovery_state' }>;
 
-export const OperatorServerMessages = [
+const OperatorServerMessages = [
   z.object({ type: z.literal('program.view_get'), agentKey: z.uuid(), request: z.uuid() }).strict(),
   z.object({ type: z.literal('program.recovery_state_get'), ...identity, request: z.uuid(), case: z.uuid() }).strict(),
   /* Text goes in first, as a paste, then the keys one after another, into the program the snapshot showed. */
