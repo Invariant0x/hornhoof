@@ -1,3 +1,4 @@
+import type { PGlite } from '@electric-sql/pglite';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -22,6 +23,8 @@ async function messaging(startedAt: Date | null = STARTED) {
   vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
   onTestFinished(() => { vi.useRealTimers(); });
   const c = await failureCompany();
+  /* The app exposes the common database type; this fixture uses PGlite for its parameterized EXPLAIN. */
+  const dbClient = (c.db as typeof c.db & { $client: PGlite }).$client;
   await listen(c.app);
   const token = 'message-count-recorded-turn';
   const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.head.id, subscriptionId: c.sub.id,
@@ -30,7 +33,7 @@ async function messaging(startedAt: Date | null = STARTED) {
   const send = () => client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, text: 'Here is the result.' } });
   const rows = (n: number, createdAt: Date, by = c.head.id) => Array.from({ length: n }, () => ({ companyId: c.companyId,
     agentId: c.agent.id, kind: 'message' as const, createdAt, data: { by, from: 'agent', text: 'Recorded message.' } }));
-  return { ...c, job: job!, send, rows };
+  return { ...c, dbClient, job: job!, send, rows };
 }
 
 type Plan = { 'Node Type': string; 'Relation Name'?: string; 'Index Name'?: string; Plans?: Plan[] };
@@ -58,14 +61,14 @@ describe('the persisted message quota', () => {
     const seen = statements();
     expect((await c.send()).isError).toBe(true);
     const query = counter(seen);
-    const explained = await c.db.$client.query<{ 'QUERY PLAN': { Plan: Plan }[] }>(`explain (format json) ${query.sql}`, query.params);
+    const explained = await c.dbClient.query<{ 'QUERY PLAN': { Plan: Plan }[] }>(`explain (format json) ${query.sql}`, query.params);
     const plan = explained.rows[0]!['QUERY PLAN'][0]!.Plan;
     console.info('Message quota EXPLAIN:', JSON.stringify(plan, null, 2));
     const nodes = allPlans(plan);
     expect(nodes.map(node => node['Index Name'])).toContain(INDEX);
     expect(nodes.filter(node => node['Relation Name'] === 'agent_events' && node['Node Type'] === 'Seq Scan')).toEqual([]);
     expect(nodes.map(node => node['Node Type'])).toContain('Limit');
-    const count = await c.db.$client.query<Record<string, number | string>>(query.sql, query.params);
+    const count = await c.dbClient.query<Record<string, number | string>>(query.sql, query.params);
     expect(Object.values(count.rows[0]!).map(Number)).toEqual([TURN_NUDGES]);
   });
 
@@ -98,7 +101,7 @@ describe('the persisted message quota', () => {
     expect((await c.send()).isError).toBe(true);
     await c.db.insert(agentEvents).values(c.rows(1, CREATED));
     const query = counter(seen);
-    const count = await c.db.$client.query<Record<string, number | string>>(query.sql, query.params);
+    const count = await c.dbClient.query<Record<string, number | string>>(query.sql, query.params);
     expect(Object.values(count.rows[0]!).map(Number)).toEqual([TURN_NUDGES]);
   });
 });
