@@ -1,4 +1,4 @@
-import { PriorityWord } from './TrackerViews';
+import { PriorityWord } from './TrackerMarks';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';

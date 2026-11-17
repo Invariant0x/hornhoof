@@ -80,7 +80,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const allAgents = companyAgents.filter(a => knowsAgentId(viewer, a.id));
     /* The company's employees: a person's own assistant is no one's but theirs. */
     const employees = allAgents.filter(a => a.kind !== 'assistant');
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, apiProtocol: subscriptions.apiProtocol, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
@@ -156,6 +156,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             model: a.model,
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
+            ...(sub?.apiProtocol ? { apiProtocol: sub.apiProtocol } : {}),
             effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             ...agentProgramState(ctx, run),

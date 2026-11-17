@@ -10,6 +10,7 @@ import type { ComputerAccessDecision, Decisions, GoalView, MachineAwayCard, Me, 
 import { ComputerCard } from '../ui/ComputerCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
+import { programOf } from '../ui/icons';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -359,7 +360,18 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
   const asksYou = (id: string) => asking.has(id);
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
-  const rows: Rows = { selected, onOpenTask, onOpenGoal, asksYou, placeName: place_ };
+  const employees = new Map(org?.departments.flatMap(d => d.employees.map(e => [e.id, e] as const)));
+  const rows: Rows = {
+    selected, onOpenTask, onOpenGoal, asksYou, placeName: place_,
+    departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
+    programOf: id => {
+      const employee = employees.get(id);
+      if (employee?.provider) return programOf(employee.provider, employee.apiProtocol);
+      const orchestrator = org?.orchestrator;
+      const sub = orchestrator?.id === id ? orchestrator.subscription : null;
+      return sub ? programOf(sub.provider, sub.api?.protocol) : null;
+    },
+  };
   const own = mine(all, goals, who);
   const working = workingNow(all, org);
   const waitsOnWho = waitingOn(all, recipient);

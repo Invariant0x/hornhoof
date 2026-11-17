@@ -1784,6 +1784,65 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-wait { color: var(--amber-ink); overflow-wrap: anywhere; }
 .tp-late { color: var(--amber-ink); font-weight: 600; }
 
+/* Tracker palette aliases follow the skin without adding fields to skin files. */
+:root {
+  --tracker-palette-accent: var(--cyan);
+  --tracker-palette-warning: var(--amber);
+  --tracker-palette-attention: var(--pink);
+  --tracker-palette-success: var(--ok);
+  --tracker-palette-blue: var(--p-kimi);
+  --tracker-palette-violet: var(--p-glm);
+  --tracker-program-claude: var(--p-claude);
+  --tracker-program-codex: var(--muted);
+  --tracker-program-kimi: var(--p-kimi);
+  --tracker-program-glm: var(--p-glm);
+  --tracker-program-antigravity: var(--p-antigravity);
+  --tracker-program-other: var(--line2);
+  --tracker-priority-urgent: var(--pink-ink);
+  --tracker-priority-high: var(--amber-ink);
+  --tracker-priority-normal: var(--cyan-ink);
+  --tracker-priority-low: var(--muted);
+  --tracker-mark-ink: var(--bg);
+  --tracker-mark-strength: 100%;
+  --tracker-working-ring: var(--cyan);
+  --tracker-waiting-ring: var(--amber);
+}
+:root[data-scheme='light'] {
+  --tracker-mark-ink: var(--ink);
+  --tracker-mark-strength: 30%;
+  --tracker-working-ring: var(--cyan-ink);
+  --tracker-waiting-ring: var(--amber-ink);
+}
+.tr-mark, .tr-status-pill {
+  background: color-mix(in srgb, var(--tr-tone) var(--tracker-mark-strength), var(--surface));
+  color: var(--tracker-mark-ink);
+}
+.tr-mark { display: inline-grid; place-items: center; flex: none; min-inline-size: 20px; min-block-size: 20px; padding-inline: 2px; font-size: 12px; font-weight: 600; line-height: 1.1; }
+.tr-avatar { border-radius: 50%; }
+.tr-executor { border-radius: 2px; }
+.tr-relation .tr-dept-mark { min-inline-size: 16px; min-block-size: 16px; font-size: 11px; }
+.tr-mark[data-tone='accent'] { --tr-tone: var(--tracker-palette-accent); }
+.tr-mark[data-tone='warning'] { --tr-tone: var(--tracker-palette-warning); }
+.tr-mark[data-tone='attention'] { --tr-tone: var(--tracker-palette-attention); }
+.tr-mark[data-tone='success'] { --tr-tone: var(--tracker-palette-success); }
+.tr-mark[data-tone='blue'] { --tr-tone: var(--tracker-palette-blue); }
+.tr-mark[data-tone='violet'] { --tr-tone: var(--tracker-palette-violet); }
+.tr-executor[data-program='claude'] { --tr-tone: var(--tracker-program-claude); }
+.tr-executor[data-program='codex'] { --tr-tone: var(--tracker-program-codex); }
+.tr-executor[data-program='kimi'] { --tr-tone: var(--tracker-program-kimi); }
+.tr-executor[data-program='glm'] { --tr-tone: var(--tracker-program-glm); }
+.tr-executor[data-program='antigravity'] { --tr-tone: var(--tracker-program-antigravity); }
+.tr-executor[data-program='other'] { --tr-tone: var(--tracker-program-other); }
+.tr-priority { display: inline-flex; align-items: center; gap: 4px; max-inline-size: 100%; color: var(--tracker-priority-normal); }
+.tr-priority.urgent { color: var(--tracker-priority-urgent); }
+.tr-priority.high { color: var(--tracker-priority-high); }
+.tr-priority.low { color: var(--tracker-priority-low); }
+.tr-priority-arrow { inline-size: 10px; block-size: 10px; fill: currentColor; stroke: none; }
+.tr-dept-mark, .tr-status-pill {
+  --cut: calc(4px * var(--cut-k));
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+
 /* The list uses the same column tracks for the heading and every row, including work under another task. */
 .tr-list { container: tr-list / inline-size; display: grid; min-inline-size: 0; }
 .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
@@ -1793,7 +1852,12 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-group-toggle:hover, .tr-add-task:hover { background: var(--surface2); color: var(--cyan-ink); }
 .tr-group-arrow { inline-size: 0; block-size: 0; border: 4px solid transparent; border-inline-start-color: currentColor; }
 .tr-group-toggle[aria-expanded="true"] .tr-group-arrow { border-inline-start-color: transparent; border-block-start-color: currentColor; }
-.tr-status-pill { padding: 2px 8px; color: var(--ink); background: var(--surface2); text-transform: uppercase; }
+.tr-status-pill { --tr-tone: var(--muted); padding: 2px 8px; text-transform: uppercase; }
+.tr-group.working .tr-status-pill { --tr-tone: var(--tracker-palette-accent); }
+.tr-group.waiting .tr-status-pill { --tr-tone: var(--tracker-palette-warning); }
+.tr-group.you .tr-status-pill, .tr-group.blocked .tr-status-pill { --tr-tone: var(--tracker-palette-attention); }
+.tr-group.done .tr-status-pill { --tr-tone: var(--tracker-palette-success); }
+.tr-group.review .tr-status-pill { --tr-tone: var(--tracker-palette-violet); }
 .tr-rows { display: grid; margin: 0; padding: 0; list-style: none; }
 .tr-row-line { min-block-size: 40px; padding: 8px; border-block-end: 1px solid var(--line); }
 .tr-row-line.on { border-inline-start: 3px solid var(--cyan); padding-inline-start: 5px; background: var(--glow); }
@@ -1803,6 +1867,13 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; }
 .tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
 .tr-status-dot { flex: 0 0 auto; inline-size: 14px; block-size: 14px; border: 2px solid var(--muted); border-radius: 50%; }
+.tr-status-dot.working { border-color: var(--tracker-working-ring); }
+.tr-status-dot.waiting { border-color: var(--tracker-waiting-ring); }
+.tr-status-dot.you, .tr-status-dot.blocked { border-color: var(--pink-ink); }
+.tr-status-dot.review { border-color: var(--tracker-palette-violet); }
+.tr-status-dot.done { border-color: var(--ok); background: var(--ok); }
+.tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
+.tr-task-name > .tr-wait, .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
@@ -2808,6 +2879,8 @@ th.k-prio .sorth { white-space: nowrap; }
 /* A skin of pixels cuts every corner in two square steps of 2 px, times its cut, whatever the usual cut of the part.
    Last in the file and as specific as the rule of each part, so a part that drops its cut, a ghost button or a focused
    one, keeps doing so. */
+:where(:root[data-cut='steps']) .tr-dept-mark,
+:where(:root[data-cut='steps']) .tr-status-pill,
 :where(:root[data-cut='steps']) .edge,
 :where(:root[data-cut='steps']) .btn,
 :where(:root[data-cut='steps']) .tview .lchip,

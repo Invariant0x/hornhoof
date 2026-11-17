@@ -1,4 +1,4 @@
-import type { TaskPriority } from '@hornhoof/protocol';
+import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
 import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
@@ -158,6 +158,7 @@ export type Employee = {
   model: string;
   modelName: string | null;
   provider: ProviderId | null;
+  apiProtocol?: ApiProtocol;
   /* The level its model thinks at, when Hornhoof knows it. */
   effort: string | null;
   state: AgentState;

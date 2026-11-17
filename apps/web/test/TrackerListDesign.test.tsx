@@ -68,3 +68,23 @@ it('shows typed waits for tasks and people and the other department that needs t
   expect(within(screen.getByRole('listitem', { name: '#413 Send' })).getByText('waits for #267')).toHaveClass('tr-relation');
   expect(screen.getByRole('button', { name: 'Waits for a person: 1' })).toBeInTheDocument();
 });
+
+it('uses status shapes, stable identity marks and a colored priority arrow', () => {
+  const rows = { selected: null, onOpenTask: vi.fn(), programOf: () => 'claude' as const };
+  const tasks = [
+    task({ priority: 'urgent' }), task({ id: 'done', number: 270, title: 'Sent', status: 'done' }),
+    task({ id: 'open', number: 271, title: 'Draft', status: 'open' }),
+    task({ id: 'wait', number: 272, title: 'Proof', status: 'waiting' }),
+  ];
+  render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  expect(within(row).getByRole('img', { name: 'Luisa Rivera' })).toHaveAttribute('data-program', 'claude');
+  expect(within(row).getByRole('img', { name: 'Max' })).toHaveClass('tr-avatar');
+  expect(within(row).getByText('Urgent')).toHaveClass('tr-priority', 'urgent');
+  expect(within(within(row).getByText('Urgent')).getByTestId('priority-arrow')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: 'In work' })).toHaveClass('working');
+  expect(screen.getByRole('img', { name: 'Done' })).toHaveClass('done');
+  expect(screen.getByRole('img', { name: 'Not started' })).toHaveClass('open');
+  expect(screen.getByRole('img', { name: 'Waiting' })).toHaveClass('waiting');
+  expect(screen.getByRole('button', { name: 'Done: 1' }).closest('section')).toHaveClass('done');
+});

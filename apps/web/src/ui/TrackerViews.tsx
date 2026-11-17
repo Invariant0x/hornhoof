@@ -1,15 +1,17 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, type Asks, type HumanStatus } from '../task-board';
-import { boardColumns, doerOf, layoutTree, listGroups, NODE, priorityOf, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
+import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
 import { Fold } from './TaskBoard';
 import { dueText, sinceSeconds, spanText, taskWaits, waitLabel, waitText } from './tracker-words';
 import { routePath } from '../routes';
+import type { Program } from './icons';
+import { DepartmentMark, ExecutorMark, PersonMark, PriorityWord } from './TrackerMarks';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null };
 
 /* The look of a state on the strip of a node or a card: the task lists' own classes, the person's answer in the colour of
    attention. The words always go with it. */
@@ -30,11 +32,6 @@ function Cell({ name, children }: { name: string; children: ReactNode }) {
       <span className="tr-v">{children}</span>
     </span>
   );
-}
-
-export function PriorityWord({ task }: { task: TaskLine }) {
-  const t = useT();
-  return <span>{t.tracker.priority[priorityOf(task)]}</span>;
 }
 
 type Relations = ReadonlyMap<number, TaskLine[]>;
@@ -65,6 +62,7 @@ function ListRow({ tree, rows, relations, depth = 0 }: { tree: TaskTree; rows: R
   const needed = (relations.get(task.number) ?? []).filter(other => other.department && other.department.id !== task.department?.id);
   const details = waits.filter(wait => wait.kind !== 'after' || !wait.reason);
   const goal = task.goal;
+  const executor = doerOf(task);
   return (
     <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
       <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`}>
@@ -84,10 +82,14 @@ function ListRow({ tree, rows, relations, depth = 0 }: { tree: TaskTree; rows: R
                 : waitLabel(t, task, wait)}
             </small>
           ))}
-          {needed.map(other => <small className="tr-relation" key={other.id}>{words.neededFor(other.number, rows.placeName?.(other.department) ?? other.department!.name)}</small>)}
+          {needed.map(other => {
+            const department = other.department!;
+            const name = rows.placeName?.(department) ?? department.name;
+            return <small className="tr-relation" key={other.id}><DepartmentMark id={department.id} name={name} template={rows.departmentTemplate?.(department.id)} /><span>{words.neededFor(other.number, name)}</span></small>;
+          })}
         </div>
-        <Cell name={words.executor}>{doerOf(task)?.name ?? t.tracker.nobody}</Cell>
-        <Cell name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Cell>
+        <Cell name={words.executor}>{executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} /> : t.tracker.nobody}</Cell>
+        <Cell name={words.responsible}>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>
         <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>
           {goal ? (

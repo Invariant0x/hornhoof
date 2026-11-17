@@ -325,7 +325,16 @@ Built with the classes `.mat*`, `.mv*`, `.opt*` and `.answer-zone`. What each fi
 
 ### Tracker
 
-**PROPOSAL.** The tracker page, `/tasks`, and the card it opens use existing tokens only. Its classes below are in `theme.css` and wait for the head's approval. The page is seen in `apps/web/e2e/tasks-board/tasks-board.spec.ts`, whose shots go to `HH_SCREENSHOT_DIR`.
+The tracker uses the approved list reference and the existing skin roles. Tracker palette aliases in `theme.css` resolve for every built-in and custom skin.
+
+| Tokens | Skin roles and use |
+|---|---|
+| `--tracker-palette-accent`, `--tracker-palette-warning`, `--tracker-palette-attention`, `--tracker-palette-success`, `--tracker-palette-blue`, `--tracker-palette-violet` | Accent, warning, attention, success, Kimi and GLM roles for department and person marks |
+| `--tracker-program-claude`, `--tracker-program-codex`, `--tracker-program-kimi`, `--tracker-program-glm`, `--tracker-program-antigravity`, `--tracker-program-other` | The provider role for each program, muted for Codex and the strong line for an unknown program |
+| `--tracker-priority-urgent`, `--tracker-priority-high`, `--tracker-priority-normal`, `--tracker-priority-low` | Attention text, warning text, accent text and muted text |
+| `--tracker-mark-ink`, `--tracker-mark-strength` | Dark uses the page background as text on a full-strength fill. Light uses ink on a fill mixed at 30 percent over the panel surface |
+| `--tracker-working-ring`, `--tracker-waiting-ring` | Accent and warning on dark, their text variants on light |
+
 
 | Class | What it is | Source |
 |---|---|---|
