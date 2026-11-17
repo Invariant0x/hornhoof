@@ -304,32 +304,55 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}${by}.`, data: { release: row!.id } });
     return row!;
   });
-  return releaseView(turn, record, released, left);
+  return releaseView(turn, record, released, left, await lastVersion(ctx, turn, target.repo));
 }
 
-const releaseView = (turn: Turn, record: Release, released: ReleasedTask[], left: number[]) => ({
+/* The last version tag of the repository's own line, which its next release goes on from: the one the turn started at, or,
+   before the round first looked, the newest one the repository has now. Its turn number and any other repository's version
+   set nothing. last is null for a repository with no version tag yet; none comes back where its tags could not be read. */
+type Line = { last: string | null } | null;
+async function lastVersion(ctx: Reader, turn: Turn, repo: Repo): Promise<Line> {
+  if (turn.baseVersion) return { last: turn.baseVersion };
+  const read = await ctx.readTags?.(repo, 30_000).catch(() => null);
+  if (!read || 'problem' in read) return null;
+  return { last: newestFirst(read.tags)[0]?.[0] ?? null };
+}
+
+/* The version tags of a repository, newest first, each with its commit. */
+const newestFirst = (tags: Record<string, string>): [string, string][] =>
+  Object.entries(tags).filter(([name]) => versionOf(name)).sort(([a], [b]) => newerVersion(a, b) ? -1 : newerVersion(b, a) ? 1 : 0);
+
+const nextTag = (line: Line): string =>
+  !line ? 'newer than the last version tag of this repository'
+    : line.last ? `the next version after ${line.last}, the last version tag of this repository`
+      : 'the first version tag of this repository, which has none yet';
+
+const releaseView = (turn: Turn, record: Release, released: ReleasedTask[], left: number[], line: Line) => ({
   release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha, runId: record.runId, approvalRequestId: record.approvalRequestId, autonomousReleaseId: record.autonomousReleaseId,
   tasks: released.map(({ number, commit, verdicts }) => ({ number, commit, verdicts })), covered: record.covered, uncovered: record.uncovered, left,
-  next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z: the tag closes Turn ${turn.number}${left.length ? `, and what it leaves out goes into the next release` : ''}.`,
+  next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z, ${nextTag(line)}: the tag closes Turn ${turn.number}${left.length ? `, and what it leaves out goes into the next release` : ''}.`,
 });
 
-/* One department's open turn on its repository's tags: the first look takes the newest tag as where the turn starts; a newer
-   tag of a release recorded before main moved, on its exact commit and from where the turn started, closes it. A newer tag of
-   its line that no standing record names releases nothing: the turn stays open, and its head and the CEO hear of it once. */
+/* One department's open turn on the tags of its own repository, its own line of versions: the first look takes the newest tag
+   as where the turn starts; a newer tag of a release recorded before main moved, on its exact commit and from where the turn
+   started, closes it. A newer tag of its line that no standing record names releases nothing: the turn stays open, and its head
+   and the CEO hear of it once. A repository that had no version tag as the turn started comes out with its first one, such
+   as v1.4.0 or v2026.11.0: before the first look took any tag, a tag on the commit of a release recorded in the turn closes it. */
 async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   if (!ctx.readTags) return;
   const before = (await ctx.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
   const read = await ctx.readTags(repo, 30_000);
   if ('problem' in read) return;
-  const versions = Object.entries(read.tags).filter(([name]) => versionOf(name)).sort(([a], [b]) => newerVersion(a, b) ? -1 : newerVersion(b, a) ? 1 : 0);
-  if (!turn.baseVersion) {
-    const [newest] = versions;
+  const tagged = newestFirst(read.tags);
+  const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
+  const versions = turn.baseVersion ? tagged : tagged.filter(([, commit]) => records.some(r => r.commit === commit));
+  if (!turn.baseVersion && !versions.length) {
+    const [newest] = tagged;
     if (newest) await ctx.db.update(turns).set({ baseVersion: newest[0], baseCommit: newest[1] }).where(and(eq(turns.id, turn.id), eq(turns.status, 'open'), isNull(turns.baseVersion)));
     return;
   }
-  const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
   for (const [name, commit] of versions) {
-    if (!newerVersion(name, turn.baseVersion)) return;
+    if (turn.baseVersion && !newerVersion(name, turn.baseVersion)) return;
     if (turn.baseCommit && !(await branchHolds(ctx, repo, commit, turn.baseCommit))) continue;
     const record = records.find(r => r.commit === commit && r.baseCommitSha !== commit);
     if (!record || !(await branchHolds(ctx, repo, commit, record.baseCommitSha))) {
@@ -356,9 +379,10 @@ async function tellOfTag(ctx: Reader, turn: Turn, version: string, commit: strin
     : `the full run or the approval its release record relied on no longer stands`;
   const key = `release_tag:${turn.departmentId}:${version}:${commit}`;
   const notification = { source: 'release_tag' as const, tasks: on };
+  const which = turn.baseVersion ? `newer than ${turn.baseVersion} where Turn ${turn.number} started` : `the first version tag of the repository of Turn ${turn.number}`;
   if (head) await recordWaitNotice(ctx.db, {
     companyId: turn.companyId, agentId: head.id, personId: null, dedupKey: `${key}:head`, guard: { tasks: [] },
-    message: { personId: null, notification, text: `${version} was tagged on ${commit}, newer than ${turn.baseVersion} where Turn ${turn.number} started, but ${cause}. Turn ${turn.number} stays open, and none of its results counts as released. Find out how this tag came to be. The turn is released only by the tag of a release recorded with release_turn before main moves, on its exact commit.` },
+    message: { personId: null, notification, text: `${version} was tagged on ${commit}, ${which}, but ${cause}. Turn ${turn.number} stays open, and none of its results counts as released. Find out how this tag came to be. The turn is released only by the tag of a release recorded with release_turn before main moves, on its exact commit.` },
   });
   if (ceo && goal) await recordWaitNotice(ctx.db, {
     companyId: turn.companyId, agentId: null, personId: ceo.id, dedupKey: `${key}:ceo`, guard: { tasks: [], turn: { id: turn.id, taskId: goal.id }, tag: { version, commit, why } },
