@@ -3,24 +3,42 @@ import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import type { Db } from '../src/db/client.js';
 import { AFTER_MIGRATIONS } from '../src/db/net.js';
 import { tlsOf } from '../src/modules/tls/store.js';
-import { freshPglite, ownDatabases } from './helpers-db.js';
-import { freshInstall, migrate, migrationsUpTo } from './migrations-fixture.js';
+import { ownDatabases } from './helpers-db.js';
+import { freshInstall, migrate, migrationsUpTo, olderInstall, prepareInstalls } from './migrations-fixture.js';
 
 ownDatabases();
+
+/* The outbound gateway's migration, whatever number it ends up with: the journal says which it is and which comes just
+   before it. */
+const TAGS = (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
+const GATEWAY = TAGS.find(tag => tag.endsWith('_outbound'))!;
+const BEFORE_GATEWAY = TAGS[TAGS.indexOf(GATEWAY) - 1]!;
+
+/* Every older install a test here starts from, made once as the file is collected. */
+await prepareInstalls([
+  '0062_pipeline_report',
+  '0067_request_materials',
+  BEFORE_GATEWAY,
+  GATEWAY,
+  '0080_live_stuck_recipients',
+  '0083_harness',
+  '0084_skill_bricks',
+  '0085_work_fast_cards',
+  '0097_route_abilities',
+  '0129_builtin_node_connections',
+]);
 
 describe('department owner and approval policy migration', () => {
   const FORWARD = '0062_pipeline_report';
 
   it('leaves every department without an owner and every company without rules, with nobody given anything', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall(FORWARD);
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo(FORWARD) });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true)`);
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
@@ -39,10 +57,8 @@ describe('department owner and approval policy migration', () => {
   });
 
   it('keeps the approvals already asked as they are, and still refuses an approval that says nothing of what it approves', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall(FORWARD);
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo(FORWARD) });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
     const sub = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'codex', 'personal', 'Plan', ${owner}, 'ready') returning id`)).rows[0]!.id;
@@ -74,10 +90,8 @@ describe('department owner and approval policy migration', () => {
 
 describe('model checks migration', () => {
   it('adds its tables empty, with nobody given anything and no row of an older database touched', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0067_request_materials');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0067_request_materials') });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
     const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'support', 'SUP') returning id`)).rows[0]!.id;
@@ -97,19 +111,10 @@ describe('model checks migration', () => {
 });
 
 describe('outbound gateway migration', () => {
-  /* Whatever number it ends up with: the journal says which it is and which comes just before it. */
-  const journalTags = async () => (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
-  const gatewayTag = async () => (await journalTags()).find(tag => tag.endsWith('_outbound'))!;
-  const tagBeforeGateway = async () => {
-    const tags = await journalTags();
-    return tags[tags.indexOf(await gatewayTag()) - 1]!;
-  };
 
   it('adds its tables empty, with nobody given anything and no row of two older companies touched', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall(BEFORE_GATEWAY);
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo(await tagBeforeGateway()) });
     for (const name of ['Acme', 'Moonfern']) {
       const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values (${name}, ${name === 'Acme'}) returning id`)).rows[0]!.id;
       const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', ${`dana@${name}.example`}, 'active', 'listed') returning id`)).rows[0]!.id;
@@ -120,7 +125,7 @@ describe('outbound gateway migration', () => {
     const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access', 'approval_policies'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
     const before = await older();
 
-    const target = await migrationsUpTo(await gatewayTag());
+    const target = await migrationsUpTo(GATEWAY);
     await migrate(db, { migrationsFolder: target });
     await migrate(db, { migrationsFolder: target });
 
@@ -133,11 +138,9 @@ describe('outbound gateway migration', () => {
   });
 
   it('leaves its guards in place when it is run again', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall(GATEWAY);
     const db = drizzle(client);
-    const target = await migrationsUpTo(await gatewayTag());
-    await migrate(db, { migrationsFolder: target });
+    const target = await migrationsUpTo(GATEWAY);
     const guards = sql`select count(*)::int as n from pg_trigger where tgname like 'outbound_guard_%' and not tgisinternal`;
     const [{ n }] = (await db.execute<{ n: number }>(guards)).rows as [{ n: number }];
     expect(n).toBeGreaterThan(0);
@@ -150,10 +153,8 @@ describe('migration 0081', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
   it('keeps on every card the text that moved out of a skill it holds, and adds nothing else', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0080_live_stuck_recipients');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0080_live_stuck_recipients') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     const cards: Record<string, string[]> = {
       /* What the testing policy took from the engineering rules and from the path of a turn. */
@@ -204,10 +205,8 @@ describe('migration 0084', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
   it('gives what leading and working on code took out of the common skills to every card that leads or works on code, and nothing to the others', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0083_harness');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0083_harness') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     const cards: [name: string, kind: 'head' | 'worker', role: string | null, skills: string[]][] = [
       /* Leading code left the skill every head carries. */
@@ -254,10 +253,8 @@ describe('migration 0085', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
   it('gives the speed skill every role lists to every head and member that keeps a list of its own, once, and nothing to the orchestrator', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0084_skill_bricks');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0084_skill_bricks') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     const cards: [name: string, kind: 'orchestrator' | 'head' | 'worker', role: string | null, skills: string[]][] = [
       ['Lead', 'head', 'DEV-HEAD', ['dev-lead', 'dev-work-pipeline']],
@@ -294,10 +291,8 @@ describe('migration 0086 composable skills', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
   it('preserves sole and mixed pending staffing cards when retiring the developer role', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0085_work_fast_cards');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Proposal upgrade')`);
     const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${C}, 'orchestrator', 'Coordinator', '') returning id`)).rows[0]!.id;
     const legacy = { role: 'DEV-GEN', name: 'Mira', model: 'saved-model', checked: true, skills: { on: ['dev-tdd'], off: [] } };
@@ -316,10 +311,8 @@ describe('migration 0086 composable skills', () => {
   });
 
   it('retires only the saved DEV-GEN role key without changing card text, skill choices or run settings', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0085_work_fast_cards');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner)
       values (${C}, 'Owner', 'owner@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
@@ -370,10 +363,8 @@ describe('migration 0086 composable skills', () => {
   });
 
   it('appends only missing split company abilities to saved selections and preserves custom bodies, hashes and list order', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0085_work_fast_cards');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     const cards = [
       { name: 'All missing', kind: 'worker', skills: ['retired-kept', 'orch-company', 'hh-work-fast'], after: ['retired-kept', 'orch-company', 'hh-work-fast', 'orch-staff', 'orch-people', 'orch-resources'] },
@@ -414,10 +405,8 @@ describe('migration 0086 composable skills', () => {
 
 describe('migration 0106, the tables of the network', () => {
   it('marks the sessions of an older install as made before the __Host- cookie', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0097_route_abilities');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0097_route_abilities') });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values ('older', ${person}, now() + interval '1 day')`);
@@ -428,10 +417,8 @@ describe('migration 0106, the tables of the network', () => {
 
 describe('a database from before the link had a certificate', () => {
   it('reads as having none, as the keeper meets it before an update migrates', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0097_route_abilities');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0097_route_abilities') });
     expect(await tlsOf(db as unknown as Db, '00000000-0000-4000-8000-000000000001')).toBeNull();
   });
 });
@@ -442,10 +429,8 @@ describe('migration 0107, the fences and the journal', () => {
     where t.tgname = 'net_journal' and n.nspname = 'public' order by 1`;
 
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     return { client, db };
   }
 
@@ -487,10 +472,8 @@ describe('migration 0107, the fences and the journal', () => {
 
 describe('migrations 0108 and 0109, where each change came from', () => {
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     return { client, db };
   }
 
@@ -528,10 +511,8 @@ describe('migrations 0108 and 0109, where each change came from', () => {
 
 describe("migration 0110, the tables of the company's network", () => {
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     return { client, db };
   }
@@ -565,10 +546,8 @@ describe("migration 0110, the tables of the company's network", () => {
 
 describe('migration 0111, what joined machines need', () => {
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -617,10 +596,8 @@ describe('migration 0111, what joined machines need', () => {
 
 describe('migration 0112, computer access per machine', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -655,10 +632,8 @@ describe('migration 0112, computer access per machine', () => {
 
 describe('migrations 0113 and 0114, the backups', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -700,10 +675,8 @@ describe('migration 0115, the merge records', () => {
   const RECORDS = ['merges', 'merge_rows', 'merge_conflicts', 'merge_consumed', 'restores', 'horizon'];
 
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     return db;
   }
@@ -756,10 +729,8 @@ describe('migration 0115, the merge records', () => {
 
 describe('migration 0116, the server order and the copies', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -817,10 +788,8 @@ describe('migration 0116, the server order and the copies', () => {
 
 describe('migration 0117, the measures of the server order', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -850,10 +819,8 @@ describe('migration 0117, the measures of the server order', () => {
 
 describe('migration 0118, the tables of a server move', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -920,10 +887,8 @@ describe('migration 0118, the tables of a server move', () => {
 
 describe('migration 0119, the tables of takeovers, parked job results and the hidden link', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
     await client.exec(`SET session_replication_role = replica`);
@@ -977,10 +942,8 @@ describe('migration 0119, the tables of takeovers, parked job results and the hi
 
 describe('migration 0131, the fallbacks of a plan', () => {
   it('gives every plan an empty list of fallbacks, keeps the plans and cards as they were, and puts nobody on a fallback', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await olderInstall('0129_builtin_node_connections');
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0129_builtin_node_connections') });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
     const plan = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status, budget) values (${company}, 'antigravity', 'personal', 'Plan', ${owner}, 'ready', 70) returning id`)).rows[0]!.id;
