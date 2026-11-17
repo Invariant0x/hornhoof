@@ -300,6 +300,12 @@ export class NodeHub {
     return this.openEntry(id)?.browserError || null;
   }
 
+  /* A check group that is still alive keeps the machine out of new checks until cleanup succeeds. */
+  checkErrorOf(id: NodeIdentity): string | null {
+    const reason = this.openEntry(id)?.noRuns;
+    return reason?.startsWith('Check group ') ? reason : null;
+  }
+
   /* Why Playwright's browser alone holds this ready node back from runs, or null when it takes runs or has another blocker. */
   browserHoldOf(id: NodeIdentity): string | null {
     if (!this.isReady(id) || !this.loadOf(id)) return null;

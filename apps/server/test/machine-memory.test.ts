@@ -27,11 +27,12 @@ async function planOnOneMachine() {
   const hire = async (name: string) => (await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name, roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: plan }).returning())[0]!;
   const bruno = await hire('Bruno');
   const vera = await hire('Vera');
+  const rita = await hire('Rita');
   const online = async (frame: ReturnType<typeof hello>) => {
     mac.send(frame);
     await until(async () => (await state(app, ceo, bruno.id)).ready);
   };
-  return { app, ceo, mac, bruno, vera, online };
+  return { app, ceo, mac, bruno, vera, rita, online };
 }
 
 const state = async (app: FastifyInstance, token: string, id: string) => (await app.inject({ url: `/api/agents/${id}/events`, ...as(token) })).json().state;
@@ -47,7 +48,7 @@ async function nextRun(node: FakeNode): Promise<Run> {
 describe('a new agent program on a machine short of free memory', () => {
   it('waits, says why, and starts by itself once memory frees up', async () => {
     const { app, ceo, mac, bruno, online } = await planOnOneMachine();
-    await online(hello(1.5 * GIB, []));
+    await online(hello(1.25 * GIB, []));
     await write(app, ceo, bruno.id, 'Start when there is room');
     expect(await state(app, ceo, bruno.id)).toMatchObject({ ready: true, reason: null, queued: 1, memoryWait: true });
     expect(mac.queued()).toBe(0);
@@ -68,13 +69,13 @@ describe('a new agent program on a machine short of free memory', () => {
 
   it('counts a program sent to start against the free memory until the node names it', async () => {
     const { app, ceo, mac, bruno, vera, online } = await planOnOneMachine();
-    await online(hello(2.5 * GIB, []));
+    await online(hello(1.75 * GIB, []));
     await write(app, ceo, bruno.id, 'First');
     expect((await nextRun(mac)).prompt).toContain('First');
     await write(app, ceo, vera.id, 'Second');
     expect(await state(app, ceo, vera.id)).toMatchObject({ queued: 1, memoryWait: true });
     expect(mac.queued()).toBe(0);
-    mac.send({ type: 'load', ...load(2.5 * GIB), live: [bruno.id] });
+    mac.send({ type: 'load', ...load(1.75 * GIB), live: [bruno.id] });
     expect((await nextRun(mac)).prompt).toContain('Second');
   });
 
@@ -88,6 +89,18 @@ describe('a new agent program on a machine short of free memory', () => {
     expect(mac.queued()).toBe(0);
     mac.send({ type: 'load', ...load(8 * GIB), live: [bruno.id, vera.id] });
     expect((await nextRun(mac)).prompt).toContain('Wait for the processors');
+  });
+
+  it('lets a turn whose program runs there, which waited for the processors, go before one that came later, while another program still starts', async () => {
+    const { app, ceo, mac, bruno, vera, rita, online } = await planOnOneMachine();
+    await online({ ...hello(1.75 * GIB, [bruno.id, vera.id]), load: { ...load(1.75 * GIB), load: 20 } });
+    await write(app, ceo, rita.id, 'Start a program');
+    expect((await nextRun(mac)).prompt).toContain('Start a program');
+    await write(app, ceo, vera.id, 'Waited first');
+    expect(await state(app, ceo, vera.id)).toMatchObject({ queued: 1, memoryWait: true });
+    mac.send({ type: 'load', ...load(1.75 * GIB), live: [bruno.id, vera.id] });
+    await write(app, ceo, bruno.id, 'Came later');
+    expect((await nextRun(mac)).prompt).toContain('Waited first');
   });
 
   it('is not held on a node that does not say which programs run there', async () => {

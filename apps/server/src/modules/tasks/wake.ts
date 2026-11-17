@@ -718,8 +718,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   if (job?.kind === 'call') return callEnded(ctx, jobId);
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
-  /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
-  if (job.status === 'failed' && job.inboxWake && (await mailBack(ctx.db, job.agentId, jobId))) await inboxChanged(ctx, job.agentId);
+  if (job.status === 'failed') await restoreUnheardInbox(ctx, jobId, { agentId: job.agentId, inboxWake: job.inboxWake });
   const handled = await afterFailure(ctx, jobId);
   if (job.taskId) {
     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
@@ -729,6 +728,21 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
+}
+
+/* What the program itself says in a turn: only that shows it got the turn's prompt. A typed mark is a person's Enter or
+   words shown again, and proves nothing of it. */
+const PROGRAM_SAID = ['text', 'todo', 'tool', 'tool_result'] as const;
+
+/* Inbox wakes keep their retry policy. An ordinary turn can carry the same summary: until its program answered it, its
+   failed delivery must not consume those letters. Once it answered, they stay read, so they are not given twice. */
+async function restoreUnheardInbox(ctx: Ctx, jobId: string, job: { agentId: string; inboxWake: boolean }): Promise<void> {
+  if (!job.inboxWake) {
+    const [said] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
+      .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, [...PROGRAM_SAID]))).limit(1);
+    if (said) return;
+  }
+  if (await mailBack(ctx.db, job.agentId, jobId)) await inboxChanged(ctx, job.agentId);
 }
 
 async function recordFailedTurn(

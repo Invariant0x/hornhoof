@@ -187,7 +187,8 @@ describe('turns on a machine that went away', () => {
     await c.round(new Date(away + 91 * MIN));
     await c.round(new Date(away + 92 * MIN));
     expect((await noted()).map(e => (e.data as { stage: string }).stage)).toEqual(['away', 'back']);
-    expect((await heard()).map(j => j.prompt.includes('in reach again')).sort()).toEqual([false, true]);
+    /* Heard in a turn of its own, or with the notice that waited for the machine in line. */
+    expect((await heard()).some(j => j.prompt.includes('in reach again'))).toBe(true);
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Done after all.', tail: '', error: null, sessionId: 'kept-session' });
     expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'done', result: 'Done after all.' });
   });

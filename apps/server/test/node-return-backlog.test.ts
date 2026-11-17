@@ -144,7 +144,7 @@ describe('wake-ups that waited while the machine was away', () => {
     expect(along).toHaveLength(GOING_ON_TURNS);
     expect(along.every(j => j.taskId === task.id)).toBe(true);
     const prompt = c.sentPrompt(one!.id)!;
-    expect(prompt).toContain('These wake-ups on your task waited in line until your machine was connected again.');
+    expect(prompt).toContain('Several things waited for you in line and go out together in this turn.');
     for (const said of [...told, 'Any news on the checkout?']) expect(prompt).toContain(said);
 
     await c.run('Back. Read all of it, going on with the totals.');

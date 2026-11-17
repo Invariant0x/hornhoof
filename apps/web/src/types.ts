@@ -869,6 +869,7 @@ export type MachineView = {
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
   /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
   browserError?: string | null;
+  checkError?: string | null;
   /* Older servers omit it; null while no update waits on the machine. */
   drain?: MachineDrain | null;
   /* The company's core on it: where the company opens on that machine, and how the machine reaches the server; null
@@ -985,7 +986,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;

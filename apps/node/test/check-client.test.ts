@@ -146,3 +146,27 @@ describe('node machine check leases across a reconnect', () => {
     expect(held.signal.aborted).toBe(true);
   });
 });
+
+it('retains the active lease, refuses queued and new checks, then recovers after group cleanup', async () => {
+  const requests: CheckQueueRequest[] = [];
+  const client = new CheckClient(frame => { requests.push(frame); return true; });
+  const changed = vi.fn(); client.refusalChanged = changed;
+  client.online(true);
+  const running = client.acquire();
+  const active = requests[0]!.id;
+  client.receive({ type: 'check.state', id: active, state: 'running', position: 0 });
+  const lease = await running;
+  const queued = client.acquire();
+  const rejected = expect(queued).rejects.toThrow('still alive');
+  client.refuse('Check group 4242 is still alive');
+  await rejected;
+  await expect(client.acquire()).rejects.toThrow('still alive');
+  expect(lease.signal.aborted).toBe(false);
+  expect(requests.filter(frame => frame.type === 'check.release').map(frame => frame.id)).not.toContain(active);
+  expect(client.refused()).toBe('Check group 4242 is still alive');
+  client.refuse(null);
+  const next = client.acquire();
+  client.receive({ type: 'check.state', id: requests.at(-1)!.id, state: 'running', position: 0 });
+  (await next).release(); lease.release();
+  expect(changed).toHaveBeenCalledTimes(2);
+});

@@ -2,13 +2,13 @@ import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import ts from 'typescript';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
-import { configureCheckCommands } from '../src/check-command-runner.js';
+import { configureCheckCommands, installCheckCommand } from '../src/check-command-runner.js';
 import { classifyAgentCommand } from '../src/command-guard.js';
 import { createAgentCommandGuard } from '../src/check-runtime.js';
-import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import type { JobUser } from '../src/isolation.js';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Bridge, type OpensCheck } from '../src/terminal/bridge.js';
 import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
@@ -40,6 +40,9 @@ beforeAll(() => {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
   cli = join(dir, 'check-command.mjs');
   writeFileSync(cli, outputText.replace(/from 'zod'/, `from ${JSON.stringify(import.meta.resolve('zod'))}`));
+  const groupSource = readFileSync(fileURLToPath(new URL('../src/check-group.ts', import.meta.url)), 'utf8');
+  writeFileSync(join(dir, 'check-group.js'), ts.transpileModule(groupSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
   chmodSync(dir, 0o755); chmodSync(cli, 0o644);
   return () => rmSync(dir, { recursive: true, force: true });
 });
@@ -351,5 +354,140 @@ describe('command policy boundary', () => {
     release(); await finished;
     await request;
     expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
+  });
+});
+
+/* A heavy check an agent starts in its own shell waits for a machine check slot like for a lock, and runs right there. */
+describe('a heavy check in the agent\'s own shell', () => {
+  const output = (child: ReturnType<typeof spawn>) => new Promise<string>(resolve => {
+    let stdout = ''; child.stdout!.on('data', chunk => { stdout += String(chunk); });
+    child.once('close', code => resolve(`${code}:${stdout}`));
+  });
+  beforeEach(() => { configureCheckCommands(user); onTestFinished(() => configureCheckCommands(null)); });
+  function machine(grantAtOnce: boolean, online = true, onRelease = () => {}) {
+    const key = '10000000-0000-4000-8000-000000000011', frames: string[] = [];
+    let grant = () => {}, end = () => {};
+    const client = new CheckClient(frame => {
+      frames.push(frame.type);
+      if (frame.type === 'check.release') onRelease();
+      if (frame.type === 'check.acquire') {
+        grant = () => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+        end = () => client.receive({ type: 'check.state', id: frame.id, state: 'ended', position: 0 });
+      }
+      if (grantAtOnce && frame.type === 'check.acquire') queueMicrotask(grant);
+      return true;
+    });
+    client.online(online); setCheckClient(client);
+    const bridge = new Bridge('http://127.0.0.1:1', () => {});
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
+    const dir = mkdtempSync(join(tmpdir(), 'hh-check-wait-'));
+    giveToUser(dir);
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    return { key, frames, bridge, dir, grant: () => grant(), end: () => end(), start: async () => { await bridge.start(); bridge.setToken(key, 'turn'); return bridge.agent(key).hookUrl; } };
+  }
+
+  it('runs the command in its own shell once a slot is given, and holds the slot until the command ends', async () => {
+    const m = machine(false), hook = await m.start();
+    const said = 'process.stdout.write([process.getuid(), process.cwd(), process.env.HH_CHECK_SLOT ? "slot" : "none"].join(" ")); process.exit(7)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    await eventually(() => m.frames.includes('check.acquire'));
+    expect(m.frames).toEqual(['check.acquire']);
+    m.grant();
+    expect(await done).toBe(`7:${user?.uid ?? process.getuid!()} ${realpathSync(m.dir)} slot`);
+    await eventually(() => m.frames.includes('check.release'));
+    expect(m.frames).toEqual(['check.acquire', 'check.release']);
+  });
+
+  it.runIf(existsSync('/proc/self'))('stops the command and what it started as its slot ends, and gives the slot back only after', async () => {
+    /* A process that was killed but not yet reaped is gone too. */
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0, grandchild = 0;
+    const atRelease: boolean[] = [];
+    const m = machine(true, true, () => atRelease.push(alive(leader) || alive(grandchild))), hook = await m.start();
+    const started = join(m.dir, 'started');
+    const starts = 'const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); require("node:fs").writeFileSync(process.argv[1], [process.pid, g.pid].join(" ")); setInterval(() => {}, 1000)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', starts, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    /* A run that fails leaves nothing behind; a pid never named stays unsent, as 0 would mean this test's own group. */
+    onTestFinished(() => { for (const pid of [child.pid ?? 0, leader, grandchild]) if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL'); });
+    await eventually(() => existsSync(started) && readFileSync(started, 'utf8') !== '');
+    [leader, grandchild] = readFileSync(started, 'utf8').split(' ').map(Number) as [number, number];
+    expect([alive(leader), alive(grandchild)]).toEqual([true, true]);
+    m.end();
+    expect(await done).toBe('143:');
+    await eventually(() => m.frames.includes('check.release'));
+    expect(atRelease).toEqual([false]);
+    expect([alive(leader), alive(grandchild)]).toEqual([false, false]);
+  });
+
+  it('runs the command at once when the machine has no slot to give or it is not an agent\'s', async () => {
+    const m = machine(false, false), hook = await m.start();
+    const said = 'process.stdout.write(process.env.HH_CHECK_SLOT ?? "none"); process.exit(3)';
+    const run = (env: NodeJS.ProcessEnv) => output(spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { uid: user?.uid, gid: user?.gid, env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    expect(await run({ PATH: process.env.PATH, HH_BRIDGE: hook })).toBe('3:none');
+    expect(await run({ PATH: process.env.PATH })).toBe('3:none');
+  });
+
+  it.runIf(existsSync('/proc/self'))('keeps no running group past the slot when its wrapper is killed', async () => {
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0;
+    const atRelease: boolean[] = [];
+    const m = machine(true, true, () => atRelease.push(alive(leader))), hook = await m.start();
+    const started = join(m.dir, 'started');
+    const payload = 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', payload, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    onTestFinished(() => {
+      if (leader > 0 && alive(leader)) process.kill(leader, 'SIGKILL');
+      if (child.pid && alive(child.pid)) child.kill('SIGKILL');
+    });
+    await eventually(() => existsSync(started) && readFileSync(started, 'utf8') !== '');
+    leader = Number(readFileSync(started, 'utf8'));
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    child.kill('SIGKILL');
+    await exited;
+    await eventually(() => m.frames.includes('check.release'));
+    expect(atRelease).toEqual([false]);
+    expect(alive(leader)).toBe(false);
+  });
+
+  it.runIf(existsSync('/proc/self'))('keeps the group leader until the node has ended what a finished command left in its group', async () => {
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0, left = 0;
+    const m = machine(true), hook = await m.start();
+    const started = join(m.dir, 'started');
+    /* The command leaves a process in its own group and ends with 0, as a tool with a forgotten helper does. */
+    const leaves = 'const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); g.unref(); require("node:fs").writeFileSync(process.argv[1], [process.ppid, g.pid].join(" ")); process.exit(0)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', leaves, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    onTestFinished(() => { for (const pid of [left, leader]) if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL'); });
+    expect(await done).toBe('0:');
+    [leader, left] = readFileSync(started, 'utf8').split(' ').map(Number) as [number, number];
+    /* The node can end the group only while its original leader still names it; the leader goes last. */
+    await eventually(() => !alive(leader));
+    expect(alive(left)).toBe(false);
+    await eventually(() => m.frames.includes('check.release'));
+  });
+
+  it('makes an agent\'s tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else', async () => {
+    const m = machine(true), hook = await m.start();
+    installCheckCommand(m.dir, cli);
+    mkdirSync(join(m.dir, 'node_modules', '.bin'), { recursive: true });
+    const tool = (name: string) => {
+      const path = join(m.dir, 'node_modules', '.bin', name);
+      writeFileSync(path, '#!/usr/bin/env node\nprocess.stdout.write(process.env.HH_CHECK_SLOT ? "slot" : "none");\n', { mode: 0o755 });
+      return path;
+    };
+    const path = `${join(m.dir, 'tools', 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, agent = { PATH: path, HH_BRIDGE: hook };
+    const run = (command: string, args: string[], env: NodeJS.ProcessEnv = agent) => output(spawn(command, args, { uid: user?.uid, gid: user?.gid, env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    /* As npx and npm scripts start them: by the name in node_modules/.bin, whose first line asks for node. */
+    for (const name of ['tsc', 'vitest', 'eslint', 'jest', 'playwright']) expect(await run(tool(name), ['--noEmit']), name).toBe('0:slot');
+    expect(await run(join(m.dir, 'tools', 'bin', 'node'), [tool('vitest'), 'run'])).toBe('0:slot');
+    expect(m.frames.filter(type => type === 'check.acquire')).toHaveLength(6);
+    expect(await run(tool('light'), [])).toBe('0:none');
+    expect(await run(tool('tsc'), [], { PATH: path })).toBe('0:none');
+    /* One that runs inside a check already holds its slot. */
+    expect(await run(tool('vitest'), [], { ...agent, HH_CHECK_SLOT: 'held' })).toBe('0:slot');
+    expect(m.frames.filter(type => type === 'check.acquire')).toHaveLength(6);
   });
 });

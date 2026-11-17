@@ -7,7 +7,13 @@ let client: CheckClient | null = null;
 const leased = new AsyncLocalStorage<{ lease: CheckLease; active: boolean }>();
 const leases = new Map<string, { lease: CheckLease; agentId: string | undefined; active: boolean; children: Set<Promise<unknown>> }>();
 
-export function setCheckClient(next: CheckClient | null): void { client = next; }
+const blocked = new Map<number, string>();
+export function setCheckClient(next: CheckClient | null): void { client = next; if (!next) blocked.clear(); }
+export function suspendCheckSlots(group: number, reason: string | null): void {
+  if (reason) blocked.set(group, reason); else blocked.delete(group);
+  client?.refuse(blocked.values().next().value ?? null);
+}
+export function checkQueueOffline(): boolean { return !client?.isOnline(); }
 export function checkSlotWaiting(agentId: string, jobId?: string | null): boolean { return client?.waiting(agentId, jobId) ?? false; }
 export function currentCheckLease(): string | undefined { return leased.getStore()?.lease.id; }
 export function currentCheckSignal(): AbortSignal | undefined { return leased.getStore()?.lease.signal; }

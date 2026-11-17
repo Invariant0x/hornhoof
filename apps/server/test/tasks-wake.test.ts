@@ -872,7 +872,7 @@ describe('a head', () => {
       await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, busy!.id));
       await afterJob(ctx, busy!.id);
       const run = await nextRun(builtin);
-      expect(run.prompt).toContain('Several of your tasks moved while you were busy');
+      expect(run.prompt).toContain('Several things waited for you in line and go out together in this turn.');
       await db.insert(agentEvents).values({ companyId, agentId: head.id, jobId: run.jobId, kind: 'program', data: { program: { state: 'thinking', since: Date.now() - 1000, tool: null }, alarm: null } });
       await db.insert(agentEvents).values(taskIds.map(taskId => ({ companyId, agentId: head.id, jobId: run.jobId, kind: 'tool' as const, data: { name: 'hornhoof.task', input: '{}', task: { id: taskId } } })));
       await during();

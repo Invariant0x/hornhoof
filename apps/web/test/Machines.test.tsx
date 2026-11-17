@@ -88,6 +88,15 @@ describe('the link certificate warning', () => {
 });
 
 describe('Machines', () => {
+  it('shows why new checks wait for a previous process to stop', async () => {
+    const reason = 'Check group 4242 has not stopped. New checks wait until its processes are gone.';
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, checkError: reason }], builtin: null }] });
+    render(<Machines me={ME} />);
+    const mac = await openCard('dev-laptop');
+    expect(within(mac).getByText('Checks paused')).toHaveAttribute('title', reason);
+    expect(within(mac).getByText(reason)).toBeInTheDocument();
+  });
+
   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
     localStorage.setItem('hh-lang', language);
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });
