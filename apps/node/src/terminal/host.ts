@@ -1,5 +1,5 @@
 import { execFile, type ChildProcess } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -394,6 +394,9 @@ const stopped = (signal?: AbortSignal): Promise<false> =>
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
 export class TerminalHost {
+  /* A plain screen hash would let a viewer guess masked values. Bind the keyed proof to this agent and program too,
+     so another program's chosen output cannot serve as a verifier. The key never leaves this host. */
+  private readonly completionKey = randomBytes(32);
   private readonly operator: OperatorRuntime | null;
   private readonly operatorTimer: NodeJS.Timeout | null;
   private readonly agents = new Map<string, Agent>();
@@ -507,7 +510,7 @@ export class TerminalHost {
     if (a.program !== program || this.completionBlocked(a)) return null;
     if (output === null) return null;
     const text = completionText(program.kind, screen, output);
-    return text ? createHash('sha256').update(text).digest('hex') : null;
+    return text ? createHmac('sha256', this.completionKey).update(JSON.stringify([a.key, a.instance, text])).digest('hex') : null;
   }
 
   private async completionOutput(a: Agent, kind: TermProgram['kind']): Promise<string | null> {

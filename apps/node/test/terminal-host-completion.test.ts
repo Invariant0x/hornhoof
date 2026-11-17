@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { OperatorNodeMessage, type OperatorNodeMessage as ProgramFrame } from '@hornhoof/protocol/program-operator';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { kimiProgram } from '../src/terminal/programs.js';
+import { completionText } from '../src/terminal/program-state.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { untilOnClock } from './terminal-host-helpers.js';
 
@@ -14,7 +15,7 @@ const done = '\x1b]7501;state=done:app=kimi-code\x1b\\';
 const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-function fixture() {
+function fixture(secrets: string[] = []) {
   vi.useFakeTimers();
   const home = mkdtempSync(join(tmpdir(), 'hh-completion-'));
   const tmux = new Tmux({ env: { HOME: home } });
@@ -26,7 +27,7 @@ function fixture() {
   const position = vi.spyOn(tmux, 'programCursor').mockResolvedValue(cursor);
   const output = vi.spyOn(tmux, 'programOutput').mockReturnValue(done);
   const sent: ProgramFrame[] = [];
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true } });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => secrets, operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true } });
   stops.push(async () => { await host.stop(); rmSync(home, { recursive: true, force: true }); });
   const key = randomUUID();
   const a = host['agent'](key);
@@ -45,6 +46,29 @@ it('uses the current Kimi turn recording and keeps the completion proof stable w
   expect(await c.facts()).toMatchObject({ completion: first!.completion });
   c.shown.mockResolvedValue(screen.replace('The review is complete', 'The next response is complete'));
   expect((await c.facts())!.completion).not.toBe(first!.completion);
+});
+
+it('does not let a completion proof verify guesses of a masked secret or correlate another program', async () => {
+  const secret = '31415926';
+  const c = fixture([secret]);
+  const raw = screen.replace('The review is complete', `The secret is ${secret}`);
+  c.shown.mockResolvedValue(raw);
+  const request = randomUUID();
+  await c.host.operatorMessage({ type: 'program.view_get', agentKey: c.key, request });
+  const view = c.sent.find((frame): frame is Extract<ProgramFrame, { type: 'program.view' }> => frame.type === 'program.view' && frame.request === request)!;
+  expect(view.cells).not.toContain(secret);
+  expect(view.completion).toMatch(/^[a-f0-9]{64}$/);
+  const guess = ['31415925', secret, '31415927'].find(value =>
+    createHash('sha256').update(completionText('kimi', raw.replace(secret, value), done)!).digest('hex') === view.completion);
+  expect(guess).toBeUndefined();
+
+  const other = c.host['agent'](randomUUID());
+  other.program = kimiProgram; other.instance = randomUUID();
+  c.host['beginTurn'](other);
+  other.busy = other.took = true;
+  expect((await c.host['programFacts'](other.key))!.completion).not.toBe(view.completion);
+  c.a.instance = randomUUID();
+  expect((await c.facts())!.completion).not.toBe(view.completion);
 });
 
 it('does not reuse an older done when another Kimi turn starts', async () => {
