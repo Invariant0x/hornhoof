@@ -162,7 +162,7 @@ describe('a read from the page', () => {
 
 describe('newRequestId', () => {
   it('makes a v4 uuid without randomUUID, which a page on plain http lacks', () => {
-    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => realCrypto.getRandomValues(bytes) });
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array<ArrayBuffer>) => realCrypto.getRandomValues(bytes) });
     const ids = [newRequestId(), newRequestId()];
     expect(ids[0]).toMatch(UUID_V4);
     expect(ids[1]).toMatch(UUID_V4);

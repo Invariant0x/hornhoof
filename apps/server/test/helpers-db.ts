@@ -252,13 +252,39 @@ async function putBack(client: PGlite, { tables, numbers }: Rows): Promise<void>
   });
 }
 
+/* Rows fixture() is still making or putting back. */
+const making = new Set<Promise<unknown>>();
+
+/* A turn of the event loop as the real clock gives it, as a test can end with the clock not real. */
+const { setImmediate: nextTurn } = globalThis;
+
+/* A test whose end waits for rows goes on to the rows it asks for next, which stand on them, within a turn of the event
+   loop. */
+async function madeAll(): Promise<void> {
+  do {
+    await Promise.allSettled(making);
+    await new Promise(next => nextTurn(next));
+  } while (making.size);
+}
+
 /* Rows a group of tests starts from: make builds them through the real code for the first test of the file that asks,
    and every later one that asks on the same rows gets the rows and numbers make left back, with a copy of what make
    returned, which holds no function. So one set of rows can stand on another made the same way. On other rows they are
    made again, as on any database, and so they are while the clock is not real: kept ones would hold the time of the real
    one. Under one key, make builds the same rows each time. */
-export async function fixture<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
+export function fixture<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
   if (vi.isFakeTimers()) return make();
+  /* A test can end while rows are still being made, as when its time runs out on a busy machine. Its end waits for them
+     then, with its database and app still open, so they are kept: made again, they would cost the next test the same
+     time. Its hooks run last first, and those that close the database and the app came before this one. */
+  if (TestRunner.getCurrentTest()) onTestFinished(madeAll);
+  const call = keptOrMade(client, key, make);
+  making.add(call);
+  call.then(() => making.delete(call), () => making.delete(call));
+  return call;
+}
+
+async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
   const on = `${key}\n${await digestOf(await rowsOf(client))}`;
   const kept = made.get(on);
   if (kept) {
