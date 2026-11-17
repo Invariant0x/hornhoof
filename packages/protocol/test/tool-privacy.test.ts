@@ -47,6 +47,16 @@ describe('sensitive tool telemetry', () => {
     expect(privacy.event({ kind: 'text', text: 'Ready with private-result-marker.' })).toEqual({ kind: 'text', text: 'Ready with [hidden].' });
   });
 
+  it('uses a registered policy for telemetry and keeps an explicit sensitive event private', () => {
+    const privacy = new ToolPrivacy();
+    const policy = { sensitive: true, secretInput: ['value'], secretOutput: ['value'] };
+    expect(privacy.event({ kind: 'tool', name: 'new_private_tool', input: '{"value":"private-policy-marker"}' }, policy)).toMatchObject({ input: PRIVATE_TOOL_NOTE });
+    expect(privacy.event({ kind: 'text', text: 'Done with private-policy-marker.' })).toEqual({ kind: 'text', text: 'Done with [hidden].' });
+    const hinted = new ToolPrivacy();
+    expect(hinted.event({ kind: 'tool', name: 'phone_action', sensitive: true, input: '{}' })).toMatchObject({ input: PRIVATE_TOOL_NOTE });
+    expect(hinted.sensitive).toBe(true);
+  });
+
   it.each(['vault_entry', 'hornhoof.vault_save', 'mcp__hornhoof__vault_entry'])('recognizes the shared definition of %s', name => {
     expect(isSensitiveTool(name)).toBe(true);
     expect(isSensitiveTool(`${name}_public`)).toBe(false);

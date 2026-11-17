@@ -8,7 +8,7 @@ export const PRIVATE_TOOLS = {
   phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },
 } as const;
 
-export const PRIVATE_TOOL_NOTE = 'Sensitive tool data hidden. The turn output is hidden too.';
+export const PRIVATE_TOOL_NOTE = 'Sensitive tool data and raw terminal output hidden.';
 export const PRIVATE_COMMAND_REFUSED = 'This command contains a vault secret and was not sent or recorded. Type the password with your own program on the machine instead.';
 export const PRIVATE_TURN_LOST = 'The server restarted after this turn used a vault secret. Its temporary value masks are gone, so no new changes can be recorded. End this turn and start a new one.';
 
@@ -122,8 +122,11 @@ export class ToolPrivacy {
     this.values.remember(result, policy?.secretOutput);
   }
 
-  event(event: AgentEvent): AgentEvent {
-    if (event.kind === 'tool' && (event.sensitive || isSensitiveTool(event.name))) this.input(event.name, parsed(event.input), toolPrivacy(event.name) ?? { sensitive: true });
+  event(event: AgentEvent, policy?: ToolPrivacyPolicy): AgentEvent {
+    if (event.kind === 'tool') {
+      policy ??= toolPrivacy(event.name);
+      if (event.sensitive || policy?.sensitive) this.input(event.name, parsed(event.input), { ...policy, sensitive: true });
+    }
     if (this.sensitive && event.kind === 'tool_result') this.result(parsed(event.summary), { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
     return this.values.hide(privateToolEvent(event, this.sensitive));
   }
