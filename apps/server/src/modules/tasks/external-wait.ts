@@ -159,12 +159,12 @@ function requireHolder(task: Task, agentId: string): void {
 }
 
 /* The recipient holds the task, or the sender acts on it or oversees it as orchestrator or head of its department. An
-   employee also writes on any task to the orchestrator, which oversees them all, as when it answers what it was asked. */
+   employee also writes on any task to the orchestrator, which oversees them all, as when it answers what it was asked.
+   A closed task is held by nobody, and the one who did it, its head and the orchestrator still write about it. */
 function requireMessageTask(task: Task, recipient: Sender | undefined, sender: Sender | undefined): void {
-  if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is ${task.status}.`);
   const toOrchestrator = Boolean(sender && recipient?.kind === 'orchestrator');
   if (task.assigneeAgentId !== recipient?.id && !toOrchestrator && !senderMayWrite(task, sender)) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
-  if (task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused, so a message about it wakes nobody. Send it without the task, or resume the task first.`);
+  if (OPEN.has(task.status) && task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused, so a message about it wakes nobody. Send it without the task, or resume the task first.`);
 }
 
 type TaskMessage = { companyId: string; agentId: string; task?: number | string; actor: Actor; text: string };
@@ -307,6 +307,8 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
   requireMessageTask(task, recipient, sender);
   const before = await sentBefore(ctx, input.agentId, turn.message, task.id);
   if (before) return { id: before, repeated: true };
+  /* A word about a closed task, such as that it is done, goes as a message naming it: no work is left on it to wake. */
+  if (!OPEN.has(task.status)) return { id: await insertOrDeliverTurn(ctx, { ...turn, message: { ...turn.message, task: { id: task.id, number: task.number } } }) };
   const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) });
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));
