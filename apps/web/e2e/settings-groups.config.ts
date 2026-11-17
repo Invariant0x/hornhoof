@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 import { browserPort } from './browser-port';
 
-/* The Settings groups on this checkout, in each browser engine. */
+/* The built Settings groups on this checkout, in each browser engine. */
 process.env.HORNHOOF_BROWSER_PORT ??= String(browserPort(process.pid, 5200));
 const port = process.env.HORNHOOF_BROWSER_PORT;
 const origin = `http://127.0.0.1:${port}`;
@@ -24,7 +24,7 @@ export default defineConfig({
     { name: 'settings-webkit', use: { browserName: 'webkit' } },
   ],
   webServer: {
-    command: `vite --mode browser-test --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run build && vite preview --host 127.0.0.1 --port ${port} --strictPort`,
     cwd: fileURLToPath(new URL('..', import.meta.url)),
     url: origin,
     reuseExistingServer: false,
