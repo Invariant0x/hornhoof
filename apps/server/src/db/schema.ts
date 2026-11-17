@@ -1888,8 +1888,8 @@ export const testSuiteMemory = pgTable(
   t => [primaryKey({ name: 'test_suite_memory_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.suiteId] })],
 );
 
-/* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
-   and agreements. People who see the whole company read and change it too. */
+/* The company's notebook holds the CEO's decisions, rules and agreements across conversations. People who see the whole
+   company read and change it too. */
 export const notebookNotes = pgTable(
   'notebook_notes',
   {

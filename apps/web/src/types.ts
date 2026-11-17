@@ -359,7 +359,6 @@ export type AgentCardView = {
   parts: Part[];
   raw: string;
   /* How long the text every turn sends is, and the most it may be. */
-  instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string }[];
   /* Its latest turns a node restart cut off, the latest first; node: none for the built-in node. */

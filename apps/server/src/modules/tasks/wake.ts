@@ -5,7 +5,7 @@ import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, type TurnMessage } from '../conversation/queue.js';
 import { inboxChanged, mailBack } from '../conversation/inbox.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
@@ -671,7 +671,8 @@ async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: He
 
 async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boolean> {
   const { agentId } = job;
-  const unsent = UNSENT.includes(job.error ?? '');
+  /* Jobs from older builds can still carry these dispatch errors. */
+  const unsent = job.error === 'instructions_too_long' || job.error === 'node_too_old';
   const how = unsent ? null : await keptBreaking(ctx, agentId, task, job);
   if (!unsent && !how) return false;
   const text = unsent ? job.result ?? job.error! : await brokenTurnText(ctx, job, task, how === 'at_once');

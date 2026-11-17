@@ -1,4 +1,3 @@
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,9 +7,8 @@ import { ApiError } from '../../errors.js';
 import { onAgent } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import type { ToolJob } from '../tools/job.js';
-import { placeOf, renderInstructions } from './instructions.js';
 
-const Assignment = z.strictObject({ employee: z.uuid(), assignment: z.string().max(8000).nullable() });
+const Assignment = z.strictObject({ employee: z.uuid(), assignment: z.string().nullable() });
 const forbidden = () => new ApiError(403, 'forbidden', 'A head can set only the assignment of a current worker in its own department.', 'not_your_department');
 
 /* This authority changes text alone. It never delegates the employee-card PATCH surface. */
@@ -32,10 +30,6 @@ export async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof
       const overrides = { ...employee.overrides };
       if (body.assignment === null) delete overrides.base;
       else overrides.base = body.assignment;
-      const next = { ...employee, overrides };
-      if (renderInstructions(ctx.templates, next, await placeOf(tx, next)).text.length > MAX_INSTRUCTIONS) {
-        throw new ApiError(400, 'validation', 'The assignment makes the instructions too long. Shorten it.', 'instructions_too_long');
-      }
       if (JSON.stringify(overrides) === JSON.stringify(employee.overrides)) return;
       await tx.update(agents).set({ overrides }).where(eq(agents.id, employee.id));
       await tx.insert(agentChanges).values({ companyId: job.companyId, agentId: employee.id, field: 'prompt', before: employee.overrides, after: overrides });

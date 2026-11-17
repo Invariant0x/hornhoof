@@ -1,5 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -172,8 +171,6 @@ describe('what a node from before skill files takes', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
 
-  /* A role is built of as many bricks as it needs: how much such a node takes bounds none of them, and a turn too long for
-     it ends saying the node needs an update. */
   it('gets every brick of a role and of the orchestrator whole', () => {
     for (const role of shipped.roles.values()) {
       const { parts, whole } = always(role);
@@ -335,10 +332,9 @@ describe('renderInstructions', () => {
     expect(whole).not.toContain('## Skills');
   });
 
-  it('keeps that text whole however long it is, and a turn too long for the node does not go out', () => {
+  it('keeps the whole override for a node that takes skills inline', () => {
     const long = 'Test first. '.repeat(2000);
     const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
-    expect(whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
     expect(whole).toContain(`${long}\n<!-- /hh:skill -->`);
   });
 
@@ -690,7 +686,6 @@ describe('reading web pages in a browser on the node', () => {
       expect(packet.text, id).toContain(rule!.body);
       expect(packet.whole, id).toContain(rule!.body);
       expect(packet.skills.some(s => s.name === 'hh-web-pages'), id).toBe(false);
-      expect(packet.text.length, id).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     }
   });
 
@@ -734,10 +729,6 @@ describe('one run of every test per release', () => {
       PLACE,
     );
   };
-
-  it('keeps MAX_INSTRUCTIONS at 200000', () => {
-    expect(MAX_INSTRUCTIONS).toBe(200_000);
-  });
 
   it('starts employee hh-* skills with You can', () => {
     for (const skill of shipped.skills.values()) {

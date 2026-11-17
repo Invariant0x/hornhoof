@@ -53,6 +53,15 @@ describe('employee assignment authority', () => {
     expect(cleared!.overrides).toEqual(worker.overrides);
   });
 
+  it('saves the full text of a long assignment from a head', async () => {
+    const { db, head, worker, connect } = await fixture();
+    const client = await connect(head.id);
+    const assignment = 'Own the order queue.\n'.repeat(13_000);
+    expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment } })).isError).toBeFalsy();
+    const [after] = await db.select().from(agents).where(eq(agents.id, worker.id));
+    expect(after!.overrides.base).toBe(assignment);
+  });
+
   it('refuses other departments, other companies, heads, removed employees and unrelated patch fields', async () => {
     const { db, company, head, worker, other, connect } = await fixture();
     const [foreignCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();

@@ -734,8 +734,8 @@ export class TerminalHost {
     const { input, program } = job;
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
-    const instructionsFile = await this.writeInstructions(job);
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
+    const instructions = await this.writeInstructions(job);
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, ...instructions, urls });
     return { spec, urls, hash: await this.versionedHash(a, job, spec) };
   }
 
@@ -967,20 +967,21 @@ export class TerminalHost {
 
   /* Claude Code reads what it is told from the file it starts with, which this returns. Codex, Kimi Code and Antigravity
      read a file of their folder for it, each its own in a task's folder, agy only its start. */
-  private async writeInstructions(job: TermJob): Promise<string | null> {
+  private async writeInstructions(job: TermJob): Promise<{ instructionsFile: string | null; instructionsBytes?: number }> {
     const told = await this.toldOf(job);
     const whole = join(job.input.workDir, '.hh-instructions.md');
-    if (!told) return null;
+    if (!told) return { instructionsFile: null };
     if (job.program.kind === 'claude') {
       await this.fs.write(whole, told + '\n');
-      return whole;
+      return { instructionsFile: whole };
     }
     const place = toldPlace(job.program.kind, job.input);
     const { rules, whole: all } = job.program.kind === 'antigravity' ? agyRules(told, whole, Buffer.byteLength(place.head)) : { rules: told, whole: null };
     if (all) await this.fs.write(whole, all + '\n');
     await this.fs.mkdir(dirname(place.file));
-    await this.fs.write(place.file, place.head + rules + '\n');
-    return null;
+    const instructions = place.head + rules + '\n';
+    await this.fs.write(place.file, instructions);
+    return { instructionsFile: null, instructionsBytes: Buffer.byteLength(instructions) };
   }
 
   /* The program runs as this turn would start it, in the session it asks for. A new session asked for goes on in a program

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
+import { type SkillFile } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
-import { renderInstructions } from '../src/modules/agents/instructions.js';
+import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
@@ -497,37 +497,15 @@ describe('the orchestrator\'s conversation', () => {
     expect(run.skills?.find(s => s.name === 'orch-plan-turn')?.body).toBe(`# ${plan.title.en}\n\n${plan.body}`);
   });
 
-  it("ends the orchestrator's turn at once on a machine that writes no skill files, as his skills come whole there and take more than it does", async () => {
+  it("sends the orchestrator's full instructions to a node that takes skills inline", async () => {
     const { app, ceo, mac } = await onMac('0.5.0', 'claude', { skillFiles: false });
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    await say(app, ceo, 'Hello');
-    const failed = async () => (await db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id))).find(j => j.status === 'failed');
-    await until(async () => Boolean(await failed()));
-    const job = await failed();
-    expect(job!.error).toBe('node_too_old');
-    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
-    expect(await quiet(mac)).toBe(0);
-  });
-
-  it("ends a turn too long for a machine from before skill files at once, saying its node needs an update", async () => {
-    stillClock();
-    const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
-    const { db } = app.ctx;
-    await until(async () => (await state(app, ceo)).ready);
-    const [acme] = await db.select().from(companies);
-    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-    const base = 'x'.repeat(OLD_NODE_INSTRUCTIONS);
-    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', overrides: { base } }).returning();
-    const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
-    expect(posted.statusCode).toBe(202);
-    await expect(nextRunOrFailed(app, mac, posted.json().jobId)).rejects.toThrow(/^node_too_old: This machine's node is too old for these instructions; update it\./);
-    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id));
-    expect(job).toMatchObject({ status: 'failed', error: 'node_too_old' });
-    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
-    expect(job!.result).toContain(`more than the ${OLD_NODE_INSTRUCTIONS} it takes`);
-    expect(await quiet(mac)).toBe(0);
+    const posted = await say(app, ceo, 'Hello');
+    const run = await nextRunOrFailed(app, mac, posted.json().jobId);
+    expect(run.instructions).toBe((await instructionsOf(app.ctx, orchestrator!, false)).text);
+    expect(run.skills ?? []).toEqual([]);
   });
 
   it('keeps the next message waiting when the machine says its login ran out', async () => {
@@ -771,18 +749,14 @@ describe("an employee's conversation", () => {
     return { ...company, id };
   }
 
-  it('ends a turn whose instructions are longer than a machine takes at once, saying so, and sends nothing', async () => {
+  it('dispatches a long assignment whole', async () => {
     const { app, db, ceo, builtin, bruno } = await withEmployee();
-    /* Saved before its header grew: Hornhoof refuses such an edit now. */
-    await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS) } }).where(eq(agents.id, bruno.id));
-    expect((await sayTo(app, ceo, bruno.id, 'What do you own?')).statusCode).toBe(202);
-    const log = async () => (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(ceo) })).json().events as { kind: string; data: object }[];
-    await until(async () => (await log()).some(e => e.kind === 'failed'));
-    expect((await log()).at(-1)).toMatchObject({ kind: 'failed', data: { error: 'instructions_too_long' } });
-    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
-    expect(job).toMatchObject({ status: 'failed', error: 'instructions_too_long' });
-    expect(job!.result).toMatch(/^Bruno's instructions are \d+ characters, more than the 200000 a turn carries/);
-    expect(await quiet(builtin)).toBe(0);
+    const base = 'Own checkout.\n'.repeat(17_000);
+    await db.update(agents).set({ overrides: { base } }).where(eq(agents.id, bruno.id));
+    const posted = await sayTo(app, ceo, bruno.id, 'What do you own?');
+    expect(posted.statusCode).toBe(202);
+    const run = await nextRunOrFailed(app, builtin, posted.json().jobId);
+    expect(run.instructions).toContain(base);
   });
 
   it('talks to an employee with its rendered instructions', async () => {
