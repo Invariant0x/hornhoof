@@ -369,7 +369,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(184);
+    expect(skills).toHaveLength(185);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
