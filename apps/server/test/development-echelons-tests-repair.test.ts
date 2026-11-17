@@ -51,6 +51,8 @@ describe('test-only repair and src/** return at Tests without task cancellation'
     expect(afterRepair).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: f.tester.id });
     expect(afterRepair.candidateId).not.toBe(initialCandidateId);
     expect(afterRepair.revision).toBe(initialRevision + 1);
+    await expect(report(f.ctx, f.tester.id, f.task.id, verified(f.snapshot))).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.candidateId).toBe(afterRepair.candidateId);
 
     const submissions = (await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id)).orderBy(asc(taskEvents.id)))
       .filter(event => event.kind === 'submitted');
