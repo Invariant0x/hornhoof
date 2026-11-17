@@ -6,7 +6,7 @@ import { Worker } from 'node:worker_threads';
 export type ParserAnswer = { tree: string } | { refused: string } | { broken: string };
 
 /* What this file needs of a worker. */
-export type ParserWorker = {
+type ParserWorker = {
   on(event: 'message', listener: (answer: ParserAnswer) => void): unknown;
   on(event: 'error', listener: (err: Error) => void): unknown;
   on(event: 'exit', listener: () => void): unknown;

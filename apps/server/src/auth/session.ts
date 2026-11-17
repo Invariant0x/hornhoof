@@ -11,11 +11,11 @@ import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
 import { checkRead, READ_MS, readCookieOf, readPerson, signRead } from './read-cookie.js';
 
-export const SESSION_COOKIE = 'hh_session';
+const SESSION_COOKIE = 'hh_session';
 /* A browser takes a __Host- cookie only when it is secure, has path / and no domain, so a page on another company's name
    under hornhoof.org cannot set it. */
 export const LINK_SESSION_COOKIE = '__Host-hh_session';
-export const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
+const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
 const SESSION_DAYS = 30;
 const HANDOVER_GRACE_SECONDS = 60;
 

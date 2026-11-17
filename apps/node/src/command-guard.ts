@@ -18,10 +18,10 @@ export type CommandFiles = {
   /* The names a folder holds, or null when it is no folder. */
   list(path: string): Promise<string[] | null>;
 };
-export type CommandCoverage = 'recognized' | 'opaque';
+type CommandCoverage = 'recognized' | 'opaque';
 export type CommandDenial = { allow: false; code: 'whole_suite_local' | 'command_guard_unavailable'; category: string };
 export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'test_files' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
-export type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
+type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 
 /* stages: of one text. walked: of a whole command, with all the scripts it reaches. */
 export const COMMAND_LIMITS = { commandBytes: 65_536, nesting: 32, stages: 256, walked: 4096, resolving: 8, fileBytes: 1_048_576, fileReads: 32 };

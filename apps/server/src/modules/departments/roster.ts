@@ -32,7 +32,7 @@ export async function templateRoster(ctx: Pick<Ctx, 'db' | 'templates'>, dept: D
 /* The members a team of a template starts with, for the sub-unit made for it: each on the first plan that runs the
    strongest model, which a turnkey team asks for, or waiting for one, with the skills of its role and those the team
    adds. Several of one role are numbered. */
-export function teamRoster(ctx: Pick<Ctx, 'templates'>, team: TeamTemplate, teamId: string, serving: readonly Plan[]): HireLine[] {
+function teamRoster(ctx: Pick<Ctx, 'templates'>, team: TeamTemplate, teamId: string, serving: readonly Plan[]): HireLine[] {
   return team.members.flatMap(({ role: id, count }) => {
     const role = ctx.templates.roles.get(id)!;
     const tier = team.turnkey ? 'top' : role.tier;

@@ -9,7 +9,7 @@ import type { RepoAddress } from './refs.js';
 type Run = typeof testRuns.$inferSelect;
 type MarkState = 'success' | 'failure';
 export type TestsMark = { state: MarkState; description: string; targetUrl: string | null };
-export type MarkAnswer = { ok: true } | { problem: string };
+type MarkAnswer = { ok: true } | { problem: string };
 export type CommitMarker = (repo: RepoAddress, commit: string, mark: TestsMark) => Promise<MarkAnswer>;
 
 /* What a full test run leaves on the commit it checked. scripts/tests-mark.mjs reads it for .github/workflows/images.yml. */

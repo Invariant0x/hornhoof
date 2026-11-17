@@ -10,7 +10,7 @@ import { isPublicAddress } from '../outbound/extension.js';
 
 export type ModelsRequest = { url: URL; headers: Record<string, string> };
 export const MODELS_FAILURES = ['internal_address', 'redirect', 'too_large', 'timeout', 'unreachable', 'bad_answer', 'refused'] as const;
-export type ModelsFailure = (typeof MODELS_FAILURES)[number];
+type ModelsFailure = (typeof MODELS_FAILURES)[number];
 export type ModelsAnswer = { ok: true; body: unknown } | { ok: false; reason: ModelsFailure; status?: number };
 export type ModelsReader = (request: ModelsRequest) => Promise<ModelsAnswer>;
 

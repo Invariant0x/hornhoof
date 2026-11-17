@@ -4,7 +4,7 @@ import type { EventView, OrchestratorState } from '../types';
 import { clock } from './subscription';
 
 /* How an agent's window shows it: a chat anyone reads, or its live terminal for those who want the program itself. */
-export type AgentView = 'chat' | 'terminal';
+type AgentView = 'chat' | 'terminal';
 const VIEW = 'hh-agent-view';
 
 function storedView(): AgentView {
@@ -32,7 +32,7 @@ export function useAgentView(): [AgentView, () => void] {
 
 /* The program's own steps, what it called and its plan, are one quiet line of the chat between the words around them. */
 const STEPS: ReadonlySet<EventView['kind']> = new Set(['tool', 'tool_result', 'todo']);
-export type ChatItem<E extends EventView> = { kind: 'event'; event: E; index: number } | { kind: 'steps'; events: { event: E; index: number }[] };
+type ChatItem<E extends EventView> = { kind: 'event'; event: E; index: number } | { kind: 'steps'; events: { event: E; index: number }[] };
 
 export function chatItems<E extends EventView>(events: E[]): ChatItem<E>[] {
   const items: ChatItem<E>[] = [];

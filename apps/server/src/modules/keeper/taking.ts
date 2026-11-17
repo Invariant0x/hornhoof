@@ -57,7 +57,7 @@ export function writeTaking(dir: string, taking: Taking): void {
   writePrivately(join(dir, TAKING_FILE), JSON.stringify(taking));
 }
 
-export function forgetTaking(dir: string): void {
+function forgetTaking(dir: string): void {
   rmSync(join(dir, TAKING_FILE), { force: true });
 }
 
@@ -104,7 +104,7 @@ export async function probeLink(base: string, nonce: string): Promise<{ machine:
 }
 
 /* after: what is done once the answer has gone out. */
-export type SwitchAnswer = { status: number; body: object; after?: () => void };
+type SwitchAnswer = { status: number; body: object; after?: () => void };
 
 const refused = (status: 403 | 404 | 409, why?: string): SwitchAnswer => ({ status, body: { ok: false, ...(why ? { why } : {}) } });
 const OK: SwitchAnswer = { status: 200, body: { ok: true } };

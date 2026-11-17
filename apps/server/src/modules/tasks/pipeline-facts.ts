@@ -19,12 +19,12 @@ export type FactsTask = {
   closedAt: Date | null;
 };
 export type FactsEvent = { taskId: string; kind: TaskEventKind; data: Record<string, unknown>; createdAt: Date };
-export type FactsRequest = { taskId: string; createdAt: Date; answeredAt: Date | null };
-export type FactsPart = { queuedAt: Date; startedAt: Date | null; finishedAt: Date | null };
+type FactsRequest = { taskId: string; createdAt: Date; answeredAt: Date | null };
+type FactsPart = { queuedAt: Date; startedAt: Date | null; finishedAt: Date | null };
 export type FactsRun = { id: string; taskId: string; kind: 'tests' | 'work'; createdAt: Date; finishedAt: Date | null; parts: FactsPart[]; fileCache?: TestRunFileCache | null };
 /* coordination: a turn of the orchestrator, a head or an employee of Operations. */
 export type FactsJob = { taskId: string | null; status: string; error: string | null; interrupted: boolean; coordination: boolean; createdAt: Date; startedAt: Date | null; finishedAt: Date | null };
-export type FactsTimings = PartTimings & { runId: string };
+type FactsTimings = PartTimings & { runId: string };
 export type FactsInput = {
   openedAt: Date;
   /* When the turn closed, or now. */
@@ -382,7 +382,7 @@ function selectionMissesOf(runs: FactsRun[]): number | null {
 
 /* A bug task made after the task it names as #number closed. */
 export type LaterBug = { number: number; createdAt: Date; text: string };
-export type LaterBugs = { total: number; byKind: Partial<Record<KindLine, number>> };
+type LaterBugs = { total: number; byKind: Partial<Record<KindLine, number>> };
 
 function namedDone(bug: LaterBug, byNumber: Map<number, DoneTask>): DoneTask[] {
   const named = [...new Set([...bug.text.matchAll(/#(\d+)/g)].map(m => Number(m[1])))];
@@ -404,7 +404,7 @@ export function laterBugsOf(done: DoneTask[], bugs: LaterBug[]): LaterBugs {
 }
 
 /* The change from one number to another in percent, none when there is nothing to compare with. */
-export function percentChange(value: number | null, base: number | null): number | null {
+function percentChange(value: number | null, base: number | null): number | null {
   if (value === null || base === null) return null;
   if (base === 0) return value === 0 ? 0 : null;
   return Math.round(((value - base) / base) * 100);

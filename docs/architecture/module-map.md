@@ -85,7 +85,7 @@ orchestrator, decisions and access; `net` (9, 1,487) the front port, the doors o
 ### Cycles
 
 At run time, 42 of the server's modules are in one cycle of imports: every one but `templates`, `modules/auth`,
-`crypto`, `benchmark` and the entry points (`app.ts` among them) reaches every other one. At the level of files there are three cycles:
+`crypto`, `benchmark` and the entry points (`app.ts` among them) reaches every other one. At the level of files there are two cycles:
 
 - 78 files around `tasks/engine.ts`: the waits (`wait-*.ts`, `external-wait.ts`), wakes (`wake.ts`, `again.ts`,
   `failures.ts`, `silent.ts`, `restarts.ts`, `orphan-turns.ts`), the echelons (`echelons-*.ts`), `testruns/runs.ts`,
@@ -94,7 +94,8 @@ At run time, 42 of the server's modules are in one cycle of imports: every one b
   queues a turn, a turn's end moves a task: all of it is one knot.
 - `errors.ts` and `modules/keeper/app-mode.ts`: errors take the read-only message from the keeper, and the keeper's
   mode takes `ApiError` from errors.
-- `tasks/tree.ts` and `tasks/tree-waits.ts`.
+
+A third, `tasks/tree.ts` and `tasks/tree-waits.ts`, is gone since `taskActor` lives in `tree-waits.ts`.
 
 ## Node
 
@@ -142,9 +143,10 @@ other.
 `dryer` (threshold 0.82, at least 4 lines) finds 88 pairs of functions that are the same in form, 58 of them exactly.
 Those with the most copies:
 
-- Starting and stopping a timer that ticks: the same `start` and `stop` in `keeper/beats.ts`, `keeper/question.ts`,
-  `keeper/watch.ts`, `keeper/proofs.ts` and `tls/manager.ts`; the same `start` and `stop` around a watcher in
-  `keeper/handing.ts`, `keeper/lead-update.ts` and `keeper/taking.ts`.
+- Starting and stopping a timer that ticks: the same `start` and `stop` were in `keeper/beats.ts`, `keeper/question.ts`,
+  `keeper/watch.ts` and `keeper/proofs.ts`, which now share `keeper/ticker.ts`; `tls/manager.ts` differs a little and
+  keeps its own. The same `start` and `stop` around a watcher stand in `keeper/handing.ts`, `keeper/lead-update.ts`
+  and `keeper/taking.ts`.
 - Turning a refusal into a tool's error text: `answer` or `refused` in `testruns/tools.ts`, `improvements/tools.ts`,
   `tools/approval-policy.ts`, `assistants/mcp.ts` and `vault/tools.ts`, each with its own `say`.
 - Small helpers kept more than once: parsing JSON or giving null (`backups/bundle.ts`, `model-checks/dataset.ts`,
