@@ -12,6 +12,7 @@ export * from './outbound.js';
 export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
+import { AuthorCheckRequest, AuthorCheckDone } from './author-check.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
@@ -464,7 +465,7 @@ export type NodeReconnect = z.infer<typeof NodeReconnect>;
    server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
    answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
    agent.restarted and node.stopping. */
-export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'author_check.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
 /* Optional, so a build that does not number still talks to one that does. */
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
@@ -484,7 +485,7 @@ export const HELLO_IDS_MAX = 20_000;
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
+  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame, AuthorCheckDone,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -707,6 +708,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
+  AuthorCheckRequest,
   CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
@@ -834,3 +836,4 @@ function parse<T>(schema: z.ZodType<T>, raw: string): T | null {
 
 export const parseNodeMessage = (raw: string): NodeMessage | null => parse(NodeMessage, raw);
 export const parseServerMessage = (raw: string): ServerMessage | null => parse(ServerMessage, raw);
+export { AuthorCheckRequest, AuthorCheckDone, AuthorCheckCrap, authorCheckDocuments, sameAuthorCheck } from './author-check.js';

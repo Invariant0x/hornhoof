@@ -37,6 +37,7 @@ import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 import { phoneNodeGone } from '../phones/rpc.js';
+import { recordAuthorCheck } from '../tasks/author-check.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 const LOAD_SEEN_MS = 60_000;
@@ -338,7 +339,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
-  if (await testNodeMessage(ctx, id, msg)) return;
+  if (await checkNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
   switch (msg.type) {
@@ -508,6 +509,11 @@ export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void>
 }
 
 const testStatusReady = (unblocked: boolean, msg: Extract<NodeMessage, { type: 'status' }>): boolean => unblocked || msg.testEnvironmentVersion === 1;
+async function checkNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
+  if (msg.type === 'author_check.done') { await recordAuthorCheck(ctx, id, msg); return true; }
+  return testNodeMessage(ctx, id, msg);
+}
+
 async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Other node frames remain with their owning handler.
   switch (msg.type) {

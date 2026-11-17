@@ -39,6 +39,7 @@ import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings
 import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
+import { requestAuthorCheck } from './author-check.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
 type Agent = typeof agents.$inferSelect;
@@ -195,6 +196,7 @@ class TaskTools {
   }
 
   private registerExecutionTools(): void {
+    this.registerAuthorCheck();
     this.registerSubmit();
     this.registerBlocked();
     this.registerVerdict();
@@ -678,6 +680,17 @@ class TaskTools {
           return { text: `Cancelled #${task.number}.${left}`, moved };
         }),
     );
+  }
+
+  private registerAuthorCheck(): void {
+    this.server.registerTool('check_author', {
+      description: 'Runs check:author on the executing node before submit. Takes only a task: the server pins its repository, task branch SHA and the current target branch base. The node requires a clean matching checkout and records its own result. Use the returned baseCommit for submit. No command, arguments or author-supplied JSON is accepted. Missing or failed evidence keeps Review; Tests and required Security remain.',
+      inputSchema: z.strictObject({ task: Ref }),
+    }, async ({ task: ref }) => this.run(async () => {
+      const { task } = await this.find(ref);
+      const request = await requestAuthorCheck(this.ctx, this.job.agentId, this.job.id, task.id);
+      return { text: `Requested check:author ${request.requestId} on ${request.commit}, baseCommit ${request.baseCommit}. Read the task log for the node's completion before submitting.` };
+    }));
   }
 
   private registerSubmit(): void {

@@ -48,6 +48,7 @@ import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
 import { heldJobs } from './held-jobs.js';
 import { nodeLog } from './node-log.js';
+import { AuthorCheckExecutor } from './author-check-runtime.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -73,6 +74,8 @@ const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(byte
 const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type HarnessRun = Extract<ServerMessage, { type: 'tests.harness' }>;
+type PhoneRequest = Extract<ServerMessage, { type: 'phone.probe' | 'phone.open' | 'phone.action' | 'phone.renew' | 'phone.revoke' }>;
+const isPhoneRequest = (message: ServerMessage): message is PhoneRequest => ['phone.probe', 'phone.open', 'phone.action', 'phone.renew', 'phone.revoke'].includes(message.type);
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
 async function sayToAgent(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void): Promise<boolean> {
@@ -304,6 +307,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
   const outside = new OutsideCalls();
+  const authorChecks = new AuthorCheckExecutor({ dir, builtin, terminal, credUser, home: credHome, emit });
   const host = terminal
     ? new TerminalHost({
         tmux: terminal.tmux,
@@ -426,6 +430,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
+    if (authorChecks.consume(m)) return;
     if (isProgramControl(m)) return applyProgramControl(m, checks, host);
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
@@ -449,8 +454,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
-    if (m.type === 'phone.probe' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);
+    if (isPhoneRequest(m)) return phones.handle(m);
     if (m.type === 'job.cancel') {
+      authorChecks.stop(m.jobId);
       running.get(m.jobId)?.stop.abort();
       outside.stop(m.jobId);
       await host?.cancel(m.jobId);
@@ -698,6 +704,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
     phones.close();
+    authorChecks.stop();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);

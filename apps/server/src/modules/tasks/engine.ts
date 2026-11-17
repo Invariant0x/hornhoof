@@ -653,7 +653,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...skippedData(next.skipped) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
