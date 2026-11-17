@@ -139,10 +139,10 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('reads any page the CEO can open', async () => {
     const { app } = await company();
-    const res = await call(await mcp(app, TOKEN), 'view', { path: '/api/people' });
+    const res = await call(await mcp(app, TOKEN), 'api', { path: '/api/people' });
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(text(res)).people[0]).toMatchObject({ title: 'CEO' });
-    expect((await call(await mcp(app, TOKEN), 'view', { path: '/mcp' })).isError).toBe(true);
+    expect((await call(await mcp(app, TOKEN), 'api', { path: '/mcp' })).isError).toBe(true);
   });
 
   it("shows the CEO, in this window, the commands that connect the CEO's machines and plans, and the orchestrator when it reads them", async () => {
@@ -174,7 +174,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
     expect(await commands()).toMatchObject([{ id: made[0]!.id, dismissedSubscriptionIds: [plan!.id] }]);
-    expect(JSON.parse(text(await call(client, 'view', { path: '/api/nodes/commands' }))).commands).toEqual(await commands());
+    expect(JSON.parse(text(await call(client, 'api', { path: '/api/nodes/commands' }))).commands).toEqual(await commands());
     const events = JSON.stringify(await db.select(only(agentEvents, 'data')).from(agentEvents));
     for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));
   });
@@ -197,7 +197,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     await running(bruno.id, WORKER_TOKEN);
     const names = (await (await mcp(app, WORKER_TOKEN)).listTools()).tools.map(t => t.name);
     expect(names).not.toContain('change_employee');
-    expect(names).not.toContain('view');
+    expect(names).not.toContain('api');
   });
 
   it('lets no one outside pass as the orchestrator', async () => {
@@ -423,8 +423,8 @@ describe("the orchestrator and the company's public link", () => {
     const taken = await call(client, 'set_public_link', { name: 'acme' });
     expect(taken.isError).toBeFalsy();
     expect(JSON.parse(text(taken))).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
-    expect(JSON.parse(text(await call(client, 'view', { path: '/api/link' })))).toMatchObject({ link: { name: 'acme' } });
-    expect(JSON.parse(text(await call(client, 'view', { path: '/api/link/names/acme-corp' })))).toEqual({ name: 'acme-corp', free: true });
+    expect(JSON.parse(text(await call(client, 'api', { path: '/api/link' })))).toMatchObject({ link: { name: 'acme' } });
+    expect(JSON.parse(text(await call(client, 'api', { path: '/api/link/names/acme-corp' })))).toEqual({ name: 'acme-corp', free: true });
     expect(JSON.parse(text(await call(client, 'set_public_link', { name: 'acme-corp' }))).link.name).toBe('acme-corp');
     expect([...relay.bindings.keys()]).toEqual(['acme-corp']);
     const random = JSON.parse(text(await call(client, 'set_public_link', {}))).link.name;
