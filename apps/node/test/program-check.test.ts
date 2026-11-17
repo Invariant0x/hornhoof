@@ -20,6 +20,7 @@ let dir: string;
 let bin: string;
 let runs: string;
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   dir = mkdtempSync(join(tmpdir(), 'hh-program-check-'));
   mkdirSync(join(dir, 'bin'));
   bin = join(dir, 'bin', 'claude');
@@ -50,7 +51,6 @@ function installs(...shapes: (() => void)[]) {
 
 describe('whether an installed program starts', () => {
   it('checks a root-owned installation without agent runtime settings or node secrets', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.spyOn(process, 'getuid').mockReturnValue(0);
     for (const [name, value] of Object.entries({
       HOME: dir, TMPDIR: dir, PATH: '/agent-writable/bin',
