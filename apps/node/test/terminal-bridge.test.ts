@@ -2,8 +2,10 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
+import { fromAgent } from '../src/terminal/peer.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { procFixture } from './terminal-proc-fixture.js';
 
 /* The longest time a timer takes: a wait the passing path must never see run out. */
 const NEVER = 2_147_483_647;
@@ -204,6 +206,29 @@ describe("the node's bridge to Hornhoof's tools", () => {
     const attach = a.attachUrl.slice(0, -a.secret.length - 1);
     expect((await fetch(attach, { method: 'POST', headers: { authorization: `Bearer ${a.secret}` }, body: Buffer.from('png') })).status).toBe(404);
     expect(up.seen).toHaveLength(2);
+  });
+
+  /* Agents of one plan share a Linux user, and each reads the others' environment: the secret proves nothing alone, whether it
+     comes in the path or as a bearer token. The kernel's tables, here a controlled copy of /proc, must find the process that
+     holds the caller's end under the agent's own pane; the user it runs as is never asked. */
+  it("refuses a process of the same user outside the agent's pane that sends the agent's own secret as a bearer token", async () => {
+    const up = await upstream();
+    const PANE = 4100;
+    const caller = { pid: PANE + 1, belongs: true };
+    const fixture = procFixture('agent-1', () => caller.belongs);
+    const bridge = new Bridge(up.url, () => {}, fromAgent(async key => (key === 'agent-1' ? [PANE] : []), fixture.proc), { proc: fixture.proc, capture: fixture.capture });
+    await bridge.start();
+    fixture.listen(bridge, () => PANE, () => caller.pid);
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    /* A connection of its own each time: the bridge keeps what it found for a connection. */
+    const post = (to: string, authorization?: string) => fetch(to, { method: 'POST', headers: { 'content-type': 'application/json', connection: 'close', ...(authorization ? { authorization } : {}) }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+    expect((await post(a.mcpAddress, `Bearer ${a.secret}`)).status).toBe(200);
+    Object.assign(caller, { pid: 4200, belongs: false });
+    expect((await post(a.mcpAddress, `Bearer ${a.secret}`)).status).toBe(403);
+    expect((await post(a.mcpUrl)).status).toBe(403);
+    expect(up.seen).toHaveLength(1);
   });
 
   it("hands on a task's files both ways, with their names and of any size, and nothing else under the picture address", async () => {

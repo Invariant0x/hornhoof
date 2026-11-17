@@ -1,0 +1,48 @@
+
+ RUN  v5.0.5 /data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/packages/protocol
+
+ ❯ test/approval-policy.test.ts (10 tests | 1 failed) 108ms
+   ✓ approvalNeeded (4)
+     ✓ asks every time in the mode that wants each one, whatever was approved before and however small 1ms
+     ✓ asks only for a kind nobody approved yet in the mode of new kinds 0ms
+     ✓ passes up to the limit and asks above it, in the mode of limits 0ms
+     ✓ asks in the mode of limits when the work does not say how much, so nothing passes unmeasured 0ms
+   ✓ ApprovalRule (2)
+     ✓ keeps the three modes, with a limit only in the mode of limits 14ms
+     ✓ refuses a mode of limits without a limit, a limit below zero, and a limit on another mode 10ms
+   ❯ ruleOf (2)
+     × asks for new kinds by default, so an approved kind does not ask each time 54ms
+     ✓ reads what is stored, and never reads a stored mode of limits with no limit as no limit at all 0ms
+   ✓ the channels and kinds (2)
+     ✓ names what the company asked for, and a channel for all the rest 0ms
+     ✓ counts a kind as the same however it is typed 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/approval-policy.test.ts > ruleOf > asks for new kinds by default, so an approved kind does not ask each time
+AssertionError: expected { mode: 'every' } to deeply equal { mode: 'new_kinds' }
+
+- Expected
++ Received
+
+  {
+-   "mode": "new_kinds",
++   "mode": "every",
+  }
+
+ ❯ test/approval-policy.test.ts:45:35
+     43| describe('ruleOf', () => {
+     44|   it('asks for new kinds by default, so an approved kind does not ask …
+     45|     expect(DEFAULT_APPROVAL_RULE).toEqual({ mode: 'new_kinds' });
+       |                                   ^
+     46|     expect(approvalNeeded(ruleOf(undefined), work({ known: false }))).…
+     47|     expect(approvalNeeded(ruleOf(undefined), work({ known: true }))).t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Start at  16:44:27
+   Duration  4.71s (import 55%, transform 34%, tests 8%, worker 3%)
+

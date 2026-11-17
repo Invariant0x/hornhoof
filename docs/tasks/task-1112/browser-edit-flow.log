@@ -1,0 +1,119 @@
+[WebServer] (node:165985) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 24 tests using 1 worker
+
+(node:166448) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 1440px (50.5s)
+  ✓   2 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 375px (23.0s)
+  ✓   3 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 1440px (34.1s)
+  ✓   4 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 375px (33.8s)
+  ✓   5 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 1440px (36.9s)
+  ✓   6 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 375px (33.2s)
+  ✓   7 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 1440px (38.3s)
+  ✓   8 [approvals-chromium] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 375px (38.2s)
+(node:169224) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   9 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 1440px (1.8m)
+  ✓  10 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 375px (22.4s)
+  ✓  11 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 1440px (25.6s)
+  ✓  12 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 375px (34.5s)
+  ✓  13 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 1440px (28.1s)
+  ✓  14 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 375px (20.1s)
+  ✓  15 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 1440px (19.3s)
+  ✓  16 [approvals-firefox] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 375px (12.3s)
+(node:172635) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  17 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 1440px (16.7s)
+  ✓  18 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, light, at 375px (17.2s)
+  ✓  19 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 1440px (56.6s)
+  ✓  20 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in ru, dark, at 375px (54.0s)
+  ✓  21 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 1440px (2.0m)
+  ✘  22 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 375px (2.0m)
+(node:177104) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] 5:19:10 PM [vite] (client) [console.warn] Hornhoof turned the page light: frames (frames).
+  ✘  23 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 1440px (2.1m)
+(node:178451) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  24 [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 375px (2.1m)
+
+
+  1) [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 375px 
+
+    Error: Test timeout of 120000ms exceeded
+
+      160 |         await price.getByRole('textbox', { name: a.unit, exact: true }).fill('USD');
+      161 |         await price.getByRole('button', { name: t.common.save, exact: true }).click();
+    > 162 |         await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/price', body: { mode: 'within_limits', limit: 250, unit: 'USD' } });
+          |                                              ^
+      163 |
+      164 |         const autoSwitch = part.getByRole('switch', { name: a.autonomousRelease, exact: true });
+      165 |         await expect(autoSwitch).not.toBeChecked();
+        at /data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/apps/web/e2e/approval-policy.spec.ts:162:46
+
+    Error Context: e2e/results/approval-policy/approval-policy-the-CEO-re-e485c--rules-in-en-light-at-375px-approvals-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e/results/approval-policy/approval-policy-the-CEO-re-e485c--rules-in-en-light-at-375px-approvals-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace e2e/results/approval-policy/approval-policy-the-CEO-re-e485c--rules-in-en-light-at-375px-approvals-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 1440px 
+
+    Test timeout of 120000ms exceeded.
+
+    Error Context: e2e/results/approval-policy/approval-policy-the-CEO-re-b6e99--rules-in-en-dark-at-1440px-approvals-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e/results/approval-policy/approval-policy-the-CEO-re-b6e99--rules-in-en-dark-at-1440px-approvals-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace e2e/results/approval-policy/approval-policy-the-CEO-re-b6e99--rules-in-en-dark-at-1440px-approvals-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 375px 
+
+    Test timeout of 120000ms exceeded.
+
+    Error: locator.click: Test timeout of 120000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'About the department', exact: true })
+        - locator resolved to <button type="button" class="hbtn glass" aria-expanded="false">About the department</button>
+      - attempting click action
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+
+
+      111 |   });
+      112 |   await page.goto('/departments/d2');
+    > 113 |   await page.getByRole('button', { name: MESSAGES[lang].dept.about, exact: true }).click();
+          |                                                                                    ^
+      114 |   await expect(page.getByRole('heading', { name: MESSAGES[lang].dept.approvals.title, exact: true })).toBeVisible();
+      115 |   await page.evaluate(async () => { await document.fonts.ready; });
+      116 |   /* Tall enough that the panel shows the whole section, without scrolling, in its screenshots. */
+        at open (/data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/apps/web/e2e/approval-policy.spec.ts:113:84)
+        at /data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/apps/web/e2e/approval-policy.spec.ts:134:34
+
+    Error Context: e2e/results/approval-policy/approval-policy-the-CEO-re-50353-e-rules-in-en-dark-at-375px-approvals-webkit/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e/results/approval-policy/approval-policy-the-CEO-re-50353-e-rules-in-en-dark-at-375px-approvals-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace e2e/results/approval-policy/approval-policy-the-CEO-re-50353-e-rules-in-en-dark-at-375px-approvals-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3 failed
+    [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, light, at 375px 
+    [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 1440px 
+    [approvals-webkit] › e2e/approval-policy.spec.ts:132:7 › the CEO reads and changes the owner and the rules, in en, dark, at 375px 
+  21 passed (22.9m)

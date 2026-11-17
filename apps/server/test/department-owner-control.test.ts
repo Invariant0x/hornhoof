@@ -130,15 +130,18 @@ describe("a head's own approval and wait policies", () => {
     expect(await c.db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, c.dev.id))).toEqual([]);
   });
 
-  it('are not set on the word of someone who does not run it, of nobody, or for commits', async () => {
+  it('are set in any turn with the rights of whoever runs the department, whoever wrote or nobody, but never for commits', async () => {
     const c = await company();
     for (const person of [c.ids.dana, null]) {
-      const refused = await call(await c.tools(c.salesHead, person), 'set_approval_policy', { department: c.sales.id, ...RULE });
-      expect(refused.isError, String(person)).toBe(true);
+      const set = await call(await c.tools(c.salesHead, person), 'set_approval_policy', { department: c.sales.id, ...RULE });
+      expect(set.isError, `${String(person)}: ${set.content[0]!.text}`).toBeFalsy();
     }
     const commit = await call(await c.tools(c.salesHead, c.ids.sam), 'set_approval_policy', { department: c.sales.id, channel: 'commit', mode: 'new_kinds' });
     expect(commit.isError, commit.content[0]!.text).toBe(true);
-    expect(await c.db.select().from(approvalPolicies)).toEqual([]);
+    /* Sales names no owner, so its head goes with the CEO's rights. */
+    expect(await c.db.select({ departmentId: approvalPolicies.departmentId, channel: approvalPolicies.channel, mode: approvalPolicies.mode, updatedBy: approvalPolicies.updatedBy }).from(approvalPolicies)).toEqual([
+      { departmentId: c.sales.id, channel: 'message', mode: 'new_kinds', updatedBy: c.ids.ceo },
+    ]);
     /* A worker has none of them. */
     const tools = (await (await c.tools(c.seller, c.ids.sam)).listTools()).tools.map(t => t.name);
     expect(tools).not.toContain('set_approval_policy');
@@ -172,17 +175,18 @@ describe("a head and its department's work", () => {
     expect((await explain(c.orchestrator.id)).statusCode).toBe(200);
   });
 
-  it('sets the department description on the word of a person who runs it, as that person does on the screen', async () => {
+  it('sets the department description in any turn, whoever wrote or nobody, as the person who runs it does on the screen', async () => {
     const c = await company();
     const about = async (id: string) => (await c.db.select(only(departments, 'about')).from(departments).where(eq(departments.id, id)))[0]!.about;
-    const told = await call(await c.tools(c.salesHead, c.ids.sam), 'change_department', { about: 'Measures: replies and first reply time.' });
+    const told = await call(await c.tools(c.salesHead, null), 'change_department', { about: 'Measures: replies and first reply time.' });
     expect(told.isError, told.content[0]!.text).toBeFalsy();
     expect(await about(c.sales.id)).toBe('Measures: replies and first reply time.');
-    const notHis = await call(await c.tools(c.salesHead, c.ids.dana), 'change_department', { about: 'Not hers.' });
-    expect(notHis.isError).toBe(true);
+    const onDanas = await call(await c.tools(c.salesHead, c.ids.dana), 'change_department', { about: 'Measures: replies.' });
+    expect(onDanas.isError, onDanas.content[0]!.text).toBeFalsy();
+    expect(await about(c.sales.id)).toBe('Measures: replies.');
     expect((await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.dev.id, about: 'Deploys a day.' }] })).statusCode).toBe(201);
     expect(await about(c.dev.id)).toBe('Deploys a day.');
     expect((await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.sales.id, about: 'Taken.' }] })).statusCode).toBe(403);
-    expect(await about(c.sales.id)).toBe('Measures: replies and first reply time.');
+    expect(await about(c.sales.id)).toBe('Measures: replies.');
   });
 });

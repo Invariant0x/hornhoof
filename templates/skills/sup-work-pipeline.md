@@ -40,5 +40,5 @@ When assigned to plan or assess support checks, use the queues, the case records
 ## Descriptions and measures
 
 - For each queue in scope, record what comes in, in which languages, its response targets, where these checks stand and the sample its owner set. Keep it in the department notebook.
-- Name the department's own measures, such as the share of replies and the time to first reply, in the department description: the head sets it with "change_department" (about) when a person who runs the department agrees. The pipeline report of a turn says when a department has no description.
+- Name the department's own measures, such as the share of replies and the time to first reply, in the department description: the head sets it with "change_department" (about) under the department's rules. The pipeline report of a turn says when a department has no description.
 - Return the proposed check plan, unresolved cases, missing help articles and missing evidence to the person who assigned this work. A sample or model result never replaces a decision that belongs to a person.

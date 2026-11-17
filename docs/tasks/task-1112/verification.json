@@ -1,0 +1,163 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "sourceCommit": "82aba675cd2c8e0be844fd635e86d0b8a43ddb35",
+  "base": "f4fb7eff1840c17bacd6826c109e341a35d076ba",
+  "passed": [
+    {
+      "command": "npx --no-install vitest run test/approval-policy.test.ts --no-file-parallelism",
+      "cwd": "packages/protocol",
+      "tests": 10,
+      "exitCode": 0,
+      "log": "green-protocol.log"
+    },
+    {
+      "command": "npm test -w apps/web -- test/ApprovalPolicy.test.tsx --pool=threads --no-file-parallelism",
+      "tests": 23,
+      "exitCode": 0,
+      "log": "green-web.log"
+    },
+    {
+      "command": "npm run -s build -w @hornhoof/protocol",
+      "exitCode": 0
+    },
+    {
+      "command": "ESLint of protocol and web changed paths before the controlled-clock scenario was added",
+      "sourceCommit": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "exitCode": 0,
+      "limit": "This is not the final full changed-path lint receipt."
+    }
+  ],
+  "failed": [
+    {
+      "command": "npm test -w apps/server -- test/head-department-control.test.ts --no-file-parallelism --pool=threads",
+      "tests": 8,
+      "failures": 8,
+      "reason": "All exceeded 20000 ms; behavior not proved",
+      "seconds": 1423.3,
+      "log": "head-timeouts.log"
+    },
+    {
+      "command": "PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test e2e/approval-policy.spec.ts --config=e2e/approval-policy.config.ts --grep \"the CEO reads and changes\"",
+      "passed": 21,
+      "failed": 3,
+      "reason": "WebKit test timeouts at 120000 ms",
+      "log": "browser-edit-flow.log"
+    }
+  ],
+  "notRunOrUnfinished": [
+    "Final head rerun exited 143 before any completed tests.",
+    "Final server test types and web types interrupted, no PASS.",
+    "Final changed-path ESLint interrupted, no PASS.",
+    "Three decisions-answers files have no completed result.",
+    "Full WebKit/Chromium and final default-limit browser matrix not proved.",
+    "Fresh coverage score of extracted appliedTo helper unavailable.",
+    "Whole selection NOT_RUN; no run_tests."
+  ],
+  "next": {
+    "route": [
+      "Review",
+      "Security",
+      "Tests"
+    ],
+    "integration": "Head authorization required; no shared branch or main merge.",
+    "headInstruction": "Accepted core access and Firefox receipts; submit DONE_WITH_CONCERNS without waiting for machine load; remaining checks strictly sequential; no timeout increase."
+  },
+  "historicalStatus": "DEVELOPMENT_IN_PROGRESS",
+  "currentEvidence": "Attached task-1112 evidence archive, exact candidate manifest; no full author-check PASS.",
+  "completedLocalReceipts": [
+    {
+      "file": "apps/server/test/head-department-control.test.ts",
+      "tests": 9,
+      "result": "PASS before audit helper extraction",
+      "log": "head-green.log",
+      "limit": "Not a completed final-candidate rerun."
+    },
+    {
+      "file": "apps/server/test/decision-context.test.ts",
+      "tests": 33,
+      "result": "PASS with coverage",
+      "log": "context-fixed.log",
+      "source": "decision-context implementation unchanged since this receipt"
+    },
+    {
+      "file": "apps/server/test/approval-policy.test.ts",
+      "tests": 31,
+      "result": "PASS with coverage",
+      "log": "approval-green.log"
+    },
+    {
+      "file": "apps/server/test/outbound-department.test.ts",
+      "tests": 11,
+      "result": "PASS on current code",
+      "log": "outbound-final.log",
+      "exitCode": 0,
+      "seconds": 311.09
+    },
+    {
+      "file": "packages/protocol/test/approval-policy.test.ts",
+      "tests": 10,
+      "result": "PASS on current code with coverage",
+      "log": "protocol-final.log",
+      "exitCode": 0
+    },
+    {
+      "file": "apps/web/test/ApprovalPolicy.test.tsx",
+      "tests": 23,
+      "result": "Reused PASS on identical source/test/protocol/lockfile git objects",
+      "log": "green-web.log",
+      "fingerprintRecord": "reused-web-proof.json"
+    }
+  ],
+  "partialRuns": [
+    {
+      "log": "server-neighbours.log",
+      "exitCode": 143,
+      "completedFiles": {
+        "outbound-approvals.test.ts": 47,
+        "decisions.test.ts": 22,
+        "head-department-control.test.ts": 9,
+        "outbound-grants.test.ts": 60,
+        "decision-policy.test.ts": 49
+      },
+      "limit": "No whole batch PASS; batch began before final audit-helper extraction."
+    },
+    {
+      "log": "browser-firefox-webkit-local-fonts.log",
+      "exitCode": 143,
+      "completedPassingCases": {
+        "firefox": 34,
+        "webkit": 19
+      },
+      "failedCases": {
+        "webkit": 1
+      },
+      "notCompleted": 14,
+      "limit": "Earlier task timeout 120 seconds removed afterward; no complete final-config browser PASS."
+    }
+  ],
+  "quality": {
+    "crapper": {
+      "asOwner": {
+        "complexity": 7,
+        "coveragePercent": 91.7,
+        "crap": 7.0
+      },
+      "headOwner": {
+        "complexity": 5,
+        "coveragePercent": 100,
+        "crap": 5.0
+      },
+      "limit": "Only these new/grown functions have matching measured coverage; final extracted helper unavailable."
+    },
+    "dryer": {
+      "exitCode": 0,
+      "flags": 1,
+      "limit": "Response decoder duplicate predates this task; blocks verified identical in main."
+    },
+    "mutation": {
+      "result": "UNAVAILABLE",
+      "command": "mutator --root . --source-root packages/protocol/src/approval-policy.ts --lines 34 --no-coverage --max-workers 1 --mutate-all --test-command 'cd packages/protocol && ../../node_modules/.bin/vitest run --config ../../scripts/mutation/vitest.config.mjs test/approval-policy.test.ts --maxWorkers=1'",
+      "exitCode": 143
+    }
+  }
+}

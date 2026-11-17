@@ -239,6 +239,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Who applied a card: the person, also when the orchestrator applied it for them. */
   const appliedBy = (me: Person, on: Delegation | undefined) => (on ? on.personId : personOf(me));
   const forWhom = (on: Delegation | undefined) => (on ? { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq } : {});
+  /* The acting agent keeps its own decision; a person's card stays with its author, otherwise the orchestrator. */
+  const appliedTo = (on: Delegation | undefined, proposalAgentId: string | null, orchestrator: { id: string } | null) => on?.agentId ?? proposalAgentId ?? orchestrator?.id;
 
   app.post('/api/departments/build', async (req, reply) => {
     const me = await requirePerson(req, db);
@@ -361,7 +363,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (result.hired.length) await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = appliedTo(on, result.agentId, orchestrator);
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
@@ -546,7 +548,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = appliedTo(on, result.agentId, orchestrator);
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
