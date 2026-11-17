@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jobs } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { as, until } from './helpers.js';
 import { company, next, open, opened, turnOn, type Company, type Screen } from './terminal-company.js';
 
@@ -229,7 +230,7 @@ describe('whose turn a key opens', () => {
     send(v, 'and the limits\r');
     expect(await next(c.node, 'term.input')).toMatchObject({ data: 'and the limits\r', pressedIn: running.id });
     c.node.send({ type: 'job.done', jobId: running.id, ok: true, sessionId: 's', result: 'Done.', tail: '', error: null, wordsWaiting: true });
-    await until(async () => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, running.id)))[0]?.status !== 'running');
+    await until(async () => (await c.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, running.id)))[0]?.status !== 'running');
     c.node.send({ type: 'turn.open', agentKey: c.crew.other.id, text: 'and the limits', ref: 'typed-2', queuedFrom: running.id });
     const opened = await next(c.node, 'turn.opened');
     const [turn] = await c.db.select().from(jobs).where(eq(jobs.id, opened.jobId!));

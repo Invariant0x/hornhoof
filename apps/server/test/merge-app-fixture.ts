@@ -6,6 +6,7 @@ import { onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { runMerge, type MergeResult } from '../src/modules/merge/apply.js';
 import { appOn, setUpCompany } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
@@ -60,6 +61,6 @@ export async function mergeApp(env: NodeJS.ProcessEnv = {}) {
     }
   };
   const conflicts = (id?: string) => rowsOf<Conflict>(db, id ? sql`SELECT * FROM net.merge_conflicts WHERE merge = ${id} ORDER BY tbl, created_at, id` : sql`SELECT * FROM net.merge_conflicts ORDER BY tbl, created_at, id`);
-  const titleOf = async (id: string) => (await db.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
+  const titleOf = async (id: string) => (await db.select(only(tasks, 'title')).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
   return { app, db, ceo, control, acme: acme!, on, owner: owner!, orchestrator: orchestrator!, plan: plan!, staff, dev: dev!, hana: hana!, ana: ana!, turn: turn!, one, two, task, fork, merge, conflicts, titleOf };
 }

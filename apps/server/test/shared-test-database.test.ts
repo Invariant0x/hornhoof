@@ -1,8 +1,9 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { until } from './helpers-basic.js';
 
 /* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
@@ -49,7 +50,7 @@ describe('the tests of one file', { shuffle: false }, () => {
     const db = await createTestDb();
     opened = databasesOpened();
     firstNumber = await numberedEvent(db);
-    expect(await db.select({ name: companies.name }).from(companies)).toEqual([{ name: 'Acme' }]);
+    expect(await db.select(only(companies, 'name')).from(companies)).toEqual([{ name: 'Acme' }]);
   });
 
   it('share that database and do not see what the test before wrote, and numbers start over', async () => {
@@ -291,7 +292,7 @@ describe('rows a file makes once', { shuffle: false }, () => {
       const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
       return agent!;
     });
-    const names = (db: Db) => db.select({ name: agents.name }).from(agents).orderBy(agents.name);
+    const names = (db: Db) => db.select(only(agents, 'name')).from(agents).orderBy(agents.name);
     const first = await createTestDb();
     await acme(first);
     const bruno = await team(first);
@@ -370,6 +371,66 @@ describe('after a test fails', { shuffle: false }, () => {
   it('so the next test gets a new one', async () => {
     await createTestDb();
     expect(databasesOpened()).toBe(opened + 1);
+  });
+});
+
+/* A test can end while the rows it asked for are still being made, as when its time runs out on a busy machine. Made
+   again, they would cost the next test the same time, and it would run out of time too. */
+describe('rows a test was still making when it ended', { shuffle: false }, () => {
+  let made = 0;
+  let firstSeq = 0;
+  let begun: () => void = () => {};
+  let ended: () => void = () => {};
+  const acme = (db: Db) => fixture(db.$client, 'acme, made as its test ends', async () => {
+    made += 1;
+    const seq = await numberedEvent(db);
+    if (made === 1) {
+      firstSeq = seq;
+      begun();
+      /* The rest is made once its test has ended, a turn of the event loop later. */
+      await new Promise<void>(go => (ended = go));
+      await new Promise(next => setImmediate(next));
+    }
+    const [agent] = await db.select().from(agents);
+    const [event] = await db.insert(agentEvents).values({ companyId: agent!.companyId, agentId: agent!.id, kind: 'message', data: {} }).returning();
+    return { seq, last: event!.seq };
+  });
+  /* Rows that stand on those, which a test cut off goes on to ask for once they are made. */
+  let layers = 0;
+  const team = (db: Db) => fixture(db.$client, 'team on acme, made as its test ends', async () => {
+    layers += 1;
+    const [company] = await db.select().from(companies);
+    return (await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning())[0]!;
+  });
+  let bruno: unknown;
+
+  it.fails('can end with them half made, as at its time limit', async () => {
+    const db = await createTestDb();
+    await new Promise<void>(go => {
+      begun = go;
+      acme(db).then(async () => (bruno = await team(db))).catch(() => {});
+    });
+    onTestFinished(() => ended());
+    throw new Error('As if this test had run out of time.');
+  });
+
+  it('are kept for the next test whole, with those it went on to, and it does not make them again', async () => {
+    const db = await createTestDb();
+    expect(await acme(db)).toEqual({ seq: firstSeq, last: firstSeq + 1 });
+    expect(await team(db)).toEqual(bruno);
+    expect([made, layers]).toEqual([1, 1]);
+    expect(await db.select({ seq: agentEvents.seq }).from(agentEvents).orderBy(agentEvents.seq)).toEqual([{ seq: firstSeq }, { seq: firstSeq + 1 }]);
+    expect(await db.select({ name: agents.name }).from(agents).orderBy(agents.name)).toEqual([{ name: 'Bruno' }, { name: 'Orchestrator' }]);
+  });
+
+  it('do not hold up the end of a test that left the clock not real', async () => {
+    /* Hooks run last first: the clock is real again only after the wait for rows. */
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const db = await createTestDb();
+    await acme(db);
+    vi.useFakeTimers();
   });
 });
 

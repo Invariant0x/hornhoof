@@ -1,0 +1,133 @@
+import { Fragment, type ReactNode } from 'react';
+import { useLanguage, useT, type Language } from '../i18n';
+import { changes, partsAsTokens, wordsOf, type Piece, type Token } from './catalog-diff';
+
+/* One revision of a catalog entry as a person reads it before they publish it or take it back: what a message would say,
+   with the places it fills in marked, in which language, who proposed it and when, and what changed from the revision
+   messages use now. The same view in every place the catalog is shown. */
+
+type Part = { kind: 'text'; text: string } | { kind: 'slot'; slotId: string; type: string };
+type TemplateValue = { kind: 'template'; locale: string; subject: string | null; parts: Part[] };
+export type ShownRevision = { revision: number; summary: string; value: { kind?: string }; createdAt: string; createdBy: { name: string | null } };
+export type ShownEntry = { locale: string | null; current: number | null; revisions: ShownRevision[] };
+
+/* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
+export const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join(' · ');
+
+export const whenOf = (language: Language, iso: string): string => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+
+function languageName(locale: string, language: Language): string {
+  try {
+    return new Intl.DisplayNames([language], { type: 'language' }).of(locale) ?? locale;
+  } catch {
+    return locale;
+  }
+}
+
+const templateOf = (value: ShownRevision['value']): TemplateValue | null => (value.kind === 'template' && Array.isArray((value as TemplateValue).parts) ? (value as TemplateValue) : null);
+
+/* The words a comparison takes: a template's subject and text, anything else by its value. */
+const subjectOf = (revision: ShownRevision): Token[] => wordsOf(templateOf(revision.value)?.subject ?? '');
+const textOf = (revision: ShownRevision): Token[] => {
+  const template = templateOf(revision.value);
+  return template ? partsAsTokens(template.parts) : wordsOf(revision.summary);
+};
+
+function Slot({ type }: { type: string }) {
+  const slots = useT().outboundSetup.slots as Record<string, string>;
+  return <span className="outbound-slot">{slots[type] ?? type}</span>;
+}
+
+const MARKS = { added: 'ins', removed: 'del' } as const;
+
+/* A text with the spaces at its edges apart from its words. */
+const edgesOf = (text: string): [string, string, string] => {
+  const [, lead = '', words = '', trail = ''] = /^(\s*)(.*?)(\s*)$/s.exec(text)!;
+  return [lead, words, trail];
+};
+
+/* One change, its mark covering words only: the spaces at its edges stand outside it, and words put in right after words
+   taken out with no space between get one outside both, so that neither direction runs them together. */
+function Change({ piece, afterTakenOut }: { piece: Piece & { change: 'added' | 'removed' }; afterTakenOut: boolean }) {
+  const Mark = MARKS[piece.change];
+  const [lead, words, trail] = piece.slot === undefined ? edgesOf(piece.text) : ['', '', ''];
+  const gap = piece.change === 'added' && afterTakenOut && !lead ? ' ' : '';
+  const marked = piece.slot === undefined ? words : <Slot type={piece.slot} />;
+  return <>{gap}{lead}{marked && <Mark>{marked}</Mark>}{trail}</>;
+}
+
+/* Whether a piece ends in words taken out, with no space after them. */
+const endsTakenOut = (piece: Piece | undefined): boolean => piece?.change === 'removed' && (piece.slot !== undefined || (/\S$/.test(piece.text)));
+
+function Words({ pieces }: { pieces: readonly Piece[] }) {
+  return (
+    <>
+      {pieces.map((piece, at) =>
+        piece.change === 'same' ? (
+          <span key={at}>{piece.slot === undefined ? piece.text : <Slot type={piece.slot} />}</span>
+        ) : (
+          <Fragment key={at}><Change piece={{ ...piece, change: piece.change }} afterTakenOut={endsTakenOut(pieces[at - 1])} /></Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+const unchanged = (tokens: readonly Token[]): Piece[] => tokens.map(token => ({ ...token, change: 'same' }));
+
+function Changes({ entry, revision }: { entry: ShownEntry; revision: ShownRevision }) {
+  const v = useT().outboundSetup.view;
+  const inUse = entry.revisions.find(r => r.revision === entry.current);
+  if (!inUse) return <p className="outbound-note" dir="auto">{v.isNew}</p>;
+  if (inUse.revision === revision.revision) return <p className="outbound-note" dir="auto">{v.inUseNow}</p>;
+  const subject = changes(subjectOf(inUse), subjectOf(revision));
+  const text = changes(textOf(inUse), textOf(revision));
+  const same = [...subject, ...text].every(piece => piece.change === 'same');
+  return (
+    <div className="outbound-changes" role="group" aria-label={v.changesFrom(inUse.revision)}>
+      <b dir="auto">{v.changesFrom(inUse.revision)}</b>
+      {same ? (
+        <p className="outbound-note" dir="auto">{v.same}</p>
+      ) : (
+        <>
+          <small dir="auto">{v.key}</small>
+          {templateOf(revision.value) && <p className="outbound-words" dir="auto"><Words pieces={subject} /></p>}
+          <p className="outbound-words" dir="auto"><Words pieces={text} /></p>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function RevisionView({ id, entry, revision, children }: { id: string; entry: ShownEntry; revision: ShownRevision; children?: ReactNode }) {
+  const s = useT().outboundSetup;
+  const v = s.view;
+  const { language } = useLanguage();
+  const template = templateOf(revision.value);
+  return (
+    <section className="outbound-view" id={id} aria-label={s.revision(revision.revision)}>
+      <p className="outbound-meta">
+        {entry.locale && <span dir="auto">{`${v.language}: ${languageName(entry.locale, language)}`}</span>}
+        <span dir="auto">{v.proposed(revision.createdBy.name ?? '', whenOf(language, revision.createdAt))}</span>
+      </p>
+      {template ? (
+        <dl className="outbound-facts">
+          <dt>{v.subject}</dt>
+          <dd dir="auto">{template.subject ?? v.noSubject}</dd>
+          <dt>{v.text}</dt>
+          <dd>
+            <p className="outbound-words" dir="auto"><Words pieces={unchanged(partsAsTokens(template.parts))} /></p>
+            <small dir="auto">{v.places}</small>
+          </dd>
+        </dl>
+      ) : (
+        <dl className="outbound-facts">
+          <dt>{v.value}</dt>
+          <dd dir="auto">{revision.summary}</dd>
+        </dl>
+      )}
+      <Changes entry={entry} revision={revision} />
+      {children}
+    </section>
+  );
+}

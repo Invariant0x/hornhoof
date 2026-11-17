@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { people } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { machinePrincipal, withInputLock } from '../conversation/decision-context.js';
 import { appendEvent, appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -33,7 +34,7 @@ async function named(ctx: Ctx, job: ToolJob, machine: string | undefined): Promi
 const isSaid = (value: AccessMachine | Said): value is Said => 'content' in value;
 
 async function ownerName(ctx: Ctx, personId: string): Promise<string> {
-  const [owner] = await ctx.db.select({ name: people.name }).from(people).where(eq(people.id, personId));
+  const [owner] = await ctx.db.select(only(people, 'name')).from(people).where(eq(people.id, personId));
   return owner?.name ?? 'its owner';
 }
 

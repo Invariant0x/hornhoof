@@ -11,6 +11,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
 import { NotConfirmed } from '../src/db/confirm.js';
 import { agents, companies, jobs, notebookNotes, people, subscriptions, toolCalls } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { listed, outsideSources } from '../src/db/sources.js';
 import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
 import { ALREADY_RAN, ANSWER_MAX, currentInvocation, guardTools, ID_TAKEN, INVOCATION, MAY_HAVE_RUN, PENDING, STARTS_FIRST, TOO_LARGE } from '../src/modules/tools/calls.js';
@@ -264,7 +265,7 @@ describe('the database tool with an invocation id', () => {
     await c.db.insert(agents).values({ companyId: c.job.companyId, kind: 'worker', name: 'Bruno', model: '' });
     const change = { sql: `UPDATE agents SET name = name || '!' WHERE name LIKE 'Bruno%'` };
     const first = await c.call('database', change, id);
-    const names = async () => (await c.db.select({ name: agents.name }).from(agents).where(sql`${agents.name} like 'Bruno%'`)).map(row => row.name);
+    const names = async () => (await c.db.select(only(agents, 'name')).from(agents).where(sql`${agents.name} like 'Bruno%'`)).map(row => row.name);
     expect(JSON.parse(first.content[0]!.text)).toEqual([{ rows: [], changed: 1 }]);
     expect(await c.call('database', change, id)).toEqual(first);
     expect(await names()).toEqual(['Bruno!']);

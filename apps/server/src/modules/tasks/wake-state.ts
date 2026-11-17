@@ -5,7 +5,7 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
@@ -112,7 +112,7 @@ export async function repeatWake(db: Db, { job, task, agent }: Ended, run: strin
 /* The log is English for agents; the web uses wake and its author's name to translate it for people. */
 async function logSkipped(db: Store, task: Task, agentId: string, wake: string, job: string | null): Promise<void> {
   if (!CLOSED.includes(task.status)) return;
-  const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await db.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   await db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'wake_skipped', text: `Run skipped: task is already closed. ${agent!.name}: ${wake}.`, data: { wake, job } });
 }
 
@@ -122,7 +122,7 @@ const wakeIn = (data: unknown): TaskWake | null => {
 };
 
 async function stateOf(db: Store, jobId: string): Promise<TaskWake | null> {
-  const [message] = await db.select({ data: agentEvents.data }).from(agentEvents)
+  const [message] = await db.select(only(agentEvents, 'data')).from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed']))).orderBy(asc(agentEvents.seq)).limit(1);
   return wakeIn(message?.data);
 }
@@ -156,7 +156,7 @@ function staleFailure(task: Task, run: string, status: 'queued' | 'running', pro
 }
 
 async function logObsolete(db: Store, task: Task, agentId: string, wake: string, jobId: string): Promise<void> {
-  const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await db.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   const text = `Wake-up became obsolete: the task moved on. ${agent!.name}: ${wake}.`;
   await db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'wake_obsolete', text, data: { wake, job: jobId } });
 }
