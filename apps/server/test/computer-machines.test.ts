@@ -104,8 +104,8 @@ describe('computer access to a machine of the company', () => {
   it("opens only for the machine's owner", async () => {
     const c = await company();
     const grant = { grant: await c.key.grant(c.NETWORK_ID) };
-    /* The CEO, a person who sees the whole company, a person of the same department, and the orchestrator acting for
-       the CEO: nobody but Marat, also from localhost and through the machine itself. */
+    /* The CEO, a person who sees the whole company and a person of the same department: nobody but Marat, also from
+       localhost and through the machine itself, and the orchestrator, which acts as anyone. */
     for (const action of ['open', 'decline']) {
       for (const token of [c.tokens.ceo, c.tokens.zed, c.tokens.dan]) {
         const res = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, ...as(token) });
@@ -113,10 +113,10 @@ describe('computer access to a machine of the company', () => {
         const forged = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, cookies: as(token).cookies, remoteAddress: '127.0.0.1', headers: { host: 'localhost:8080', [VIA]: c.mac } });
         expect(forged.statusCode, action).toBe(403);
       }
-      const acting = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
-      expect([acting.statusCode, acting.json().error.reason], action).toEqual([403, 'not_machine_owner']);
     }
     expect(await c.accessOf(c.mac)).toBeUndefined();
+    const acting = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/decline`, payload: grant, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+    expect(acting.statusCode).toBe(200);
     /* The server's own machine holds no key, and is the CEO's. */
     expect((await c.open(c.tokens.marat, c.server)).json().error.reason).toBe('not_machine_owner');
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
@@ -464,7 +464,7 @@ describe('computer access to a machine of the company', () => {
     expect((await c.app.inject({ url: '/api/machines/here', cookies: as(c.tokens.dan).cookies, headers: { host: 'localhost:8080' } })).json()).toEqual({ machine: null, view: null });
   });
 
-  it('tells every person to look again, and the orchestrator acting for them nothing', async () => {
+  it('tells every person to look again, and the orchestrator acting for them nothing, while it sees every machine', async () => {
     const c = await company();
     const streams = { marat: await openStream(c.app, c.tokens.marat), dan: await openStream(c.app, c.tokens.dan) };
     await c.openMac();
@@ -472,7 +472,8 @@ describe('computer access to a machine of the company', () => {
     /* What each then loads is their own: Dan sees no machine's access. */
     expect(await c.views(c.tokens.dan)).toEqual([]);
     expect((await c.views(c.tokens.zed)).map(view => [view.machine.name, view.canOpen, view.canClose])).toEqual([['the company server', false, false], ['marat-mac', false, false]]);
-    expect((await c.app.inject({ url: '/api/machines/access', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
+    const inside = (await c.app.inject({ url: '/api/machines/access', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).json() as { views: AccessView[] };
+    expect(inside.views.map(view => [view.machine.name, view.canOpen, view.canClose])).toEqual([['the company server', true, true], ['marat-mac', true, true]]);
   });
 
   it('tells the orchestrator which machine a person writes from, when they sit at one', async () => {

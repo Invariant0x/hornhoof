@@ -151,15 +151,15 @@ describe('turning an inbox card into an issue', () => {
     expect((await app.inject({ url: '/api/feedback/inbox', ...as(ceo) })).json().cards[0].issue).toBeNull();
   });
 
-  it('refuses an orchestrator call without a person pressing the button', async () => {
+  it('opens it for the orchestrator acting for the owner, as for a person pressing the button', async () => {
     const { app, hub, card, saveKey } = await inbox();
     await saveKey('invariant0x');
     const froze = await card('Terminal froze');
     const [agent] = await app.ctx.db.select().from(agents);
     const [owner] = await app.ctx.db.select().from(people);
-    const refused = await app.inject({ method: 'POST', url: `/api/feedback/inbox/${froze.id}/issue`, headers: orchestratorHeaders(owner!.id, agent!.id) });
-    expect(refused.statusCode).toBe(403);
-    expect(hub.seen).toEqual([]);
+    const opened = await app.inject({ method: 'POST', url: `/api/feedback/inbox/${froze.id}/issue`, headers: orchestratorHeaders(owner!.id, agent!.id) });
+    expect([opened.statusCode, opened.json()]).toEqual([200, { issue: { number: 1347, url: 'https://github.com/octocat/Hello-World/issues/1347' } }]);
+    expect(hub.seen).toHaveLength(1);
   });
 
   it('opens one issue when two people press at once', async () => {
