@@ -44,6 +44,15 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it('removes raw output even when its privacy marker cannot be written', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-failed-marker-1178');
+    vi.spyOn(tmux['recordings'], 'protect').mockImplementation(() => { throw new Error('No room for marker'); });
+    await expect(tmux.protectOutput('a-private')).rejects.toThrow('No room for marker');
+    expect(existsSync(recording.file)).toBe(false);
+  });
+
   it('removes a sensitive recording and keeps recording disabled after the node restarts', async () => {
     const { tmux, home } = recorded();
     const recording = tmux['recordings'].create('a-private', home);
