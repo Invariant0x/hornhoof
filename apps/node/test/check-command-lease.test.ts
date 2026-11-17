@@ -4,6 +4,7 @@ import { checkCommand } from '../src/check-command.js';
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn }));
+vi.mock('../src/check-group.js', () => ({ checkGroupProcess: async () => ({ pid: 4242, group: 4242, session: 4242, started: '100' }) }));
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 const original = new Map(signals.map(signal => [signal, process.listeners(signal)]));
 afterEach(() => {
@@ -14,8 +15,9 @@ afterEach(() => {
 });
 
 it('stops a local check when its recorded lease stream ends', async () => {
-  const child = Object.assign(new EventEmitter(), { kill: vi.fn() });
-  spawn.mockReturnValue(child);
+  const child = Object.assign(new EventEmitter(), { pid: 4242, kill: vi.fn(), send: vi.fn(), disconnect: vi.fn(), unref: vi.fn() });
+  spawn.mockImplementation(() => { queueMicrotask(() => child.emit('spawn')); return child; });
+  const sent = vi.spyOn(process, 'kill').mockImplementation(() => true);
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({ start(controller) {
     stream = controller;
@@ -26,6 +28,6 @@ it('stops a local check when its recorded lease stream ends', async () => {
   expect(spawn).toHaveBeenCalled();
   stream.close();
   await new Promise<void>(resolve => setImmediate(resolve));
-  try { expect(child.kill).toHaveBeenCalled(); }
-  finally { child.emit('exit', 0, null); await pending; }
+  try { expect(sent).toHaveBeenCalledWith(-4242, 'SIGTERM'); }
+  finally { child.emit('exit', 0, null); await pending; sent.mockRestore(); }
 });

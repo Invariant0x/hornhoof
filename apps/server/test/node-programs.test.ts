@@ -35,6 +35,18 @@ describe('program snapshots on node sockets', () => {
     node.send({ type: 'status', loggedIn: true, limits: null, programs: after });
     await until(() => app.ctx.hub.programsOf(id)?.[0]?.version === '2.0.0');
     expect(app.ctx.hub.programsOf(id)).toEqual(after);
+    const reason = 'Check group 4242 has not stopped. New checks wait until its processes are gone.';
+    node.send({ type: 'status', loggedIn: true, limits: null, noRuns: reason });
+    await until(() => app.ctx.hub.checkErrorOf(id) === reason);
+    const blocked = await app.inject({ method: 'GET', url: '/api/machines', ...as(ceo) });
+    const view = kind === 'builtin' ? blocked.json().builtin : blocked.json().machines.find((machine: { hostname: string }) => machine.hostname === 'program-host');
+    expect(view.checkError).toBe(reason);
+    node.send({ type: 'status', loggedIn: true, limits: null, noRuns: null });
+    await until(() => app.ctx.hub.checkErrorOf(id) === null);
+    const recovered = await app.inject({ method: 'GET', url: '/api/machines', ...as(ceo) });
+    const ready = kind === 'builtin' ? recovered.json().builtin : recovered.json().machines.find((machine: { hostname: string }) => machine.hostname === 'program-host');
+    expect(ready.checkError).toBeNull();
+
     node.send({ type: 'status', loggedIn: true, limits: null });
     node.send({ type: 'load', cpus: 2, load: 0.123, memTotal: 100, memFree: 50, tests: 0, jobs: 0 });
     await until(() => app.ctx.hub.loadOf(id)?.load === 0.123);

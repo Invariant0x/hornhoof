@@ -1005,6 +1005,7 @@ export const en = {
     otherBuild: 'Other build',
     otherBuildNote: (here: string, server: string) => `Its nodes are not the server's build (${here} here, ${server} on the server). To update them, run the install command on it again without --join.`,
     olderBuild: 'an older one',
+    checksPaused: 'Checks paused',
     browserFailed: 'Browser failed',
     browserFailedNote: (reason: string) => `The browser for checks did not start (${reason}). Run the install command on this machine again without --join, or check the node logs.`,
     /* A machine that waits for its work to end before an update restarts it. */

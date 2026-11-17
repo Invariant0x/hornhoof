@@ -314,6 +314,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               drain: nodeDrain(ctx, own),
               programs: programsFor(hub, [own]),
               browserError: hub.browserErrorOf(own),
+              checkError: hub.checkErrorOf(own),
               webPort: ownRow?.webPort ?? null,
               refusedBy,
               access: accessOf(ownRow?.id),

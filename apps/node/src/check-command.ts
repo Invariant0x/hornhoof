@@ -5,8 +5,10 @@ import { constants } from 'node:os';
 import type { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { checkGroupProcess, type CheckGroup } from './check-group.js';
 
 const Frame = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('unavailable') }),
   z.object({ type: z.literal('queued'), position: z.number().int().positive() }),
   z.object({ type: z.literal('slot'), lease: z.string() }),
   z.object({ type: z.enum(['stdout', 'stderr']), data: z.string().max(2 * 1024 * 1024) }),
@@ -27,7 +29,7 @@ async function write(stream: Writable, bytes: string | Buffer): Promise<void> {
 async function show(frame: Frame): Promise<number | null> {
   switch (frame.type) {
     case 'queued': await write(process.stderr, `Waiting for a machine check slot. Position ${frame.position}.\n`); return null;
-    case 'slot': return null;
+    case 'slot': case 'unavailable': return null;
     case 'stdout': await write(process.stdout, Buffer.from(frame.data, 'base64')); return null;
     case 'stderr': await write(process.stderr, Buffer.from(frame.data, 'base64')); return null;
     case 'error': case 'stop': throw new Error(frame.message);
@@ -67,14 +69,16 @@ type Held = { lease: string; rest: AsyncGenerator<Frame> };
 
 /* The lease of the slot the machine gave, which stays this command's while the request stays open, and the rest of the
    request's stream. */
-async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<Held | undefined> {
+async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSignal, group?: CheckGroup): Promise<Held | undefined> {
   if (!env.HH_BRIDGE) return undefined;
-  const response = await ask(env, { command, cwd: process.cwd(), env: {}, wait: true, ...(env.HH_CHECK_SLOT ? { lease: env.HH_CHECK_SLOT } : {}) }, signal);
-  if (!response.ok || !response.body) return undefined;
+  const response = await ask(env, { command, cwd: process.cwd(), env: {}, wait: true, ...(group ? { group } : {}), ...(env.HH_CHECK_SLOT ? { lease: env.HH_CHECK_SLOT } : {}) }, signal).catch(error => { if (signal.aborted) throw error; return null; });
+  if (!response || response.status === 409) return undefined;
+  if (!response.ok || !response.body) throw new Error(`The machine check bridge answered ${response.status}.`);
   const rest = frames(response.body.getReader());
   for (;;) {
     const next = await rest.next();
-    if (next.done) return undefined;
+    if (next.done) throw new Error('The machine check bridge ended before admission.');
+    if (next.value.type === 'unavailable') return undefined;
     if (next.value.type === 'slot') return { lease: next.value.lease, rest };
     await show(next.value);
   }
@@ -91,46 +95,96 @@ async function lapsed(rest: AsyncGenerator<Frame>): Promise<string> {
   } catch (error) { return error instanceof Error && error.message ? error.message : 'The machine check slot ended.'; }
 }
 
-/* hh-check --wait -- COMMAND: the command runs here, in the agent's own shell, once the machine gives it a check slot, and
-   holds the slot until it ends, like a lock; what runs inside it holds the same slot. With no slot to be had, as with no
-   turn or with the node away from Hornhoof, it runs at once, as it would with no queue.
-   Under a slot the command leads a process group of its own, so that what it starts stops with it: as the slot goes first,
-   the group gets TERM, and KILL after a grace; such a check never passes, it ends with 128 and the signal, as a shell says.
-   As the command ends, what it left in its group is killed before the slot goes. */
-async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number> {
-  const stop = new AbortController();
+/* Outside an agent turn there is no machine lease. Preserve the ordinary local command and shell signal status. */
+async function localWaited(command: string[], env: NodeJS.ProcessEnv): Promise<number> {
+  const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', detached: false, env });
+  let stopped: NodeJS.Signals | null = null, killing: NodeJS.Timeout | undefined;
+  const cancel = (value: NodeJS.Signals) => {
+    stopped ??= value; child.kill(value);
+    killing ??= setTimeout(() => { stopped = 'SIGKILL'; child.kill('SIGKILL'); }, KILL_AFTER_MS);
+  };
+  const listeners = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(value => ({ value, stop: () => cancel(value) }));
+  for (const listener of listeners) process.on(listener.value, listener.stop);
   try {
-    const held = await slot(command, env, stop.signal).catch(() => undefined);
-    const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', detached: Boolean(held), env: held ? { ...env, HH_CHECK_SLOT: held.lease } : env });
-    const signal = (value: NodeJS.Signals) => {
-      if (!held || !child.pid) { child.kill(value); return; }
-      try { process.kill(-child.pid, value); } catch { /* The group is gone already. */ }
-    };
-    let ended = false, stopped = null as NodeJS.Signals | null, killing: NodeJS.Timeout | undefined;
-    const cancel = (value: NodeJS.Signals) => {
-      if (ended) return;
-      stopped ??= value;
-      signal(value);
-      killing ??= setTimeout(() => { stopped = 'SIGKILL'; signal('SIGKILL'); }, KILL_AFTER_MS);
-    };
-    const listeners = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(value => ({ value, stop: () => cancel(value) }));
-    for (const listener of listeners) process.on(listener.value, listener.stop);
+    const [code, by] = await once(child, 'exit') as [number | null, NodeJS.Signals | null];
+    const ending = stopped ?? (code === null ? by : null);
+    return ending ? 128 + constants.signals[ending] : code ?? 1;
+  } finally {
+    clearTimeout(killing);
+    for (const listener of listeners) process.removeListener(listener.value, listener.stop);
+  }
+}
+
+/* This local leader has no payload until the node owns its identity and grants admission. IPC loss before that
+   admission exits it without starting work. Afterwards it stays alive as the group's identity anchor until cleanup. */
+const PARKED_CHECK = String.raw`
+const { spawn } = require('node:child_process');
+let started = false, stopped = false, managed = false;
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { stopped = true; });
+process.on('disconnect', () => {
+  if (!started) process.exit(1);
+  if (!managed) process.kill(-process.pid, 'SIGKILL');
+});
+process.on('message', message => {
+  if (started || stopped) return;
+  started = true; managed = message.managed;
+  const child = spawn(message.command[0], message.command.slice(1), { stdio: 'inherit', env: message.env });
+  const tell = result => { if (process.connected) process.send(result, () => {}); };
+  child.once('error', () => tell({ code: 127, signal: null }));
+  child.once('exit', (code, signal) => tell({ code, signal }));
+});
+if (!process.connected) process.exit(1);
+`;
+
+async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number> {
+  if (!env.HH_BRIDGE) return localWaited(command, env);
+  const stop = new AbortController();
+  const child = spawn(process.execPath, ['-e', PARKED_CHECK], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], detached: true, env: { ...env, NODE_OPTIONS: '' } });
+  let ended = false, stopped: NodeJS.Signals | null = null, killing: NodeJS.Timeout | undefined;
+  const signal = (value: NodeJS.Signals) => { try { if (child.pid) process.kill(-child.pid, value); } catch { /* The group is gone. */ } };
+  const result = new Promise<[number | null, NodeJS.Signals | null]>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, by) => resolve([code, by]));
+    child.on('message', message => {
+      const parsed = z.object({ code: z.number().int().min(0).max(255).nullable(), signal: z.string().nullable() }).safeParse(message);
+      if (parsed.success) resolve([parsed.data.code, parsed.data.signal as NodeJS.Signals | null]);
+    });
+  });
+  /* A spawn error can precede the first await of result. */
+  void result.catch(() => {});
+  const cancel = (value: NodeJS.Signals) => {
+    if (ended) return;
+    stopped ??= value; signal(value);
+    stop.abort();
+    killing ??= setTimeout(() => { stopped = 'SIGKILL'; signal('SIGKILL'); }, KILL_AFTER_MS);
+  };
+  const listeners = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(value => ({ value, stop: () => cancel(value) }));
+  for (const listener of listeners) process.on(listener.value, listener.stop);
+  try {
+    await once(child, 'spawn');
+    if (!child.pid) throw new Error('The waiting check has no group leader.');
+    const group = await checkGroupProcess(child.pid);
+    if (!group || group.group !== child.pid || group.session !== child.pid) throw new Error('The waiting check group cannot be identified.');
+    const held = await slot(command, env, stop.signal, { pid: child.pid, started: group.started });
+    stop.signal.throwIfAborted();
+    child.send({ command, env: held ? { ...env, HH_CHECK_SLOT: held.lease } : env, managed: Boolean(held) });
     if (held) void lapsed(held.rest).then(async why => {
       if (ended) return;
       cancel('SIGTERM');
       await write(process.stderr, `${why} The command stops.\n`).catch(() => {});
     });
-    try {
-      const [code, by] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
-      ended = true;
-      if (held) signal('SIGKILL');
-      const ending = stopped ?? (code === null ? by : null);
-      return ending ? 128 + constants.signals[ending] : code ?? 1;
-    } finally {
-      ended = true; clearTimeout(killing);
-      for (const listener of listeners) process.removeListener(listener.value, listener.stop);
-    }
-  } finally { stop.abort(); }
+    const [code, by] = await result;
+    const ending = stopped ?? (code === null ? by : null);
+    return ending ? 128 + constants.signals[ending] : code ?? 1;
+  } catch (error) {
+    if (stopped) return 128 + constants.signals[stopped];
+    throw error;
+  } finally {
+    ended = true; stop.abort(); clearTimeout(killing);
+    for (const listener of listeners) process.removeListener(listener.value, listener.stop);
+    if (child.connected) child.disconnect();
+    child.unref();
+  }
 }
 
 /* The words a refusal gives, as the bridge says why the command may not run now. */

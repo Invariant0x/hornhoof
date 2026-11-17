@@ -357,10 +357,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: { has: partId => outbox.doneParts().includes(partId) }, run: testOne, harness: syncOne, emit });
-  const noRunsNow = () => noRunsBecause(testUser, browserError);
+  const noRunsNow = () => checks.refused() ?? noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
     emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+  };
+  checks.refusalChanged = () => {
+    log(checks.refused() ?? 'Check group cleanup finished. The machine takes new checks again.');
+    tellStatus();
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */

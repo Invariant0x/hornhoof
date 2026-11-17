@@ -40,6 +40,7 @@ export function machineProgramState(hub: NodeHub, ids: string[], machineId: stri
   return {
     online: nodes.some(id => hub.isOnline(id)),
     programs: programsFor(hub, nodes),
+    checkError: nodes.map(id => hub.checkErrorOf(id)).find((err): err is string => err !== null) || null,
     browserError: nodes.map(id => hub.browserErrorOf(id)).find((err): err is string => err !== null) || null,
   };
 }

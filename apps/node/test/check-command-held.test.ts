@@ -1,17 +1,19 @@
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CheckClient } from '../src/check-client.js';
 import { configureCheckCommands, serveCheckCommand } from '../src/check-command-runner.js';
 import { setCheckClient } from '../src/check-queue.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
+const { assertGroup, clean } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn() }));
+vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean }));
 const KEY = '10000000-0000-4000-8000-000000000021';
-const WAIT = Buffer.from(JSON.stringify({ command: ['recorded-tool'], cwd: '/tmp', env: {}, wait: true }));
-beforeEach(() => configureCheckCommands({ uid: 20000, gid: 20000 }));
-afterEach(() => { setCheckClient(null); configureCheckCommands(null); });
+const GROUP = { pid: 4242, started: '100' };
+const WAIT = Buffer.from(JSON.stringify({ command: ['recorded-tool'], cwd: '/tmp', env: {}, wait: true, group: GROUP }));
+beforeEach(() => { configureCheckCommands({ uid: 20000, gid: 20000 }); assertGroup.mockResolvedValue(undefined); });
+afterEach(() => { setCheckClient(null); configureCheckCommands(null); vi.resetAllMocks(); });
 
-/* The agent's shell on the other end of a waiting command: what the node writes to it, and its going away. */
 function shell() {
   const frames: { type: string; message?: string }[] = [];
   const res = Object.assign(new EventEmitter(), {
@@ -22,8 +24,6 @@ function shell() {
   });
   return { res: res as unknown as ServerResponse, frames, letGo: () => { res.destroyed = true; res.emit('close'); } };
 }
-
-/* A machine whose server grants the slot at once and may end it, with what the node told the server. */
 function machine() {
   const told: string[] = [];
   let id = '';
@@ -36,31 +36,30 @@ function machine() {
   return { told, endLease: () => client.receive({ type: 'check.state', id, state: 'ended', position: 0 }) };
 }
 
-it.each([
-  ['its lease ends', (m: ReturnType<typeof machine>) => m.endLease()],
-  ['the turn token changes', (_m: ReturnType<typeof machine>, request: AbortController) => request.abort()],
-] as const)('tells the shell to stop when %s and gives the slot back only once the shell let go', async (_why, end) => {
+it.each(['lease', 'turn', 'close'] as const)('owns cleanup on %s without trusting the wrapper to close or kill its group', async why => {
+  let gone!: () => void;
+  clean.mockImplementation(() => new Promise<void>(resolve => { gone = resolve; }));
   const m = machine(), s = shell(), request = new AbortController();
-  const served = serveCheckCommand(KEY, WAIT, request.signal, s.res);
+  const served = serveCheckCommand(KEY, WAIT, request.signal, s.res, undefined, 42);
   await eventually(() => s.frames.some(frame => frame.type === 'slot'));
-  end(m, request);
-  await eventually(() => s.frames.some(frame => frame.type === 'stop'));
-  expect(s.frames.at(-1)).toEqual({ type: 'stop', message: 'The machine check slot ended.' });
-  /* The command and its group still run in the shell: the slot stays taken. */
-  for (let turn = 0; turn < 5; turn += 1) await new Promise<void>(resolve => { setImmediate(resolve); });
+  expect(assertGroup).toHaveBeenCalledWith(GROUP, 20000, 42);
+  if (why === 'lease') m.endLease();
+  else if (why === 'turn') request.abort();
+  else { s.letGo(); request.abort(); }
+  await eventually(() => clean.mock.calls.length === 1);
+  expect(clean).toHaveBeenCalledWith(GROUP, 20000, expect.any(Object));
   expect(m.told).toEqual(['check.acquire']);
-  s.letGo();
+  if (why !== 'close') expect(s.frames.at(-1)?.type).toBe('stop');
+  gone();
   expect(await served).toBe(true);
   expect(m.told).toEqual(['check.acquire', 'check.release']);
 });
 
-it('gives the slot back at once when the shell lets go first, with no word to stop', async () => {
-  const m = machine(), s = shell(), request = new AbortController();
-  const served = serveCheckCommand(KEY, WAIT, request.signal, s.res);
-  await eventually(() => s.frames.some(frame => frame.type === 'slot'));
-  /* As the bridge does: the shell's request closes and aborts what it asked for. */
-  s.letGo(); request.abort();
-  expect(await served).toBe(true);
-  expect(m.told).toEqual(['check.acquire', 'check.release']);
-  expect(s.frames.map(frame => frame.type)).toEqual(['slot']);
+it('never acquires or signals a group whose identity is refused', async () => {
+  assertGroup.mockRejectedValue(new Error('wrong process owner'));
+  const m = machine(), s = shell();
+  expect(await serveCheckCommand(KEY, WAIT, new AbortController().signal, s.res, undefined, 42)).toBe(false);
+  expect(m.told).toEqual([]);
+  expect(clean).not.toHaveBeenCalled();
+  expect(s.frames).toEqual([{ type: 'error', message: 'wrong process owner' }]);
 });

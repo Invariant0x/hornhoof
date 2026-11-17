@@ -40,6 +40,9 @@ beforeAll(() => {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
   cli = join(dir, 'check-command.mjs');
   writeFileSync(cli, outputText.replace(/from 'zod'/, `from ${JSON.stringify(import.meta.resolve('zod'))}`));
+  const groupSource = readFileSync(fileURLToPath(new URL('../src/check-group.ts', import.meta.url)), 'utf8');
+  writeFileSync(join(dir, 'check-group.js'), ts.transpileModule(groupSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
   chmodSync(dir, 0o755); chmodSync(cli, 0o644);
   return () => rmSync(dir, { recursive: true, force: true });
 });
@@ -360,6 +363,7 @@ describe('a heavy check in the agent\'s own shell', () => {
     let stdout = ''; child.stdout!.on('data', chunk => { stdout += String(chunk); });
     child.once('close', code => resolve(`${code}:${stdout}`));
   });
+  beforeEach(() => { configureCheckCommands(user); onTestFinished(() => configureCheckCommands(null)); });
   function machine(grantAtOnce: boolean, online = true, onRelease = () => {}) {
     const key = '10000000-0000-4000-8000-000000000011', frames: string[] = [];
     let grant = () => {}, end = () => {};
@@ -377,19 +381,20 @@ describe('a heavy check in the agent\'s own shell', () => {
     const bridge = new Bridge('http://127.0.0.1:1', () => {});
     onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const dir = mkdtempSync(join(tmpdir(), 'hh-check-wait-'));
+    giveToUser(dir);
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     return { key, frames, bridge, dir, grant: () => grant(), end: () => end(), start: async () => { await bridge.start(); bridge.setToken(key, 'turn'); return bridge.agent(key).hookUrl; } };
   }
 
   it('runs the command in its own shell once a slot is given, and holds the slot until the command ends', async () => {
     const m = machine(false), hook = await m.start();
-    const said = 'process.stdout.write([process.ppid, process.cwd(), process.env.HH_CHECK_SLOT ? "slot" : "none"].join(" ")); process.exit(7)';
-    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const said = 'process.stdout.write([process.getuid(), process.cwd(), process.env.HH_CHECK_SLOT ? "slot" : "none"].join(" ")); process.exit(7)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
     const done = output(child);
     await eventually(() => m.frames.includes('check.acquire'));
     expect(m.frames).toEqual(['check.acquire']);
     m.grant();
-    expect(await done).toBe(`7:${child.pid} ${realpathSync(m.dir)} slot`);
+    expect(await done).toBe(`7:${user?.uid ?? process.getuid!()} ${realpathSync(m.dir)} slot`);
     await eventually(() => m.frames.includes('check.release'));
     expect(m.frames).toEqual(['check.acquire', 'check.release']);
   });
@@ -402,7 +407,7 @@ describe('a heavy check in the agent\'s own shell', () => {
     const m = machine(true, true, () => atRelease.push(alive(leader) || alive(grandchild))), hook = await m.start();
     const started = join(m.dir, 'started');
     const starts = 'const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); require("node:fs").writeFileSync(process.argv[1], [process.pid, g.pid].join(" ")); setInterval(() => {}, 1000)';
-    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', starts, started], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', starts, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
     const done = output(child);
     /* A run that fails leaves nothing behind; a pid never named stays unsent, as 0 would mean this test's own group. */
     onTestFinished(() => { for (const pid of [child.pid ?? 0, leader, grandchild]) if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL'); });
@@ -419,7 +424,7 @@ describe('a heavy check in the agent\'s own shell', () => {
   it('runs the command at once when the machine has no slot to give or it is not an agent\'s', async () => {
     const m = machine(false, false), hook = await m.start();
     const said = 'process.stdout.write(process.env.HH_CHECK_SLOT ?? "none"); process.exit(3)';
-    const run = (env: NodeJS.ProcessEnv) => output(spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    const run = (env: NodeJS.ProcessEnv) => output(spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { uid: user?.uid, gid: user?.gid, env, stdio: ['ignore', 'pipe', 'pipe'] }));
     expect(await run({ PATH: process.env.PATH, HH_BRIDGE: hook })).toBe('3:none');
     expect(await run({ PATH: process.env.PATH })).toBe('3:none');
   });
@@ -431,9 +436,9 @@ describe('a heavy check in the agent\'s own shell', () => {
     const m = machine(true, true, () => atRelease.push(alive(leader))), hook = await m.start();
     const started = join(m.dir, 'started');
     const payload = 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)';
-    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', payload, started], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', payload, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
     onTestFinished(() => {
-      if (leader > 0 && alive(leader)) process.kill(-leader, 'SIGKILL');
+      if (leader > 0 && alive(leader)) process.kill(leader, 'SIGKILL');
       if (child.pid && alive(child.pid)) child.kill('SIGKILL');
     });
     await eventually(() => existsSync(started) && readFileSync(started, 'utf8') !== '');
@@ -456,7 +461,7 @@ describe('a heavy check in the agent\'s own shell', () => {
       return path;
     };
     const path = `${join(m.dir, 'tools', 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, agent = { PATH: path, HH_BRIDGE: hook };
-    const run = (command: string, args: string[], env: NodeJS.ProcessEnv = agent) => output(spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    const run = (command: string, args: string[], env: NodeJS.ProcessEnv = agent) => output(spawn(command, args, { uid: user?.uid, gid: user?.gid, env, stdio: ['ignore', 'pipe', 'pipe'] }));
     /* As npx and npm scripts start them: by the name in node_modules/.bin, whose first line asks for node. */
     for (const name of ['tsc', 'vitest', 'eslint', 'jest', 'playwright']) expect(await run(tool(name), ['--noEmit']), name).toBe('0:slot');
     expect(await run(join(m.dir, 'tools', 'bin', 'node'), [tool('vitest'), 'run'])).toBe('0:slot');

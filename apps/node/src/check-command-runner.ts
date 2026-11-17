@@ -6,14 +6,15 @@ import type { ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
-import { currentCheckLease, reuseCheckLease, withCheckSlot } from './check-queue.js';
+import { checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlots, withCheckSlot } from './check-queue.js';
+import { assertCheckGroup, checkGroupMembers, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
 import { trackCheckProcess } from './check-processes.js';
 import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
 
 export type CheckCommandGuard = (key: string, input: Pick<CommandInput, 'command' | 'cwd'>) => Promise<AgentCommandVerdict>;
 
 const Word = z.string().max(100_000).refine(value => !value.includes('\0'));
-const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional(), wait: z.literal(true).optional() });
+const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional(), wait: z.literal(true).optional(), group: z.object({ pid: z.number().int().positive().safe(), started: z.string().regex(/^[0-9]{1,30}$/) }).optional() });
 type Command = z.infer<typeof Command>;
 let user: JobUser | null = null;
 let commandGuard: CheckCommandGuard | undefined;
@@ -29,14 +30,16 @@ async function commandPolicy(key: string, input: Command): Promise<AgentCommandV
 
 const MARKER = '#!/bin/sh\n# Hornhoof machine check command.\n';
 
-/* hh-check runs a command under a machine check slot. The node next to it comes first on an agent's PATH, so npx and npm
+/* hh-check runs a command under a machine check slot. On Linux, the node next to it comes first on an agent's PATH, so npx and npm
    scripts start node through it too: an agent's own TypeScript, Vitest, ESLint, Jest or Playwright waits there for a slot,
    like for a lock, and then runs in the agent's shell; whatever else node runs goes on at once. */
-export function installCheckCommand(dir: string, cli = fileURLToPath(new URL('./check-command.js', import.meta.url))): void {
+export function installCheckCommand(dir: string, cli = fileURLToPath(new URL('./check-command.js', import.meta.url)), platform: NodeJS.Platform = process.platform): void {
   const bin = join(dir, 'tools', 'bin');
   mkdirSync(bin, { recursive: true });
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`, node = quote(process.execPath), target = quote(cli);
   install(join(bin, 'hh-check'), `exec ${node} ${target} "$@"\n`);
+  /* Exact process birth identity for node-owned cleanup is implemented on Linux. Other platforms keep direct node. */
+  if (platform !== 'linux') return;
   install(join(bin, 'node'), [
     'case "${HH_BRIDGE:+agent}${HH_CHECK_SLOT:+held}:$1" in',
     `  agent:*/tsc|agent:*/vitest|agent:*/vitest.mjs|agent:*/eslint|agent:*/eslint.js|agent:*/jest|agent:*/jest.js|agent:*/playwright) exec ${node} ${target} --wait -- ${node} "$@" ;;`,
@@ -69,21 +72,27 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
 
 const STOP = 'The machine check slot ended.';
 
-/* A command that runs in the agent's own shell: the slot stays its own until the shell lets the request go. As the lease or
-   the turn ends first, the shell is told to stop the command and its group, and the slot goes only once the shell let go:
-   no check runs on past its slot. A node gone away loses the slot by the server's own lease time. */
-const held = (res: ServerResponse) => (signal: AbortSignal) => new Promise<boolean>(resolve => {
-  if (res.destroyed) { resolve(true); return; }
-  const stop = () => { send(res, { type: 'stop', message: STOP }); };
-  res.once('close', () => { signal.removeEventListener('abort', stop); resolve(true); });
-  send(res, { type: 'slot', lease: currentCheckLease() });
-  if (signal.aborted) stop();
-  else signal.addEventListener('abort', stop, { once: true });
-});
+/* The caller owns execution; the node owns cleanup. Closing a request is not evidence that its detached group ended. */
+const held = (res: ServerResponse, group: CheckGroup, uid: number) => async (signal: AbortSignal): Promise<boolean> => {
+  let stop!: () => void;
+  const ended = new Promise<void>(resolve => {
+    stop = () => { send(res, { type: 'stop', message: STOP }); resolve(); };
+    res.once('close', resolve);
+    signal.addEventListener('abort', stop, { once: true });
+    if (res.destroyed || signal.aborted) resolve();
+    else send(res, { type: 'slot', lease: currentCheckLease() });
+  });
+  try { await ended; }
+  finally {
+    signal.removeEventListener('abort', stop);
+    await cleanCheckGroup(group, uid, { list: checkGroupMembers, kill: (_pid, value) => signalCheckGroup(group, uid, user?.gid ?? process.getgid!(), value), block: reason => suspendCheckSlots(group.pid, reason) });
+  }
+  return true;
+};
 
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
-  const run = input.wait ? held(res) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
+  const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!()) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
   return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
@@ -99,13 +108,17 @@ function parseCommand(body: Buffer): Command {
 }
 
 /* True when the command ran to its end with code 0. */
-export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse, jobId?: string): Promise<boolean> {
+export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse, jobId?: string, callerPid?: number): Promise<boolean> {
   assertCommandUser();
   const input = parseCommand(body);
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   try {
     /* One that only waits runs in the agent's shell as it would with no queue, whatever it is. */
-    if (!input.wait) await assertCommandPolicy(key, input, signal);
+    if (input.wait && checkQueueOffline()) { send(res, { type: 'unavailable' }); return false; }
+    if (input.wait) {
+      if (!input.group) throw new Error('A waiting check must register its process group.');
+      await assertCheckGroup(input.group, user?.uid ?? process.getuid!(), callerPid);
+    } else await assertCommandPolicy(key, input, signal);
     return await admitCommand(key, input, signal, res, jobId);
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });

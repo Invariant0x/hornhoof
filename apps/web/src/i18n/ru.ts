@@ -1016,6 +1016,7 @@ export const ru: Messages = {
     otherBuild: 'Другая сборка',
     otherBuildNote: (here, server) => `Ее ноды не той сборки, что у сервера (здесь ${here}, у сервера ${server}). Чтобы обновить их, выполните на ней команду установки еще раз без --join.`,
     olderBuild: 'старая',
+    checksPaused: 'Проверки приостановлены',
     browserFailed: 'Браузер не запустился',
     browserFailedNote: reason => `Браузер для проверок не запустился (${reason}). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.`,
     drainMark: { waiting: 'Ждет обновления', restarting: 'Обновляется' },

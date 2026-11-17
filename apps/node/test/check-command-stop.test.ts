@@ -4,6 +4,7 @@ import { checkCommand } from '../src/check-command.js';
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn }));
+vi.mock('../src/check-group.js', () => ({ checkGroupProcess: async () => ({ pid: 4242, group: 4242, session: 4242, started: '100' }) }));
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 const original = new Map(signals.map(signal => [signal, process.listeners(signal)]));
 afterEach(() => {
@@ -24,8 +25,8 @@ const tick = () => new Promise<void>(resolve => { turn(resolve); });
 /* A recorded command, pid 4242, which leads its own process group: the signals sent to it and to its group are written
    down, and it exits when the test says so. */
 function recorded() {
-  const child = Object.assign(new EventEmitter(), { pid: 4242, kill: vi.fn(() => true) });
-  spawn.mockReturnValue(child);
+  const child = Object.assign(new EventEmitter(), { pid: 4242, kill: vi.fn(() => true), send: vi.fn(), disconnect: vi.fn(), unref: vi.fn() });
+  spawn.mockImplementation(() => { queueMicrotask(() => child.emit('spawn')); return child; });
   const group: string[] = [];
   vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
     if (pid !== -4242) throw new Error(`unexpected kill of ${pid}`);
@@ -53,7 +54,8 @@ it('runs the command in a process group of its own while it holds a slot, and as
   await tick();
   child.emit('exit', 0, null);
   expect(await held).toBe(0);
-  expect(spawn).toHaveBeenLastCalledWith('recorded-tool', ['-p'], expect.objectContaining({ detached: true, stdio: 'inherit' }));
+  expect(spawn).toHaveBeenLastCalledWith(process.execPath, ['-e', expect.any(String)], expect.objectContaining({ detached: true, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] }));
+  expect(child.send).toHaveBeenCalledWith(expect.objectContaining({ command: ['recorded-tool', '-p'], managed: true }));
   const alone = checkCommand(['--wait', '--', 'recorded-tool'], {});
   await tick();
   child.emit('exit', 0, null);
@@ -108,11 +110,11 @@ it('leaves a command that ends on its own to its end, then ends what it left in 
   await tick();
   child.emit('exit', 7, null);
   expect(await pending).toBe(7);
-  expect(group).toEqual(['SIGKILL']);
+  expect(group).toEqual([]);
   /* The stream ends as the command lets the slot go: nothing more is stopped and no clock is left. */
   stream().close();
   await tick();
-  expect(group).toEqual(['SIGKILL']);
+  expect(group).toEqual([]);
   expect(child.kill).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
