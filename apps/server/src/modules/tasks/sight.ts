@@ -17,7 +17,7 @@ import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, ty
 export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId'>;
 
 /* Every task of the company, but the work of another person's assistant's own agent. */
-export function seesTask(viewer: AgentViewer, task: TaskPlace): boolean {
+export function seesTask(viewer: Pick<AgentViewer, 'apart'>, task: TaskPlace): boolean {
   return [task.assigneeAgentId, task.executorAgentId].every(id => !id || knowsAgentId(viewer, id));
 }
 

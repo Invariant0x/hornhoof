@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { companies, departments, people, tasks } from '../src/db/schema.js';
+import { agents, assistants, companies, departments, people, subscriptions, tasks } from '../src/db/schema.js';
+import { createTask } from '../src/modules/tasks/engine.js';
 import type { StreamMessage } from '../src/modules/events/bus.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, echelonsTurn, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -44,6 +45,42 @@ describe('goals', () => {
     expect(goals.map(g => [g.number, g.progress, g.done, g.total])).toEqual([[1, 0.424, 3, 4], [2, 0.75, 3, 4], [3, 0.5, 1, 2]]);
   });
 
+  it("counts for a reader only the tasks they see: never the work of another person's assistant", async () => {
+    const { db, ctx, companyId, ceo, oleg, dev, ivanId, send, get } = await company();
+    const [avaPerson] = await db.insert(people).values({ companyId, name: 'Ava', status: 'active', isAgent: true, assistantOf: ivanId, scopeKind: 'company' }).returning();
+    const [ava] = await db.insert(agents).values({ companyId, kind: 'assistant', name: 'Ava', model: '' }).returning();
+    await db.insert(assistants).values({ personId: avaPerson!.id, companyId, program: 'avaclone', agentId: ava!.id });
+    const grow = (await send('POST', ceo, '/api/goals', { title: 'Grow' })).json().goal;
+    const shop = (await send('POST', oleg, '/api/goals', { title: 'Shop', department: dev.id, parent: grow.id })).json().goal;
+    const ads = (await send('POST', oleg, '/api/goals', { title: 'Ads', department: dev.id })).json().goal;
+    const [sub] = await db.select().from(subscriptions);
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) => (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const head = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    await echelonsTurn(db, companyId);
+    const task = async (status: 'open' | 'done', goalId: string | null, hidden: boolean, parentId: string | null = null) => {
+      const { task: made } = await createTask(ctx, { agentId: head.id }, { title: 'Work', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' });
+      await db.update(tasks).set({ status, goalId, parentId, closedAt: status === 'open' ? null : new Date(), ...(hidden ? { assigneeAgentId: ava!.id, executorAgentId: ava!.id } : {}) }).where(eq(tasks.id, made.id));
+      return made;
+    };
+    const first = await task('open', shop.id, false);
+    await task('done', shop.id, false);
+    /* Ivan's assistant's work: open and done, on the goal, above it, under visible work, and alone on a goal. */
+    await task('open', shop.id, true);
+    await task('done', grow.id, true);
+    await task('done', null, true, first.id);
+    await task('open', ads.id, true);
+
+    const counted = async (token: string) => ((await get(token, '/api/goals')).json().goals as { title: string; progress: number | null; done: number; total: number }[]).map(g => [g.title, g.done, g.total, g.progress]);
+    const listed = await get(oleg, '/api/tasks?status=all');
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect((listed.json().tasks as { number: number }[]).map(t => t.number)).toEqual([2, 1]);
+    expect(await counted(oleg)).toEqual([['Grow', 1, 2, 0.5], ['Shop', 1, 2, 0.5], ['Ads', 0, 0, null]]);
+    expect((await get(oleg, `/api/goals/${ads.id}`)).json().goal).toMatchObject({ done: 0, total: 0, progress: null });
+    /* Its owner sees it all. */
+    expect(await counted(ceo)).toEqual([['Grow', 3, 5, 0.6], ['Shop', 2, 4, 0.5], ['Ads', 0, 1, 0]]);
+  });
+
   it('refuses a goal under its own smaller goal, and a company goal under a department goal', async () => {
     const { ceo, oleg, dev, send, get } = await company();
     const top = (await send('POST', ceo, '/api/goals', { title: 'Grow' })).json().goal;
@@ -60,7 +97,7 @@ describe('goals', () => {
   });
 
   it('lets the CEO set company goals and whoever reaches a department set its goals, each change once', async () => {
-    const { ceo, oleg, maria, dev, sales, mariaId, send } = await company();
+    const { oleg, maria, dev, sales, mariaId, send } = await company();
     expect((await send('POST', oleg, '/api/goals', { title: 'Grow' })).json().error.reason).toBe('company_scope_only');
     const other = await send('POST', maria, '/api/goals', { title: 'Shop', department: dev.id });
     expect([other.statusCode, other.json().error.reason]).toEqual([403, 'not_your_department']);

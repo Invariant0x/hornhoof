@@ -1,10 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { goals, GOAL_STATUSES } from '../../db/schema.js';
+import { agents, goals, GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { refuse, taskSpot, type Task } from '../tasks/engine.js';
+import { seesTask } from '../tasks/sight.js';
 import { taskByRef } from '../tasks/views.js';
 import type { Grant } from '../templates/load.js';
 import type { ToolJob } from '../tools/job.js';
@@ -83,10 +84,16 @@ const Stage = z.strictObject({
 export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
   const keeper = grants.has('tracker');
   const actor = { agentId: job.agentId };
+  /* The goals with their progress over the tasks this employee sees, by the rule people's are counted by: every task but
+     the work of a person's assistant other than itself. */
+  const goalsSeen = async () => {
+    const apart = new Set((await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, job.companyId), eq(agents.kind, 'assistant'), ne(agents.id, job.agentId)))).map(a => a.id));
+    return goalViews(ctx, job.companyId, t => seesTask({ apart }, t));
+  };
   server.registerTool(
     'goals',
     { description: "The company's goals with their progress, and the pipelines of your department (every department's for the orchestrator), each with its stages." },
-    async () => told(async () => JSON.stringify({ goals: await goalViews(ctx, job.companyId), pipelines: await pipelineViews(ctx, job.companyId, job.agentKind === 'orchestrator' ? undefined : (job.departmentId ?? undefined)) })),
+    async () => told(async () => JSON.stringify({ goals: await goalsSeen(), pipelines: await pipelineViews(ctx, job.companyId, job.agentKind === 'orchestrator' ? undefined : (job.departmentId ?? undefined)) })),
   );
   if (job.agentKind !== 'head' && job.agentKind !== 'orchestrator' && !keeper) return;
   const guard = agentGuard(job);
@@ -137,7 +144,7 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
           const edited = await editGoal(ctx, job.companyId, actor, guard, id, change, now!.version);
           if (input.status) await setGoalStatus(ctx, job.companyId, actor, guard, id, input.status, edited.version);
         }
-        return JSON.stringify((await goalViews(ctx, job.companyId)).find(g => g.id === id));
+        return JSON.stringify((await goalsSeen()).find(g => g.id === id));
       }),
   );
 
