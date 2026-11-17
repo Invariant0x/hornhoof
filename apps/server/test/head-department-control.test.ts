@@ -68,6 +68,9 @@ describe('a department head for a person who runs its department', () => {
     const changes = await c.db.select().from(agentChanges).where(inArray(agentChanges.agentId, [c.worker.id, ira!.id]));
     expect(changes.map(ch => ch.field).sort()).toEqual(['hired', 'name', 'removed', 'reset', 'team']);
     for (const change of changes) expect(change, change.field).toMatchObject({ personId: c.ids.dana, byOrchestrator: false });
+    const applied = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'applied')));
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({ personId: null, data: { kind: 'staff', department: c.dev.id, onBehalfOfPersonId: c.ids.dana, sourceSeq: null } });
   });
 
   it('moves an employee who holds work into an urgent-only sub-unit', async () => {
@@ -86,8 +89,21 @@ describe('a department head for a person who runs its department', () => {
     ok(await call(hana, 'set_approval_policy', { department: c.dev.id, channel: 'message', mode: 'every' }));
     const [policy] = await c.db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, c.dev.id));
     expect(policy).toMatchObject({ updatedBy: c.ids.dana, mode: 'every' });
-    const [applied] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'applied')));
-    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.dana, sourceSeq: null });
+    const applied = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({ agentId: c.head.id, personId: null, data: { onBehalfOfPersonId: c.ids.dana, sourceSeq: null } });
+    expect(await teamNames(c)).toEqual(['Mobile']);
+  });
+
+  it('keeps the orchestrator\'s own department and staffing changes in its own history', async () => {
+    const c = await company();
+    const orchestrator = await c.tools(c.orchestrator);
+    ok(await call(orchestrator, 'build_structure', { items: [{ department: c.dev.id, teams: ['Mobile'] }] }));
+    ok(await call(orchestrator, 'hire', { department: c.dev.id, people: [{ role: 'DEV-BE', name: 'Ira' }] }));
+    const applied = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
+    expect(applied).toHaveLength(2);
+    for (const event of applied) expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids.ceo, sourceSeq: null } });
+    expect(applied.some(event => event.data.kind === 'staff')).toBe(true);
     expect(await teamNames(c)).toEqual(['Mobile']);
   });
 

@@ -61,7 +61,7 @@ type Asked = {
   plan?: WaitPlan | undefined;
 };
 
-/* The rule of a channel of the task's department; a task of no department asks every time. */
+/* The rule of a channel of the task's department; without one, new kinds need approval. */
 async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChannel) {
   if (!task.departmentId) return ruleOf(undefined);
   const [stored] = await ctx.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, task.departmentId), eq(approvalPolicies.channel, channel)));
@@ -195,7 +195,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'approval_policy',
     {
       description:
-        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
+        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks for new kinds; commits always require exact-commit approval.",
       inputSchema: { department: Department },
     },
     ({ department }) => readable(() => readPolicy(ctx, job, department)),

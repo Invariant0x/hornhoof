@@ -351,7 +351,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (result.hired.length) await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = on?.agentId ?? result.agentId ?? orchestrator?.id;
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
@@ -536,7 +536,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = on?.agentId ?? result.agentId ?? orchestrator?.id;
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
