@@ -26,6 +26,9 @@ import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
+/* The first database a worker opens pays what every later one only reuses: it opens, and closes again, as the file is
+   collected, so that cold start is no test's time. */
+await (await openTestDb()).client.close();
 
 type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; error: string | null; machine: string | null; merged_at: string | null; done_at: string | null };
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
