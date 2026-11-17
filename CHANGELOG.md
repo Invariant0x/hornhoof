@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- Assignment changes made by a department head show the head and the person whose authority it used.
+
 ### Changed
 
 - Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.

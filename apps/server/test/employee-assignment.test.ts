@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { listen, setUpCompany, testApp } from './helpers.js';
 
 async function fixture() {
@@ -38,6 +38,7 @@ async function fixture() {
 describe('employee assignment authority', () => {
   it('lets a head change the assignment of its own worker on its own and records the change', async () => {
     const { db, head, worker, connect } = await fixture();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const client = await connect(head.id);
     const names = (await client.listTools()).tools.map(t => t.name);
     expect(names).toContain('set_employee_assignment');
@@ -46,7 +47,7 @@ describe('employee assignment authority', () => {
     expect(result.isError).toBeFalsy();
     const [after] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(after).toEqual({ ...worker, overrides: { ...worker.overrides, base: assignment } });
-    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id))).toMatchObject([{ field: 'prompt', after: { base: assignment } }]);
+    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id))).toMatchObject([{ field: 'prompt', personId: owner!.id, actingAgentId: head.id, after: { base: assignment } }]);
     expect(await db.select().from(agentEvents).where(eq(agentEvents.agentId, head.id))).toMatchObject([{ kind: 'applied', data: { action: 'set_employee_assignment', employee: worker.id } }]);
     expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment: null } })).isError).toBeFalsy();
     const [cleared] = await db.select().from(agents).where(eq(agents.id, worker.id));
