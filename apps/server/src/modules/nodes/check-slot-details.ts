@@ -6,9 +6,10 @@ import { onTask } from '../tasks/attachments.js';
 import type { ToolJob } from '../tools/job.js';
 import { builtinOf, keyOf, nodeIdentity, ownBuiltin, type NodeIdentity } from './hub.js';
 import { checkQueueSnapshot } from './check-slots.js';
-import type { CheckClaim } from './check-slots-queue.js';
+import type { CheckClaim, CheckSnapshot } from './check-slots-queue.js';
 
 type Part = typeof testParts.$inferSelect;
+type Task = typeof tasks.$inferSelect;
 type Actor = { kind: 'tests' | 'work'; run: number; task: number; part: number }
   | { kind: 'check'; task: number | null; agent: string; label: string }
   | { kind: 'unavailable' };
@@ -26,12 +27,14 @@ function onClaimNode(ctx: Ctx, claim: CheckClaim, part: Pick<Part, 'builtin' | '
   return node !== null && keyOf(node) === claim.node;
 }
 
+const canReadActor = (viewer: ToolJob, owner: string | null, task: Task | null): boolean => owner === viewer.agentId || (task !== null && onTask(viewer, task));
+
 async function runActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, partId: string): Promise<Actor | null> {
   const [row] = await ctx.db.select({ part: testParts, run: testRuns, task: tasks }).from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId)).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(and(eq(testParts.companyId, viewer.companyId), eq(testRuns.companyId, viewer.companyId), eq(tasks.companyId, viewer.companyId), eq(testParts.id, partId)));
   if (!row || !onClaimNode(ctx, claim, row.part)) return null;
-  if (row.run.agentId !== viewer.agentId && !onTask(viewer, row.task)) return null;
+  if (!canReadActor(viewer, row.run.agentId, row.task)) return null;
   return { kind: row.run.kind, run: row.run.number, task: row.task.number, part: row.part.part };
 }
 
@@ -40,7 +43,7 @@ async function jobActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, jobId: str
     .innerJoin(agents, eq(agents.id, jobs.agentId)).leftJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.id, jobId)));
   if (!row || !onClaimNode(ctx, claim, { ...row.job, builtin: row.job.nodeId === null })) return null;
-  if (row.job.agentId !== viewer.agentId && !(row.task && onTask(viewer, row.task))) return null;
+  if (!canReadActor(viewer, row.job.agentId, row.task)) return null;
   return { kind: 'check', task: row.task?.number ?? null, agent: oneLine(row.name), label: oneLine(claim.request.label) };
 }
 
@@ -77,19 +80,44 @@ function waitingLine(slot: Slot, recorded: boolean): string {
   return `${state} on ${slot.machine}. Position ${slot.position ?? 'unknown'}. Capacity ${slot.capacity ?? 'unknown'}. Queued ${slot.queued ?? 'unknown'}. Holders: ${holders}. Ahead: ${ahead}.${queueNote(slot, recorded)}`;
 }
 
-/* This result is read live for each caller; a stored waiting line cannot keep showing a holder that already released. */
-export async function partCheckWait(ctx: Ctx, job: ToolJob, part: Part): Promise<CheckWait | null> {
+function partClaims(ctx: Ctx, part: Part) {
   const node = partNode(ctx, part);
   const snapshot = node ? checkQueueSnapshot(ctx, node) : null;
   const mine = (claim: CheckClaim) => claim.node === (node && keyOf(node)) && claim.request.label === `Run part ${part.id}`;
-  const waiting = snapshot?.queue.find(mine), running = snapshot?.holders.find(mine);
-  const reported = /^Waiting for a machine check slot\. Position ([1-9][0-9]*)\.$/.exec(part.tail)?.[1];
-  if (!reported && !waiting && !running) return null;
-  const position = waiting?.position ?? (running ? 0 : null);
-  const slot: Slot = {
-    machine: oneLine(part.machineName ?? 'a machine'), state: waiting ? 'queued' : running ? 'running' : 'not_recorded', capacity: snapshot?.capacity ?? null, queued: snapshot?.queue.length ?? null, position,
-    holders: await Promise.all((snapshot?.holders ?? []).map(claim => claimView(ctx, job, claim))),
-    ahead: await Promise.all((waiting ? snapshot!.queue.filter(claim => claim.position < waiting.position) : []).map(claim => claimView(ctx, job, claim))),
+  return { snapshot, waiting: snapshot?.queue.find(mine), running: snapshot?.holders.find(mine) };
+}
+
+function claimState(waiting: CheckClaim | undefined, running: CheckClaim | undefined): Pick<Slot, 'state' | 'position'> {
+  if (waiting) return { state: 'queued', position: waiting.position };
+  if (running) return { state: 'running', position: 0 };
+  return { state: 'not_recorded', position: null };
+}
+
+function aheadOf(snapshot: CheckSnapshot | null, waiting: CheckClaim | undefined): CheckClaim[] {
+  if (!snapshot || !waiting) return [];
+  return snapshot.queue.filter(claim => claim.position < waiting.position);
+}
+
+async function slotView(ctx: Ctx, job: ToolJob, part: Part, claims: ReturnType<typeof partClaims>): Promise<Slot> {
+  const { snapshot, waiting, running } = claims;
+  const pool = snapshot ? { capacity: snapshot.capacity, queued: snapshot.queue.length } : { capacity: null, queued: null };
+  return {
+    machine: oneLine(part.machineName ?? 'a machine'), ...pool, ...claimState(waiting, running),
+    holders: await Promise.all((snapshot ? snapshot.holders : []).map(claim => claimView(ctx, job, claim))),
+    ahead: await Promise.all(aheadOf(snapshot, waiting).map(claim => claimView(ctx, job, claim))),
   };
-  return { queuePosition: position ?? (reported ? Number(reported) : null), checkSlot: slot, waiting: waitingLine(slot, snapshot !== null) };
+}
+
+function reportedPosition(tail: string): number | null {
+  const found = /^Waiting for a machine check slot\. Position ([1-9][0-9]*)\.$/.exec(tail);
+  return found ? Number(found[1]) : null;
+}
+
+/* This result is read live for each caller; a stored waiting line cannot keep showing a holder that already released. */
+export async function partCheckWait(ctx: Ctx, job: ToolJob, part: Part): Promise<CheckWait | null> {
+  const claims = partClaims(ctx, part);
+  const reported = reportedPosition(part.tail);
+  if (reported === null && !claims.waiting && !claims.running) return null;
+  const slot = await slotView(ctx, job, part, claims);
+  return { queuePosition: slot.position ?? reported, checkSlot: slot, waiting: waitingLine(slot, claims.snapshot !== null) };
 }

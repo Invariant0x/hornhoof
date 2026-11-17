@@ -84,6 +84,9 @@ describe('reading a part that waits for a machine check slot', () => {
     const part = (await s.read()).parts[0];
     expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', task: s.c.task.number, agent: 'Bruno', label: label.replace('\n', ' '), since: expect.any(String) }]);
     expect(part.waiting).not.toMatch(/[\r\n]/);
+    const head = await s.c.turn(s.c.head, null);
+    const visible = JSON.parse((await head.call('test_run', { run: 3 })).text);
+    expect(visible.parts[0].checkSlot.holders).toMatchObject([{ kind: 'check', agent: 'Bruno', task: s.c.task.number }]);
   });
 
   it('keeps multiple predecessors in their FIFO order', async () => {
@@ -108,5 +111,16 @@ describe('reading a part that waits for a machine check slot', () => {
     const part = (await s.read()).parts[0];
     expect(part.checkSlot).toMatchObject({ state: 'not_recorded', capacity: 0, queued: 1, position: null });
     expect(part.waiting).not.toContain('Queue is empty');
+  });
+
+  it('does not attribute a part label claimed by another node to the part owner', async () => {
+    const s = await stand();
+    await s.release(0); await s.release(1); await s.release(2);
+    const [other] = await s.c.db.insert(nodes).values({ companyId: s.c.task.companyId, machineId: s.node!.machineId }).returning();
+    await receiveCheckRequest(s.c.app.ctx, nodeIdentity(other!.id), { ...s.claims[0]!, id: randomUUID() }, sql`false`);
+    await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const part = (await s.read()).parts[0];
+    expect(part.checkSlot.holders).toEqual([{ kind: 'unavailable', since: s.since, position: 0, releasing: false }]);
   });
 });
