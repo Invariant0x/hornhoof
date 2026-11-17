@@ -13,7 +13,6 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PGlite } from '@electric-sql/pglite';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
@@ -85,7 +84,7 @@ async function company(withLink = true) {
 }
 
 async function listening(app: FastifyInstance, port = 0): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port: port || await testPort() });
+  await app.listen({ host: '127.0.0.1', port });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -108,7 +107,7 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
-    ports: { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() },
+    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
     everyMs: 20,
     linkEveryMs: 50,
     peerEveryMs: 20,
@@ -118,6 +117,7 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     peerClientFor,
     ...extra,
   });
+  onTestFinished(() => keeper.stop());
   const ports = await keeper.start();
   const round = async () => {
     await leaseRound(keeper);
@@ -137,7 +137,6 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     remove();
     await stop();
   };
-  onTestFinished(() => keeper.stop());
   /* Initial certificate replies and the first network read settle once, with no recurring work competing with them. */
   await certificate(keeper);
   await networkRound(keeper);
@@ -280,10 +279,17 @@ describe('the peer link in the keeper', () => {
        revoked since. Its app does not answer. */
     await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, w.serial));
     expect((JSON.parse(readFileSync(join(first.dir, CRL_FILE), 'utf8')) as { serials: string[] }).serials).toEqual([]);
-    const down = http.createServer();
-    await new Promise<void>(resolve => down.listen(0, '127.0.0.1', resolve));
-    const away: Target = { host: '127.0.0.1', port: (down.address() as AddressInfo).port };
-    await new Promise(resolve => down.close(resolve));
+    /* Keep the address bound while the app is unavailable, rather than race another process for a closed port. */
+    let available = false;
+    const back = http.createServer((req, res) => {
+      if (!available) { req.socket.destroy(); return; }
+      void c.app.inject({ method: req.method as 'GET', url: req.url!, headers: { 'x-hornhoof-via': String(req.headers['x-hornhoof-via'] ?? '') }, remoteAddress: '127.0.0.1' }).then(answer => {
+        res.writeHead(answer.statusCode, { 'content-type': 'application/json' }).end(answer.body);
+      });
+    });
+    await new Promise<void>(resolve => back.listen(0, '127.0.0.1', resolve));
+    const away: Target = { host: '127.0.0.1', port: (back.address() as AddressInfo).port };
+    onTestFinished(() => void back.close());
     const second = await keeperBeside(c, away, first.dir, { holdMs: 0 });
     let open = false;
     void second.keeper.peerPorts().then(() => (open = true));
@@ -291,13 +297,7 @@ describe('the peer link in the keeper', () => {
     expect(open).toBe(false);
 
     /* The app is back where the keeper asks. */
-    const back = http.createServer((req, res) => {
-      void c.app.inject({ method: req.method as 'GET', url: req.url!, headers: { 'x-hornhoof-via': String(req.headers['x-hornhoof-via'] ?? '') }, remoteAddress: '127.0.0.1' }).then(answer => {
-        res.writeHead(answer.statusCode, { 'content-type': 'application/json' }).end(answer.body);
-      });
-    });
-    await new Promise<void>(resolve => back.listen(away.port, '127.0.0.1', resolve));
-    onTestFinished(() => void back.close());
+    available = true;
     await networkRound(second.keeper);
     await second.keeper.peerPorts();
     const ports = await second.keeper.peerPorts();
@@ -619,8 +619,8 @@ describe('the peer link in the keeper', () => {
       return probe(nonce, link);
     };
     const lease = fakeLease();
-    const ports = { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() };
-    const { keeper, lines } = await keeperBeside(c, await listening(c.app, await testPort()), folder(), { lease, now, proofs: p.proofs, ports });
+    const ports = { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 };
+    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ports });
     await waitForState(() => Boolean(keeper['ownLink']()));
     const step = async (ms = 20) => {
       clock.wall += ms;

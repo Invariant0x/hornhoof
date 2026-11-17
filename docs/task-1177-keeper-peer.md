@@ -52,3 +52,9 @@ The verification command is saved in `task-1177-series.txt`. It uses the install
 Manual self-review checked the opt-in frozen-clock guard, database isolation and snapshot completion, unchanged assertions and production limits, recorded child termination, cancellation of unfinished waits and the retained actual peer HTTP/TLS path. Security inspection found only test/measurement changes and no production access, secret, process-execution or deployment change. No independent checker, whole-suite result or main integration is claimed.
 
 The head accepted the merge attestation in the task body at 03:15: 6a052242 has no trailer; attestation is in 3410fd97. Every subsequent task commit carries Signed-off-by.
+
+## Port ownership
+
+The first area run on `216a1d5e07c9cb8eb3ffc0eac3d73a0ab1506fa0` stopped before the twenty repetitions: the first keeper case failed with `EADDRINUSE` on `127.0.0.1:24002`, then the next case timed out while reopening the failed test's discarded database. A fixture probe had released the selected port before the keeper bound it, allowing another worker to take it.
+
+Fixture listeners now bind atomically to port 0 and use the actual bound addresses. They never test a port's availability by opening and closing it first. The unavailable-app stand retains its listener, resets incoming connections while unavailable and serves the real app after availability changes, so its address never becomes another process's to take. Keeper cleanup is registered before startup, including partial startup failures. Every original keeper assertion is preserved. No production listener, timeout, clock or keeper implementation changed. The saved API command now uses the repository's ordinary server project configuration, including its workspace cwd and protocol aliases.
