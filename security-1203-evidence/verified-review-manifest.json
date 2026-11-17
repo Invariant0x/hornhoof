@@ -1,0 +1,691 @@
+{
+  "status": "PASS for archive integrity, recorded result consistency and committed node tree binding; not a new product check run",
+  "candidate": "b1a572fd5ed0431480ff715356a7432fc9d28a7e",
+  "manifest_sha256": "191895a601205bdb9fd74e7121001e600a237961c6ab566dc556d2d8604809d4",
+  "manifest_bytes": 18197,
+  "provenance": "Written after the runs from the session record: each command and its exit code as the shell printed them when it ran. Not a receipt captured by a tool at run time. Logs hashed now; they have not changed since.",
+  "limits": [
+    "Exit codes and precommit working tree identity are the reviewers session-derived record, not independently captured execution receipts.",
+    "Hashes prove the archived bytes match this later manifest; they do not prove when commands ran.",
+    "Product timing budgets and unavailable native review stay separate from assertion results."
+  ],
+  "archives": [
+    {
+      "name": "t1203-review-checks.tar.gz",
+      "bytes": 7629,
+      "sha256": "f350c30f019db335c461a00c08f4d0f0912f8d744e4c1d3b3a92dfec0349a636"
+    },
+    {
+      "name": "t1203-heavy-b1a572fd.tar.gz",
+      "bytes": 3741,
+      "sha256": "4ec6597b0c08d387e40056953892f09888a1a4d054a001efa49345c35d1181be"
+    }
+  ],
+  "records": 33,
+  "verified_log_hashes_and_sizes": 31,
+  "recorded_exits": {
+    "0": 30,
+    "1": 3
+  },
+  "full_named_files": 22,
+  "distinct_tests_passed": 338,
+  "timing_budget_status": "FAIL; recorded over-budget files and cases remain unresolved",
+  "timing_defects": [
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command.test.ts",
+      "runner_duration_s": 3.37,
+      "external_wall_s": null,
+      "cases_at_least_1s": [
+        {
+          "name": "makes an agent's tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else",
+          "milliseconds": 1192
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/inbox-carrier-recovery.test.ts",
+      "runner_duration_s": 31.55,
+      "external_wall_s": null,
+      "cases_at_least_1s": [
+        {
+          "name": "restores folded inbox mail of a failed carrier whose program never answered it, none",
+          "milliseconds": 4298
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/inbox.test.ts",
+      "runner_duration_s": 59.11,
+      "external_wall_s": null,
+      "cases_at_least_1s": [
+        {
+          "name": "keeps 25 letters that come while a person talks with the head in her inbox, and gives them in one turn after it",
+          "milliseconds": 5483
+        },
+        {
+          "name": "lets a person's words go before the letters that waited",
+          "milliseconds": 1063
+        },
+        {
+          "name": "gives the letters that waited with the next turn on a task, so the turn for the inbox never waits behind newer turns",
+          "milliseconds": 1374
+        },
+        {
+          "name": "gives every message that waited on the same task in one turn, and keeps a message on another task and a person's words apart",
+          "milliseconds": 1845
+        },
+        {
+          "name": "wakes a holder whose task waits with a turn on that task that has the letter whole, and ends the wait as before",
+          "milliseconds": 1318
+        },
+        {
+          "name": "keeps a letter on a task for a turn on that task, so its holder cannot wait past it",
+          "milliseconds": 1167
+        },
+        {
+          "name": "fails a letter on a task that cannot go out alone: the sender hears it, the wait goes on, and nothing of it waits unread",
+          "milliseconds": 1282
+        },
+        {
+          "name": "takes a person's words that came by Telegram or an assistant as a person's, not as mail",
+          "milliseconds": 1182
+        },
+        {
+          "name": "shows each employee only its own letters, cut short, and no task text it does not see",
+          "milliseconds": 1465
+        },
+        {
+          "name": "keep a comment that goes into the turn on its task in the inbox as read with that turn",
+          "milliseconds": 1103
+        },
+        {
+          "name": "keep each comment that joins a turn already waiting on its task in the inbox with that turn",
+          "milliseconds": 1052
+        },
+        {
+          "name": "list the unread letters by task and sender, and mark them read or dealt with",
+          "milliseconds": 1120
+        },
+        {
+          "name": "opens an employee's inbox to the CEO and to the owner of its department only",
+          "milliseconds": 1479
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/tasks-wake.test.ts",
+      "runner_duration_s": 78.11,
+      "external_wall_s": null,
+      "cases_at_least_1s": [
+        {
+          "name": "logs a skipped assignment on done without waking anyone",
+          "milliseconds": 3451
+        },
+        {
+          "name": "logs a skipped assignment on cancelled without waking anyone",
+          "milliseconds": 1194
+        },
+        {
+          "name": "does not let a person answer an internal stuck request through the agent's terminal",
+          "milliseconds": 1554
+        },
+        {
+          "name": "answers the agent's question with a message in its window, and leaves a commit to approve open",
+          "milliseconds": 1294
+        },
+        {
+          "name": "keeps the work with Bruno once his turns worked on it, as what he did may not be pushed yet, and he goes on on a fallback plan",
+          "milliseconds": 2908
+        },
+        {
+          "name": "waits for the reset when none of them could start now: signed out, its machine off or its node too old",
+          "milliseconds": 4673
+        },
+        {
+          "name": "asks the member head to answer the internal stuck request",
+          "milliseconds": 1232
+        },
+        {
+          "name": "wakes whoever holds the task now when its head answers",
+          "milliseconds": 1156
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/check-queue-watchdog.test.ts",
+      "runner_duration_s": 18.96,
+      "external_wall_s": 20,
+      "cases_at_least_1s": [
+        {
+          "name": "excludes queue time from silence and resumes alarms after a normal quiet interval",
+          "milliseconds": 1983
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/machine-memory.test.ts",
+      "runner_duration_s": 29.7,
+      "external_wall_s": 32,
+      "cases_at_least_1s": [
+        {
+          "name": "waits, says why, and starts by itself once memory frees up",
+          "milliseconds": 5384
+        },
+        {
+          "name": "does not hold the turn of an agent whose program already runs there",
+          "milliseconds": 1049
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/node-programs.test.ts",
+      "runner_duration_s": 17.47,
+      "external_wall_s": 19,
+      "cases_at_least_1s": [
+        {
+          "name": "keeps only live snapshots for a personal node and accepts older messages",
+          "milliseconds": 2417
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/live-fallback.test.ts",
+      "runner_duration_s": 14.64,
+      "external_wall_s": 16,
+      "cases_at_least_1s": [
+        {
+          "name": "delivers 2 missed messages once in the same session, new company round: true",
+          "milliseconds": 2564
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/node-return-backlog.test.ts",
+      "runner_duration_s": 65.13,
+      "external_wall_s": 67,
+      "cases_at_least_1s": [
+        {
+          "name": "go out in one turn on their task once the node is back, and do not make the agent look stuck",
+          "milliseconds": 12913
+        },
+        {
+          "name": "leaves none of several tasks stuck or waiting once the machine is back",
+          "milliseconds": 2799
+        },
+        {
+          "name": "neither reminds the agent nor clears its quiet turns for a turn from the backlog that ended without a word",
+          "milliseconds": 2837
+        },
+        {
+          "name": "does not count the continuation of a turn from the backlog that failed before it recorded its work",
+          "milliseconds": 3092
+        },
+        {
+          "name": "still asks the head once the agent went on for eight turns without handing anything in",
+          "milliseconds": 3779
+        },
+        {
+          "name": "counts a turn that went out before its node dropped for a moment and came back",
+          "milliseconds": 3270
+        },
+        {
+          "name": "lets one turn after its return go uncounted, and still asks the head about an agent that keeps going on",
+          "milliseconds": 3418
+        },
+        {
+          "name": "lets one quiet turn after its return go uncounted, and still asks the head about an agent that stays quiet",
+          "milliseconds": 2761
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/tasks-reconcile.test.ts",
+      "runner_duration_s": 73.43,
+      "external_wall_s": 76,
+      "cases_at_least_1s": [
+        {
+          "name": "keeps running and queued conversations through a 60-second disconnect and accepts the result after return",
+          "milliseconds": 4979
+        },
+        {
+          "name": "keeps a turn on a task whose machine is away, tells whoever gave the task once, and goes on when the machine is back",
+          "milliseconds": 1975
+        },
+        {
+          "name": "ends a turn of someone who does not hold the task as before, and closes the note of a kept turn that ended",
+          "milliseconds": 1005
+        },
+        {
+          "name": "counts a turn on a done subtask for its parent",
+          "milliseconds": 1251
+        },
+        {
+          "name": "recovers the assignee of an old open task once per move",
+          "milliseconds": 1454
+        },
+        {
+          "name": "recovers the assignee of an old working task once per move",
+          "milliseconds": 1316
+        },
+        {
+          "name": "recovers the assignee of an old review task once per move",
+          "milliseconds": 1348
+        },
+        {
+          "name": "recovers Tests after a passed Review without waking the former checker",
+          "milliseconds": 1001
+        },
+        {
+          "name": "recovers the head for a wrong-goal escalation without returning work to its author",
+          "milliseconds": 1390
+        },
+        {
+          "name": "keeps repeated ordinary findings with the checker without calling in the head or author",
+          "milliseconds": 1469
+        },
+        {
+          "name": "leaves work waiting when it is request",
+          "milliseconds": 1013
+        }
+      ]
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/queued-live-turn.test.ts",
+      "runner_duration_s": 48.73,
+      "external_wall_s": 50,
+      "cases_at_least_1s": [
+        {
+          "name": "sends B when pumping past the word deadline",
+          "milliseconds": 4524
+        },
+        {
+          "name": "keeps B waiting when only the first of two words is unheard",
+          "milliseconds": 1118
+        },
+        {
+          "name": "holds B after the old job ends, opens queued words, then sends B after their answer",
+          "milliseconds": 1091
+        }
+      ]
+    }
+  ],
+  "node_tree_binding": {
+    "previous": "3cdc7ed41ba2203c4d21d4648386d5e0d547e42d",
+    "candidate": "b1a572fd5ed0431480ff715356a7432fc9d28a7e",
+    "path": "apps/node",
+    "object": "4160bbb51e365c3dfffafe34037b41f1db1f28e9"
+  },
+  "files": [
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command.test.ts",
+      "passed": 20
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-group.test.ts",
+      "passed": 13
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-held.test.ts",
+      "passed": 4
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-platform.test.ts",
+      "passed": 2
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-stop.test.ts",
+      "passed": 11
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-wait.test.ts",
+      "passed": 4
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-lease.test.ts",
+      "passed": 1
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-client.test.ts",
+      "passed": 10
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-command-child.test.ts",
+      "passed": 8
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/inbox-carrier-recovery.test.ts",
+      "passed": 3
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/inbox.test.ts",
+      "passed": 36
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/tasks-wake.test.ts",
+      "passed": 103
+    },
+    {
+      "cwd": "apps/node",
+      "test_file": "test/check-queue.test.ts",
+      "passed": 11
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/check-queue.test.ts",
+      "passed": 9
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/check-queue-watchdog.test.ts",
+      "passed": 5
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/program-room-review.test.ts",
+      "passed": 3
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/machine-memory.test.ts",
+      "passed": 6
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/node-programs.test.ts",
+      "passed": 2
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/live-fallback.test.ts",
+      "passed": 2
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/node-return-backlog.test.ts",
+      "passed": 8
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/tasks-reconcile.test.ts",
+      "passed": 48
+    },
+    {
+      "cwd": "apps/server",
+      "test_file": "test/queued-live-turn.test.ts",
+      "passed": 29
+    }
+  ],
+  "logs": [
+    {
+      "check": "protocol build",
+      "log": "t1203-protocol.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded_exit": 0,
+      "tree_record": "committed a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18, clean"
+    },
+    {
+      "check": "RED R1",
+      "log": "t1203-red-anchor.log",
+      "bytes": 3186,
+      "sha256": "11fdf7275e6329e98c5780e1097b1619060708d38ec6391e62ed8704125b5dd3",
+      "recorded_exit": 1,
+      "tree_record": "working tree = a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18 plus only the new test in apps/node/test/check-command.test.ts; product sources of a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18 unchanged"
+    },
+    {
+      "check": "GREEN node check-command",
+      "log": "t1203-fix-check-command.log",
+      "bytes": 515,
+      "sha256": "376e01a876c0231d14ee4fd6ef6eed56b40301a9578fedbe90da4c8bbcde3050",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-group",
+      "log": "t1203-fix-check-group.log",
+      "bytes": 346,
+      "sha256": "4fed32883665a68a02fbf83444f43e2aa672552b771bdd260bed03932a2739f1",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-held",
+      "log": "t1203-fix-check-command-held.log",
+      "bytes": 348,
+      "sha256": "9529e754a86ea005d68b0764b8710de30b497eb100429140730276bf5ef4cbcb",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-platform",
+      "log": "t1203-fix-check-command-platform.log",
+      "bytes": 354,
+      "sha256": "c81fb0d021d022a6561a10ad0c72de31ce66a7c89a9454da9dfff082cbf3f369",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-stop",
+      "log": "t1203-fix-check-command-stop.log",
+      "bytes": 353,
+      "sha256": "6799ede97db9cbbcacfb0ac79d8f3c4f7a8e0e457ee5ada6d34b261ae3df97a1",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-wait",
+      "log": "t1203-fix-check-command-wait.log",
+      "bytes": 350,
+      "sha256": "a97d2352abd98e5208ea3db4377c7ba56c6f0d087f13558d710cc526dedf547a",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-lease",
+      "log": "t1203-fix-check-command-lease.log",
+      "bytes": 399,
+      "sha256": "a6959c5b8743a0bc466e3fa33f625cbe43e7b318afef85c050a2e3ca0f81cf49",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-client",
+      "log": "t1203-fix-check-client.log",
+      "bytes": 347,
+      "sha256": "cdf69d9d6fac4b07c27d095a9e07c240cc54951ad8e070c67f0a0c6dc9cdfc8a",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN R1 single case",
+      "log": "t1203-green-anchor.log",
+      "bytes": 518,
+      "sha256": "48ac93210ed23478aefa6adf1029304c64a17824b8bbacc1444892f4aa19d2fa",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "GREEN node check-command-child",
+      "log": "t1203-green-child.log",
+      "bytes": 349,
+      "sha256": "1f24f61274e3ccbd21433b51299c0c945de41800935b1ea3229e931a0241eb1e",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d right after these runs"
+    },
+    {
+      "check": "RED R2",
+      "log": "t1203-red-carrier.log",
+      "bytes": 1865,
+      "sha256": "0fe0a2fe0b86e04dc49bfc48ffd2aa7949014e8c328c2a38ac9db828c21be7b3",
+      "recorded_exit": 1,
+      "tree_record": "working tree = content later committed as 3cdc7ed41ba2203c4d21d4648386d5e0d547e42d plus only the changed apps/server/test/inbox-carrier-recovery.test.ts; apps/server/src unchanged from a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18"
+    },
+    {
+      "check": "GREEN server inbox-carrier-recovery",
+      "log": "t1203-fix-inbox-carrier-recovery.log",
+      "bytes": 648,
+      "sha256": "92f891e8ff63c3b6585f4a8f82abb29c56d8ff1560c11be831a5fc3dc7359f28",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "GREEN server inbox",
+      "log": "t1203-fix-inbox.log",
+      "bytes": 4646,
+      "sha256": "03905f2cfa5a3f6f07e879b9b9c78782d46e9619fb6a36a2e2fd521492bd007e",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "GREEN server tasks-wake",
+      "log": "t1203-fix-tasks-wake.log",
+      "bytes": 8040,
+      "sha256": "afe9d5c2744db5c96457f687987daa4fc28811c7f312ea758fd64c66c32fa4df",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "types node with tests",
+      "log": "t1203-tsc-node.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "types server with tests",
+      "log": "t1203-tsc-server.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "eslint changed files",
+      "log": "t1203-eslint.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "node build",
+      "log": "t1203-build-node.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded_exit": 0,
+      "tree_record": "working tree, committed unchanged as b1a572fd5ed0431480ff715356a7432fc9d28a7e right after these runs"
+    },
+    {
+      "check": "merge with turn-31",
+      "log": "t1203-merge-tree.log",
+      "bytes": 434,
+      "sha256": "ccbaad8fb2924c09e4c2a9391b60e19ba344483b045fa7a4f03e3c606f7355cd",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy check-queue",
+      "log": "t1203-heavy-check-queue.log",
+      "bytes": 345,
+      "sha256": "060f8238bcf3c3a8b0c1870d71539c8590491952a926010eeffe6ac91ec6b126",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy server-check-queue",
+      "log": "t1203-heavy-server-check-queue.log",
+      "bytes": 355,
+      "sha256": "42bced6538a26c9aee9859fe6a5000fc67adef8793105955a6b31e63988b8e25",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy server-check-queue-watchdog",
+      "log": "t1203-heavy-server-check-queue-watchdog.log",
+      "bytes": 494,
+      "sha256": "8631f1ec19e615c21a71ae74266e70fa807c7d218695c60b649a3fb62efa688e",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy program-room-review",
+      "log": "t1203-heavy-program-room-review.log",
+      "bytes": 363,
+      "sha256": "7b91eba19e0bf78e39c71400ec1c299f427c0b72a283e4a2569979418180b129",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy machine-memory",
+      "log": "t1203-heavy-machine-memory.log",
+      "bytes": 1013,
+      "sha256": "3930f8713e44184b66e9f97af076bf9c301b928f9b745719d21727001b5772d0",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy node-programs",
+      "log": "t1203-heavy-node-programs.log",
+      "bytes": 560,
+      "sha256": "74ca32ad28552e464dadc0224d2782e2d8f15b477e6cbf6b818aa828ce10fb01",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy live-fallback",
+      "log": "t1203-heavy-live-fallback.log",
+      "bytes": 579,
+      "sha256": "c5274df1630f2e3367db17e97d49fd6b958971a19a999b903b9ac79cb32c25bf",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy node-return-backlog",
+      "log": "t1203-heavy-node-return-backlog.log",
+      "bytes": 1370,
+      "sha256": "8f6851d350488b485e0ba3f262a23149507dc8a19c91540dd671ea32c1e633d5",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy tasks-reconcile",
+      "log": "t1203-heavy-tasks-reconcile.log",
+      "bytes": 3988,
+      "sha256": "903228ff47ef0d23d91df2fd52c7b685a9992a598047d177c27e150495608cb9",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    },
+    {
+      "check": "heavy queued-live-turn",
+      "log": "t1203-heavy-queued-live-turn.log",
+      "bytes": 2646,
+      "sha256": "3a8795b2230583ced121a24dcf23b7b40a5e18f31ee48dd6ff8d3beec33f987f",
+      "recorded_exit": 0,
+      "tree_record": "committed b1a572fd5ed0431480ff715356a7432fc9d28a7e, clean (origin/task-1203-iv-queue)"
+    }
+  ]
+}
