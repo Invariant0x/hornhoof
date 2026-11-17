@@ -1,12 +1,10 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
-import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
-import type { BindingPart } from '../modules/model-checks/lifecycle.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
-import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -1971,8 +1969,10 @@ export const waitPolicies = pgTable('wait_policies', {
   check('wait_policies_one_author', sql`(${t.createdByPersonId} IS NULL) <> (${t.createdByAgentId} IS NULL)`),
 ]);
 
-/* Checks made by a model. Both SQL roles stay out (HIDDEN): the examples hold private words, the held-out part must not
-   reach whoever tunes a prompt, and a status written by hand could turn a check on. */
+/* What the outbound gateway and its checks made by a model kept, from model_checks down to model_check_certificates.
+   Nothing reads or writes these tables any more: their rows stay, a mailbox password among them, until a later release
+   drops them once every company keeps its mailbox logins in the vault and its letters in git. Both SQL roles stay out
+   (HIDDEN). */
 const MODEL_CHECK_PARTIES = ['person', 'agent'] as const;
 
 export const modelChecks = pgTable('model_checks', {
@@ -1980,14 +1980,14 @@ export const modelChecks = pgTable('model_checks', {
   companyId: companyId(),
   departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
   productId: uuid('product_id').references(() => departments.id, { onDelete: 'cascade' }),
-  kind: text('kind', { enum: MODEL_CHECK_KINDS }).notNull(),
+  kind: text('kind').notNull(),
   /* Off until a run of this very binding passes, and off again when its week ends or a part of it changes. */
   status: text('status', { enum: ['off', 'on'] }).notNull().default('off'),
-  offReason: text('off_reason', { enum: INVALIDATION_CODES }),
+  offReason: text('off_reason'),
   bindingDigest: text('binding_digest'),
   validUntil: timestamp('valid_until', { withTimezone: true }),
   /* Set by the owner of the department, not by whoever wrote the check. */
-  thresholds: jsonb('thresholds').$type<Thresholds>(),
+  thresholds: jsonb('thresholds'),
   thresholdsBy: uuid('thresholds_by').references(() => people.id),
   createdAt: createdAt(),
 }, t => [
@@ -2007,7 +2007,7 @@ export const modelCheckRevisions = pgTable('model_check_revisions', {
   outputSchemaHash: text('output_schema_hash').notNull(),
   sourceListHash: text('source_list_hash').notNull(),
   taxonomyHash: text('taxonomy_hash'),
-  model: jsonb('model').$type<ModelIdentity>().notNull(),
+  model: jsonb('model').notNull(),
   authorKind: text('author_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
   authorId: uuid('author_id').notNull(),
   createdAt: createdAt(),
@@ -2043,18 +2043,18 @@ export const modelCheckEvaluations = pgTable('model_check_evaluations', {
   revisionId: uuid('revision_id').notNull().references(() => modelCheckRevisions.id, { onDelete: 'cascade' }),
   datasetId: uuid('dataset_id').notNull().references(() => modelCheckDatasets.id, { onDelete: 'cascade' }),
   /* The binding it ran, whole: the next change compares against it, and a report says what it was about. */
-  binding: jsonb('binding').$type<CheckBinding>().notNull(),
+  binding: jsonb('binding').notNull(),
   bindingDigest: text('binding_digest').notNull(),
   trigger: text('trigger', { enum: ['change', 'weekly'] }).notNull(),
-  parts: jsonb('parts').$type<BindingPart[]>().notNull().default([]),
+  parts: jsonb('parts').$type<string[]>().notNull().default([]),
   dedupKey: text('dedup_key').notNull(),
   status: text('status', { enum: ['queued', 'running', 'passed', 'failed', 'incomplete'] }).notNull().default('queued'),
   complete: boolean('complete').notNull().default(false),
   infraErrors: integer('infra_errors').notNull().default(0),
   mustBlockMisses: integer('must_block_misses').notNull().default(0),
-  metrics: jsonb('metrics').$type<EvaluationCounts>(),
-  holdoutMetrics: jsonb('holdout_metrics').$type<EvaluationCounts>(),
-  problems: jsonb('problems').$type<RunProblem[]>().notNull().default([]),
+  metrics: jsonb('metrics'),
+  holdoutMetrics: jsonb('holdout_metrics'),
+  problems: jsonb('problems').$type<string[]>().notNull().default([]),
   /* Ids of missed examples of the part authors may see. Held-out ones are never named. */
   missedDevCases: jsonb('missed_dev_cases').$type<string[]>().notNull().default([]),
   startedAt: timestamp('started_at', { withTimezone: true }),
@@ -2081,9 +2081,7 @@ const isDigest = (name: string, column: AnyPgColumn) => check(name, sql`${column
 const placeColumns = () => ({ companyId: companyId(), departmentId: uuid('department_id').notNull(), productId: uuid('product_id') });
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
-/* A way out of the company: one adapter, one purpose, direct to contacts or public. A stop holds a reason and only a
-   person's decision ends it; each stop or reopening is a new generation, so what was admitted under an older one is stale. */
-export type StopReason = GateCode | 'complaint_threshold' | 'refusal_threshold' | 'bounce_threshold';
+/* The outbound gateway's tables, down to outbound_sampling_counters: kept unused with their rows, like the checks above. */
 export const outboundChannels = pgTable('outbound_channels', {
   id: id(),
   ...placeColumns(),
@@ -2093,7 +2091,7 @@ export const outboundChannels = pgTable('outbound_channels', {
   audience: text('audience', { enum: ['direct', 'public'] }).notNull(),
   status: text('status', { enum: ['new', 'active', 'stopped'] }).notNull().default('new'),
   generation: integer('generation').notNull().default(1),
-  stoppedReason: text('stopped_reason').$type<StopReason>(),
+  stoppedReason: text('stopped_reason'),
   stoppedAt: at('stopped_at'),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),
@@ -2115,7 +2113,7 @@ export const outboundPolicies = pgTable('outbound_policies', {
   channelId: uuid('channel_id').notNull(),
   revision: integer('revision').notNull(),
   digest: text('digest').notNull(),
-  value: jsonb('value').$type<OutboundPolicyValue>().notNull(),
+  value: jsonb('value').notNull(),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),
 }, t => [
@@ -2180,9 +2178,9 @@ export const outboundCatalogRevisions = pgTable('outbound_catalog_revisions', {
   channelId: uuid('channel_id'),
   entryId: uuid('entry_id').notNull(),
   revision: integer('revision').notNull(),
-  kind: text('kind', { enum: CATALOG_KINDS }).notNull(),
+  kind: text('kind').notNull(),
   locale: text('locale'),
-  value: jsonb('value').$type<CatalogValue>().notNull(),
+  value: jsonb('value').notNull(),
   digest: text('digest').notNull(),
   status: text('status', { enum: ['proposed', 'published', 'revoked'] }).notNull().default('proposed'),
   validFrom: at('valid_from').notNull().defaultNow(),
@@ -2299,8 +2297,8 @@ export const supportClassifications = pgTable('support_classifications', {
   status: text('status', { enum: ['pending', 'ready', 'unavailable'] }).notNull().default('pending'),
   classId: text('class_id'),
   requiresHuman: boolean('requires_human'),
-  reasonCodes: jsonb('reason_codes').$type<ReasonCode[]>().notNull().default([]),
-  reviewer: jsonb('reviewer').$type<ModelIdentity>(),
+  reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
+  reviewer: jsonb('reviewer'),
   decidedAt: at('decided_at'),
   createdAt: createdAt(),
 }, t => [
@@ -2340,8 +2338,8 @@ export const outboundMessages = pgTable('outbound_messages', {
   segmentId: uuid('segment_id'),
   samplingOrdinals: jsonb('sampling_ordinals').$type<Record<string, number>>().notNull().default({}),
   revision: integer('revision').notNull().default(1),
-  status: text('status', { enum: MESSAGE_STATUSES }).notNull(),
-  reasonCodes: jsonb('reason_codes').$type<GateCode[]>().notNull().default([]),
+  status: text('status').notNull(),
+  reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
   scheduledAt: at('scheduled_at').notNull(),
   createdAt: createdAt(),
   updatedAt: at('updated_at').notNull().defaultNow(),
@@ -2375,7 +2373,7 @@ export const outboundMessageRevisions = pgTable('outbound_message_revisions', {
   companyId: companyId(),
   messageId: uuid('message_id').notNull(),
   revision: integer('revision').notNull(),
-  document: jsonb('document').$type<MessageDocument>().notNull(),
+  document: jsonb('document').notNull(),
   contentDigest: text('content_digest').notNull(),
   sealedEnc: text('sealed_enc').notNull(),
   sourceRevisionsDigest: text('source_revisions_digest').notNull(),
@@ -2439,8 +2437,8 @@ export const outboundReviewReceipts = pgTable('outbound_review_receipts', {
   checkId: uuid('check_id').notNull().references(() => modelChecks.id),
   bindingDigest: text('binding_digest').notNull(),
   subjectDigest: text('subject_digest').notNull(),
-  reviewer: jsonb('reviewer').$type<ModelIdentity>().notNull(),
-  result: jsonb('result').$type<CheckResult>().notNull(),
+  reviewer: jsonb('reviewer').notNull(),
+  result: jsonb('result').notNull(),
   createdAt: createdAt(),
 }, t => [
   unique('outbound_review_receipts_once').on(t.messageId, t.messageRevision, t.bindingDigest),
@@ -2575,7 +2573,7 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   evaluatedAt: at('evaluated_at').notNull(),
   validUntil: at('valid_until').notNull(),
   status: text('status', { enum: ['active', 'invalidated'] }).notNull().default('active'),
-  invalidatedReason: text('invalidated_reason', { enum: INVALIDATION_CODES }),
+  invalidatedReason: text('invalidated_reason'),
   invalidatedAt: at('invalidated_at'),
   createdAt: createdAt(),
 }, t => [

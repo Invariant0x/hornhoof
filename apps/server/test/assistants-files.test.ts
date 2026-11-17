@@ -5,7 +5,7 @@ import { agents, assistants, attachments, companies, jobs, requests, subscriptio
 import { disposition, fileLink } from '../src/modules/assistants/files.js';
 import { callSkill } from '../src/modules/assistants/skills.js';
 import { WORDS } from '../src/modules/assistants/words.js';
-import { unsubscribeToken } from '../src/modules/outbound/contacts.js';
+import { signedToken } from '../src/crypto/tokens.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -149,7 +149,7 @@ describe('a link to one file, for its owner to open on a phone', () => {
     const url = fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', kept.id);
     const [payload, mac] = new URL(url).pathname.split('/').pop()!.split('.');
     const otherPayload = new URL(fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', other.id)).pathname.split('/').pop()!.split('.')[0];
-    const stop = unsubscribeToken(c.app.ctx.config.secret, { companyId: c.companyId, contactId: randomUUID(), channelId: randomUUID(), purpose: 'first_contact' });
+    const stop = signedToken(c.app.ctx.config.secret, 'another link', { f: kept.id, until: Date.now() + 60_000 });
     const wrong = [`${payload}.${mac!.slice(0, -1)}${mac!.endsWith('A') ? 'B' : 'A'}`, `${otherPayload}.${mac}`, stop, 'not-a-link', `${payload}.${mac}.x`];
     for (const link of wrong) {
       const got = await opened(c, `https://ann.hornhoof.org/api/files/${link}`);

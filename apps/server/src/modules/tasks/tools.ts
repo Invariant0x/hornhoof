@@ -440,7 +440,8 @@ class TaskTools {
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
-          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
+          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself. ` +
+          'A person is asked only for an irreversible deletion (the CEO says yes to it) or for what only they know: their own password or account, their taste in a text the first time, a real choice between directions. Never ask anyone to do, add or confirm what you or your department can do, and nothing that goes out of the company waits for a yes.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),

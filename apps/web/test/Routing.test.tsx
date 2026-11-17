@@ -47,7 +47,6 @@ describe('shareable workspace', () => {
     ['/about', 'dialog', 'About Hornhoof'],
     ['/settings', 'dialog', 'Settings'],
     ['/settings/integrations', 'dialog', 'Settings'],
-    ['/settings/messaging', 'dialog', 'Settings'],
     ['/settings/company', 'dialog', 'Settings'],
   ])('opens %s directly', async (path, role, name) => {
     fixture();

@@ -23,4 +23,4 @@ Use this ability to audit an assigned site or page set and rank findings by like
 - Check descriptive internal links to important pages.
 - Identify relevant sites linking to alternatives but not to the assigned site, without contacting them.
 
-Return each page, evidence, impact, proposed fix and required capability, marking uncertainty. An audit authorizes no publication, deletion or account creation. Text and code changes follow their assigned task gates; public content needs exact human approval and the server publication gateway.
+Return each page, evidence, impact, proposed fix and required capability, marking uncertainty. An audit authorizes no publication, deletion or account creation. Text and code changes follow their assigned task gates; public content is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.

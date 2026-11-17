@@ -15,4 +15,4 @@ Use this ability to write an assigned page, article, email or announcement. Inpu
 6. Keep one main action, worded consistently.
 7. Provide two headline options and a short reason for the preferred one.
 
-Return a draft with its channel, language and claim sources. It remains a draft until approved for use. Publication requires published catalog sources through the server outbound gateway and explicit approval of each exact public item; selecting this ability does not authorize sending or publishing.
+Return a draft with its channel, language and claim sources. It remains a draft until approved for use. Publication is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; selecting this ability does not authorize sending or publishing.

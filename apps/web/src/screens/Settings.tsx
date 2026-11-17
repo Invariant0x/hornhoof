@@ -9,7 +9,6 @@ import { Field } from '../ui/Field';
 import { INTEGRATIONS, Integrations } from '../ui/Integrations';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
-import { ExternalMessaging, OUTBOUND_PATH } from '../ui/Outbound';
 import { useScrollbarRoom } from '../ui/scrollbar-room';
 import { Themes } from '../ui/Themes';
 import { Vault, VAULT_PATH } from '../ui/Vault';
@@ -20,9 +19,9 @@ import { unavailableFailure } from './RouteUnavailable';
 /* The parts of the window in their order: Profile, then the four groups. Appearance & language has no group of its own in
    the address. */
 type Group = 'appearance' | SettingsGroup;
-const GROUPS: readonly Group[] = ['profile', 'appearance', 'integrations', 'passwords', 'messaging', 'company'];
+const GROUPS: readonly Group[] = ['profile', 'appearance', 'integrations', 'passwords', 'company'];
 /* What the window asks the server once it opens: a group shows only when the server gives this person what it holds. */
-const PROBES: readonly string[] = [...INTEGRATIONS.map(tool => tool.probe), VAULT_PATH, OUTBOUND_PATH];
+const PROBES: readonly string[] = [...INTEGRATIONS.map(tool => tool.probe), VAULT_PATH];
 
 /* The addresses of PROBES the server answered, or null until every one did. */
 function useReached(): ReadonlySet<string> | null {
@@ -48,7 +47,6 @@ const companyShown = (me: Me) => me.person.scopeKind === 'company' || me.person.
 function groupShown(group: Group, me: Me, reached: ReadonlySet<string> | null): boolean {
   if (group === 'company') return companyShown(me);
   if (group === 'integrations') return reached !== null && INTEGRATIONS.some(tool => reached.has(tool.probe));
-  if (group === 'messaging') return reached !== null && reached.has(OUTBOUND_PATH);
   if (group === 'passwords') return reached !== null && reached.has(VAULT_PATH);
   return true;
 }
@@ -236,10 +234,10 @@ function CompanyGroup({ me }: { me: Me }) {
   );
 }
 
-type GroupProps = { group: Group; me: Me; reached: ReadonlySet<string> | null; onRenamed?: (name: string) => void; onOpenTask: (id: string) => void };
+type GroupProps = { group: Group; me: Me; reached: ReadonlySet<string> | null; onRenamed?: (name: string) => void };
 
 /* What the open group holds, once the server said which groups this person has; one it does not give them says so. */
-function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps) {
+function GroupContent({ group, me, reached, onRenamed }: GroupProps) {
   const t = useT();
   if (group === 'profile') return <div className="settings-group"><NameForm me={me} onRenamed={onRenamed} /></div>;
   if (group === 'appearance') return <div className="settings-group"><LanguagePart /><Themes /></div>;
@@ -254,7 +252,7 @@ function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps)
   }
   if (group === 'company') return <CompanyGroup me={me} />;
   if (group === 'passwords') return <Vault />;
-  return group === 'integrations' ? <Integrations reached={reached!} /> : <ExternalMessaging onOpenTask={onOpenTask} />;
+  return <Integrations reached={reached!} />;
 }
 
 /* The open group under its heading, which takes the focus when the window opens, and what it holds in a line. */
@@ -296,16 +294,14 @@ type SettingsProps = {
   group?: SettingsGroup;
   onGroup?: (group?: SettingsGroup) => void;
   onRenamed?: (name: string) => void;
-  onOpenTask?: (id: string) => void;
   onClose: () => void;
 };
 
 const nothing = () => {};
 
-/* Settings, for everyone signed in: Profile, then five groups, Appearance & language, Integrations, Passwords, External
-   messaging and Company & access. Each has its own address under /settings, and the switch between them keeps what lies under the
-   window. */
-export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask = nothing, onClose }: SettingsProps) {
+/* Settings, for everyone signed in: Profile, then four groups, Appearance & language, Integrations, Passwords and Company &
+   access. Each has its own address under /settings, and the switch between them keeps what lies under the window. */
+export function Settings({ me, group, onGroup = nothing, onRenamed, onClose }: SettingsProps) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -338,7 +334,7 @@ export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask =
           <div className="settings-body">
             <GroupNav group={current} me={me} reached={reached} onGroup={onGroup} />
             <div className="settings-main">
-              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onOpenTask={onOpenTask} />
+              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} />
             </div>
           </div>
         </div>
