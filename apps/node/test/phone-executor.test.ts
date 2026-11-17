@@ -21,7 +21,7 @@ const PHOTO = screencap(true);
 const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN) {
+function phone(png = SCREEN, serial = SERIAL) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -29,8 +29,8 @@ function phone(png = SCREEN) {
   const adb = new PhoneAdb(async call => {
     calls.push(call);
     const a = call.args.join(' ');
-    if (a === `connect ${SERIAL}`) return Buffer.from(`connected to ${SERIAL}\n`);
-    if (a === 'devices -l') return Buffer.from(`List of devices attached\n${SERIAL} device model:Pixel_8 transport_id:1\n`);
+    if (a === `connect ${serial}`) return Buffer.from(`connected to ${serial}\n`);
+    if (a === 'devices -l') return Buffer.from(`List of devices attached\n${serial} device model:Pixel_8 transport_id:1\n`);
     if (a.endsWith('getprop ro.serialno')) return Buffer.from('R58MIDENTITY\n');
     if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
@@ -40,11 +40,11 @@ function phone(png = SCREEN) {
   });
   const out: (PhoneReply | PhoneFrame)[] = [];
   const phones = new PhoneExecutor({ adb, send: m => out.push(m) });
-  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial: SERIAL, hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
+  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial, hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
   const act = (n: number, operation: Extract<Parameters<PhoneExecutor['handle']>[0], { type: 'phone.action' }>['operation']) =>
     phones.handle({ type: 'phone.action', requestId: id(n), sessionId: SESSION, generation: 1, operation });
   const reply = (n: number) => out.find((m): m is PhoneReply => m.type === 'phone.reply' && m.requestId === id(n));
-  const shells = () => calls.filter(c => c.args.join(' ') === `-s ${SERIAL} shell`).map(c => c.input);
+  const shells = () => calls.filter(c => c.args.join(' ') === `-s ${serial} shell`).map(c => c.input);
   return { phones, calls, grant, act, reply, shells, open: () => phones.handle({ type: 'phone.open', requestId: id(5), grant }) };
 }
 
@@ -55,6 +55,18 @@ describe('phone messages on the execution node', () => {
     const p = phone();
     await p.phones.handle({ type: 'phone.probe', requestId: id(1), endpoint: SERIAL });
     expect(p.reply(1)).toEqual({ type: 'phone.reply', requestId: id(1), status: 'ok', devices: [{ serial: SERIAL, status: 'device', model: 'Pixel_8', hardwareKey: HARDWARE }] });
+  });
+
+  it('reaches a phone plugged by cable into the machine by its serial number, with no address to connect to', async () => {
+    const p = phone(SCREEN, 'ZF525LRDQS');
+    await p.phones.handle({ type: 'phone.probe', requestId: id(1), endpoint: 'ZF525LRDQS' });
+    expect(p.reply(1)).toMatchObject({ status: 'ok', devices: [{ serial: 'ZF525LRDQS', status: 'device', hardwareKey: HARDWARE }] });
+    await p.open();
+    await p.act(6, { kind: 'key', key: 'home' });
+    expect(p.reply(6)?.status).toBe('ok');
+    expect(p.shells()).toEqual(['input keyevent KEYCODE_HOME\n']);
+    expect(p.calls.some(c => c.args[0] === 'connect')).toBe(false);
+    p.phones.close();
   });
 
   it('sends the agent\'s tap in the phone\'s own pixels and its text, a login and password too, as the agent gave them', async () => {

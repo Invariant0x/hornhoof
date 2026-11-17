@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { PhoneAdb, privateAdbEnvironment, type AdbCall } from '../src/phones/adb.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PhoneAdb, privateAdb, privateAdbEnvironment, type AdbCall } from '../src/phones/adb.js';
 
 describe('the phone adb boundary', () => {
   it('keeps the adb server off TCP and its keys and trace out of agent users', () => {
@@ -9,6 +12,17 @@ describe('the phone adb boundary', () => {
     expect(env.ANDROID_USER_HOME).toBe('/data/phone-adb');
     expect(env.ADB_TRACE).toBe('');
   });
+  it('uses the adb server of the machine a phone is plugged into once that machine puts its socket into the node\'s folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phone-adb-'));
+    const adb = join(dir, 'adb');
+    writeFileSync(adb, '#!/bin/sh\nprintf %s "$ADB_SERVER_SOCKET"\n', { mode: 0o755 });
+    const run = privateAdb(adb, join(dir, 'keys'));
+    const server = async () => (await run({ args: ['devices'], signal: new AbortController().signal })).toString();
+    expect(await server()).toMatch(/^localfilesystem:\/tmp\/hornhoof-adb-[a-f0-9]+\/server$/);
+    writeFileSync(join(dir, 'keys', 'host.sock'), '');
+    expect(await server()).toBe(`localfilesystem:${join(dir, 'keys', 'host.sock')}`);
+  });
+
   it('pairs with the Android screen code through stdin, never argv or a returned message', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.from('Enter pairing code: Successfully paired to 192.168.1.80:37123 [guid=recorded]\n'); });
