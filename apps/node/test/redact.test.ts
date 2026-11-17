@@ -21,9 +21,24 @@ describe('words that look like a key', () => {
     ['AbCd1234EfGh5678IjKl9012MnOp', 'key [hidden] refused'],
     ['0123456789abcdef0123456789abcdef', 'key [hidden] refused'],
     ['Bearer marker7c41abcdefghijklmnopqrstuvwxyz', 'key Bearer [hidden] refused'],
+    ['Bearer prefix~marker7lowercase', 'key Bearer [hidden] refused'],
+    ['Bearer ~marker7lowercase', 'key Bearer [hidden] refused'],
     ['Basic dXNlcjpwYXNz', 'key Basic [hidden] refused'],
   ])('hides %s', (key, shown) => {
     expect(hideKeyLike(`key ${key} refused`)).toBe(shown);
+  });
+
+  it.each([
+    ['https://provider.invalid/?access_token=marker7lowercase&state=ready', 'https://provider.invalid/?access_token=[hidden]&state=ready'],
+    ['{"access_token":"marker7lowercase"}', '{"access_token":"[hidden]"}'],
+    ['refresh_token=marker7lowercase', 'refresh_token=[hidden]'],
+    ['id_token=marker7lowercase', 'id_token=[hidden]'],
+  ])('hides a named OAuth credential regardless of its entropy: %s', (text, shown) => {
+    expect(hideKeyLike(text)).toBe(shown);
+  });
+
+  it('keeps an already hidden OAuth value stable when a snapshot masks it again', () => {
+    expect(hideKeyLike('access_token=[hidden]')).toBe('access_token=[hidden]');
   });
 
   it.each([

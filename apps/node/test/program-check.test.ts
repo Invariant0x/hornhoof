@@ -1,8 +1,16 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CheckedInstalls, REINSTALLS, startsCheck, type Repair } from '../src/program-check.js';
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 /* What Claude Code said on node 7e79f787 (0.29.1, Windows in Docker) when npm had left out its platform-native package,
    as Ivan recorded it on 16.11; it ended with code 1. */
@@ -17,7 +25,12 @@ beforeEach(() => {
   bin = join(dir, 'bin', 'claude');
   runs = join(dir, 'runs');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 /* The program as the install left it: it prints its words, counts each start and ends with its code. */
 function program(code: number, words: string): void {
@@ -36,6 +49,32 @@ function installs(...shapes: (() => void)[]) {
 }
 
 describe('whether an installed program starts', () => {
+  it('checks a root-owned installation without agent runtime settings or node secrets', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+    for (const [name, value] of Object.entries({
+      HOME: dir, TMPDIR: dir, PATH: '/agent-writable/bin',
+      NODE_OPTIONS: '--require=/agent-writable/start.cjs', NODE_PATH: dir,
+      NODE_KEY: 'private-node-marker', HORNHOOF_SECRET: 'private-server-marker',
+    })) vi.stubEnv(name, value);
+    let checkedHome = '';
+    let settings: { env?: NodeJS.ProcessEnv; cwd?: unknown } = {};
+    vi.mocked(spawn).mockImplementationOnce((_bin, _args, options) => {
+      settings = { env: options?.env, cwd: options?.cwd };
+      checkedHome = options?.env?.HOME ?? '';
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 90001 });
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child as unknown as ChildProcess;
+    });
+    expect(await startsCheck(bin)).toEqual({ ok: true });
+    expect(settings.env?.PATH).toBe('/usr/local/bin:/usr/bin:/bin');
+    expect(checkedHome).not.toBe(dir);
+    expect(checkedHome.startsWith('/tmp/hh-install-')).toBe(true);
+    expect(settings.cwd).toBe(checkedHome);
+    for (const name of ['NODE_OPTIONS', 'NODE_PATH', 'NODE_KEY', 'HORNHOOF_SECRET']) expect(settings.env?.[name], name).toBeUndefined();
+    expect(existsSync(checkedHome)).toBe(false);
+  });
+
   it('hides a known secret before shortening the diagnostic', async () => {
     const secret = `private-${'s'.repeat(240)}-marker`;
     program(1, `Cannot start with ${secret}`);
