@@ -7,7 +7,7 @@ import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 
 export type BacklogItem = typeof backlogItems.$inferSelect;
-export type BacklogItemView = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };
+type BacklogItemView = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };
 
 const changed = () => new ApiError(409, 'conflict', 'The list changed meanwhile: some of these items are no longer in it. Read it again.', 'backlog_changed');
 

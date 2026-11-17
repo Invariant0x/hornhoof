@@ -309,7 +309,7 @@ describe("getting a message's picture", () => {
     const old = await uploaded(app, ceo, bruno.id);
     const fresh = await uploaded(app, ceo, bruno.id);
     await db.update(attachments).set({ createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) }).where(eq(attachments.id, old.id));
-    expect(await dropOldFiles(db, new Date())).toBe(1);
+    expect(await dropOldFiles(app.ctx, new Date())).toBe(1);
     expect((await db.select(idOnly(attachments)).from(attachments)).map(a => a.id)).toEqual([fresh.id]);
   });
 });

@@ -13,7 +13,7 @@ import { builtinMachine } from '../nodes/nodes.js';
 /* The CEO's request to move the server to another machine: one row of net.move at a time. preparing: the target gets
    its copy and commits come to wait for it; switching: the keepers hand the server over; failed: it did not move, and
    the row says why until it is taken off or replaced. */
-export type MoveState = 'preparing' | 'switching' | 'failed';
+type MoveState = 'preparing' | 'switching' | 'failed';
 
 /* The request as the Machines tab shows it. machine: the target's row; leader: the hostname of the machine that led
    when it was asked; progress: how far the target's copy is while it is not ready. */

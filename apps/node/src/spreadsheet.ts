@@ -2,18 +2,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { crc32, deflateRawSync } from 'node:zlib';
 
-export type SpreadsheetCell = string | number | boolean | null | undefined;
+type SpreadsheetCell = string | number | boolean | null | undefined;
 
-export type SpreadsheetSheet = {
+type SpreadsheetSheet = {
   name?: string;
   headers?: string[];
   rows: SpreadsheetCell[][];
 };
-
-export type SpreadsheetInput =
-  | Record<string, unknown>[]
-  | SpreadsheetCell[][]
-  | { sheets: (SpreadsheetSheet | { name?: string; rows: Record<string, unknown>[] })[] };
 
 const USAGE = 'Usage: hh-xlsx <input.json|input.csv|input.tsv|-> <output.xlsx|output.csv>';
 

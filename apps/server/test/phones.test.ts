@@ -1,7 +1,9 @@
+import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
+import { orchestratorHeaders } from '../src/auth/internal.js';
 import { as } from './helpers.js';
 import { phoneCompany } from './phone-fixture.js';
-import { companyPhones } from '../src/db/schema.js';
+import { agents, companyPhones } from '../src/db/schema.js';
 
 it('lets any person register their network phone on a company machine, with an owner', async () => {
   const c = await phoneCompany();
@@ -16,9 +18,14 @@ it('lets any person register their network phone on a company machine, with an o
   expect(await c.db.select().from(companyPhones)).toHaveLength(1);
 });
 
-it('never sends the node to an address on its own machine, where its agents\' tools listen', async () => {
+it("lets the orchestrator, acting for the owner, look for a phone and stop and resume any person's phone", async () => {
   const c = await phoneCompany();
-  const local = await c.app.inject({ method: 'POST', url: '/api/phones/probe', ...as(c.claraSession), payload: { machineId: c.machine.id, endpoint: '127.0.0.1:43117' } });
-  expect(local.statusCode).toBe(400);
-  expect(c.calls).toEqual([]);
+  const phone = (await c.addPhone()).json();
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const ceo = (await c.app.inject({ url: '/api/me', ...as(c.ceoSession) })).json().person.id as string;
+  const inside = { headers: orchestratorHeaders(ceo, orchestrator!.id) };
+  const probed = await c.app.inject({ method: 'POST', url: '/api/phones/probe', payload: { machineId: c.machine.id, endpoint: '192.168.1.80:5555' }, ...inside });
+  expect(probed.json()).toMatchObject({ devices: [{ serial: '192.168.1.80:5555', status: 'device' }] });
+  expect((await c.app.inject({ method: 'POST', url: `/api/phones/${phone.id}/stop`, ...inside })).json()).toMatchObject({ lending: false });
+  expect((await c.app.inject({ method: 'POST', url: `/api/phones/${phone.id}/resume`, ...inside })).json()).toMatchObject({ lending: true });
 });

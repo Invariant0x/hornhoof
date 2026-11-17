@@ -11,11 +11,11 @@ import { freshState } from '../keeper/state.js';
 
 const GoOnBody = z.object({ networkId: z.string().regex(/^[0-9a-f]{32}([0-9a-f]{32})?$/), reach: z.string().max(64).nullable() });
 
-const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO answers this, from his own session.', 'not_owner_session');
+const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO answers this, by himself or through the orchestrator.', 'not_owner_session');
 const changed = () => new ApiError(409, 'conflict', 'The question changed. Look again.', 'question_changed');
 
-/* The CEO himself: not the orchestrator acting for him, and not his assistant. */
-const ownSession = (me: Person): boolean => me.isOwner && !me.via && !me.assistant;
+/* The CEO himself, or the orchestrator acting for him: not a head, and not his assistant. */
+const ownSession = (me: Person): boolean => me.isOwner && !me.viaHead && !me.assistant;
 
 /* The question a copy puts to the CEO while the machine that leads is gone and the copy may lack changes, as the app
    of that copy shows it, and the CEO's answer, which goes to this machine's keeper through the control folder. The

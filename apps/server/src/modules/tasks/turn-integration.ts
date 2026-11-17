@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { companies, departments, turns } from '../../db/schema.js';
+import { companies, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './engine.js';
@@ -30,18 +30,6 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   return { repo: found.repo, branch: `turn-${turn.number}`, turn };
 }
 
-/* Whether the result goes to its own main line straight, read without opening any turn: the first of its product and
-   department that keeps a repository is a part of a department. A top-level department's results join its open turn, and
-   one that keeps no repository has nothing to integrate. */
-export async function goesStraightToMain(db: Ctx['db'] | Tx, task: Pick<Task, 'productId' | 'departmentId'>): Promise<boolean> {
-  for (const id of [task.productId, task.departmentId]) {
-    if (!id) continue;
-    const [d] = await db.select({ repoUrl: departments.repoUrl, parentId: departments.parentId }).from(departments).where(eq(departments.id, id));
-    if (d?.repoUrl) return d.parentId !== null;
-  }
-  return false;
-}
-
 /* A branch at head holds commit: it is there, or the branch went on from it. GitHub says so by the status of their comparison,
    however many files it has; where it cannot, only a whole comparison proves it. Anything unread proves nothing. */
 export async function branchHolds(ctx: Reader, repo: Repo, head: string, commit: string): Promise<boolean> {
@@ -69,7 +57,7 @@ export async function headOf(ctx: Reader, repo: Repo, branch: string): Promise<s
 
 type Maker = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'readBranches' | 'createBranch'>>;
 type Heads = Awaited<ReturnType<NonNullable<Ctx['readBranches']>>>;
-export type TurnBranch = { head: string; made: boolean } | { problem: string };
+type TurnBranch = { head: string; made: boolean } | { problem: string };
 
 /* Where a turn's branch is made from: the commit the turn starts from, else the release it came from, else main's head. */
 const startOf = (turn: Turn, heads: Record<string, string>, main: string): string | undefined => turn.startCommit ?? turn.baseCommit ?? heads[main];

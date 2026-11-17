@@ -76,7 +76,7 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
   }, { auth, network }).then(() => Buffer.concat(chunks));
 }
 
-export async function repositoryCacheRoot(source: Pick<Source, 'url'>, scope: RepositoryScope, context: CacheContext): Promise<string> {
+async function repositoryCacheRoot(source: Pick<Source, 'url'>, scope: RepositoryScope, context: CacheContext): Promise<string> {
   RepositoryScope.parse(scope);
   const url = new URL(source.url);
   if (url.username || url.password) throw new Error('Repository credentials must be supplied separately.');

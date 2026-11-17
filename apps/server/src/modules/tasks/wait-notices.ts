@@ -15,7 +15,7 @@ import { quietRecipient, waitOrchestrator } from './wait-recipients.js';
 import { quietDepartment } from './wait-observations.js';
 
 type Writer = Pick<Db, 'insert'>;
-export type NewWaitNotice = typeof waitNotices.$inferInsert;
+type NewWaitNotice = typeof waitNotices.$inferInsert;
 type Notice = typeof waitNotices.$inferSelect;
 const pending = and(isNull(waitNotices.deliveredAt), isNull(waitNotices.cancelledAt));
 const LEASE_MS = 2 * 60_000;

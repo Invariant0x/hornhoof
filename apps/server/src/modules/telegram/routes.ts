@@ -25,10 +25,11 @@ export async function telegramOf(db: Db, agentId: string): Promise<TelegramView>
 }
 
 /* People with the whole company give an agent a bot or take it off, and so does the person responsible for a head's
-   department, who runs it as the CEO does; the orchestrator is in no department. Always from their own screen. */
+   department, who runs it as the CEO does; the orchestrator is in no department. From their own screen, or through the
+   orchestrator, never a head. */
 async function requireBotKeeper(db: Db, me: Person, agent: AgentRow): Promise<void> {
   await requireDepartmentChanger(db, me, agent.kind === 'orchestrator' ? null : agent.departmentId);
-  if (me.via) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen.', 'company_scope_only');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen, or the orchestrator.', 'company_scope_only');
 }
 
 const unreachable = () => new ApiError(503, 'unavailable', 'Telegram does not answer now. Try again in a few minutes.', 'telegram_unreachable');

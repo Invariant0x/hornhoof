@@ -14,7 +14,7 @@ import { notStep } from '../tools/steps.js';
 type Case = typeof programOperatorCases.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 /* How a hold ended. A closed case proves a recovery only with its continuation: the outcome says which it was. */
-export type HoldEnd = { outcome: string; text: string; actor?: MessageParty };
+type HoldEnd = { outcome: string; text: string; actor?: MessageParty };
 const BY_OWNER: HoldEnd = { outcome: 'owner_recovered', text: 'The owner passed the screen; the original words continue once.' };
 const AT_PROMPT: HoldEnd = { outcome: 'went_on', text: 'The program stood ready with an empty input; the original words continue once.' };
 const PROGRAM_GONE: HoldEnd = { outcome: 'program_gone', text: 'The program that waited for the words is gone; the original words continue once.' };

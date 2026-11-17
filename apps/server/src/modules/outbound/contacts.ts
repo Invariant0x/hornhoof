@@ -1,9 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Checker } from '../../checker.js';
-import { encryptSecret } from '../../crypto/secrets.js';
+import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
+import { signedBody, signedToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { outboundChannels, outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
@@ -11,6 +11,7 @@ import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
 import { cancelQueuedTo } from './policies.js';
+import { addersOf } from './setup-log.js';
 
 /* Whom a company may write to and what they said about it. One row for one address, sealed. A refusal is for good: nothing
    imported later brings a contact back, and a queued message to them is cancelled in the step that records it. */
@@ -63,22 +64,51 @@ export async function addContact(ctx: Pick<Ctx, 'db' | 'config'>, input: NewCont
   });
 }
 
-/* The place a permission is of: that of its channel. */
-export async function permissionPlace(db: Pick<Db, 'select'>, companyId: string, permissionId: string): Promise<{ departmentId: string }> {
-  const [place] = await db.select(only(outboundChannels, 'departmentId')).from(outboundPermissions).innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId)).where(and(eq(outboundPermissions.id, permissionId), eq(outboundPermissions.companyId, companyId)));
+/* The place a permission is of: that of its channel, with the kind of its address. */
+export async function permissionPlace(db: Pick<Db, 'select'>, companyId: string, permissionId: string): Promise<{ departmentId: string; channelId: string; kind: ContactKind }> {
+  const [place] = await db
+    .select({ departmentId: outboundChannels.departmentId, channelId: outboundChannels.id, kind: outboundContacts.kind })
+    .from(outboundPermissions)
+    .innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId))
+    .innerJoin(outboundContacts, eq(outboundContacts.id, outboundPermissions.contactId))
+    .where(and(eq(outboundPermissions.id, permissionId), eq(outboundPermissions.companyId, companyId)));
   if (!place) throw notFound();
   return place;
 }
 
-/* A permission taken back. A message waiting on it finds out at its last look. */
-export async function revokePermission(ctx: Pick<Ctx, 'db'>, at: { companyId: string; permissionId: string }, now = new Date()): Promise<void> {
-  await ctx.db.transaction(async tx => {
+/* A permission taken back, and whether it was in force until now. A message waiting on it finds out at its last look. */
+export async function revokePermission(ctx: Pick<Ctx, 'db'>, at: { companyId: string; permissionId: string }, now = new Date()): Promise<boolean> {
+  return ctx.db.transaction(async tx => {
     const [permission] = await tx.select().from(outboundPermissions).where(and(eq(outboundPermissions.id, at.permissionId), eq(outboundPermissions.companyId, at.companyId)));
     if (!permission) throw notFound();
     const contact = await theContact(tx, at.companyId, permission.contactId);
-    await tx.update(outboundPermissions).set({ status: 'revoked', revokedAt: now }).where(and(eq(outboundPermissions.id, permission.id), eq(outboundPermissions.status, 'granted')));
+    const taken = await tx.update(outboundPermissions).set({ status: 'revoked', revokedAt: now }).where(and(eq(outboundPermissions.id, permission.id), eq(outboundPermissions.status, 'granted'))).returning(only(outboundPermissions, 'id'));
     await record(tx, { contact, kind: 'consent_revoked', dedupKey: `revoke:${permission.id}`, evidenceDigest: digestOf(permission.id), now });
+    return taken.length > 0;
   });
+}
+
+const SHOWN = 200;
+
+/* The addresses added to a department's channels, newest first, for the people who run it: each with its channel's
+   purpose, its consent and when it was given or taken back, and who added it where the setup log says so. */
+export async function contactsOf(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, departmentId: string) {
+  const rows = await ctx.db
+    .select({
+      permissionId: outboundPermissions.id, channelId: outboundPermissions.channelId, kind: outboundContacts.kind, addressEnc: outboundContacts.addressEnc,
+      purpose: outboundPermissions.purpose, source: outboundPermissions.source, status: outboundPermissions.status,
+      grantedAt: outboundPermissions.grantedAt, revokedAt: outboundPermissions.revokedAt, doNotContact: outboundContacts.doNotContact,
+    })
+    .from(outboundPermissions)
+    .innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId))
+    .innerJoin(outboundContacts, eq(outboundContacts.id, outboundPermissions.contactId))
+    .where(and(eq(outboundPermissions.companyId, companyId), eq(outboundChannels.departmentId, departmentId)))
+    .orderBy(desc(outboundPermissions.grantedAt))
+    .limit(SHOWN);
+  const added = await addersOf(ctx.db, companyId, rows.map(row => row.permissionId));
+  return rows.map(({ addressEnc, grantedAt, revokedAt, ...row }) => ({
+    ...row, address: decryptSecret(addressEnc, ctx.config.secret), grantedAt: grantedAt.toISOString(), revokedAt: revokedAt?.toISOString() ?? null, addedBy: added.get(row.permissionId) ?? null,
+  }));
 }
 
 /* A refusal, once: no more permissions, and what waits for this contact is cancelled in the same step. The contact is held,
@@ -102,33 +132,13 @@ export async function suppressContact(ctx: Pick<Ctx, 'db'>, at: { companyId: str
 export type UnsubscribeTarget = { companyId: string; contactId: string; channelId: string; purpose: string };
 const TokenBody = z.strictObject({ c: z.uuid(), k: z.uuid(), h: z.uuid(), p: z.string().min(1) });
 
-/* Its own key, so that no other signature of this server is ever one of these. */
-const macOf = (secret: Buffer, payload: string): Buffer => createHmac('sha256', secret).update(`hornhoof outbound unsubscribe v1\n${payload}`).digest();
+/* Its own purpose, so that no other signature of this server is ever one of these. */
+const UNSUBSCRIBE = 'hornhoof outbound unsubscribe v1';
 
-export function unsubscribeToken(secret: Buffer, t: UnsubscribeTarget): string {
-  const payload = Buffer.from(JSON.stringify({ c: t.companyId, k: t.contactId, h: t.channelId, p: t.purpose })).toString('base64url');
-  return `${payload}.${macOf(secret, payload).toString('base64url')}`;
-}
-
-const parseBody = (payload: string) => {
-  try {
-    return TokenBody.safeParse(JSON.parse(Buffer.from(payload, 'base64url').toString()));
-  } catch {
-    return { success: false as const };
-  }
-};
-
-const signedBy = (secret: Buffer, payload: string, mac: string): boolean => {
-  const want = macOf(secret, payload);
-  const got = Buffer.from(mac, 'base64url');
-  return got.length === want.length && timingSafeEqual(got, want);
-};
+export const unsubscribeToken = (secret: Buffer, t: UnsubscribeTarget): string => signedToken(secret, UNSUBSCRIBE, { c: t.companyId, k: t.contactId, h: t.channelId, p: t.purpose });
 
 export function readUnsubscribeToken(secret: Buffer, token: string): UnsubscribeTarget | null {
-  const [payload, mac, ...rest] = token.split('.');
-  if (!payload || !mac || rest.length) return null;
-  if (!signedBy(secret, payload, mac)) return null;
-  const body = parseBody(payload);
+  const body = TokenBody.safeParse(signedBody(secret, UNSUBSCRIBE, token));
   return body.success ? { companyId: body.data.c, contactId: body.data.k, channelId: body.data.h, purpose: body.data.p } : null;
 }
 

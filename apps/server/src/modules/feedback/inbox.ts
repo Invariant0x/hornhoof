@@ -17,8 +17,8 @@ export type Priority = 'high' | 'normal' | 'low';
 const HOUR = 60 * 60 * 1000;
 /* What one installation may send in an hour, and how many new cards all of them may open in an hour together, so made-up
    installations cannot fill the list. */
-export const REPORTS_PER_HOUR = 10;
-export const NEW_CARDS_PER_HOUR = 200;
+const REPORTS_PER_HOUR = 10;
+const NEW_CARDS_PER_HOUR = 200;
 /* Every signal consumes the shared budget, even when its report repeats an existing card under a made-up installation. */
 const SIGNALS_PER_HOUR = 2000;
 /* What a card keeps of the versions and machines its signals came with. */
@@ -27,7 +27,7 @@ const KEPT = 20;
 const LISTED = 500;
 
 /* A bug many installations have comes first; then any other bug and anything many asked for; then the rest. */
-export function priorityOf(kind: Kind, installations: number): Priority {
+function priorityOf(kind: Kind, installations: number): Priority {
   if (kind === 'bug' && installations >= 3) return 'high';
   if (kind === 'bug' || installations >= 3) return 'normal';
   return 'low';
