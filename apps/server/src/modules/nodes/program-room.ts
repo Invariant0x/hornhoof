@@ -16,11 +16,12 @@ export const START_FREE_BYTES = PROGRAM_BYTES + WORKER_BYTES;
    not show its prompt within two minutes fails its turn. */
 const STARTING_MS = 2 * 60_000;
 
-/* live: the agents whose programs run on the node as it said last, null while it says nothing of them. starting: the
-   agents a turn went out to start a program for, and when. waiting: the agents whose turns wait for room on it. easing:
-   turns waited for room there, and they go one with each report until none waits. sent: the turns that went out to the
-   node since its last report. working: the turns that run on it, as of its last report and the ones sent since. */
-type Room = { live: Set<string> | null; starting: Map<string, number>; waiting: Set<string>; easing: boolean; sent: number; working: number };
+/* live: the agents whose programs run on the node as it said last, null while it says nothing of them; liveAt: when it
+   said so. starting: the agents a turn went out to start a program for, and when. waiting: the agents whose turns wait for
+   room on it. easing: turns waited for room there, and they go one with each report until none waits. sent: the turns
+   that went out to the node since its last report. working: the turns that run on it, as of its last report and the ones
+   sent since. */
+type Room = { live: Set<string> | null; liveAt: number; starting: Map<string, number>; waiting: Set<string>; easing: boolean; sent: number; working: number };
 
 const rooms = new WeakMap<NodeHub, Map<string, Room>>();
 
@@ -29,7 +30,7 @@ function roomOf(ctx: Ctx, node: NodeIdentity): Room {
   rooms.set(ctx.hub, all);
   let room = all.get(keyOf(node));
   if (!room) {
-    room = { live: null, starting: new Map(), waiting: new Set(), easing: false, sent: 0, working: 0 };
+    room = { live: null, liveAt: 0, starting: new Map(), waiting: new Set(), easing: false, sent: 0, working: 0 };
     all.set(keyOf(node), room);
   }
   return room;
@@ -62,6 +63,7 @@ export function overloaded(load: NodeLoad): boolean {
 export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | undefined, working?: number): string[] {
   const room = roomOf(ctx, node);
   room.live = live ? new Set(live) : null;
+  room.liveAt = Date.now();
   room.sent = 0;
   if (working !== undefined) room.working = working;
   const load = ctx.hub.loadOf(node);
@@ -74,6 +76,12 @@ export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | unde
   const waited = [...room.waiting];
   room.waiting.clear();
   return waited;
+}
+
+/* The agents whose programs run on the node as it said last, and when it said so; null while it says nothing of them. */
+export function livePrograms(ctx: Ctx, node: NodeIdentity): { agents: ReadonlySet<string>; at: number } | null {
+  const room = rooms.get(ctx.hub)?.get(keyOf(node));
+  return room?.live ? { agents: room.live, at: room.liveAt } : null;
 }
 
 /* Whether a turn of this agent may go to the node now. On a machine that works past what it carries an employee's turn

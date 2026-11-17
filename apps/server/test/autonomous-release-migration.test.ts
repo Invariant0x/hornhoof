@@ -1,8 +1,8 @@
-import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 const ACME = '00000000-0000-4000-8000-000000000a11';
 const DEV = '00000000-0000-4000-8000-000000000b11';
@@ -10,7 +10,7 @@ const TASK = '00000000-0000-4000-8000-000000000c11';
 
 describe('the autonomous release migration', { timeout: 60_000 }, () => {
   it('migrates an existing company with autonomous_release = false and creates the autonomous_releases journal table', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     await migrate(drizzle(client), { migrationsFolder: await migrationsBefore('autonomous_release') });
     await client.exec(`

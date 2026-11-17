@@ -2,6 +2,7 @@ import { OperatorDelivery, type OperatorDelivery as Delivery } from '@hornhoof/p
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agentEvents, programDeliveries } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 
 type Attempt = { delivery: Delivery; jobId: string; digest: string };
 const live = new WeakMap<object, Map<string, Attempt>>();
@@ -24,7 +25,7 @@ export async function sourceDeliveryForJob(db: Db, agentId: string, jobId: strin
 }
 
 export async function sourceDeliveryMetadataForJob(db: Db, agentId: string, jobId: string): Promise<Delivery | undefined> {
-  const [event] = await db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.jobId, jobId), sql`${agentEvents.data}->'operatorDelivery' is not null`)).orderBy(asc(agentEvents.seq)).limit(1);
+  const [event] = await db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.jobId, jobId), sql`${agentEvents.data}->'operatorDelivery' is not null`)).orderBy(asc(agentEvents.seq)).limit(1);
   const value = event?.data as { operatorDelivery?: unknown } | undefined;
   const parsed = OperatorDelivery.safeParse(value?.operatorDelivery);
   if (!parsed.success) return;

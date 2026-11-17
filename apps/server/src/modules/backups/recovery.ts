@@ -6,6 +6,7 @@ import type { Person } from '../../auth/session.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { companies, recoveryKeys } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { tunnelSettings } from '../link/link.js';
 import { authorityOf } from '../network/store.js';
@@ -45,7 +46,7 @@ async function fileLink(db: Db, config: Config) {
   return link && !link.hidden ? link : null;
 }
 
-export type ActiveRecovery = { id: string; recipient: string; madeAt: Date; madeBy: string; link: RecoveryLink | null };
+type ActiveRecovery = { id: string; recipient: string; madeAt: Date; madeBy: string; link: RecoveryLink | null };
 
 /* The company's recovery key now: the newest one not retired, when the link it was saved with is the link now. With the
    link taken, renamed or removed since, there is none, and bundles are sealed without one until a new file is saved. */
@@ -58,7 +59,7 @@ export async function activeRecovery(db: Db, config: Config): Promise<ActiveReco
 
 /* Whether a key that is not retired was saved with another link than the one now: a new file is due. */
 export async function linkChanged(db: Db, config: Config): Promise<boolean> {
-  const [newest] = await db.select({ linkPrint: recoveryKeys.linkPrint }).from(recoveryKeys).where(isNull(recoveryKeys.retiredAt)).orderBy(desc(recoveryKeys.madeAt), desc(recoveryKeys.id)).limit(1);
+  const [newest] = await db.select(only(recoveryKeys, 'linkPrint')).from(recoveryKeys).where(isNull(recoveryKeys.retiredAt)).orderBy(desc(recoveryKeys.madeAt), desc(recoveryKeys.id)).limit(1);
   return Boolean(newest) && newest!.linkPrint !== linkPrint(await fileLink(db, config));
 }
 
@@ -71,7 +72,7 @@ export async function makeRecoveryFile(db: Db, config: Config, me: Person): Prom
   const recipient = await identityToRecipient(identity);
   const link = await fileLink(db, config);
   const madeAt = new Date();
-  const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
+  const [company] = await db.select(only(companies, 'name')).from(companies).where(eq(companies.id, me.companyId));
   await db.transaction(async tx => {
     await tx.update(recoveryKeys).set({ retiredAt: madeAt }).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt)));
     await tx.insert(recoveryKeys).values({ companyId: me.companyId, recipient, linkPrint: linkPrint(link), linkName: link?.name ?? null, linkUrl: link?.url ?? null, madeBy: me.id, madeAt });

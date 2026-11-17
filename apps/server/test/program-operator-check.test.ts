@@ -3,6 +3,7 @@ import type { OperatorCheck } from '@hornhoof/protocol/program-operator';
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { agentEvents, attachments, jobs, machines, nodes, programOperatorCases, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { agentCasePicture } from '../src/modules/program-operator/attachments.js';
 import { reserveDelivery, wordsDigest } from '../src/modules/program-operator/deliveries.js';
@@ -77,7 +78,7 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   const [picture] = await picturesOf(c, turn.id);
   expect(Buffer.from(picture!.bytes).equals(render(cells, [secret]))).toBe(true);
   expect(Buffer.from(picture!.bytes).equals(render(cells))).toBe(false);
-  const stored = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.jobId, turn.id));
+  const stored = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(eq(agentEvents.jobId, turn.id));
   expect(JSON.stringify(stored)).not.toContain('the words nobody sent');
   expect(JSON.stringify(stored)).not.toContain(secret);
 });

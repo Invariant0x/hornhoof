@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { fromAgent, type Peer } from '../src/terminal/peer.js';
-import { claudeProgram } from '../src/terminal/programs.js';
+import { agyProgram, claudeProgram, codexProgram, type TermProgram } from '../src/terminal/programs.js';
+import { real } from './real-screens.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const sample = JSON.parse(readFileSync(new URL('./fixtures/hook-owner-reparented.json', import.meta.url), 'utf8')) as {
@@ -93,7 +94,7 @@ it('repeats one failed tmux lookup for a status hook instead of requiring a clie
 
 describe('screen evidence independent of a lost end hook', () => {
   const idle = '● Done.\n✻ Worked for 4s · done 10:47 AM\n────────────────────\n❯ \n────────────────────\n  ⏵⏵ bypass permissions on';
-  async function facts(screen: string, pending = false) {
+  async function facts(screen: string, pending = false, program: TermProgram = claudeProgram) {
     const home = mkdtempSync(join(tmpdir(), 'hh-screen-idle-'));
     stops.push(() => rmSync(home, { recursive: true, force: true }));
     const tmux = new Tmux({ env: { HOME: home } });
@@ -103,7 +104,7 @@ describe('screen evidence independent of a lost end hook', () => {
     const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], operator: { dir: join(home, 'operator'), send: () => true, connected: () => true } });
     stops.push(() => host.stop());
     const a = host['agent']('own');
-    a.program = claudeProgram; a.instance = 'program-1'; a.busy = true; a.took = true;
+    a.program = program; a.instance = 'program-1'; a.busy = true; a.took = true;
     if (pending) a.calls.set('pending', { name: 'Bash', at: 0 });
     return host['programFacts']('own');
   }
@@ -119,6 +120,14 @@ describe('screen evidence independent of a lost end hook', () => {
     readFileSync(new URL('./fixtures/claude-busy-screen.txt', import.meta.url), 'utf8'),
   ])('keeps work or uncertain input working', async screen => {
     expect(await facts(screen)).toMatchObject({ working: true });
+  });
+
+  it.each([
+    ['codex', codexProgram, real('codex-0.166.0-long-session')],
+    ['antigravity', agyProgram, readFileSync(new URL('./fixtures/agy-tui/screen-done.ansi', import.meta.url), 'utf8')],
+  ] as const)('reports completed %s idle independently, while a pending tool still prevents completion', async (_kind, program, screen) => {
+    expect(await facts(screen, false, program)).toMatchObject({ working: false, input: 'empty' });
+    expect(await facts(screen, true, program)).toMatchObject({ working: true, tool: 'Bash' });
   });
 
   it('keeps a pending tool working even at a completed empty screen', async () => {

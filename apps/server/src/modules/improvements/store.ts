@@ -3,14 +3,15 @@ import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, FEEDBACK_KINDS, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { fingerprintOfReport } from '../feedback/inbox.js';
 import { fateOf } from '../feedback/released.js';
 import type { Tx } from '../tasks/engine.js';
 
-export type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
-export type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];
+type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
+type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];
 /* How many closed ones are listed; every one that waits or is in work is. */
 const CLOSED_LISTED = 200;
 const ACTIVE: readonly ImprovementStatus[] = ['open', 'taken'];
@@ -49,7 +50,7 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'> & Fate, companyId: s
   const active = statuses.filter(s => ACTIVE.includes(s));
   const closed = statuses.filter(s => !ACTIVE.includes(s));
   const ofCompany = eq(improvements.companyId, companyId);
-  const latestClosed = ctx.db.select({ id: improvements.id }).from(improvements).where(and(ofCompany, inArray(improvements.status, closed))).orderBy(desc(improvements.updatedAt)).limit(CLOSED_LISTED);
+  const latestClosed = ctx.db.select(idOnly(improvements)).from(improvements).where(and(ofCompany, inArray(improvements.status, closed))).orderBy(desc(improvements.updatedAt)).limit(CLOSED_LISTED);
   /* One read, so one that changes meanwhile is listed once. */
   const rows = await ctx.db
     .select({ i: improvements, agent: { id: agents.id, name: agents.name }, department: departments, decidedBy: people.name })
@@ -114,14 +115,14 @@ export async function countOnSent(ctx: Pick<Ctx, 'db' | 'bus'> & Fate, companyId
 export const improvementsChanged = (ctx: Pick<Ctx, 'bus'>, companyId: string) => ctx.bus.publish(companyId, { type: 'improvements', spot: { departmentId: null } });
 
 /* Moves an improvement inside a caller's transaction, with the same company and source-status guards everywhere. */
-export async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
+async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
   const [moved] = await db
     .update(improvements)
     .set({ ...to, updatedAt: new Date() })
     .where(and(eq(improvements.id, id), eq(improvements.companyId, companyId), eq(improvements.status, from)))
     .returning();
   if (!moved) {
-    const [there] = await db.select({ status: improvements.status }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
+    const [there] = await db.select(only(improvements, 'status')).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
     if (!there) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
     throw new ApiError(409, 'conflict', `This improvement is ${there.status} already.`, 'improvement_decided');
   }

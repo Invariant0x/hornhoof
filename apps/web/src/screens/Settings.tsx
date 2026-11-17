@@ -12,6 +12,7 @@ import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName
 import { ExternalMessaging, OUTBOUND_PATH } from '../ui/Outbound';
 import { useScrollbarRoom } from '../ui/scrollbar-room';
 import { Themes } from '../ui/Themes';
+import { Vault, VAULT_PATH } from '../ui/Vault';
 import { Backups } from './Backups';
 import { useSteady } from './Feedback';
 import { unavailableFailure } from './RouteUnavailable';
@@ -19,9 +20,9 @@ import { unavailableFailure } from './RouteUnavailable';
 /* The parts of the window in their order: Profile, then the four groups. Appearance & language has no group of its own in
    the address. */
 type Group = 'appearance' | SettingsGroup;
-const GROUPS: readonly Group[] = ['profile', 'appearance', 'integrations', 'messaging', 'company'];
+const GROUPS: readonly Group[] = ['profile', 'appearance', 'integrations', 'passwords', 'messaging', 'company'];
 /* What the window asks the server once it opens: a group shows only when the server gives this person what it holds. */
-const PROBES: readonly string[] = [...INTEGRATIONS.map(tool => tool.probe), OUTBOUND_PATH];
+const PROBES: readonly string[] = [...INTEGRATIONS.map(tool => tool.probe), VAULT_PATH, OUTBOUND_PATH];
 
 /* The addresses of PROBES the server answered, or null until every one did. */
 function useReached(): ReadonlySet<string> | null {
@@ -48,6 +49,7 @@ function groupShown(group: Group, me: Me, reached: ReadonlySet<string> | null): 
   if (group === 'company') return companyShown(me);
   if (group === 'integrations') return reached !== null && INTEGRATIONS.some(tool => reached.has(tool.probe));
   if (group === 'messaging') return reached !== null && reached.has(OUTBOUND_PATH);
+  if (group === 'passwords') return reached !== null && reached.has(VAULT_PATH);
   return true;
 }
 
@@ -251,6 +253,7 @@ function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps)
     );
   }
   if (group === 'company') return <CompanyGroup me={me} />;
+  if (group === 'passwords') return <Vault />;
   return group === 'integrations' ? <Integrations reached={reached!} /> : <ExternalMessaging onOpenTask={onOpenTask} />;
 }
 
@@ -258,7 +261,7 @@ function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps)
 function GroupBody(props: GroupProps) {
   const t = useT();
   const id = useId();
-  const intro = props.group === 'appearance' || props.group === 'company' ? t.settings.intro[props.group] : props.group === 'integrations' ? t.integrations.intro : null;
+  const intro = props.group === 'appearance' || props.group === 'company' ? t.settings.intro[props.group] : props.group === 'integrations' ? t.integrations.intro : props.group === 'passwords' ? t.vault.intro : null;
   return (
     <section className="sgroup" data-group={props.group} aria-labelledby={id}>
       <header className="g-head">
@@ -299,8 +302,8 @@ type SettingsProps = {
 
 const nothing = () => {};
 
-/* Settings, for everyone signed in: Profile, then four groups, Appearance & language, Integrations, External messaging and
-   Company & access. Each has its own address under /settings, and the switch between them keeps what lies under the
+/* Settings, for everyone signed in: Profile, then five groups, Appearance & language, Integrations, Passwords, External
+   messaging and Company & access. Each has its own address under /settings, and the switch between them keeps what lies under the
    window. */
 export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask = nothing, onClose }: SettingsProps) {
   const t = useT();

@@ -24,9 +24,10 @@ describe('limits freshness migration', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    /* Later migrations add columns of their own, empty: 0125 the address and protocol of an API connection. */
-    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' - 'base_url' - 'api_protocol' as data from subscriptions s`)).rows).toEqual(before);
-    expect((await db.execute(sql`select limits_updated_at, base_url, api_protocol from subscriptions`)).rows).toEqual([{ limits_updated_at: null, base_url: null, api_protocol: null }]);
+    /* Later migrations add columns of their own, empty: 0125 the address and protocol of an API connection, 0131 the
+       fallbacks of a plan. */
+    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' - 'base_url' - 'api_protocol' - 'fallbacks' as data from subscriptions s`)).rows).toEqual(before);
+    expect((await db.execute(sql`select limits_updated_at, base_url, api_protocol, fallbacks from subscriptions`)).rows).toEqual([{ limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [] }]);
   });
 });
 
@@ -382,7 +383,8 @@ describe('migration 0059', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect((await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows).toEqual(before);
+    /* Every old node field must survive; later migrations may add fields of their own. */
+    expect((await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows).toMatchObject(before);
     expect((await db.execute(sql`select * from node_connections`)).rows).toEqual([]);
     expect((await db.execute(sql`select grantee from information_schema.role_table_grants where table_name = 'node_connections' and grantee <> current_user`)).rows).toEqual([]);
     await db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at) values (${company}, ${machine}, ${node}, now())`);

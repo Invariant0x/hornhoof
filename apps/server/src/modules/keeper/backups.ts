@@ -17,7 +17,7 @@ export const DUMP_GAP_MS = 600_000;
 /* A dump not sealed within this long is deleted. */
 export const DUMP_LIFE_MS = 86_400_000;
 /* How many of its own bundles the machine that makes them keeps. */
-export const KEEP_OWN = 2;
+const KEEP_OWN = 2;
 /* In the keeper's volume. */
 export const BUNDLES_DIR = 'bundles';
 
@@ -31,7 +31,7 @@ export type PeerBackups = {
   get(peer: Peer, id: string): { status: 200; length: number; stream(): Readable } | { status: 403 | 404 };
   put(peer: Peer, id: string, body: Readable): Promise<201 | 400 | 403>;
 };
-export type BackupKeeperOptions = {
+type BackupKeeperOptions = {
   /* The keeper's own folder; the bundles lie in a folder of it. */
   dir: string;
   controlDir: string;

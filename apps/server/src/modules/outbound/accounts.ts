@@ -4,9 +4,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
+import type { Checker } from '../../checker.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, type OutboundSetupKind } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
@@ -62,7 +64,7 @@ const conflict = (message: string, reasonCodes: GateCode[] = []) => new ApiError
 const notYours = (message: string) => new ApiError(403, 'forbidden', message, 'outbound_not_allowed');
 
 /* Which fields were wrong, and none of what they said. */
-function checked<T>(schema: z.ZodType<T>, raw: unknown): T {
+function checked<T>(schema: Checker<T>, raw: unknown): T {
   const parsed = schema.safeParse(raw);
   if (parsed.success) return parsed.data;
   throw new ApiError(400, 'validation', 'These settings cannot be used.', 'outbound_invalid', { fields: parsed.error.issues.map(issue => issue.path.join('.')) });
@@ -131,14 +133,14 @@ export async function revokeAccount(ctx: Ctx, seen: Account, now = new Date()) {
 }
 
 async function refuseWhileOnItsWay(tx: Tx, accountId: string): Promise<void> {
-  const open = await tx.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.accountId, accountId), inArray(outboundAttempts.status, ['reserved', 'sending', 'unknown']))).limit(1);
+  const open = await tx.select(idOnly(outboundAttempts)).from(outboundAttempts).where(and(eq(outboundAttempts.accountId, accountId), inArray(outboundAttempts.status, ['reserved', 'sending', 'unknown']))).limit(1);
   if (open.length) throw conflict('An attempt of this account has no known end yet. Settle it first.', ['delivery_unknown']);
 }
 
 async function requireFreeAuthor(tx: Tx, account: Account, agentId: string): Promise<void> {
-  const [author] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, account.companyId), eq(agents.departmentId, account.departmentId), isNull(agents.removedAt)));
+  const [author] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, account.companyId), eq(agents.departmentId, account.departmentId), isNull(agents.removedAt)));
   if (!author) throw new ApiError(404, 'not_found', 'There is no such author in this account\'s department.', 'outbound_unknown');
-  const [other] = await tx.select({ id: outboundBindings.id }).from(outboundBindings).where(and(eq(outboundBindings.agentId, agentId), eq(outboundBindings.status, 'active')));
+  const [other] = await tx.select(idOnly(outboundBindings)).from(outboundBindings).where(and(eq(outboundBindings.agentId, agentId), eq(outboundBindings.status, 'active')));
   if (other) throw conflict('This author already writes from another account.', ['account_bound_elsewhere']);
 }
 
@@ -205,10 +207,10 @@ function settingsFrom(ctx: Ctx, row: { configEnc: string; adapter: Channel['adap
 export const markInvalid = (ctx: Ctx, accountId: string, configGeneration: number, now = new Date()) =>
   ctx.db.update(outboundAccounts).set({ status: 'invalid', updatedAt: now }).where(and(eq(outboundAccounts.id, accountId), eq(outboundAccounts.configGeneration, configGeneration), eq(outboundAccounts.status, 'active')));
 
-/* A setting and its secret never pass through a model, a head's included: only a person gives them, on their own screen. A
-   model connects an account only with the settings of one the company has, by sameAs. */
+/* A setting and its secret never pass through a head: only a person gives them, on their own screen, or the orchestrator. A
+   head connects an account only with the settings of one the company has, by sameAs. */
 function refuseModel(me: Person): void {
-  if (me.via) throw notYours('Only a person does this: settings never pass through a model. Connect it with sameAs, the settings of an account the company has, or ask a person to give new ones on the channel\'s screen.');
+  if (me.viaHead) throw notYours('Only a person does this: settings never pass through a model. Connect it with sameAs, the settings of an account the company has, or ask a person to give new ones on the channel\'s screen.');
 }
 
 /* The settings of an account the caller runs, for a new account of a channel with the same adapter, sending from its own

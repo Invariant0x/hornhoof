@@ -7,6 +7,7 @@ import { limiter } from '../../auth/limit.js';
 import { requireCompanyPerson, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { feedbackInbox, improvements, repoHosts } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { improvementsChanged, moveImprovement } from '../improvements/store.js';
 import { ISSUE_REPOSITORY, issueOf } from './github-issue.js';
@@ -26,7 +27,7 @@ const Repeats = z.strictObject({ improvement: z.uuid() });
 
 const notHere = () => new ApiError(404, 'not_found', 'Not found.');
 const humanOnly = (me: Person): void => {
-  if (me.via) throw new ApiError(403, 'forbidden', 'Only a person does this, from their own screen.', 'feedback_person_only');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only a person does this, from their own screen, or the orchestrator.', 'feedback_person_only');
 };
 
 /* The wait a refusal names, as the header a client reads. */
@@ -130,7 +131,7 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requireCompanyPerson(req, db);
     humanOnly(me);
     const { improvement } = Repeats.parse(req.body);
-    const [found] = await db.select({ agentId: improvements.agentId }).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
+    const [found] = await db.select(only(improvements, 'agentId')).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
     if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
     if (telling.has(improvement)) throw new ApiError(409, 'conflict', 'Its repeats are being told already.', 'feedback_no_repeats');
     const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());

@@ -1,13 +1,19 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
 import { makeKey } from '../src/owner-key';
 import { keyDefaults } from '../src/owner-key-store';
 import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
+import { decl } from './css';
 import { clock } from '../src/ui/subscription';
+import { commandCode } from './command-code';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -100,12 +106,12 @@ describe('Machines', () => {
     });
     render(<Machines me={ME} />);
     const mac = await screen.findByRole('article', { name: 'dev-laptop' });
-    expect(await within(mac).findByText(withKey(command.command))).toBeInTheDocument();
+    expect(await within(mac).findByText(commandCode(withKey(command.command)))).toBeInTheDocument();
     const update = within(mac).getByRole('button', { name: 'Update programs' });
     await userEvent.setup().click(update);
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
     await vi.waitFor(() => expect(update).toBeEnabled());
-    expect(within(mac).getByText(withKey(command.command))).toBeInTheDocument();
+    expect(within(mac).getByText(commandCode(withKey(command.command)))).toBeInTheDocument();
     expect(calls.some(c => c.path.endsWith('/hide'))).toBe(false);
   });
 
@@ -220,9 +226,10 @@ describe('Machines', () => {
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
     expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
     expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
+    /* The programs stand in the block at the bottom of the card (#1027), under what runs on it. */
     expect(within(own).getAllByRole('button')).toEqual([
-      within(own).getByRole('button', { name: 'Update programs' }),
       within(own).getByRole('button', { name: 'Open Orchestrator' }),
+      within(own).getByRole('button', { name: 'Update programs' }),
     ]);
     expect(within(own).getByRole('button', { name: 'Update programs' })).toBeDisabled();
     expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
@@ -253,7 +260,7 @@ describe('Machines', () => {
 
   it('keeps machine notes ahead of built-in notes and uses built-in resources when its machine has none', async () => {
     const machine = { ...MACHINES[0]!, online: false, load: null, browserError: 'machine browser reason', drain: { state: 'restarting' as const, since: '2026-11-04T17:00:00.000Z' } };
-    lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'postponed', turnsLeft: 2, partsLeft: 0, retryAt: '2026-11-04T18:00:00.000Z' } } }] });
+    lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'waiting', turnsLeft: 2, partsLeft: 0, since: '2026-11-04T18:00:00.000Z' } } }] });
     render(<Machines me={ME} />);
     const mac = await openCard('dev-laptop');
     expect(fact(await screen.findByRole('region', { name: 'All machines together' }), 'Machines online')).toBe('1 of 1');
@@ -262,7 +269,7 @@ describe('Machines', () => {
     expect(within(mac).getByText(/machine browser reason/, { selector: 'p' })).toBeInTheDocument();
     expect(within(mac).queryByText(/builtin browser reason/)).not.toBeInTheDocument();
     expect(within(mac).getByText('Updating now: the machine restarts and takes work again by itself')).toBeInTheDocument();
-    expect(within(mac).queryByText(/update is postponed/)).not.toBeInTheDocument();
+    expect(within(mac).queryByText(/before the update/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(1);
   });
 
@@ -333,7 +340,7 @@ describe('Machines', () => {
     render(<Machines me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Connect a machine' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/command', body: undefined });
-    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
     expect(screen.getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
@@ -342,7 +349,7 @@ describe('Machines', () => {
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
   });
 
   it("adds one of the person's plans to a machine of theirs and shows the command to run there", async () => {
@@ -361,14 +368,14 @@ describe('Machines', () => {
     expect(screen.queryByRole('button', { name: 'Add Claude to dev-laptop' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Add Kimi to dev-laptop' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
-    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(screen.getByText(/^Run this in a terminal on dev-laptop\./)).toBeInTheDocument();
     expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(within(mac).getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
   });
 
   it('keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel', async () => {
@@ -389,30 +396,30 @@ describe('Machines', () => {
     });
     const user = userEvent.setup();
     const first = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
-    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(machineCmd.command)))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
 
     /* Switching tabs and returning, or reloading the page, keeps both commands visible. */
     first.unmount();
     localStorage.setItem('hh-lang', 'ru');
     const inRu = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
-    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(machineCmd.command)))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
     expect(screen.getAllByText(/^Действует еще (59 мин|1 ч)\.$/)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(4);
     const cancels = screen.getAllByRole('button', { name: 'Отменить' });
     expect(cancels).toHaveLength(2);
     await user.click(cancels[0]!);
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${machineCmd.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(withKey(machineCmd.command))).not.toBeInTheDocument());
-    expect(screen.getByText(withKey(addCmd.command))).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByText(commandCode(withKey(machineCmd.command)))).not.toBeInTheDocument());
+    expect(screen.getByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
 
     /* After the machine joins by the add-plan command or it expires, reload hides it too. */
     active = [];
     inRu.unmount();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(screen.queryByText(withKey(addCmd.command))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(addCmd.command)))).not.toBeInTheDocument();
   });
 
   it('disconnects a machine after a confirm', async () => {
@@ -477,7 +484,29 @@ describe('Machines', () => {
   });
 
   it.each([
-    ['en', 'Other build', "Its nodes are not the server's build (3fe094e here, 8de55ce on the server). To update them, run the install command on it again without --join.", "Its nodes are not the server's build (an older one here, 8de55ce on the server). To update them, run the install command on it again without --join."],
+    ['en', 'Off checks', 'Taken off checks: none of its nodes, the built-in one too, takes parts of test runs or work runs.'],
+    ['ru', 'Снята с проверок', 'Снята с проверок: ни одна ее нода, и встроенная тоже, не берет части прогонов тестов и работ.'],
+  ])('marks a machine taken off checks, in its row and its card, and no lent one, in %s', async (language, mark, note) => {
+    localStorage.setItem('hh-lang', language);
+    lists();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(within(screen.getByRole('row', { name: 'build-box' })).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'dev-laptop' })).queryByText(mark)).not.toBeInTheDocument();
+    const box = card('build-box');
+    expect(within(box).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(box).getByTitle(note)).toHaveClass('badge', 'off');
+    expect(within(box).getByText(note, { selector: 'p' })).toBeInTheDocument();
+    const laptop = card('dev-laptop');
+    expect(within(laptop).queryByText(mark)).not.toBeInTheDocument();
+    expect(within(laptop).queryByText(note)).not.toBeInTheDocument();
+    /* The server's own card, on no machine of the company, lends always and says nothing of it. */
+    const server = screen.getAllByRole('row').find(r => r.classList.contains('rm') && !['build-box', 'dev-laptop'].includes(r.getAttribute('aria-label') ?? ''))!;
+    expect(within(server).queryByText(mark)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Other build',"Its nodes are not the server's build (3fe094e here, 8de55ce on the server). To update them, run the install command on it again without --join.", "Its nodes are not the server's build (an older one here, 8de55ce on the server). To update them, run the install command on it again without --join."],
     ['ru', 'Другая сборка', 'Ее ноды не той сборки, что у сервера (здесь 3fe094e, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.', 'Ее ноды не той сборки, что у сервера (здесь старая, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.'],
   ])('marks a machine whose nodes are not the server build, in its row and its card, and no other, in %s', async (language, mark, note, older) => {
     localStorage.setItem('hh-lang', language);
@@ -577,8 +606,10 @@ describe('Machines', () => {
     shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
     const mac = await openCard('dev-laptop');
     expect(within(mac).getByText(line)).toBeInTheDocument();
-    /* Its place stands in the same part, above the line. */
-    expect(within(within(mac).getByText(line).closest('section')!).getByText('2')).toBeInTheDocument();
+    /* Its place stands in the same block, above the line, which has a part of its own (#1027). */
+    const role = within(mac).getByRole('region', { name: language === 'en' ? 'Server and data copy' : 'Сервер и копия данных' });
+    expect(within(role).getByText('2')).toBeInTheDocument();
+    expect(within(role).getByText(line).closest('section')?.querySelector('h5')?.textContent).toBe(language === 'en' ? 'Data copy' : 'Копия данных');
   });
 
   it("writes every state of a copy, and a machine's place without one", async () => {
@@ -835,32 +866,24 @@ describe('Machines', () => {
     ['en', [
       'Cannot take the server: it is a phone.',
       'Cannot take the server: Hornhoof runs here without Docker; make host-1 a full machine.',
-      'Cannot take the server: Docker here gets less than 4 GB of memory.',
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees one department.",
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees 2 departments.",
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.",
       "Cannot take the server: the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
-      'Cannot take the server: measuring this machine.',
-      'Cannot take the server: 12 GB free; it needs 40.5 GB.',
-      'Cannot take the server: the disk saves slowly (72.4 ms); it needs under 50 ms.',
     ]],
     ['ru', [
       'Не может взять сервер: это телефон.',
       'Не может взять сервер: здесь Hornhoof работает без Docker; сделайте host-1 полной машиной.',
-      'Не может взять сервер: Docker здесь получает меньше 4 ГБ памяти.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит один отдел.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит 2 отдела.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.',
       'Не может взять сервер: скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
-      'Не может взять сервер: машина еще измеряется.',
-      'Не может взять сервер: свободно 12 ГБ; нужно 40,5 ГБ.',
-      'Не может взять сервер: диск сохраняет медленно (72,4 мс); нужно меньше 50 мс.',
     ]],
   ])('says why a machine cannot take the server in %s', async (language, lines) => {
     const reasons: object[] = [
-      { why: 'phone' }, { why: 'no_core' }, { why: 'memory', memory: 3.2 * GIB },
+      { why: 'phone' }, { why: 'no_core' },
       { why: 'scope', person: 'Anna', departments: 1 }, { why: 'scope', person: 'Anna', departments: 2 }, { why: 'scope', person: 'Anna', departments: 0 },
-      { why: 'no_link' }, { why: 'measuring' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
+      { why: 'no_link' },
     ];
     shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
     await screen.findByRole('table');
@@ -869,6 +892,27 @@ describe('Machines', () => {
       expect(within(one).getByText(line), line).toBeInTheDocument();
       expect(within(one).queryByRole('radio')).not.toBeInTheDocument();
     }
+  });
+
+  it.each([
+    ['en', "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.", 'Copy: up to date', 'Cannot take the server'],
+    ['ru', 'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.', 'Копия: актуальна', 'Не может взять сервер'],
+  ])('says in %s why a machine that holds an up-to-date copy has no place, in its card and beside its dash', async (language, reason, copy, cannot) => {
+    const anna = { ...MACHINES[0]!, id: 'u0', hostname: 'anna-mac', data: held({ unfit: { why: 'scope', person: 'Anna', departments: 0 }, copy: { line: 'ready' } }) };
+    const waits = { ...MACHINES[0]!, id: 'u1', hostname: 'next-mac', data: held({}) };
+    shown(language, [anna, waits]);
+    await screen.findByRole('table');
+    const cell = (hostname: string) => screen.getByRole('button', { name: new RegExp(`${hostname}$`) }).closest('tr')!.querySelector('.k-prio')!;
+    /* The dash in the list says the same reason, for whoever points at it or hears it. */
+    expect(cell('anna-mac').textContent).toBe(reason);
+    expect(cell('anna-mac').querySelector('.pdash')).toHaveAttribute('title', reason);
+    /* A machine with no reason against it, which waits for the ranking, keeps the short words. */
+    expect(cell('next-mac').textContent).toBe(cannot);
+    const part = within(card('anna-mac')).getByRole('heading', { name: language === 'en' ? 'Priority' : 'Приоритет' }).closest('section')!;
+    expect(within(part).getByText(reason)).toBeInTheDocument();
+    /* The copy's line stands in the same block, in a part of its own beside Priority (#1027). */
+    const block = within(card('anna-mac')).getByRole('region', { name: language === 'en' ? 'Server and data copy' : 'Сервер и копия данных' });
+    expect(within(block).getByText(copy).closest('section')?.querySelector('h5')?.textContent).toBe(language === 'en' ? 'Data copy' : 'Копия данных');
   });
 
   it("shows the server's machine as 1", async () => {
@@ -999,26 +1043,25 @@ describe('Machines', () => {
     await screen.findByRole('table');
     expect(screen.queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
     await userEvent.type(screen.getByRole('searchbox'), 'Bruno');
-    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button'));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ }));
     await act(() => vi.advanceTimersByTimeAsync(5000));
     expect(screen.getByRole('searchbox')).toHaveValue('Bruno');
-    expect(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('Showing 1 of 1')).toBeInTheDocument();
   });
 
   describe('waiting before an update', () => {
     const at = (hour: number, minute: number) => new Date(2026, 10, 4, hour, minute).toISOString();
-    const waiting = (turnsLeft: number, partsLeft = 0) => ({ state: 'waiting' as const, turnsLeft, partsLeft, until: at(21, 30) });
-    const postponed = { state: 'postponed' as const, turnsLeft: 2, partsLeft: 0, retryAt: at(22, 5) };
+    const waiting = (turnsLeft: number, partsLeft = 0) => ({ state: 'waiting' as const, turnsLeft, partsLeft, since: at(21, 30) });
     const restarting = { state: 'restarting' as const, since: at(21, 0) };
     const onMachine = (drain: unknown, over: Partial<(typeof MACHINES)[number]> = {}): [number, unknown] => [200, { machines: [{ ...MACHINES[0]!, ...over, drain }], builtin: null }];
     /* The table's own row, not the row its open card sits in. */
     const macRow = () => screen.getAllByRole('row', { name: 'dev-laptop' }).find(row => row.getAttribute('aria-label') === 'dev-laptop')!;
 
     it.each([
-      ['en', 'Waiting for agents to finish before the update: 3 turns left, until 21:30', 'Waiting to update'],
-      ['ru', 'Ждет конца работы агентов перед обновлением: осталось 3 хода, до 21:30', 'Ждет обновления'],
-    ])('says in the card and the row how many turns are left and until when in %s', async (language, line, mark) => {
+      ['en', 'Waiting since 21:30 for agents to finish before the update: 3 turns left. It takes no new work until then', 'Waiting to update'],
+      ['ru', 'С 21:30 ждет конца работы агентов перед обновлением: осталось 3 хода. До тех пор новой работы не берет', 'Ждет обновления'],
+    ])('says in the card and the row how many turns are left and since when in %s', async (language, line, mark) => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(3)) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
@@ -1028,14 +1071,14 @@ describe('Machines', () => {
     });
 
     it.each([
-      ['en', 1, 0, 'Waiting for agents to finish before the update: 1 turn left, until 21:30'],
-      ['en', 0, 0, 'Waiting for agents to finish before the update: 0 turns left, until 21:30'],
-      ['en', 0, 1, 'Waiting for agents to finish before the update: 1 run part left, until 21:30'],
-      ['en', 2, 3, 'Waiting for agents to finish before the update: 2 turns and 3 run parts left, until 21:30'],
-      ['ru', 1, 0, 'Ждет конца работы агентов перед обновлением: остался 1 ход, до 21:30'],
-      ['ru', 5, 0, 'Ждет конца работы агентов перед обновлением: осталось 5 ходов, до 21:30'],
-      ['ru', 0, 1, 'Ждет конца работы агентов перед обновлением: осталась 1 часть прогона, до 21:30'],
-      ['ru', 2, 5, 'Ждет конца работы агентов перед обновлением: осталось 2 хода и 5 частей прогона, до 21:30'],
+      ['en', 1, 0, 'Waiting since 21:30 for agents to finish before the update: 1 turn left. It takes no new work until then'],
+      ['en', 0, 0, 'Waiting since 21:30 for agents to finish before the update: 0 turns left. It takes no new work until then'],
+      ['en', 0, 1, 'Waiting since 21:30 for agents to finish before the update: 1 run part left. It takes no new work until then'],
+      ['en', 2, 3, 'Waiting since 21:30 for agents to finish before the update: 2 turns and 3 run parts left. It takes no new work until then'],
+      ['ru', 1, 0, 'С 21:30 ждет конца работы агентов перед обновлением: остался 1 ход. До тех пор новой работы не берет'],
+      ['ru', 5, 0, 'С 21:30 ждет конца работы агентов перед обновлением: осталось 5 ходов. До тех пор новой работы не берет'],
+      ['ru', 0, 1, 'С 21:30 ждет конца работы агентов перед обновлением: осталась 1 часть прогона. До тех пор новой работы не берет'],
+      ['ru', 2, 5, 'С 21:30 ждет конца работы агентов перед обновлением: осталось 2 хода и 5 частей прогона. До тех пор новой работы не берет'],
     ])('words the count in %s for %i turns and %i run parts', async (language, turns, parts, line) => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(turns, parts)) });
@@ -1061,18 +1104,6 @@ describe('Machines', () => {
     });
 
     it.each([
-      ['en', 'The update is postponed: agents did not finish in time. Next try at 22:05', 'Update postponed'],
-      ['ru', 'Обновление отложено: агенты не успели закончить работу. Следующая попытка в 22:05', 'Обновление отложено'],
-    ])('says an update was postponed and when it tries again in %s', async (language, line, mark) => {
-      localStorage.setItem('hh-lang', language);
-      lists({ 'GET /api/machines': onMachine(postponed) });
-      render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      const mac = await openCard('dev-laptop');
-      expect(within(mac).getByText(line)).toBeInTheDocument();
-      expect(within(macRow()).getByText(mark)).toBeInTheDocument();
-    });
-
-    it.each([
       ['en', 'Updating now: the machine restarts and takes work again by itself', 'Updating'],
       ['ru', 'Идет обновление: машина перезапустится и сама снова возьмет работу', 'Обновляется'],
     ])('tells a restart for the update from a lost machine in %s', async (language, line, mark) => {
@@ -1089,21 +1120,21 @@ describe('Machines', () => {
       lists({ 'GET /api/machines': onMachine(drain) });
       render(<Machines me={ME} />);
       const mac = await openCard('dev-laptop');
-      expect(within(mac).queryByText(/before the update|postponed|Updating now/)).not.toBeInTheDocument();
+      expect(within(mac).queryByText(/before the update|Updating now/)).not.toBeInTheDocument();
       expect(within(macRow()).queryByText('Waiting to update')).not.toBeInTheDocument();
     });
 
     it('shows the wait of the built-in node on its own card', async () => {
       lists({}, { ...BUILTIN, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
-      expect(within(await openCard('Built-in node')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
+      expect(within(await openCard('Built-in node')).getByText(/Waiting since 21:30 for agents to finish before the update: 2 turns left\./)).toBeInTheDocument();
       expect(within(card('dev-laptop')).queryByText(/before the update/)).not.toBeInTheDocument();
     });
 
     it('shows the wait of the built-in node on the machine it runs on', async () => {
       lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' }, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
-      expect(within(await openCard('dev-laptop')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
+      expect(within(await openCard('dev-laptop')).getByText(/Waiting since 21:30 for agents to finish before the update: 2 turns left\./)).toBeInTheDocument();
     });
   });
 });
@@ -1148,7 +1179,7 @@ describe("each machine's place in the company's network", () => {
     expect(within(card('dev-laptop')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
     await userEvent.setup().click(within(box).getByRole('button', { name: action }));
     expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m2/core', body: undefined });
-    expect(await within(box).findByText(withKey(`${COMMAND}-CORE`))).toBeInTheDocument();
+    expect(await within(box).findByText(commandCode(withKey(`${COMMAND}-CORE`)))).toBeInTheDocument();
     expect(within(box).getByText(run)).toBeInTheDocument();
     expect(within(box).queryByRole('button', { name: action })).not.toBeInTheDocument();
   });
@@ -1157,7 +1188,7 @@ describe("each machine's place in the company's network", () => {
     const shown = { id: '8'.repeat(64), kind: 'core' as const, plans: [], machineId: 'm2', machine: 'build-box', command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
     show({ 'GET /api/nodes/commands': [200, { commands: [shown] }] });
     const box = await screen.findByRole('article', { name: 'build-box' });
-    expect(await within(box).findByText(withKey(shown.command))).toBeInTheDocument();
+    expect(await within(box).findByText(commandCode(withKey(shown.command)))).toBeInTheDocument();
     expect(within(box).getByText(/^Run this in a terminal on build-box\. It adds the company's core there/)).toBeInTheDocument();
   });
 
@@ -1254,5 +1285,128 @@ describe("computer access on a machine's card", () => {
     expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();
     expect(within(own).getByText('Открытый доступ позволяет оркестратору изменить на машине debian что угодно, включая данные компании.')).toBeInTheDocument();
     expect(within(own).getByText('Если на машине debian стоит macOS, этот доступ открывает только Linux внутри Docker, а не саму macOS.')).toBeInTheDocument();
+  });
+});
+
+describe('the filter groups and search of Machines (#1020)', () => {
+  const showIn = (language: 'en' | 'ru') => {
+    localStorage.setItem('hh-lang', language);
+    lists();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+  };
+
+  it.each(['en', 'ru'] as const)('in %s starts Provider, Status and Tests with All N (44px, pressed by default) and resets only its own group', async language => {
+    showIn(language);
+    await screen.findByRole('table');
+    const t = { en, ru }[language];
+    const cases = [
+      [t.tables.provider, /^Codex/, 1],
+      [t.tables.status, new RegExp(`^${t.cards.offline}`), 1],
+      [t.tables.testFilters, new RegExp(`^${t.tables.lentFilter}`), 1],
+    ] as const;
+
+    for (const [label, option, shown] of cases) {
+      const group = screen.getByRole('group', { name: label });
+      const buttons = within(group).getAllByRole('button');
+      expect(group).toHaveClass('whole');
+      expect(buttons[0]).toHaveTextContent(`${t.tables.all}3`);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(within(group).getByRole('button', { name: option }));
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(shown);
+      fireEvent.click(buttons[0]!);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(3);
+    }
+
+    fireEvent.click(within(screen.getByRole('group', { name: t.tables.provider })).getByRole('button', { name: /^Claude/ }));
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+    const testsGroup = screen.getByRole('group', { name: t.tables.testFilters });
+    fireEvent.click(within(testsGroup).getByRole('button', { name: new RegExp(`^${t.tables.lentFilter}`) }));
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(1);
+    fireEvent.click(within(testsGroup).getAllByRole('button')[0]!);
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+  });
+
+  it('sizes whole filter chips from 44x44px, frames chosen and focused ones by tokens, and uses logical RTL properties', () => {
+    expect(decl('.fgroup.whole .chipf', 'min-block-size')).toBe('44px');
+    expect(decl('.fgroup.whole .chipf', 'min-inline-size')).toBe('44px');
+    expect(decl('.fgroup.whole .chipf', 'max-inline-size')).toBe('100%');
+    expect(decl('.fgroup.whole .chipf', 'padding-block')).toBe('8px');
+    expect(decl('.fgroup.whole .chipf', 'padding-inline')).toBe('12px');
+    expect(decl('.fgroup.whole .chipf', 'text-align')).toBe('start');
+    expect(decl('.fgroup.whole .chipf', 'overflow-wrap')).toBe('break-word');
+    expect(decl('.fgroup.whole .chipf[aria-pressed="true"]', 'border-color')).toBe('var(--cyan-ink)');
+    expect(decl('.chipf[aria-pressed="true"]', 'background')).toBe('var(--glow)');
+    expect(decl('.chipf[aria-pressed="true"]', 'color')).toBe('var(--cyan-ink)');
+    expect(decl('.chipf:focus-visible', 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl('.chipf:focus-visible', 'outline-offset')).toBe('2px');
+    expect(decl('.fgroup > .lbl', 'margin-inline-end')).toBe('4px');
+    expect(decl('.fgroup > .lbl', 'margin-right')).toBeUndefined();
+    expect(decl('.chipf', 'padding-inline')).toBe('9px');
+    expect(decl('.chipf', 'padding')).toBeUndefined();
+    expect(decl('.people.machines', 'padding-inline', '(min-width: 1200px)')).toBe('32px');
+  });
+
+  it.each([
+    ['en', true, 'Search machines'],
+    ['ru', true, 'Поиск машин'],
+    ['en', false, 'Search by machine, owner, agent or role'],
+  ] as const)('in %s (narrow=%s) uses the phone or wide search hint', async (language, narrow, placeholder) => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    showIn(language);
+    expect(await screen.findByRole('searchbox')).toHaveAttribute('placeholder', placeholder);
+  });
+
+  it('builds pool figures and row counts from whole parameterized dictionary phrases without piece-by-piece concatenation', () => {
+    const enSource = readFileSync(resolve(process.cwd(), 'src/i18n/en.ts'), 'utf8');
+    const ruSource = readFileSync(resolve(process.cwd(), 'src/i18n/ru.ts'), 'utf8');
+    const machinesSource = readFileSync(resolve(process.cwd(), 'src/screens/Machines.tsx'), 'utf8');
+
+    expect(enSource).not.toMatch(/(machineCount|subscriptionCount)[^\n]*\$\{n\}\s+\$\{plural\(/);
+    expect(ruSource).not.toMatch(/(machineCount|subscriptionCount)[^\n]*\$\{n\}\s+\$\{plural\(/);
+    expect(machinesSource).not.toContain('t.machines.of(String(');
+    expect(machinesSource).not.toMatch(/\$\{busyShare\([^)]*\)\}%\`/);
+
+    expect([1, 3].map(n => en.tables.machineCount(n))).toEqual(['1 machine', '3 machines']);
+    expect([1, 2, 5, 21].map(n => ru.tables.machineCount(n))).toEqual(['1 машина', '2 машины', '5 машин', '21 машина']);
+    expect([1, 3].map(n => en.tables.subscriptionCount(n))).toEqual(['1 subscription', '3 subscriptions']);
+    expect([1, 2, 5, 21].map(n => ru.tables.subscriptionCount(n))).toEqual(['1 подписка', '2 подписки', '5 подписок', '21 подписка']);
+
+    expect(en.machines.of(2, 3)).toBe('2 of 3');
+    expect(ru.machines.of(2, 3)).toBe('2 из 3');
+    expect(en.machines.percent(21)).toBe('21%');
+    expect(ru.machines.percent(21)).toBe('21%');
+  });
+
+  it.each([
+    ['en', ['2 of 3', '12', '8.5 of 20 GB', '21%'], '3 machines', 'Showing 1 of 3', '6 of 12 GB'],
+    ['ru', ['2 из 3', '12', '8,5 из 20 ГБ', '21%'], '3 машины', 'Показано 1 из 3', '6 из 12 ГБ'],
+  ] as const)('isolates whole summary figures and counts in <bdi> in %s under RTL', async (language, poolFigures, totalCount, shownCount, laptopMemory) => {
+    document.documentElement.dir = 'rtl';
+    onTestFinished(() => { document.documentElement.removeAttribute('dir'); });
+    showIn(language);
+    await screen.findByRole('table');
+    const t = { en, ru }[language];
+    /* The phones under the machines have loaded, so the machines' count is the one status line. */
+    await screen.findByText(t.phones.empty);
+
+    const pool = screen.getByRole('region', { name: t.machines.pool });
+    const figures = [...pool.querySelectorAll('.pool-facts dd')];
+    expect(figures.map(dd => [dd.children.length, dd.firstElementChild?.tagName, dd.firstElementChild?.textContent])).toEqual(
+      poolFigures.map(text => [1, 'BDI', text]),
+    );
+
+    const statusLine = screen.getByRole('status');
+    expect([statusLine.children.length, statusLine.firstElementChild?.tagName, statusLine.firstElementChild?.textContent]).toEqual([1, 'BDI', totalCount]);
+
+    const laptopRow = screen.getByRole('row', { name: 'dev-laptop' });
+    expect(within(laptopRow).getByText(laptopMemory).tagName).toBe('BDI');
+    expect(within(laptopRow).getByText('25%').tagName).toBe('BDI');
+
+    fireEvent.click(within(screen.getByRole('group', { name: t.tables.provider })).getByRole('button', { name: /^Codex/ }));
+    expect([statusLine.firstElementChild?.tagName, statusLine.firstElementChild?.textContent]).toEqual(['BDI', shownCount]);
+    expect(within(statusLine).getByRole('button', { name: t.tables.clear })).toBeInTheDocument();
   });
 });

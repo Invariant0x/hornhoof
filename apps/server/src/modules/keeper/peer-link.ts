@@ -37,6 +37,8 @@ const Answer = z.object({
   doors: z.array(z.string()).default([]),
   /* The machines that stopped holding the data and owe what they held, and how large that may be. */
   uploads: z.array(z.object({ machine: z.string(), networkId: z.string().regex(NETWORK_ID), max: z.number().min(0), unpackMax: z.number().min(0) })).default([]),
+  /* The leader's slots of tables whose first copy broke off, as the copies named them, for its sweep to drop. */
+  leftSlots: z.array(z.string()).default([]),
 });
 type Answer = z.infer<typeof Answer>;
 /* The authority's list as the keeper holds it: the list, and the serials it names. */
@@ -44,7 +46,7 @@ const HeldCrl = z.object({ serials: z.array(z.string()), crlPem: z.string() });
 type HeldCrl = z.infer<typeof HeldCrl>;
 
 export type PeerPorts = { peer: number; peerApp: number };
-export type PeerLinkOptions = {
+type PeerLinkOptions = {
   /* The keeper's own folder, where the last list is kept beside the machine's key and certificate. */
   dir: string;
   app: Target;

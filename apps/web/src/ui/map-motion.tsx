@@ -5,8 +5,8 @@ import type { CutShape } from '../skins/roles';
 import { lookOf, skinsState, subscribeSkins } from '../skins/store';
 import { lengthOf, motionSpeed, pulseSeconds, SIGNALS, toD, type Point } from './wires';
 
-export type GapRange = Gap;
-export type DashSegment = { x: number; y: number; len: number; deg: number; offset: number };
+type GapRange = Gap;
+type DashSegment = { x: number; y: number; len: number; deg: number; offset: number };
 
 const pausedByMap = new WeakSet<Animation>();
 

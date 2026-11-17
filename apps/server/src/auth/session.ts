@@ -6,15 +6,16 @@ import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
 import { agents, people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
+import { idOnly, only } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
 import { checkRead, READ_MS, readCookieOf, readPerson, signRead } from './read-cookie.js';
 
-export const SESSION_COOKIE = 'hh_session';
+const SESSION_COOKIE = 'hh_session';
 /* A browser takes a __Host- cookie only when it is secure, has path / and no domain, so a page on another company's name
    under hornhoof.org cannot set it. */
 export const LINK_SESSION_COOKIE = '__Host-hh_session';
-export const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
+const sessionCookieOf = (req: FastifyRequest): string => (req.overLink ? LINK_SESSION_COOKIE : SESSION_COOKIE);
 const SESSION_DAYS = 30;
 const HANDOVER_GRACE_SECONDS = 60;
 
@@ -86,7 +87,7 @@ export async function startSession(reply: FastifyReply, db: Db, config: Config, 
   const expiresAt = newSessionExpiry();
   const started = await db.transaction(async tx => {
     const [still] = await tx
-      .select({ id: people.id })
+      .select(idOnly(people))
       .from(people)
       .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
       .for('share');
@@ -112,14 +113,14 @@ export async function endSession(req: FastifyRequest, reply: FastifyReply, db: D
 async function moveOlderSession(db: Db, config: Config, oldToken: string): Promise<{ token: string; expiresAt: Date } | null> {
   const oldHash = hashToken(oldToken);
   return db.transaction(async tx => {
-    const [owner] = await tx.select({ personId: sessions.personId }).from(sessions).where(eq(sessions.tokenHash, oldHash));
+    const [owner] = await tx.select(only(sessions, 'personId')).from(sessions).where(eq(sessions.tokenHash, oldHash));
     if (!owner) return null;
     /* The person's row first and then the session's, the order a reset or a disable takes, so a reset running at the same
        time either comes first and is seen here, or waits and then deletes the new session too. */
-    const [person] = await tx.select({ id: people.id }).from(people).where(and(eq(people.id, owner.personId), eq(people.status, 'active'))).for('share');
+    const [person] = await tx.select(idOnly(people)).from(people).where(and(eq(people.id, owner.personId), eq(people.status, 'active'))).for('share');
     if (!person) return null;
     const [older] = await tx
-      .select({ tokenHash: sessions.tokenHash })
+      .select(only(sessions, 'tokenHash'))
       .from(sessions)
       .where(and(eq(sessions.tokenHash, oldHash), eq(sessions.beforeHostCookie, true), gt(sessions.expiresAt, new Date())))
       .for('update');
@@ -133,7 +134,7 @@ async function moveOlderSession(db: Db, config: Config, oldToken: string): Promi
     const token = movedToken(config, oldToken);
     const tokenHash = hashToken(token);
     await tx.insert(sessions).values({ tokenHash, personId: person.id, expiresAt: newSessionExpiry(), beforeHostCookie: false }).onConflictDoNothing();
-    const [moved] = await tx.select({ expiresAt: sessions.expiresAt }).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, person.id)));
+    const [moved] = await tx.select(only(sessions, 'expiresAt')).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, person.id)));
     return moved ? { token, expiresAt: moved.expiresAt } : null;
   });
 }
@@ -203,14 +204,14 @@ async function tradeRead(db: Db, config: Config, cookie: string, personId: strin
   const tokenHash = hashToken(token);
   return db.transaction(async tx => {
     const [still] = await tx
-      .select({ id: people.id })
+      .select(idOnly(people))
       .from(people)
       .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
       .for('share');
     if (!still) return null;
     /* A page asks for many things at once, each with the read cookie: they all get the same session. */
     await tx.insert(sessions).values({ tokenHash, personId, expiresAt: newSessionExpiry(), beforeHostCookie: false }).onConflictDoNothing();
-    const [made] = await tx.select({ expiresAt: sessions.expiresAt }).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, personId)));
+    const [made] = await tx.select(only(sessions, 'expiresAt')).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, personId)));
     return made ? { token, expiresAt: made.expiresAt } : null;
   });
 }
@@ -253,7 +254,7 @@ const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue
 export const personOf = (me: Person): string | null => (me.via ? null : me.id);
 
 /* The orchestrator acts for the owner, as itself: not a head carrying out the decision of the person its turn answers. */
-export const viaOrchestrator = (me: Person): boolean => !!me.via && !me.viaHead;
+export const viaOrchestrator = (me: Pick<Person, 'via' | 'viaHead'>): boolean => !!me.via && !me.viaHead;
 
 /* Who a change is by: the person, or the orchestrator when it acts for the owner. What a head changes is the decision of
    the person its turn answers, so it is that person's. */
@@ -267,7 +268,7 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
   if (inside) {
     const [owner] = await db.select(personColumns).from(people).where(eq(people.id, inside.personId));
     if (!owner || owner.status !== 'active') throw notSignedIn();
-    const [agent] = await db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, inside.agentId));
+    const [agent] = await db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, inside.agentId));
     return { ...owner, via: inside.agentId, ...(agent?.kind === 'head' ? { viaHead: true as const } : {}), ...(inside.decision ? { decision: inside.decision } : {}) };
   }
   const token = req.cookies[sessionCookieOf(req)];

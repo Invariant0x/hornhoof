@@ -1,8 +1,10 @@
-import type { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, inject, it, onTestFinished, vi } from 'vitest';
 import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { until } from './helpers-basic.js';
 
 /* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
@@ -11,12 +13,14 @@ let lastShared: PGlite | undefined;
 afterAll(() => {
   expect(lastShared?.closed).toBe(true);
 });
-const { checkSharedDatabase, createTestDb, databasesOpened, fixture, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
+const { asTestDb, checkSharedDatabase, createTestDb, databasesOpened, fixture, prepareSharedDatabase, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
 afterAll(() => {
   lastShared = sharedDatabase();
   expect(lastShared?.closed).toBe(false);
 });
+
+await prepareSharedDatabase();
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 const reader = readerRole('postgres');
@@ -49,7 +53,7 @@ describe('the tests of one file', { shuffle: false }, () => {
     const db = await createTestDb();
     opened = databasesOpened();
     firstNumber = await numberedEvent(db);
-    expect(await db.select({ name: companies.name }).from(companies)).toEqual([{ name: 'Acme' }]);
+    expect(await db.select(only(companies, 'name')).from(companies)).toEqual([{ name: 'Acme' }]);
   });
 
   it('share that database and do not see what the test before wrote, and numbers start over', async () => {
@@ -61,8 +65,7 @@ describe('the tests of one file', { shuffle: false }, () => {
 
   it('find in it the same rows as in a new copy of the migrated database', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await rowsOfEachTable(emptied)).toEqual(await rowsOfEachTable(copy));
+    expect(await rowsOfEachTable(emptied)).toEqual(pristine.rows);
   });
 
   /* A new copy holds rows its migrations wrote outside public too, as the horizon of merges in net. */
@@ -97,8 +100,7 @@ describe('agent SQL in a test', { shuffle: false }, () => {
 
   it('leaves the rights and roles of a new copy to the next test', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await rights(emptied)).toEqual(await rights(copy));
+    expect(await rights(emptied)).toEqual(pristine.rights);
   });
 });
 
@@ -177,8 +179,7 @@ describe('a setting of the connection', { shuffle: false }, () => {
 
   it('does not reach the next test as that setting', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect(await applicationName(emptied)).toEqual(await applicationName(copy));
+    expect(await applicationName(emptied)).toEqual(pristine.applicationName);
   });
 });
 
@@ -195,8 +196,7 @@ describe('what a test leaves for the planner', { shuffle: false }, () => {
 
   it('is gone for the next test, as on a new copy', async () => {
     const emptied = await createTestDb();
-    const copy = await createTestDb();
-    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+    expect((await plannerView(emptied)).rows).toEqual(pristine.planner);
   });
 
   it('can be statistics an analyze made of every table', async () => {
@@ -209,8 +209,7 @@ describe('what a test leaves for the planner', { shuffle: false }, () => {
   it('does not reach the next test as statistics', async () => {
     const emptied = await createTestDb();
     expect((await statistics(emptied)).rows).toEqual([]);
-    const copy = await createTestDb();
-    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+    expect((await plannerView(emptied)).rows).toEqual(pristine.planner);
   });
 
   it('does not fail its file', async () => {
@@ -291,7 +290,7 @@ describe('rows a file makes once', { shuffle: false }, () => {
       const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
       return agent!;
     });
-    const names = (db: Db) => db.select({ name: agents.name }).from(agents).orderBy(agents.name);
+    const names = (db: Db) => db.select(only(agents, 'name')).from(agents).orderBy(agents.name);
     const first = await createTestDb();
     await acme(first);
     const bruno = await team(first);
@@ -373,8 +372,84 @@ describe('after a test fails', { shuffle: false }, () => {
   });
 });
 
+/* A test can end while the rows it asked for are still being made, as when its time runs out on a busy machine. Made
+   again, they would cost the next test the same time, and it would run out of time too. */
+describe('rows a test was still making when it ended', { shuffle: false }, () => {
+  let made = 0;
+  let firstSeq = 0;
+  let begun: () => void = () => {};
+  let ended: () => void = () => {};
+  const acme = (db: Db) => fixture(db.$client, 'acme, made as its test ends', async () => {
+    made += 1;
+    const seq = await numberedEvent(db);
+    if (made === 1) {
+      firstSeq = seq;
+      begun();
+      /* The rest is made once its test has ended, a turn of the event loop later. */
+      await new Promise<void>(go => (ended = go));
+      await new Promise(next => setImmediate(next));
+    }
+    const [agent] = await db.select().from(agents);
+    const [event] = await db.insert(agentEvents).values({ companyId: agent!.companyId, agentId: agent!.id, kind: 'message', data: {} }).returning();
+    return { seq, last: event!.seq };
+  });
+  /* Rows that stand on those, which a test cut off goes on to ask for once they are made. */
+  let layers = 0;
+  const team = (db: Db) => fixture(db.$client, 'team on acme, made as its test ends', async () => {
+    layers += 1;
+    const [company] = await db.select().from(companies);
+    return (await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning())[0]!;
+  });
+  let bruno: unknown;
+
+  it.fails('can end with them half made, as at its time limit', async () => {
+    const db = await createTestDb();
+    await new Promise<void>(go => {
+      begun = go;
+      acme(db).then(async () => (bruno = await team(db))).catch(() => {});
+    });
+    onTestFinished(() => ended());
+    throw new Error('As if this test had run out of time.');
+  });
+
+  it('are kept for the next test whole, with those it went on to, and it does not make them again', async () => {
+    const db = await createTestDb();
+    expect(await acme(db)).toEqual({ seq: firstSeq, last: firstSeq + 1 });
+    expect(await team(db)).toEqual(bruno);
+    expect([made, layers]).toEqual([1, 1]);
+    expect(await db.select({ seq: agentEvents.seq }).from(agentEvents).orderBy(agentEvents.seq)).toEqual([{ seq: firstSeq }, { seq: firstSeq + 1 }]);
+    expect(await db.select({ name: agents.name }).from(agents).orderBy(agents.name)).toEqual([{ name: 'Bruno' }, { name: 'Orchestrator' }]);
+  });
+
+  it('do not hold up the end of a test that left the clock not real', async () => {
+    /* Hooks run last first: the clock is real again only after the wait for rows. */
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const db = await createTestDb();
+    await acme(db);
+    vi.useFakeTimers();
+  });
+});
+
 describe('a test run', () => {
   it('is in one time zone, wherever the machine is', () => {
     expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe('UTC');
   });
 });
+
+/* The untouched migrated database is an independent input to comparisons with the shared one. Capture it once during
+   collection: repeatedly opening the same control copy tested infrastructure speed inside the scenario's deadline.
+   The separate two-database case above still exercises createTestDb while another database is held. */
+const pristine = await (async () => {
+  const client = new PGlite({ loadDataDir: new Blob([readFileSync(inject('migratedDataDir'))]) });
+  try {
+    const { db } = await asTestDb(client);
+    return {
+      rows: await rowsOfEachTable(db),
+      rights: await rights(db),
+      applicationName: await applicationName(db),
+      planner: (await plannerView(db)).rows,
+    };
+  } finally { await client.close(); }
+})();

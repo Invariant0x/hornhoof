@@ -27,7 +27,7 @@ const NEEDS_FILE = 'This server cannot open the backup. Add the recovery file it
 const NOT_OPENED = 'The backup could not be opened.';
 const RESTARTED = 'The keeper restarted during the restore.';
 
-export type RestoreRunnerOptions = {
+type RestoreRunnerOptions = {
   controlDir: string;
   /* The keeper's own bundles, and the ones sent to it for a restore after a total loss. */
   own: BundleStore;

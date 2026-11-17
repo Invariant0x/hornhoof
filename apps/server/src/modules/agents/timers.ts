@@ -2,6 +2,7 @@ import { and, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
@@ -36,7 +37,7 @@ async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
   const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['done', 'cancelled'])));
   for (const task of open) if (!task.externalWait && !(await waitsOnPurpose(ctx, task))) return true;
   const [failed] = await ctx.db
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .where(
       and(
@@ -61,7 +62,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), timed));
   if (!agent || !due(agent, now) || !(await liveSubscription(ctx, id)) || !(await agentState(ctx, id)).ready) return false;
   const [open] = await db
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .where(and(eq(jobs.agentId, id), inArray(jobs.status, ['queued', 'running'])))
     .limit(1);
@@ -82,7 +83,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
 export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknown) => void = () => {}): Promise<number> {
   const { db } = ctx;
   let started = 0;
-  for (const { id } of await db.select({ id: agents.id }).from(agents).where(timed)) {
+  for (const { id } of await db.select(idOnly(agents)).from(agents).where(timed)) {
     try {
       const queued = await onAgent(ctx, id, () => queueDueRound(ctx, id, now));
       if (!queued) continue;
@@ -123,7 +124,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
-    dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+    dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
@@ -141,7 +142,7 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
   await Promise.all([
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed')),
+    dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
     reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed')),
   ]);
 }

@@ -14,6 +14,9 @@ const unreachable = (): Response => {
 };
 /* An answer whose body breaks off before its JSON ends. */
 const cutShort = () => new Response('{"note":{"numb', { status: 200, headers: { 'content-type': 'application/json' } });
+/* An answer whose body the browser stops reading, as Firefox does when the page reloads while it comes. */
+const aborted = (status = 200) => () =>
+  new Response(new ReadableStream({ start: c => c.error(new DOMException('The operation was aborted.', 'AbortError')) }), { status, headers: { 'content-type': 'application/json' } });
 
 /* Answers each call with the next step, and the last step for every call after it. */
 function fetchAnswering(...steps: Step[]) {
@@ -130,11 +133,36 @@ describe('a read from the page', () => {
     expect(calls).toHaveBeenCalledTimes(1);
     expect(keys).toEqual([null]);
   });
+
+  /* A body that never came whole is no answer: the read fails as one that met no server, never with null for data. */
+  it('fails a read whose answer breaks off as one that met no server, once, and keeps an answer with no body whole', async () => {
+    for (const broken of [aborted(), cutShort]) {
+      const { calls } = fetchAnswering(broken);
+      expect(await settled(api.get('/api/feedback'))).toMatchObject({ failure: { status: 0, code: 'network' } });
+      expect(calls).toHaveBeenCalledTimes(1);
+    }
+    fetchAnswering(new Response(null, { status: 200 }));
+    expect(await settled(api.get('/api/map/layout'))).toEqual({ value: null });
+    fetchAnswering(new Response(null, { status: 204 }));
+    expect(await settled(api.get('/api/map/layout'))).toEqual({ value: undefined });
+  });
+
+  it('fails a file sent whole as one that met no server when its answer breaks off', async () => {
+    fetchAnswering(aborted());
+    expect(await settled(api.upload('/api/agents/a1/pictures?name=a.png', new Blob(['x'])))).toMatchObject({ failure: { status: 0, code: 'network' } });
+    fetchAnswering(cutShort);
+    expect(await settled(api.putFile('/api/recovery/bundles/b1?code=c', new Blob(['x'])))).toMatchObject({ failure: { status: 0, code: 'network' } });
+  });
+
+  it('keeps the status of a refusal whose words break off', async () => {
+    fetchAnswering(aborted(503));
+    expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { status: 503, code: 'internal' } });
+  });
 });
 
 describe('newRequestId', () => {
   it('makes a v4 uuid without randomUUID, which a page on plain http lacks', () => {
-    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => realCrypto.getRandomValues(bytes) });
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array<ArrayBuffer>) => realCrypto.getRandomValues(bytes) });
     const ids = [newRequestId(), newRequestId()];
     expect(ids[0]).toMatch(UUID_V4);
     expect(ids[1]).toMatch(UUID_V4);

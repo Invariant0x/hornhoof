@@ -1,21 +1,21 @@
 import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 
-export type OperatorScreenInput = {
+type OperatorScreenInput = {
   cells: string;
   cols: number;
   rows: number;
   secrets: string[];
 };
 
-export type OperatorScreenResult = {
+type OperatorScreenResult = {
   png: Buffer;
   text: string;
   width: number;
   height: number;
 };
 
-export type OperatorScreenSvgResult = {
+type OperatorScreenSvgResult = {
   svg: string;
   text: string;
   width: number;

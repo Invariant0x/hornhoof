@@ -6,7 +6,7 @@ import { redact } from '../redact.js';
 type ViewCommand = Extract<OperatorServerMessage, { type: 'program.view_get' }>;
 type InputCommand = Extract<OperatorServerMessage, { type: 'program.input_send' }>;
 /* What the host knows of an agent's program that runs here now, or null when none does. */
-export type ProgramFacts = { jobId: string | null; instance: string; working: boolean; tool: string | null; question: OperatorQuestion | null; input: ProgramInputLine; undelivered: boolean };
+export type ProgramFacts = { jobId: string | null; instance: string; working: boolean; completion?: string; tool: string | null; question: OperatorQuestion | null; input: ProgramInputLine; undelivered: boolean };
 type Source = {
   facts(key: string): Promise<ProgramFacts | null>;
   capture(key: string): Promise<Pane>;
@@ -40,7 +40,7 @@ export class ProgramAccess {
       const snapshot = { token: randomUUID(), instance: facts.instance, at: this.source.now() };
       this.keep(command.agentKey, snapshot);
       const secrets = this.source.secrets();
-      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', tool: facts.tool === null ? null : redact(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
+      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', ...(facts.completion ? { completion: facts.completion } : {}), tool: facts.tool === null ? null : redact(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
     });
   }
 

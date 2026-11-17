@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { nodes, planCredentials, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { liveNode, settlePlans } from '../nodes/nodes.js';
 import { keyedNodes } from './lease.js';
@@ -27,7 +28,7 @@ export async function storeEnvelopes(db: Db, sub: { id: string; companyId: strin
     if (kind === 'codex_auth' && from && plan.lease && plan.lease !== from) return [];
     const ids = [...new Set(envelopes.map(e => e.nodeId))];
     const live = ids.length
-      ? new Set((await tx.select({ id: nodes.id }).from(nodes).where(and(inArray(nodes.id, ids), eq(nodes.subscriptionId, sub.id), liveNode))).map(n => n.id))
+      ? new Set((await tx.select(idOnly(nodes)).from(nodes).where(and(inArray(nodes.id, ids), eq(nodes.subscriptionId, sub.id), liveNode))).map(n => n.id))
       : new Set<string>();
     const kept = envelopes.filter(e => live.has(e.nodeId));
     if (version > plan.credVersion) {
@@ -119,7 +120,7 @@ export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: str
     if (kind === 'codex_auth') {
       await db.update(subscriptions).set({ leaseNodeId: nodeId }).where(eq(subscriptions.id, node.plan));
       /* The plan runs on this machine now; the others give up their copies. */
-      const others = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.subscriptionId, node.plan), liveNode));
+      const others = await db.select(idOnly(nodes)).from(nodes).where(and(eq(nodes.subscriptionId, node.plan), liveNode));
       for (const other of others) if (other.id !== nodeId) ctx.hub.send(nodeIdentity(other.id), { type: 'cred.lease', hold: false });
     }
     if (recipients.length) ctx.hub.send(nodeIdentity(nodeId), { type: 'cred.seal', kind, version: node.credVersion + 1, recipients });
