@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
+import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -33,6 +34,7 @@ import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
+import { placeFreed, waitingOn } from './turn-places.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -71,6 +73,9 @@ const TicksBody = z
   .strict()
   .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
 const PlanBody = z.object({ subscription: z.uuid() }).strict();
+/* How many agents' turns the machine runs at once at most, a whole number from 1 up to what the column holds, or null for
+   no limit. */
+export const TurnLimitBody = z.object({ limit: z.number().int().min(1).max(2 ** 31 - 1).nullable() }).strict();
 /* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
 const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
 
@@ -249,7 +254,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, turnLimit: machines.turnLimit })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -334,6 +339,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,
+        /* How many agents' turns it runs at once at most, null for no limit, and how many wait for a place there now. */
+        turnLimit: m.turnLimit,
+        turnsWaiting: waitingOn(ctx, m.id),
         /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
         needsCore: needsCore(m),
@@ -413,6 +421,21 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await ownMachine(me, id);
     await cancelMove(ctx, id);
     return reply.code(204).send();
+  });
+
+  /* How many agents' turns the machine runs at once: its owner's, the CEO's or the CEO delegate's to set, the orchestrator's
+     through them; a head that calls this as someone is refused. A limit that goes down stops nothing that runs; turns
+     that waited for a place there go as soon as the new limit leaves one. */
+  app.put('/api/machines/:id/turn-limit', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { limit } = TurnLimitBody.parse(req.body);
+    const [machine] = await db.select({ personId: machines.personId }).from(machines).where(and(eq(machines.id, id), eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config)));
+    if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+    if (me.viaHead || (machine.personId !== me.id && !actsAsCeo(me))) throw new ApiError(403, 'forbidden', "Only the machine's owner, the CEO or the orchestrator sets how many turns it runs at once.", 'not_machine_owner');
+    const [now] = await db.update(machines).set({ turnLimit: limit }).where(eq(machines.id, id)).returning({ turnLimit: machines.turnLimit });
+    await placeFreed(ctx, id);
+    return now;
   });
 
   /* Whether the machine takes the company's test runs, and whether it keeps the company's backups. A machine lent again

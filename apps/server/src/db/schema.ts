@@ -430,6 +430,9 @@ export const machines = pgTable(
     kind: text('kind', { enum: MACHINE_KINDS }).notNull().default('computer'),
     /* Lends itself to the company's test runs; its owner, or someone who sees the whole company, can take it back. */
     lendsTests: boolean('lends_tests').notNull().default(true),
+    /* How many agents' turns run on it at once at most, over all its nodes; past that a new turn waits for a place there.
+       Empty for no limit. Its owner, the CEO or the orchestrator sets it. */
+    turnLimit: integer('turn_limit'),
     createdAt: createdAt(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     /* What the machine is in the company's network. networkId: the id its keeper runs under; none without a keeper.

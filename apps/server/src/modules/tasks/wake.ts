@@ -12,6 +12,7 @@ import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { waitedForReturn } from '../nodes/connections.js';
 import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
+import { machineOfTurn, placeFreed } from '../nodes/turn-places.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, uncountedSinceMove, wentOn, wentOnAfterReturn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
@@ -700,7 +701,7 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
-    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine })
     .from(jobs)
     .where(eq(jobs.id, jobId));
   forgetEndedTurn(ctx, jobId, job);
@@ -718,6 +719,8 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
+  /* The place the turn took on its machine is free: the turns that wait for one there go in their order. */
+  if (job.startedAt) await placeFreed(ctx, await machineOfTurn(ctx.db, job));
 }
 
 async function recordFailedTurn(

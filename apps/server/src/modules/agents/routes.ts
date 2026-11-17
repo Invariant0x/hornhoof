@@ -27,6 +27,7 @@ import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
+import { placeWaiters } from '../nodes/turn-places.js';
 import { releaseLeftProgram } from './left-programs.js';
 import { telegramOf, type TelegramView } from '../telegram/routes.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
@@ -58,6 +59,8 @@ export type AgentCard = FailureState & {
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
   held: ReturnType<typeof planHoldView>;
+  /* Its turn waits for a place on a machine that runs as many turns at once as its limit takes. */
+  slotWait: boolean;
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
   raw: string;
@@ -293,6 +296,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     ...agentProgramState(ctx, running),
     ...await agentFailureState(ctx, agent.id),
     held: planHoldView(await planHeld(ctx, agent, await liveSubscription(ctx, agent.id))),
+    slotWait: !running && (await placeWaiters(ctx, agent.companyId)).has(agent.id),
     skills: offered.flatMap(s => cardSkill(ctx, agent, s)),
     parts,
     raw,

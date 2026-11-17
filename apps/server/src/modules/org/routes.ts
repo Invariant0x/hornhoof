@@ -9,6 +9,7 @@ import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
+import { placeWaiters } from '../nodes/turn-places.js';
 import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
 import { hostsOf } from '../departments/repo-hosts.js';
@@ -136,6 +137,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const failures = await agentFailureStates(ctx, me.companyId, allAgents.map(a => a.id));
     const holds = new Map(await Promise.all(allAgents.map(async a => [a.id, planHoldView(await planHeld(ctx, a, subs.get(a.subscriptionId!)))] as const)));
+    /* Whose turn waits for a place on a machine that runs as many turns at once as its limit takes. */
+    const placeWait = await placeWaiters(ctx, me.companyId);
+    const slotWait = (id: string) => (placeWait.has(id) && !busy.has(id) ? { slotWait: true as const } : {});
     const employeesOf = (dept: (typeof depts)[number]) =>
       allAgents
         .filter(a => a.departmentId === dept.id && a.kind !== 'orchestrator')
@@ -160,6 +164,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             ...agentProgramState(ctx, run),
             ...failures.get(a.id)!,
             held: holds.get(a.id)!,
+            ...slotWait(a.id),
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
@@ -220,6 +225,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         held: holds.get(orchestrator.id)!,
+        ...slotWait(orchestrator.id),
         /* Whether he has a plan to work on, which everyone may know; which plan it is goes only to those who open him. */
         planned: Boolean(orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId)),
         subscription: orchestrator.subscriptionId && seesAgentId(viewer, orchestrator.id) ? await subView(db, onlineIn(hub, ctx.config), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,

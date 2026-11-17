@@ -6,6 +6,7 @@ import { idOnly } from '../../db/selections.js';
 import { CLOSED, openAfter, type Task } from './engine.js';
 import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
+import { waitsForPlace } from '../nodes/turn-places.js';
 
 const QUIET_DEPARTMENT_MS = 15 * 60_000;
 export const waitKey = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -43,7 +44,15 @@ async function taskWaitReason(ctx: Ctx, task: Task, now: Date): Promise<string |
   if (task.status === 'blocked' || task.status === 'waiting') return task.status;
   /* A pause holds work so that nothing wakes its holder, whatever its status: its reason explains the quiet. */
   if (task.paused) return `paused: ${task.paused.reason}`;
-  return await waitingForTasks(ctx, task) ?? await waitingForService(ctx, task);
+  return await waitingForTasks(ctx, task) ?? await waitingForService(ctx, task) ?? await waitingForPlace(ctx, task);
+}
+
+/* Its holder's turn on it waits for a place on a machine that runs as many turns as its limit takes. */
+async function waitingForPlace(ctx: Ctx, task: Task): Promise<string | null> {
+  const holder = task.assigneeAgentId;
+  if (!holder || !waitsForPlace(ctx, holder)) return null;
+  const [turn] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, holder), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'))).limit(1);
+  return turn ? 'waiting for a place on its machine' : null;
 }
 
 async function waitingForTasks(ctx: Ctx, task: Task): Promise<string | null> {

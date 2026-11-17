@@ -137,6 +137,19 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await db.select().from(machines))[0]!.lendsTests).toBe(false);
   });
 
+  it("sets how many turns one of the company's machines runs at once, or takes the limit away, as the machine screen does", async () => {
+    const { app, db } = await company();
+    const [acme] = await db.select().from(companies);
+    const [ivan] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: ivan!.id, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
+    const client = await mcp(app, TOKEN);
+    expect(text(await call(client, 'limit_machine_turns', { machine: machine!.id, limit: 3 }))).toContain('"turnLimit":3');
+    expect((await db.select().from(machines))[0]!.turnLimit).toBe(3);
+    expect((await call(client, 'limit_machine_turns', { machine: machine!.id, limit: 0 })).isError).toBe(true);
+    expect(text(await call(client, 'limit_machine_turns', { machine: machine!.id, limit: null }))).toContain('"turnLimit":null');
+    expect((await db.select().from(machines))[0]!.turnLimit).toBeNull();
+  });
+
   it('reads any page the CEO can open', async () => {
     const { app } = await company();
     const res = await call(await mcp(app, TOKEN), 'api', { path: '/api/people' });

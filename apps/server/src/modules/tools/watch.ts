@@ -205,11 +205,12 @@ function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
    line, or a turn of its own after the one that runs or waits. */
 const WAITS = {
   update: 'Its machine waits for an update, so the turn starts after it.',
+  place: 'Its machine runs as many turns at once as its limit takes, so the turn starts once a place there frees.',
   reconnect: 'Its machine is getting back on the line, so the turn starts once it is back.',
   line: 'It gets this with its next turn, not at once.',
 };
 type Waits = keyof typeof WAITS;
-const waitsOf = (state: { ready: boolean; machineDrain: unknown }): Waits => (state.machineDrain ? 'update' : state.ready ? 'line' : 'reconnect');
+const waitsOf = (state: { ready: boolean; machineDrain: unknown; slotWait: boolean }): Waits => (state.machineDrain ? 'update' : state.slotWait ? 'place' : state.ready ? 'line' : 'reconnect');
 
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
 async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Promise<string> {
@@ -312,7 +313,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether its machine runs as many turns at once as its limit takes (slotWait: its turn waits in the line of its machine, first come first served with urgent tasks ahead, and starts by itself once a turn there ends, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
           "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it. " +
           'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
@@ -354,6 +355,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             limitUntil: state.limitUntil,
             machineDrain: state.machineDrain,
             memoryWait: state.memoryWait,
+            slotWait: state.slotWait,
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,

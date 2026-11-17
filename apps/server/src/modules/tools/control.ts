@@ -15,7 +15,7 @@ import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
 import { NewRepositoryBody } from '../departments/repo-hosts.js';
 import { LinkBody } from '../link/routes.js';
 import { SHOWN_TO_CEO } from '../nodes/command.js';
-import { LendBody } from '../nodes/routes.js';
+import { LendBody, TurnLimitBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
@@ -63,6 +63,7 @@ export const CEO_ONLY = new Set([
   'remove_subscription',
   'disconnect_machine',
   'lend_machine',
+  'limit_machine_turns',
   'set_repository',
   'add_repository',
   'create_repository',
@@ -332,6 +333,13 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     "Lends a machine to the company's test runs and work runs (lendsTests true), which go to whichever lent machine is freest, or takes it back.",
     { machine: Id('machine'), ...LendBody.shape, ...PERMISSION },
     ({ machine, permission, ...body }) => ({ method: 'PATCH', url: `/api/machines/${machine}`, payload: body, permission }),
+  );
+  tool(
+    'limit_machine_turns',
+    "Sets how many agents' turns a machine runs at once, over all its plans (limit 1 or more), or null for no limit. Past the limit a new turn waits for a place there, " +
+      "first come first served with an urgent task's turns ahead, and starts by itself once a turn there ends. Lowering it stops nothing that runs.",
+    { machine: Id('machine'), ...TurnLimitBody.shape, ...PERMISSION },
+    ({ machine, permission, ...body }) => ({ method: 'PUT', url: `/api/machines/${machine}/turn-limit`, payload: body, permission }),
   );
 
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
