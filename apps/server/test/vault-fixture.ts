@@ -23,7 +23,7 @@ export async function vaultCompany() {
       { companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true },
       { companyId, name: 'Sam', email: 'sam@acme.test', status: 'active', scopeKind: 'listed' },
     ]).returning();
-    const [sub] = await db.insert(subscriptions).values({ companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Test plan', ownerPersonId: ceo!.id, status: 'ready', targetKind: 'company', secretEnc: encryptSecret('sk-test-vault-fixture', config.secret) }).returning();
+    const [sub] = await db.insert(subscriptions).values({ companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Test plan', ownerPersonId: ceo!.id, status: 'ready', targetKind: 'any', secretEnc: encryptSecret('sk-test-vault-fixture', config.secret) }).returning();
     const [orchestrator] = await db.insert(agents).values({ companyId, kind: 'orchestrator', name: 'Orchestrator', model: '', subscriptionId: sub!.id }).returning();
     const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
     const [nora, aide] = await db
