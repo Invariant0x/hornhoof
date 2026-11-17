@@ -1873,8 +1873,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-cells { display: grid; grid-template-columns: minmax(0, 4fr) repeat(3, minmax(0, 1.15fr)) minmax(0, 1.4fr) minmax(0, .9fr); align-items: center; gap: 4px 12px; min-inline-size: 0; font-size: 13px; }
 .tr-head { padding: 8px; border-block-end: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--muted); }
 .tr-head > span { overflow-wrap: anywhere; }
-.tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; }
+.tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
 .tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
+.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: 24px; min-block-size: 24px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
+.tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
+[dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
+.tr-branch-count { display: inline-flex; align-items: center; gap: 4px; }
+.tr-rows[hidden] { display: none; }
 .tr-status-dot { flex: 0 0 auto; inline-size: 14px; block-size: 14px; border: 2px solid var(--muted); border-radius: 50%; }
 .tr-status-dot.working { border-color: var(--tracker-working-ring); }
 .tr-status-dot.waiting { border-color: var(--tracker-waiting-ring); }
@@ -1884,6 +1890,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
 .tr-task-name > .tr-wait, .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-row-line .tr-title { min-block-size: 24px; }
 .tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
 .tr-name .badge { white-space: normal; }

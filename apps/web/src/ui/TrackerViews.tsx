@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, type Asks, type HumanStatus } from '../task-board';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
@@ -7,7 +7,7 @@ import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
 import { Fold } from './TaskBoard';
 import { dueText, sinceSeconds, spanText, taskWaits, waitLabel, waitText } from './tracker-words';
 import { routePath } from '../routes';
-import type { Program } from './icons';
+import { TrackerIcon, type Program } from './icons';
 import { DepartmentMark, ExecutorMark, PersonMark, PriorityWord } from './TrackerMarks';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
@@ -53,6 +53,8 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const t = useT();
   const { language } = useLanguage();
   const [open, setOpen] = useState(false);
+  const childrenId = useId();
+  const hasChildren = showSubtasks && tree.children.length > 0;
   const { task } = tree;
   const words = t.tracker.list;
   const due = dueText(t, language, task);
@@ -66,11 +68,17 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   return (
     <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
       <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`}>
-        <div className="tr-task-name" style={{ paddingInlineStart: `min(${depth * 16}px, 12%)` }}>
+        <div className="tr-task-name" style={{ '--tr-depth': depth } as CSSProperties}>
           <div className="tr-name">
+            {hasChildren && (
+              <button className="tr-row-caret" type="button" aria-expanded={open} aria-controls={childrenId}
+                aria-label={words.subtasks(tree.done, tree.total)} title={words.subtasks(tree.done, tree.total)} onClick={() => setOpen(!open)}>
+                <TrackerIcon name="chevron" />
+              </button>
+            )}
             <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
             <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-            {tree.total > 0 && <span className="tr-no" title={words.subtasks(tree.done, tree.total)}>{tree.total}</span>}
+            {tree.total > 0 && <span className="tr-no tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}
             <span className="tr-no">#{task.number}</span>
             {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
             {[...prerequisites].map(ref => <span className="tr-relation" key={ref}>{words.waitsFor(ref)}</span>)}
@@ -102,11 +110,10 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
         </Cell>
         <Cell name={words.due}>{due && <span className={due.late ? 'tp-late' : undefined}>{due.text}</span>}</Cell>
       </div>
-      {showSubtasks && tree.children.length > 0 && (
-        <>
-          <Fold open={open} onToggle={() => setOpen(!open)}>{words.subtasks(tree.done, tree.total)}</Fold>
-          {open && <ul className="tr-rows sub">{tree.children.map(child => <ListRow key={child.task.id} tree={child} rows={rows} relations={relations} depth={depth + 1} />)}</ul>}
-        </>
+      {hasChildren && (
+        <ul id={childrenId} className="tr-rows sub" hidden={!open}>
+          {open && tree.children.map(child => <ListRow key={child.task.id} tree={child} rows={rows} relations={relations} depth={depth + 1} />)}
+        </ul>
       )}
     </li>
   );
@@ -131,9 +138,9 @@ function Group({ group, rows, relations, onAddTask, showSubtasks }: { group: Lis
   const label = group.status === 'waitingPerson' ? t.tracker.list.waitingPerson : t.tracker.groups[group.status];
   const state = group.status === 'waitingPerson' ? 'waiting' : STATE_CLASS[group.status];
   return (
-    <section className={`tr-group ${state}`} aria-labelledby={id}>
+    <section className={`tr-group ${state}`} aria-label={t.tracker.list.group(label, group.trees.length)}>
       <h2 className="tr-group-head">
-        <button id={id} className="tr-group-toggle" type="button" aria-expanded={open} aria-controls={`${id}-rows`} aria-label={t.tracker.list.group(label, group.trees.length)} onClick={() => setOpen(!open)}>
+        <button className="tr-group-toggle" type="button" aria-expanded={open} aria-controls={`${id}-rows`} aria-label={t.tracker.list.group(label, group.trees.length)} onClick={() => setOpen(!open)}>
           <span className="tr-group-arrow" aria-hidden="true" />
           <span className="tr-status-pill">{label}</span>
           <span className="tr-count">{group.trees.length}</span>

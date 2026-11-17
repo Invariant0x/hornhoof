@@ -88,3 +88,26 @@ it('uses status shapes, stable identity marks and a colored priority arrow', () 
   expect(screen.getByRole('img', { name: 'Waiting' })).toHaveClass('waiting');
   expect(screen.getByRole('button', { name: 'Done: 1' }).closest('section')).toHaveClass('done');
 });
+
+it('expands under the parent title and keeps child facts in their columns', async () => {
+  const user = userEvent.setup();
+  const child = task({ id: 'child', parentId: 'plan', number: 268, title: 'Pick the recipients', status: 'open', priority: 'low' });
+  const tasks = [task(), child];
+  const rows = { selected: null, onOpenTask: vi.fn() };
+  const view = (showSubtasks: boolean) => <LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" showSubtasks={showSubtasks} /></LanguageProvider>;
+  const { rerender } = render(view(true));
+  const parent = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const toggle = within(parent).getByRole('button', { name: 'Subtasks: 0 of 1 done' });
+  expect(toggle.closest('.tr-name')).toContainElement(within(parent).getByRole('button', { name: 'Plan the mailing' }));
+  expect(within(parent).getByText('1', { selector: '.tr-branch-count' }).querySelector('svg')).toBeInTheDocument();
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await user.click(toggle);
+  const inline = within(parent).getByRole('listitem', { name: '#268 Pick the recipients' });
+  expect(inline).toHaveTextContent('Low');
+  expect(within(inline).getByRole('img', { name: 'Max' })).toBeInTheDocument();
+  expect(inline.querySelector('.tr-task-name')).toHaveStyle('--tr-depth: 1');
+  rerender(view(false));
+  expect(within(parent).queryByRole('listitem', { name: '#268 Pick the recipients' })).toBeNull();
+  rerender(view(true));
+  expect(within(parent).getByRole('listitem', { name: '#268 Pick the recipients' })).toBeInTheDocument();
+});
