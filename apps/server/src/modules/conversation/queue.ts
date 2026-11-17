@@ -6,7 +6,7 @@ import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS,
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { forgetPrivateTurn } from '../tools/privacy.js';
+import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agentEvents, agents, jobs, nodes, subscriptions, tasks, type AgentKind } from '../../db/schema.js';

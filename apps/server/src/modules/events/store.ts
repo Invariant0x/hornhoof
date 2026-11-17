@@ -7,7 +7,7 @@ import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db
 import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
-import { privateTurn } from '../tools/privacy.js';
+import { privateTurn } from '../tools/private-turns.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 

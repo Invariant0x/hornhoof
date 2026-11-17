@@ -12,7 +12,7 @@ import { holdsMachine } from '../network/follow.js';
 import { jobsOf } from '../nodes/messages.js';
 import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { attachmentToken } from '../tasks/attachment-token.js';
-import { forgetPrivateTurn } from './privacy.js';
+import { forgetPrivateTurn } from './private-turns.js';
 export { notStep } from './steps.js';
 
 /* An agent's program talks to its tools whenever it likes: as it starts and connects, and when it goes on with work no turn

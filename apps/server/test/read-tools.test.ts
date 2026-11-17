@@ -11,7 +11,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, jobs, subscriptions, toolCalls } from '../src/db/schema.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { callName, CUT_OFF, READ_TOOLS } from '../src/modules/tools/read-tools.js';
-import { privateTurn } from '../src/modules/tools/privacy.js';
+import { privateTurn } from '../src/modules/tools/private-turns.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { listen, setUpCompany, testApp, TUNNEL, until } from './helpers.js';
 
