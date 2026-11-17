@@ -44,6 +44,36 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it('removes a sensitive recording and keeps recording disabled after the node restarts', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-recording-marker-1178');
+    await tmux.protectOutput('a-private');
+    expect(existsSync(recording.file)).toBe(false);
+    const restarted = new Tmux({ socket: 'hh-test', env: { HOME: home }, recordingsDir: join(home, 'recordings') });
+    vi.spyOn(restarted, 'run').mockImplementation(async args => {
+      if (args[0] === 'has-session') throw new Error('no session');
+      return '';
+    });
+    expect(restarted.outputPrivate('a-private')).toBe(true);
+    await restarted.launch('a-private', { cwd: home, command: ['claude'], cols: 80, rows: 24, outputDir: home });
+    expect(vi.mocked(restarted.run).mock.calls.some(([args]) => args[0] === 'pipe-pane' && args.length > 3)).toBe(false);
+    await restarted.kill('a-private');
+    expect(restarted.outputPrivate('a-private')).toBe(false);
+  });
+
+  it('keeps the sensitive pane out of the temporary screen file used on stop', async () => {
+    const marker = 'private-stopped-screen-marker-1178';
+    const { tmux, calls } = recorded(args => args[0] === 'capture-pane' ? marker : '');
+    vi.spyOn(tmux, 'alive').mockResolvedValue(false);
+    await tmux.protectOutput('a-private');
+    await tmux.stop('a-private');
+    const shown = calls.find(call => call.args[0] === 'respawn-pane')?.args.at(-1);
+    expect(shown).toBeDefined();
+    expect(readFileSync(shown!, 'utf8')).not.toContain(marker);
+    expect(readFileSync(shown!, 'utf8')).toMatch(/hidden/i);
+  });
+
   it('starts a new session in one command line: its options, the program, then the keys that leave watchers none', async () => {
     const { tmux, calls } = recorded(args => (args[0] === 'has-session' ? new Error("can't find session") : ''));
     await tmux.launch('a-1', { cwd: '/work', command: ['claude', '--model', 'opus'], cols: 100, rows: 30 });

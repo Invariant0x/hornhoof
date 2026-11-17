@@ -78,7 +78,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -245,7 +245,7 @@ export class Bridge {
       return this.refused(req, res, 403, 'owner check failed');
     }
     const body = reading ? await reading : Buffer.alloc(0);
-    this.observeSensitive(key, kind, body);
+    await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
@@ -271,7 +271,7 @@ export class Bridge {
     res.writeHead(up.status, out);
     if (kind === 'attach') return pipeline(up.body ? Readable.fromWeb(up.body as never) : Readable.from([]), res);
     const answer = Buffer.from(await up.arrayBuffer());
-    this.observeSensitive(key, kind, body, answer);
+    await this.observeSensitive(key, kind, body, answer);
     if (kind === 'mcp' && up.ok) this.keepTools(key, body, answer);
     res.end(answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
@@ -323,7 +323,7 @@ export class Bridge {
     const got = await outside(key, body.toString('utf8'), typeof version === 'string' ? version : undefined).catch(() => null);
     if (!got) return false;
     const answer = Buffer.from(got.body);
-    this.observeSensitive(key, 'mcp', body, answer);
+    await this.observeSensitive(key, 'mcp', body, answer);
     reply(res, got.status, got.body);
     /* Turned away as it connects, by the machine installing its build or the agent no longer here: it keeps no tools. */
     if (got.status !== 200 || !resultsOnly(answer)) {
@@ -348,14 +348,13 @@ export class Bridge {
     return toolPrivacy(name);
   }
 
-  private observeSensitive(key: string, kind: string, body: Buffer, answer?: Buffer): void {
+  private async observeSensitive(key: string, kind: string, body: Buffer, answer?: Buffer): Promise<void> {
     if (kind !== 'mcp') return;
-    try {
-      const call = observedCall(body);
-      if (!call) return;
-      const target = privateToolCall(call.name, call.input, name => this.toolPolicy(key, name));
-      if (target.policy?.sensitive) this.options.sensitive?.(key, target.name, target.input, answer ? JSON.parse(answer.toString('utf8')) : undefined, target.policy);
-    } catch { /* Raw data belongs to the caller even when it cannot be parsed. */ }
+    const call = observedCall(body);
+    if (!call) return;
+    const target = privateToolCall(call.name, call.input, name => this.toolPolicy(key, name));
+    /* Cleanup failure stops forwarding; it must never be swallowed as a malformed response. */
+    if (target.policy?.sensitive) await this.options.sensitive?.(key, target.name, target.input, answer ? decodedAnswer(answer) : undefined, target.policy);
   }
 
   private keepTools(key: string, body: Buffer, answer: Buffer): void {
@@ -521,9 +520,15 @@ const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' ||
 const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';
 
 function observedCall(body: Buffer): { name: string; input: unknown } | null {
-  const call = JSON.parse(body.toString('utf8')) as { method?: string; params?: { name?: string; arguments?: unknown } };
-  const name = call.params?.name;
-  return call.method === 'tools/call' && typeof name === 'string' ? { name, input: call.params?.arguments } : null;
+  try {
+    const call = JSON.parse(body.toString('utf8')) as { method?: string; params?: { name?: string; arguments?: unknown } };
+    const name = call.params?.name;
+    return call.method === 'tools/call' && typeof name === 'string' ? { name, input: call.params?.arguments } : null;
+  } catch { return null; }
+}
+
+function decodedAnswer(answer: Buffer): unknown {
+  try { return JSON.parse(answer.toString('utf8')); } catch { return undefined; }
 }
 
 function privatePolicy(tool: { name?: unknown; _meta?: ToolPrivacyPolicy }): tool is { name: string; _meta: ToolPrivacyPolicy } {

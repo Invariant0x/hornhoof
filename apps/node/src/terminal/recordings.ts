@@ -114,7 +114,21 @@ export class Recordings {
     return join(this.dir, `${digest(name)}.json`);
   }
 
+  isPrivate(name: string): boolean {
+    return existsSync(join(this.dir, `${digest(name)}.private`));
+  }
+
+  protect(name: string): void {
+    this.privateDir();
+    writePrivate(join(this.dir, `${digest(name)}.private`), 'private', null);
+  }
+
+  release(name: string): void {
+    rmSync(join(this.dir, `${digest(name)}.private`), { force: true });
+  }
+
   create(name: string, dir: string): Recording {
+    if (this.isPrivate(name)) throw new Error('Raw recording is disabled for a sensitive program.');
     privateDirectory(this.root);
     privateDirectory(this.dir);
     const file = resolve(dir, `.hh-output-${randomBytes(8).toString('hex')}.log`);

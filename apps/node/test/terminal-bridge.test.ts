@@ -56,7 +56,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
     const result = { content: [{ type: 'text', text: '{"password":"private-bridge-marker"}' }] };
     const up = await upstream(result);
     const observed: unknown[] = [];
-    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => observed.push({ key, name, input, answer }) });
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => { observed.push({ key, name, input, answer }); } });
     await bridge.start();
     closers.push(() => bridge.stop(), () => up.server.close());
     bridge.setToken('agent-1', 'turn-token');
@@ -76,7 +76,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
     const result = { tools: [{ name: 'new_private_tool', _meta: policy }], content: [{ type: 'text', text: '{"value":"private-generic-marker"}' }] };
     const up = await upstream(result);
     const observed: unknown[] = [];
-    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => observed.push({ key, name, input, answer }) });
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => { observed.push({ key, name, input, answer }); } });
     await bridge.start();
     closers.push(() => bridge.stop(), () => up.server.close());
     bridge.setToken('agent-1', 'turn-token');
@@ -88,6 +88,25 @@ describe("the node's bridge to Hornhoof's tools", () => {
       { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: undefined },
       { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: { jsonrpc: '2.0', id: 1, result } },
     ]);
+  });
+
+  it('waits for private output cleanup before forwarding a sensitive call', async () => {
+    const up = await upstream();
+    let seen = false;
+    let release!: () => void;
+    const cleanup = new Promise<void>(resolve => { release = resolve; });
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: async (_key, _name, _input, answer) => { if (!answer) { seen = true; await cleanup; } } });
+    const forward = vi.spyOn(bridge as unknown as { forward: (url: string, init: RequestInit, retry: boolean) => Promise<Response> }, 'forward').mockResolvedValue(new Response('{"jsonrpc":"2.0","id":1,"result":{}}'));
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const response = fetch(bridge.agent('agent-1').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: toolCall('vault_entry') });
+    try {
+      await eventually(() => seen);
+      expect(forward).not.toHaveBeenCalled();
+    } finally { release(); }
+    await (await response).text();
+    expect(forward).toHaveBeenCalledOnce();
   });
 
   /* The bridge's pauses between tries, taken on no clock: each one is only written down. */

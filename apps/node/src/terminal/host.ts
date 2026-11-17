@@ -453,10 +453,10 @@ export class TerminalHost {
     this.operatorTimer = this.operatorTicks();
   }
 
-  private sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): void {
+  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): Promise<void> {
     const agent = this.agents.get(key);
     if (!agent) return;
-    agent.privateOutput = true;
+    await this.keepOutputPrivate(agent);
     const turn = activeTurn(agent);
     if (!turn) return;
     const privacy = (turn.privacy ??= new ToolPrivacy());
@@ -473,6 +473,15 @@ export class TerminalHost {
       try { value = JSON.parse(block.text); } catch { /* Plain sensitive replies are values too. */ }
       privacy.result(value, policy);
     }
+  }
+
+  private keepOutputPrivate(agent: Agent): Promise<void> {
+    agent.privateOutput = true;
+    return this.opts.tmux.protectOutput(agent.name);
+  }
+
+  private hideOutput(agent: Agent): void {
+    void this.keepOutputPrivate(agent).catch(() => this.log('Sensitive terminal output could not be cleared.'));
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
@@ -601,15 +610,17 @@ export class TerminalHost {
     return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 
-  screen(key: string): Promise<string> {
-    return this.opts.tmux.screen(this.agent(key).name);
+  async screen(key: string): Promise<string> {
+    const agent = this.agent(key);
+    return this.terminalText(agent, await this.opts.tmux.screen(agent.name));
   }
 
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { privateOutput: this.opts.tmux.outputPrivate(`a-${key}`), key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
+      if (a.privateOutput) this.hideOutput(a);
     }
     return a;
   }
@@ -2272,7 +2283,7 @@ export class TerminalHost {
     const turn = activeTurn(a);
     if (!turn) return;
     event = (turn.privacy ??= new ToolPrivacy()).event(event, undefined, name => this.bridge.toolPolicy(a.key, name));
-    if (turn.privacy.sensitive) a.privateOutput = true;
+    if (turn.privacy.sensitive && !a.privateOutput) this.hideOutput(a);
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
