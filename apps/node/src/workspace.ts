@@ -62,7 +62,7 @@ function childFailure(error: ExecFileException, stderr: string): ChildOutcome {
   return { kind: 'child', exitCode: typeof error.code === 'number' ? error.code : null, signal: error.signal ?? null, osCode: typeof error.code === 'string' ? error.code : null, stderr, stderrTruncated: false };
 }
 
-const realGit: Git = (args, { cwd, env, user }) =>
+export const realGit: Git = (args, { cwd, env, user }) =>
   new Promise((resolve, reject) => {
     execFile('/usr/bin/git', args, { cwd, env, uid: user?.uid, gid: user?.gid, timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
       if (err) reject(gitPreparationFailure(childFailure(err, String(stderr)), ['clone', 'fetch', 'ls-remote'].includes(args[0] ?? ''), [env.HH_GIT_PASSWORD ?? ''], args[0]));

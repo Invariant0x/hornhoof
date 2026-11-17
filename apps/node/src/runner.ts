@@ -11,6 +11,7 @@ import { plainOutput, programEnded, signalName, type ProgramOutput } from './pro
 import { placeSkills } from './skills.js';
 import { programFor } from './providers/index.js';
 import { readSessions, rememberSession } from './state.js';
+import { removeClosedCopies } from './task-copies.js';
 import type { Worktree } from './tests.js';
 import { headOf, prepareRepo, type Git } from './workspace.js';
 
@@ -181,6 +182,8 @@ type RunOptions = {
   dependencies?: (worktree: Worktree, signal?: AbortSignal) => Promise<string | null>;
   /* How long the program waits for them at most, whatever holds them. */
   dependenciesMs?: number;
+  /* The node's log, which says which worktrees of closed tasks went before the turn and why one stays. */
+  log?: (line: string) => void;
 };
 
 const DEPENDENCIES_MS = 10 * 60_000;
@@ -229,6 +232,16 @@ async function openRepo(repo: JobRepo, workDir: string, owner: { user: JobUser |
   return env;
 }
 
+/* The agent's worktrees of closed tasks go before its turn starts, so their dependencies do not fill the machine's disk.
+   What stays, and why, goes to the node's log; nothing of it keeps the turn from starting. */
+async function removeCopies(adapter: ProviderAdapter, msg: JobRun, workDir: string, git: Git | undefined, log: (line: string) => void): Promise<void> {
+  const repo = msg.workspace?.repo, tasks = msg.workspace?.tasks;
+  if (!repo || !tasks) return;
+  const owner = { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null };
+  const lines = await removeClosedCopies(join(workDir, repoFolder(repo.url)), workDir, tasks, owner, git).catch((err: unknown) => [`The worktrees of closed tasks stay this turn: ${message(err)}`]);
+  for (const line of lines) log(line);
+}
+
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
 export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
   const clean = (text: string, max: number) => cut(redact(text, secrets), max);
@@ -245,7 +258,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), dependencies, dependenciesMs }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), dependencies, dependenciesMs, log = console.log }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -269,6 +282,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   try {
     const place = await placeOfTurn(adapter, msg, dir);
     const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
+    await removeCopies(adapter, msg, place.workDir, git, log);
     const placed = await placeDependencies(adapter, msg, place, { dependencies, dependenciesMs, git, signal });
     if (placed) emit({ kind: 'text', text: placed });
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
