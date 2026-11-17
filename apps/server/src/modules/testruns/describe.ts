@@ -45,7 +45,7 @@ type Target = { department: typeof departments.$inferSelect | null; repo: NonNul
 type PlanningSources = { open: (companyId: string) => Promise<Place[]>; target: (run: Run) => Promise<Target> };
 type PlanningTransaction = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];
 /* The canonical repository/history and durable reason store are private integration ports, not cache-owner aliases. */
-export type ProductPlanningPorts = {
+type ProductPlanningPorts = {
   history?: (run: Readonly<Run>, snapshot: EnvironmentSnapshot) => Promise<PlanningHistory | null>;
   record?: (tx: PlanningTransaction, run: Readonly<Run>, plan: ProductPlan) => Promise<void>;
 };

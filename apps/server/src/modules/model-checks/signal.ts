@@ -8,7 +8,7 @@ import { recordWaitNotice } from '../tasks/wait-notices.js';
 import type { Signal } from './lifecycle.js';
 import { reportText, type Report } from './run.js';
 
-export type SignalPlace = { companyId: string; departmentId: string; checkId: string; kind: string };
+type SignalPlace = { companyId: string; departmentId: string; checkId: string; kind: string };
 
 export const signalRecipients = (ctx: Pick<Ctx, 'db'>, place: Pick<SignalPlace, 'companyId' | 'departmentId'>) => ctx.db.select(idOnly(agents)).from(agents).where(and(
   eq(agents.companyId, place.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt),

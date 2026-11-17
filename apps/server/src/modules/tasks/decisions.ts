@@ -91,7 +91,7 @@ function counted(viewer: AgentViewer, owners: { ownerPersonId: string; agentId: 
 }
 
 /* Whether a person reads a request with the work around it: the task and the agent who asks, both seen. */
-export const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentId'>, task: TaskPlace): boolean => seesTask(viewer, task) && seesAgentId(viewer, request.agentId);
+const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentId'>, task: TaskPlace): boolean => seesTask(viewer, task) && seesAgentId(viewer, request.agentId);
 
 /* Whether a person opens what shows with a request: when they read it with its work, or while it is open and theirs to
    answer, and then this and nothing around it. */
@@ -119,9 +119,10 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
   return { cards, computers };
 }
 
-/* The merges with open conflicts of the CEO's, for the CEO on his own session; nobody else is told there are any. */
+/* The merges with open conflicts of the CEO's, for the CEO and the orchestrator acting for him; nobody else is told there
+   are any. */
 async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Candidate[]): Promise<Decisions['merges']> {
-  if (!me.isOwner || me.via) return [];
+  if (!me.isOwner || me.viaHead) return [];
   const { db } = ctx;
   const his = ORCHESTRATORS_TABLES();
   const found = (await db.execute(sql`SELECT m.id, m.label, m.source, count(*)::int AS open,

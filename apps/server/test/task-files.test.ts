@@ -1,6 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
@@ -132,7 +135,7 @@ describe('the room for task files', () => {
   });
 
   it('lets go of the files of a turn closed 30 days ago, and keeps the rest', async () => {
-    const { db, companyId, head, task, counted } = await company();
+    const { app, db, companyId, head, task, counted } = await company();
     const day = 24 * 60 * 60 * 1000;
     const now = new Date();
     const turn = async (number: number, status: 'open' | 'closed', closedAt: Date | null) =>
@@ -143,8 +146,33 @@ describe('the room for task files', () => {
       const [copy] = await db.insert(tasks).values({ ...task, id: undefined, number: task.number + t.number, turnId: t.id }).returning();
       files.push(await counted(copy!.id, 10));
     }
-    expect(await dropOldFiles(db, now)).toBe(1);
+    expect(await dropOldFiles(app.ctx, now)).toBe(1);
     expect((await db.select(idOnly(attachments)).from(attachments)).map(a => a.id).sort()).toEqual([files[1]!.id, files[2]!.id].sort());
+  });
+});
+
+describe('a task file over 50 MB', () => {
+  it("lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open", async () => {
+    const { app, db, bruno, sam, task, turn, attach, fetchFile } = await company();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    app.ctx.config.filesDir = dir;
+    const bytes = Buffer.alloc(FILE_BYTES + 1, 5);
+    const sent = await attach(await turn(bruno), `task=${task.number}&name=dump.tar`, bytes);
+    expect(sent.statusCode).toBe(201);
+    const { id } = sent.json();
+    expect(readdirSync(dir)).toEqual([id]);
+    const got = await fetchFile(await turn(sam), `task=${task.number}&file=dump.tar`);
+    expect(got.headers['content-length']).toBe(String(FILE_BYTES + 1));
+    expect(got.rawPayload.equals(bytes)).toBe(true);
+    const detail = await taskDetail(app.ctx, (await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!, () => true);
+    expect(detail.files).toEqual([expect.objectContaining({ id, name: 'dump.tar', size: FILE_BYTES + 1, big: true })]);
+    const day = 24 * 60 * 60 * 1000;
+    expect(await dropOldFiles(app.ctx, new Date(Date.now() + 29 * day))).toBe(0);
+    expect(readdirSync(dir)).toEqual([id]);
+    expect(await dropOldFiles(app.ctx, new Date(Date.now() + 30 * day + 60_000))).toBe(1);
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await db.select(idOnly(attachments)).from(attachments)).toEqual([]);
   });
 });
 
@@ -221,6 +249,9 @@ describe('cross-department hh-fetch and attachment boundaries', () => {
     expect([emptyTask.statusCode, emptyTask.json().error.reason]).toEqual([400, 'file_empty']);
     const emptyChat = await attach(brunoToken, 'chat=1&name=empty.txt', Buffer.alloc(0));
     expect([emptyChat.statusCode, emptyChat.json().error.reason]).toEqual([400, 'file_empty']);
+    /* Nor is a body of a type no file comes under. */
+    const asText = await app.inject({ method: 'POST', url: `/api/attachments?task=${task.number}&name=notes.txt`, headers: { authorization: `Bearer ${brunoToken}`, 'content-type': 'text/plain' }, payload: 'notes' });
+    expect([asText.statusCode, asText.json().error.reason]).toEqual([400, 'file_empty']);
 
     const shared = await attach(brunoToken, `task=${task.number}&name=spec.pdf`, Buffer.from('company-spec'));
     expect(shared.statusCode).toBe(201);

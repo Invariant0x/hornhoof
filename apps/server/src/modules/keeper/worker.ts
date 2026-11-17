@@ -37,7 +37,7 @@ import { disconnectedAnswer, noLeaderAnswer } from './worker-pages.js';
 export const PEERS_FILE = 'peers.json';
 /* The hash of the last ticket this keeper redeemed, so a ticket is sent once. */
 export const TICKET_FILE = 'ticket.json';
-export const NO_LEADER_PAGE_MS = 60_000;
+const NO_LEADER_PAGE_MS = 60_000;
 
 export type WorkerStatus = {
   role: MachineRole;

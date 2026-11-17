@@ -1,4 +1,4 @@
-export type HookReply = { status: number; text: string };
+type HookReply = { status: number; text: string };
 type Remembered = { event: string; answer: Promise<HookReply>; done: boolean };
 type Recent = { stops: Map<string, Remembered>; others: Map<string, Remembered> };
 const MAX_CALLS = 1024;
