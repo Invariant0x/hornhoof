@@ -41,6 +41,23 @@ describe('echelon route without idle handoffs', () => {
     expect((await f.detail(task.id)).echelons).toMatchObject({ stage: 'development', ownerAgentId: f.author.id });
   });
 
+  it('refuses a separate Architecture owner from a turnkey team', async () => {
+    const f = await fixture();
+    const [team] = await f.db.insert(teams).values({
+      companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Turnkey Architecture', turnkey: true,
+    }).returning();
+    const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, architect.id));
+    await expect(f.create({ small: false, architectAgentId: architect.id })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('refuses an assistant as a separate Architecture owner', async () => {
+    const f = await fixture();
+    const architect = await f.hire('Assistant', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ kind: 'assistant' }).where(eq(agents.id, architect.id));
+    await expect(f.create({ small: false, architectAgentId: architect.id })).rejects.toMatchObject({ status: 400 });
+  });
+
   it('assigns an eligible Security checker immediately on task creation and risk escalation', async () => {
     const f = await fixture();
     const { task } = await f.create({ riskClass: 'security', securityAgentId: undefined });
