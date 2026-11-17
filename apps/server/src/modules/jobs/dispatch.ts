@@ -1,6 +1,6 @@
 import { apiEndpoint, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { jobs, subscriptions } from '../../db/schema.js';
@@ -40,6 +40,8 @@ type JobToSend = {
   skills?: SkillFile[];
   operatorDelivery?: OperatorDelivery;
   operatorSourceDelivery?: OperatorDelivery;
+  /* A one-shot call, which the node runs once in its program's one-call mode. */
+  call?: boolean;
 };
 
 /* What goes along only when the job has it. */
@@ -51,11 +53,12 @@ const jobExtras = (job: JobToSend) => ({
   ...(job.workspace ? { workspace: job.workspace } : {}),
   ...(job.context ? { context: job.context } : {}),
   ...(job.skills ? { skills: job.skills } : {}),
+  ...(job.call ? { call: true as const } : {}),
 });
 
-/* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
+/* Jobs a node has or had: running ones, and test jobs and one-shot calls, which go out the moment they are made.
    A queued conversation turn still waits in Hornhoof and goes out later. */
-export const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
+export const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), inArray(jobs.kind, ['test', 'call'])));
 
 /* OpenRouter and a compatible API run only the models their connection was given, so a turn that names none takes the
    first: the program's own default is a model of its maker, which such an API may not have. */

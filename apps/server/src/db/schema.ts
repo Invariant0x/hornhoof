@@ -778,8 +778,9 @@ export const personAccess = pgTable(
 );
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed', 'obsolete'] as const;
-/* tools: a step that answers an agent's program, which called its tools with no turn running, and ends with that request. */
-export const JOB_KINDS = ['test', 'conversation', 'tools'] as const;
+/* tools: a step that answers an agent's program, which called its tools with no turn running, and ends with that request.
+   call: a one-shot call an agent started, which runs once with no agent of its own; its row in one_shot_calls says whose. */
+export const JOB_KINDS = ['test', 'conversation', 'tools', 'call'] as const;
 /* Why a node started again, as far as Hornhoof can tell: its built-in server started again, Hornhoof updated it, the machine
    started again, its container was made anew, its program started again in the same container, or the connection broke
    and the turn never reached it. */
@@ -847,6 +848,45 @@ export const jobs = pgTable(
 /* What one turn used of its subscription, as its program told it when the turn ended: null where it told a count not,
    and all null for a program that tells no tokens. Input is what the model read anew, the cache what it read from its
    cache and wrote to it, the total all of them and the output. */
+/* What a verdict of a one-shot call said, read from the last line of its answer. */
+export type CallVerdict = { pass: boolean; reason: string };
+
+/* A one-shot call an agent started for a task: its program runs once on the caller's plan and machine, with the brief and
+   this call's input, and answers. The job holds what it was sent, its answer and its times. A batch is the calls started
+   together; its judge, when it has one, runs once the others have ended and reads every answer. told: the caller has
+   heard how the batch went. */
+export const oneShotCalls = pgTable(
+  'one_shot_calls',
+  {
+    id: id(),
+    companyId: companyId(),
+    batch: uuid('batch').notNull(),
+    number: integer('number').notNull(),
+    judge: boolean('judge').notNull().default(false),
+    jobId: uuid('job_id').notNull().unique().references(() => jobs.id),
+    callerAgentId: uuid('caller_agent_id').notNull().references(() => agents.id),
+    callerJobId: uuid('caller_job_id').references(() => jobs.id),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
+    /* The department whose map shows it, and the stage of the task's echelons it ran for, when the task was at one. */
+    departmentId: uuid('department_id').references(() => departments.id),
+    stage: text('stage'),
+    brief: text('brief').notNull(),
+    input: text('input'),
+    wantsVerdict: boolean('wants_verdict').notNull().default(false),
+    verdict: jsonb('verdict').$type<CallVerdict>(),
+    /* The judge's brief, on each call of a batch that has one. */
+    judgeBrief: text('judge_brief'),
+    told: boolean('told').notNull().default(false),
+    createdAt: createdAt(),
+  },
+  t => [
+    unique('one_shot_calls_batch_number').on(t.batch, t.number),
+    index('one_shot_calls_task_id').on(t.taskId),
+    index('one_shot_calls_department_id').on(t.departmentId),
+    check('one_shot_calls_number', sql`${t.number} > 0`),
+  ],
+);
+
 export const turnTokens = pgTable(
   'turn_tokens',
   {
@@ -1202,7 +1242,7 @@ export const taskRoutes = pgTable('task_routes', {
   check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
 ]);
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited', 'call'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */

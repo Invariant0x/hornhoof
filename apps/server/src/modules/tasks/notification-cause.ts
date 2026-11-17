@@ -19,7 +19,7 @@ const ACTIONS: Partial<Record<TaskEventKind, string>> = {
   created: 'assigned work', assigned: 'assigned work', submitted: 'handed in work', report: 'reported work done', cancelled: 'cancelled work',
   blocked: 'blocked work', updated: 'rewrote work', comment: 'commented', verdict: 'reviewed work', asked: 'asked people',
 };
-const AUTOMATIC = new Set(['reminder', 'go_on', 'wait_ended', 'tests', 'work', 'turn']);
+const AUTOMATIC = new Set(['reminder', 'go_on', 'wait_ended', 'tests', 'work', 'calls', 'turn']);
 
 function answerAction(note: ActionNote): string {
   const status = note.data?.status;

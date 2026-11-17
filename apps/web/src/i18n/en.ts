@@ -1837,7 +1837,7 @@ export const en = {
       assigned: 'assignment', review: 'review', turn_review: 'turn review', changes: 'requested changes',
       comment: 'comment', answered: 'answer', updated: 'updated task', unblocked: 'unblocked task',
       reminder: 'reminder', go_on: 'continue work', subtasks: 'finished subtasks', switched: 'handover',
-      wait_ended: 'ended wait', message: 'message', tests: 'test results', work: 'work results',
+      wait_ended: 'ended wait', message: 'message', tests: 'test results', work: 'work results', calls: 'one-shot call answers',
       blocked: 'blocked task', stuck_at_gate: 'repeated review failures', after_cancelled: 'cancelled prerequisite',
       explain: 'explain a question', done: 'completion notice', reported: 'report', cancelled: 'cancellation notice',
       turn: 'closed turn', reviewed: 'review results', review_passed: 'passed review',

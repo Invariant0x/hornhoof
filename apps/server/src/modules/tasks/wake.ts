@@ -24,6 +24,7 @@ import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
+import { callEnded } from '../calls/calls.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -130,6 +131,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
     case 'work':
       /* Its text is Hornhoof's account of the run, or who stopped it. */
       return `The work you ran on ${ref} ended${said}Go on with the task. If you cannot go on, ${stuck}.`;
+    case 'calls':
+      /* Its text is Hornhoof's account of the batch: the judge's verdict and every answer. */
+      return `The one-shot calls you started on ${ref} ended${said}Go on with the task. If you cannot go on, ${stuck}.`;
     case 'explain':
       /* Hornhoof writes this turn itself, from the request. */
       return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
@@ -327,7 +331,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work', 'calls'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
@@ -705,6 +709,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .where(eq(jobs.id, jobId));
   forgetEndedTurn(ctx, jobId, job);
   await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
+  if (job?.kind === 'call') return callEnded(ctx, jobId);
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
