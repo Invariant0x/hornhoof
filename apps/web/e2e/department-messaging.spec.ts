@@ -97,9 +97,10 @@ async function serve(page: Page, posted: Posted[]) {
   });
 }
 
-/* Whether the closing dot of an English or Russian phrase is drawn after its last word, and not jumped to its start, as
-   the dot of left to right words does in a right to left block unless the phrase is isolated. */
-const dotAtTheEnd = (phrase: Locator) =>
+/* Whether an English or Russian phrase is drawn in the order it reads: its first sign before the second and its closing
+   dot after its last word. In a right to left block a number that opens such a phrase and a dot that closes it jump to
+   the other end unless the phrase is isolated. */
+const readsInOrder = (phrase: Locator) =>
   phrase.evaluate(el => {
     const text = el.firstChild as Text;
     const box = (from: number) => {
@@ -109,7 +110,33 @@ const dotAtTheEnd = (phrase: Locator) =>
       return range.getBoundingClientRect();
     };
     const last = text.data.length - 1;
-    return box(last).left > box(last - 1).left;
+    return box(0).left < box(1).left && box(last).left > box(last - 1).left;
+  });
+
+/* Where the lines of the empty head card start, as drawn: its role line, its "No head yet." and its count. */
+const startEdges = (card: Locator) =>
+  card.evaluate(el => {
+    const rtl = getComputedStyle(el).direction === 'rtl';
+    const textBox = (node: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect();
+    };
+    const boxes = [el.querySelector('.hr')!.firstElementChild!.getBoundingClientRect(), textBox(el.querySelector('.hn')!), textBox(el.querySelector('.meta')!)];
+    return boxes.map(b => Math.round(rtl ? b.right : b.left));
+  });
+
+/* What covers the hint: the bottom buttons it meets, and whether a point of its words shows something else on top. */
+const covered = (hint: Locator) =>
+  hint.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    const meets = [...document.querySelectorAll('.dv-acts > *')].filter(b => {
+      const r = b.getBoundingClientRect();
+      return r.left < box.right && box.left < r.right && r.top < box.bottom && box.top < r.bottom;
+    }).map(b => (b.textContent ?? '').trim() || b.getAttribute('aria-label'));
+    const points = [[box.left + 8, box.top + box.height / 2], [box.left + box.width / 2, box.top + box.height / 2], [box.right - 8, box.top + box.height / 2]];
+    const hidden = points.filter(([x, y]) => !el.contains(document.elementFromPoint(x!, y!))).length;
+    return { meets, hidden, width: Math.round(box.width), inset: [Math.round(box.left), Math.round(innerWidth - box.right)] };
   });
 
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'cyberpunk' | 'light'; width: number };
@@ -145,8 +172,13 @@ for (const look of LOOKS) {
     const noHead = page.locator('.shead.empty .hn');
     await expect(noHead).toHaveText(t.dept.noHead);
     const hint = page.getByText(t.dept.noMembers, { exact: true });
-    expect(await dotAtTheEnd(noHead)).toBe(true);
-    expect(await dotAtTheEnd(hint)).toBe(true);
+    const counts = page.locator('.shead.empty .meta');
+    expect(await readsInOrder(noHead)).toBe(true);
+    expect(await readsInOrder(hint)).toBe(true);
+    expect(await readsInOrder(counts)).toBe(true);
+    /* The card's lines start at one edge, and on a narrow screen the hint stands whole above the bottom buttons (#1201). */
+    expect(new Set(await startEdges(page.locator('.shead.empty'))).size).toBe(1);
+    if (look.width <= 760) await expect.poll(() => covered(hint)).toEqual({ meets: [], hidden: 0, width: look.width - 32, inset: [16, 16] });
     await page.screenshot({ path: `${SHOTS}/map-${browserName}-${name}.png`, animations: 'disabled' });
     await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
     const panel = page.getByRole('complementary', { name: t.settings.groups.messaging });
