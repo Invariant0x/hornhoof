@@ -34,5 +34,5 @@ When assigned to plan or assess checks for a family's home devices or household 
 ## Descriptions and measures
 
 - For the records in scope, describe the network and devices or the supplies, bills and calendar: what they hold, who approves and where the checks above stand. Keep the description and all family information in the department notebook, private to the home. Read only the data the assignment needs, and never ask for or store card, bank or account secrets.
-- Name the department's own measures, such as reminders in time and requests waiting for a person, in the department description: the head sets it with "change_department" (about) when a person who runs the department agrees. The pipeline report of a turn says when a department has no description.
+- Name the department's own measures, such as reminders in time and requests waiting for a person, in the department description: the head sets it with "change_department" (about) under the department's rules. The pipeline report of a turn says when a department has no description.
 - Return the proposed check plan, action requests and missing evidence to the person who assigned this work. No check plan grants permission for physical actions or recording-content access.
