@@ -9,6 +9,11 @@ describe('the company phone protocol', () => {
     expect(PhoneOperation.safeParse({ kind: 'swipe', x: 0, y: 0, toX: 0, toY: 100, ms: 60_000 }).success).toBe(false);
   });
 
+  it('presses Back and Home as plain keys and no other key', () => {
+    for (const key of ['back', 'home']) expect(PhoneOperation.safeParse({ kind: 'key', key }).success, key).toBe(true);
+    expect(PhoneOperation.safeParse({ kind: 'key', key: 'power' }).success).toBe(false);
+  });
+
   it('lets an agent type any text a person types, Russian, emoji and new lines too', () => {
     for (const text of ['Привет, мир 👋', 'Строка один\nстрока два', 'nora@acme.test']) expect(PhoneOperation.safeParse({ kind: 'text', text }).success, text).toBe(true);
     expect(PhoneOperation.safeParse({ kind: 'text', text: '' }).success).toBe(false);

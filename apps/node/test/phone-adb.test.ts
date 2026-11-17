@@ -72,6 +72,14 @@ describe('the phone adb boundary', () => {
     ].join('\n'));
   });
 
+  it('presses Back and Home as Android key events, as the phone\'s own buttons do', async () => {
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
+    await adb.act('R58M123', { kind: 'key', key: 'back' }, new AbortController().signal);
+    await adb.act('R58M123', { kind: 'key', key: 'home' }, new AbortController().signal);
+    expect(calls.map(c => c.input)).toEqual(['input keyevent KEYCODE_BACK\n', 'input keyevent KEYCODE_HOME\n']);
+  });
+
   it('never returns another program\'s error or its echoed output', async () => {
     const adb = new PhoneAdb(async () => { throw new Error('adb echoed SECRET_UNIQUE_MARKER'); });
     await expect(adb.act('R58M123', { kind: 'tap', x: 1, y: 2 }, new AbortController().signal)).rejects.toThrow(/^phone_adb_failed$/);
