@@ -725,31 +725,45 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const c = await company();
     const w = await worker(c);
     const row = () => c.rowOf(w.machine);
-    /* Two more reports reached the leader. */
-    const reported = async () => {
-      for (let n = 0; n < 2; n++) {
-        const before = (await row()).reportAt?.getTime();
-        await until(async () => (await row()).reportAt?.getTime() !== before);
-      }
+    const control = (name: string) => join(w.config.controlDir, name);
+    /* The leader's word on this machine's upload, read now: the next report is made on it. */
+    const told = async (upload: 'waiting' | 'wipe') => {
+      await w.keeper['readView']();
+      expect(w.keeper.known()?.copy?.upload).toBe(upload);
     };
+    /* One report of the machine, made now and heard by the leader. No round runs between the steps, so no other report
+       goes, and none made before a step lands after it and undoes it. */
+    const report = async () => {
+      const before = (await row()).reportAt!.getTime();
+      vi.setSystemTime(Date.now() + 1);
+      await w.keeper['report']();
+      expect((await row()).reportAt!.getTime()).toBeGreaterThan(before);
+    };
+    /* Rounds until the machine found the leader and reported once; from here the test makes each step itself. */
+    await until(async () => (await row()).reportAt !== null);
     /* While its updater still wipes it, it says nothing of the kind. */
-    writeFileSync(join(w.config.controlDir, WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
+    writeFileSync(control(WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
     await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
     /* The updater is done: the leader hears it, and the updater's word goes once it did. */
-    rmSync(join(w.config.controlDir, WIPE_FILE));
-    writeFileSync(join(w.config.controlDir, WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
-    await until(async () => (await row()).uploadState === null);
-    await until(() => !existsSync(join(w.config.controlDir, WIPED_FILE)));
+    rmSync(control(WIPE_FILE));
+    writeFileSync(control(WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
+    await report();
+    expect((await row()).uploadState).toBeNull();
+    expect(existsSync(control(WIPED_FILE))).toBe(false);
     /* The leader counts on a machine for what it held, though a worker's keeper holds no database: it says so, and owes
        nothing. */
     await c.db.update(machines).set({ uploadState: 'waiting' }).where(eq(machines.id, w.machine));
-    await until(async () => (await row()).uploadState === null);
+    await told('waiting');
+    await report();
+    expect((await row()).uploadState).toBeNull();
     /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either. */
-    writeFileSync(join(w.config.controlDir, 'replica.json'), '{}');
+    writeFileSync(control('replica.json'), '{}');
     await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
   });
 });

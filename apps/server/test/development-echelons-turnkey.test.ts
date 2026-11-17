@@ -46,17 +46,17 @@ describe('a task of a turnkey team never enters the echelons', () => {
     const { task } = await f.give();
     await expect(submit(f.ctx, f.player.id, task.id, { summary: 'Done.', evidence: 'Checks.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('turnkey') as unknown });
     await expect(verdict(f.ctx, f.reviewer.id, task.id, { pass: true, comment: 'Looks fine.', reviewedCommit: HEAD })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('turnkey') as unknown });
-    await expect(report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.', verification: { candidateId: crypto.randomUUID(), revision: 1, runIds: [crypto.randomUUID()] } })).rejects.toMatchObject({ status: 409 });
+    await expect(report(f.ctx, f.player.id, task.id, { done: true, summary: 'Checked.', verification: { candidateId: crypto.randomUUID(), revision: 1 } })).rejects.toMatchObject({ status: 409 });
     await expect(updateTask(f.ctx, f.head.id, task.id, { cleanup: true })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('turnkey') as unknown });
     expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', phase: 'active', stages: [] });
   });
 
-  it('tells its holder to do it end to end on its task branch with local checks, never to follow echelons or run_tests per task', async () => {
+  it('tells its holder to do it end to end on its task branch with local tests, never to follow echelons', async () => {
     const f = await turnkeyFixture();
     const { task } = await f.give();
     const text = wakePrompt(f.player, task, { agentId: f.player.id, taskId: task.id, why: 'assigned' }, 'turnkey');
     expect(text).toMatch(/end to end[^.]*alone[^.]*report done true/);
-    expect(text).toMatch(/named test files[^.]*without calling run_tests/i);
+    expect(text).toContain('checking what you touched with local tests, as the full run happens once at release');
     expect(text).not.toMatch(/tests,\s*merge and release/i);
     expect(text).not.toMatch(/follow task\.echelons|Review|verdict/);
     expect(wakePrompt(f.author, f.task, { agentId: f.author.id, taskId: f.task.id, why: 'assigned' }, 'code')).toMatch(/follow task\.echelons/);

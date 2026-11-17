@@ -3,6 +3,7 @@ import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { agents, jobs } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { mergePending } from '../nodes/parked.js';
 import { turnSign } from '../tasks/turn-signs.js';
@@ -35,7 +36,7 @@ const notValid = () => new ApiError(401, 'unauthorized', 'This tool token is not
    asked to try again. The token of a job that ended is not valid, as ever. */
 async function unknownToken(ctx: Ctx, token: string | undefined): Promise<ApiError> {
   if (!token || !(await mergePending(ctx.db))) return notValid();
-  const [other] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.toolTokenHash, hashToken(token)));
+  const [other] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.toolTokenHash, hashToken(token)));
   if (other && other.status !== 'queued') return notValid();
   return new ApiError(503, 'unavailable', 'Hornhoof is bringing back work from another machine. Try again in a few minutes.', 'merge_pending');
 }

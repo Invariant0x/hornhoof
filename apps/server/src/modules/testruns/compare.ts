@@ -5,12 +5,12 @@ import { bodyWithin } from './bounded.js';
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 export type OmittedPatch = { path: string; additions: number; deletions: number };
 /* A commit between the two, with the commits it was made on: a merge has two or more. */
-export type ComparedCommit = { sha: string; parents: string[]; message?: string };
+export type ComparedCommit = { sha: string; parents: string[] };
 export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
 const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
-const Commit = z.object({ sha: Sha, parents: z.array(z.object({ sha: Sha })).default([]), commit: z.object({ message: z.string() }).optional() });
+const Commit = z.object({ sha: Sha, parents: z.array(z.object({ sha: Sha })).default([]) });
 const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(Commit), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File).max(299) });
 const MoreCommits = z.object({ commits: z.array(Commit), total_commits: z.number().int().nonnegative() });
 /* GitHub lists at most this many commits on a page of a comparison, and the server reads no more pages than this. */
@@ -52,10 +52,6 @@ function comparedPaths(file: z.infer<typeof File>): string[] {
 const patchOrName = (file: z.infer<typeof File>): string =>
   file.patch ?? `GitHub shows no patch of ${file.filename}: ${file.additions} lines added, ${file.deletions} removed.`;
 
-function comparedCommit(commit: z.infer<typeof Commit>): ComparedCommit {
-  return { sha: commit.sha, parents: commit.parents.map(parent => parent.sha), ...(commit.commit?.message !== undefined ? { message: commit.commit.message } : {}) };
-}
-
 function parsedComparison(body: unknown): CompareResult {
   const parsed = Comparison.safeParse(body);
   if (!parsed.success || !completeInventory(parsed.data)) return { complete: false, reason: 'incomplete-comparison' };
@@ -65,7 +61,7 @@ function parsedComparison(body: unknown): CompareResult {
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
   const omitted = data.files.filter(file => file.patch === undefined).map(file => ({ path: file.filename, additions: file.additions, deletions: file.deletions }));
   return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted,
-    commits: data.commits.map(comparedCommit) };
+    commits: data.commits.map(commit => ({ sha: commit.sha, parents: commit.parents.map(parent => parent.sha) })) };
 }
 
 /* GitHub's answers are read no further than this, as a repository's refs are: a larger one is too large to take. */

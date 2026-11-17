@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { cancel, comment, createTask as createTaskEngine, report, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -11,7 +11,7 @@ import { taskDetail } from '../src/modules/tasks/views.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks } from './development-echelons-verification.js';
+import { verified } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
@@ -48,18 +48,13 @@ async function company() {
   const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
   const accept = async (id: string) => {
     const task = await read(id), current = await snapshot(id);
-    const [tester] = await db.select().from(agents).where(eq(agents.id, task.assigneeAgentId!));
-    const checks = await candidateChecks({ ctx, db, task, tester: tester! }, current, HEAD);
-    const run = await checks.run();
-    await report(ctx, tester!.id, id, checks.verified([run.id]));
+    await report(ctx, task.assigneeAgentId!, id, verified(current));
     const ready = await snapshot(id);
     return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in turn-17.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };
   const complete = async (id: string, executor = bruno.id) => {
-    if (!(await routeOf(db, await read(id))).paths.length) {
-      await updateTask(ctx, head.id, id, { paths: ['logic/totals.ts'] });
-    }
     if ((await snapshot(id)).stage === 'architecture') {
+      await updateTask(ctx, head.id, id, { paths: ['logic/totals.ts'] });
       await report(ctx, executor, id, { done: true, summary: 'Change logic/totals.ts and check its changed totals.' });
     }
     await submit(ctx, executor, id, code);
@@ -117,7 +112,7 @@ describe('a task that comes after others', () => {
     const last = await accept(schema.id);
     expect(woken(last)).toContainEqual([tess.id, 'assigned']);
     /* The turn is kept with the move that finished the last of them. */
-    expect(await db.select({ why: pendingWakes.why }).from(pendingWakes).where(and(eq(pendingWakes.taskId, tests.task.id), eq(pendingWakes.agentId, tess.id)))).toEqual([{ why: 'assigned' }]);
+    expect(await db.select(only(pendingWakes, 'why')).from(pendingWakes).where(and(eq(pendingWakes.taskId, tests.task.id), eq(pendingWakes.agentId, tess.id)))).toEqual([{ why: 'assigned' }]);
     expect((await read(tests.task.id)).assigneeAgentId).toBe(tess.id);
     const log = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(eq(taskEvents.taskId, tests.task.id));
     expect(log.at(-1)).toEqual({ kind: 'started', text: `#${api.number} and #${schema.number} are done, so it starts now.` });
@@ -437,7 +432,7 @@ describe('an independent part of a dependent task', () => {
     const children = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
     expect(children).toHaveLength(1);
     expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id });
-    expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'development', phase: 'active', ownerAgentId: bruno.id });
+    expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'architecture', phase: 'active', ownerAgentId: bruno.id });
     expect((await routeOf(db, children[0]!)).paths).toEqual(['apps/checkout/**']);
     const detail = await taskDetail(ctx, moved.task, () => true);
     expect(detail.independentPart).toMatchObject({

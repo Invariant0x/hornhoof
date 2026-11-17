@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, departments, subscriptions } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -53,7 +53,7 @@ export async function uncheckable(db: Reader['db'], task: Pick<Task, 'companyId'
   if (!task.departmentId || !authorId) return false;
   const [department] = await db.select({ key: departments.templateKey }).from(departments).where(and(eq(departments.id, task.departmentId), eq(departments.companyId, task.companyId)));
   if (!department?.key || department.key === 'development') return false;
-  const [author] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
+  const [author] = await db.select(only(agents, 'kind')).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
   if (!author || author.kind === 'head') return false;
   return !(await hasChecker(db, { id: authorId, companyId: task.companyId, departmentId: task.departmentId }, ability));
 }
@@ -74,27 +74,6 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
     if (identity && !reviewEligibility(producer, identity)) eligible.push(identity);
   }
   return eligible.find(identity => identity.provider !== producer.provider) ?? eligible[0] ?? null;
-}
-
-async function securityOrigin(db: Reader['db'], task: Task, producer?: CheckerIdentity | null): Promise<CheckerIdentity | null> {
-  if (producer) return producer;
-  const authorId = task.executorAgentId ?? task.assigneeAgentId;
-  return authorId ? agentIdentity(db, task.companyId, authorId) : null;
-}
-
-/* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
-export async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string, producer?: CheckerIdentity | null): Promise<string | null> {
-  if (!task.departmentId) return null;
-  const origin = await securityOrigin(db, task, producer);
-  const checker = origin ? await checkerFor({ db }, task, origin, ability, null) : null;
-  return checker ? checker.agentId : null;
-}
-
-export async function populateSecurityOwner(db: Reader['db'], task: Task, state: Route['state'], producer?: CheckerIdentity | null): Promise<Route['state']> {
-  const step = state.security.required ? state.stages.find(item => item.stage === 'security') : undefined;
-  if (!step || step.ownerAgentId || !state.abilities.security) return state;
-  const ownerAgentId = await initialSecurityOwner(db, task, state.abilities.security, producer);
-  return ownerAgentId ? { ...state, stages: state.stages.map(item => item.stage === 'security' ? { ...item, ownerAgentId } : item) } : state;
 }
 
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */

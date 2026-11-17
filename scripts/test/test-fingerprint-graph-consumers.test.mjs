@@ -22,7 +22,7 @@ test('the real outbound fixture invalidates both mutation consumers', async () =
 
 test('all risky sources retain mode-bound judges at both reuse levels', async () => {
   const { mutation } = manifest, suite = manifest.suites.find(item => item.id === 'mutation');
-  assert.equal(mutation.sourcePaths.length, 11);
+  assert.equal(mutation.sourcePaths.length, 10);
   const judges = fingerprint.mutationJudgesOf(input, mutation, suite, mutation.sourcePaths);
   const selected = fingerprint.fastTestsOf(input, mutation, mutation.sourcePaths);
   const tests = new Set(mutation.sourcePaths.map(source => selected.get(source)[0]));

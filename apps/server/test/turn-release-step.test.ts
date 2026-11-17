@@ -31,17 +31,42 @@ describe('the release step of a turn', () => {
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true });
   });
 
+  /* After the first run of a release, a run of it takes what that release proved and runs what failed or changed. */
+  it('asks in its description for a whole run of the turn branch, which may take what its release proved', async () => {
+    const f = await releasing();
+    const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
+    expect(tool.description).toMatch(/runId a passed whole run of it: the first run of its release, or a later one that took only what its release proved/);
+    expect(tool.description).not.toMatch(/nothing reused/);
+    expect(tool.inputSchema.properties?.runId).toMatchObject({ description: 'A passed whole run of that commit.' });
+  });
+
+  it('takes a later run of the release that took the green results of its release', async () => {
+    const f = await releasing();
+    const run = await f.fullRun({ reused: 3 });
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
+  });
+
+  it('takes a later run of the release that ran nothing, as every test file kept its green result', async () => {
+    const f = await releasing();
+    const run = await f.fullRun({ reused: 5, parts: 0 });
+    await f.approve();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: false });
+  });
+
   it.each([
-    ['a run that reused results', { reused: 3 }],
+    ['a run with no part that took nothing', { parts: 0 }],
+    ['a run that took results from before releases were kept', { reused: 3, ofRelease: false }],
+    ['a run of one suite', { reused: 3, suite: 'server' }],
     ['a run with a failed part', { failedPart: true }],
     ['a run of another commit', { commit: EXTRA }],
     ['a run of another branch', { branch: 'task-1' }],
     ['a failed run', { status: 'failed' as const }],
-  ])('refuses %s: a release needs a real full run on its exact commit', async (_what, run) => {
+  ])('refuses %s: a release needs a whole run of its own on its exact commit', async (_what, run) => {
     const f = await releasing();
     const given = await f.fullRun(run);
     await f.approve();
-    expect(await f.recordRelease({ runId: given.id })).toMatchObject({ isError: true, text: expect.stringContaining('full run') as unknown });
+    expect(await f.recordRelease({ runId: given.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
   });
 
   it('refuses a full run when a newer run of the same commit failed', async () => {
@@ -49,7 +74,7 @@ describe('the release step of a turn', () => {
     const run = await f.fullRun();
     await f.fullRun({ status: 'failed' });
     await f.approve();
-    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('full run') as unknown });
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
   });
 
   it('refuses a commit that is not the head of the turn branch, or a main that already holds it', async () => {

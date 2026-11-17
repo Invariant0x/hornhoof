@@ -9,21 +9,12 @@ function descriptions(): Map<string, string> {
 }
 
 describe('test tool guidance', () => {
-  it('leads with whole suites and keeps checks of a change in the owner workspace', () => {
+  it('says in three sentences where it runs, what each run of a release runs, and what it leaves', () => {
     const text = descriptions().get('run_tests')!;
-    expect(text.split('.')[0]).toMatch(/whole test suite[\s\S]*declared profile[\s\S]*groups[\s\S]*free machines/i);
-    expect(text).toMatch(/own change[\s\S]*own workspace[\s\S]*need no run_tests/i);
-    expect(text).not.toMatch(/\bstrictly once\b/i);
-    expect(text).toMatch(/once per release candidate on the combined release branch before main/i);
-    for (const fact of ['fingerprint', 'main branch', 'returns at once', 'fresh folder', 'woken on the task', 'full log', '{part}', '{parts}', 'hornhoof/tests']) expect(text).toContain(fact);
-  });
-
-  /* A release once shipped on a run of the default profile, which left out the database and the browser. */
-  it('names the run that checks a release, and that a run without profile checks only the default one', () => {
-    const text = descriptions().get('run_tests')!;
-    expect(text).toMatch(/without profile[^.]*default profile[^.]*leave suites out/i);
-    expect(text).toMatch(/check of a release[^.]*execution\.fullRun\.profile[^.]*no suite and no candidate/i);
-    expect(text).toMatch(/every suite and every test file anew/i);
-    expect(text).not.toMatch(/run a release's check on the turn's branch/i);
+    expect(text.split('. ')).toHaveLength(3);
+    expect(text).toMatch(/only on main, a turn's branch turn-<number> or a release-<name> branch: on any other branch it starts nothing[^.]*local tests of what it touched/i);
+    expect(text).toMatch(/first run of a release runs every test file; each later run of the same release runs only what failed or changed/i);
+    for (const fact of ['hornhoof/tests', 'pins the commit', 'wakes you', '{part}', '{parts}']) expect(text).toContain(fact);
+    expect(text).not.toMatch(/profile|candidate|tests_not_release|full_run_early|every so many turns/i);
   });
 });

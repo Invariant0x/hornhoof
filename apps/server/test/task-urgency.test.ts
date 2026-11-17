@@ -650,15 +650,12 @@ describe('work for someone in a team that takes only urgent work', () => {
     it('when their team took only urgent work after they got it', async () => {
       const c = await company();
       await makeTurn(c.db, c.companyId, c.dev.id);
-      const top = await c.root();
-      const held = await c.under(top.id, toRobin(c));
-      const withArchitect = await c.under(top.id, { ...toRobin(c), architectAgentId: c.bruno.id });
+      const held = await c.under((await c.root()).id, toRobin(c));
       await c.db.update(teams).set({ urgentOnly: true }).where(eq(teams.id, c.quick.id));
       await updateTask(c.ctx, c.head.id, held.id, { body: 'Now this.' });
       await updateTask(c.ctx, c.head.id, held.id, { executor: c.robin.id });
       expect(await c.read(held.id)).toMatchObject({ body: 'Now this.', executorAgentId: c.robin.id, assigneeAgentId: c.robin.id });
-      expect(routeSnapshot(await routeOf(c.db, held), c.robin.id)).toMatchObject({ stage: 'development', phase: 'active', ownerAgentId: c.robin.id });
-      const planned = await report(c.ctx, c.bruno.id, withArchitect.id, { done: true, summary: 'Change the checkout and verify the changed behavior.' });
+      const planned = await report(c.ctx, c.robin.id, held.id, { done: true, summary: 'Change the checkout and verify the changed behavior.' });
       expect(routeSnapshot(await routeOf(c.db, planned.task), c.robin.id)).toMatchObject({ stage: 'development', phase: 'active', ownerAgentId: c.robin.id });
     });
 

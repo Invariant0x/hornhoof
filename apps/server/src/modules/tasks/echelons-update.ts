@@ -1,7 +1,8 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
-import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
+import { only } from '../../db/selections.js';
+import { checkerFor } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { changeRoute, checkedScopePaths, routeOf, type Route } from './echelons-store.js';
@@ -46,10 +47,6 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
   let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
   const paths = changedPaths(route, change);
   state = withRisk(state, agentId, change.riskClass);
-  if (state.security.required && !route.state.security.required) {
-    const producer = route.state.candidateId ? await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)) : null;
-    state = await populateSecurityOwner(ctx.db, task, state, producer);
-  }
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
@@ -91,7 +88,7 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
 export async function turnCleanupDefault(tx: Tx, task: Task): Promise<boolean> {
   const turnId = task.turnId ?? (await openTurnOf(tx, task.companyId, task.departmentId))?.id;
   if (!turnId) return false;
-  const [event] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
+  const [event] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
   return (event?.data.turnCleanup as { enabled?: boolean } | undefined)?.enabled === true;
 }
 
