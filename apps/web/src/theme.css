@@ -152,6 +152,8 @@ select:disabled { opacity: .55; }
 /* A control whose value failed a check: a pink frame, with the focus ring outside it when focused. */
 .field :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--pink); }
 .field :is(input, select, textarea)[aria-invalid="true"]:is(:focus, :focus-visible) { border-color: var(--pink); outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
+/* So does the card of a tick whose words stand under it, as the consent of an address. */
+.check-card:has([aria-invalid="true"]) { border-color: var(--pink); }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
 .alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
 .agent-window-error { margin-top: 68px; }
@@ -496,6 +498,22 @@ select:disabled { opacity: .55; }
 .outbound-setup .form-foot { margin-block-start: 8px; }
 /* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
+.outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
+.outbound-added { margin: 0; overflow-wrap: anywhere; }
+/* A revision as a person reads it before publishing it: its facts, its words with the places a message fills in marked,
+   and what changed: words put in in the text's own colour over a 2px line of success, words taken out struck through,
+   the colour only repeating it; spaces stand outside both (Design #1181). */
+.outbound-view { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface2); overflow-wrap: break-word; }
+.outbound-facts { display: grid; gap: 4px; min-width: 0; margin: 0; }
+.outbound-facts dt { font-size: 12px; font-weight: 600; color: var(--muted); }
+.outbound-facts dd { display: grid; gap: 4px; min-width: 0; margin: 0; }
+.outbound-words { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.outbound-slot { display: inline-block; padding: 0 6px; border: 1px solid currentColor; color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.6; white-space: normal; }
+.outbound-changes { display: grid; gap: 4px; min-width: 0; padding-block-start: 8px; border-block-start: 1px solid var(--line); }
+.outbound-changes ins { color: var(--ink); text-decoration-line: underline; text-decoration-thickness: 2px; text-decoration-color: var(--ok); }
+.outbound-changes del { color: var(--pink-ink); text-decoration: line-through; }
+.outbound-note { margin: 0; color: var(--muted); overflow-wrap: break-word; }
+.outbound-view > .entry-actions { margin-block-start: 4px; }
 /* The groups of the limits form share .field-group, standing 8px below what precedes them and 10px between their fields. */
 .outbound-numbers { margin-block-start: 8px; }
 .outbound-numbers > .field-group-body { gap: 10px; }

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { certificates, companies, machines, people, recoveryKeys } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { notAMachine } from '../network/join.js';
 import { authorityOf, findThisMachine, networkMachine } from '../network/store.js';
@@ -67,7 +67,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* What the server's own keeper hears: whom to seal to and what was made, with who holds it. */
   async function makerView(): Promise<MakerView> {
     const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
-    const data = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.ageKey)));
+    const data = await db.select(only(machines, 'ageKey')).from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.ageKey)));
     const recovery = company ? await activeRecovery(db, config) : null;
     /* The last backup of the database in use as it is now: a database set aside before a merge is none of it, and
        neither is a backup made before the company was last restored, whose record a merge may have brought back. */
@@ -115,7 +115,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function recordFrom(from: string, mine: string | null, head: string, manifest: Manifest): Promise<boolean> {
     if (manifest.reason !== 'fork') throw new ApiError(400, 'validation', 'Only the bundle of a database that led is recorded for another machine.', 'bundle_refused');
     const row = await networkMachine(db, from);
-    const [certificate] = await db.select({ serial: certificates.serial }).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, from), isNull(certificates.revokedAt)));
+    const [certificate] = await db.select(only(certificates, 'serial')).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, from), isNull(certificates.revokedAt)));
     if (!row || row.role !== 'data' || from === mine || manifest.signer !== from || !certificate) throw new ApiError(403, 'forbidden', 'This bundle was not signed by that machine with a certificate that stands.');
     if (Math.abs(Date.now() - Date.parse(manifest.madeAt)) > RECORD_WITHIN_MS) throw new ApiError(400, 'validation', 'This bundle was not made today.', 'bundle_time');
     if (await bundleRow(db, manifest.id)) return false;
@@ -160,7 +160,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const mine = await findThisMachine(db, config);
     if (from !== undefined) return reply.code((await recordFrom(from, mine?.id ?? null, head, manifest)) ? 201 : 200).send({ holders: (await bundleRow(db, manifest.id))?.holders ?? [] });
-    const [certificate] = mine ? await db.select({ serial: certificates.serial }).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, mine.id), isNull(certificates.revokedAt))) : [];
+    const [certificate] = mine ? await db.select(only(certificates, 'serial')).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, mine.id), isNull(certificates.revokedAt))) : [];
     if (!mine || manifest.signer !== mine.id || !certificate) throw new ApiError(403, 'forbidden', "This bundle was not signed by this server's own machine with a certificate that stands.");
     if (Math.abs(Date.now() - Date.parse(manifest.madeAt)) > RECORD_WITHIN_MS) throw new ApiError(400, 'validation', 'This bundle was not made today.', 'bundle_time');
     const known = await bundleRow(db, manifest.id);
@@ -200,7 +200,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const forks = await bundleRows(db, { forks: { since: new Date(Date.now() - FORK_KEEP_MS) } });
     const active = await activeRecovery(db, config);
     const [newest] = await db.select(idOnly(recoveryKeys)).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
-    const [maker] = active ? await db.select({ name: people.name }).from(people).where(eq(people.id, active.madeBy)) : [];
+    const [maker] = active ? await db.select(only(people, 'name')).from(people).where(eq(people.id, active.madeBy)) : [];
     const cored = await db.select().from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), isNotNull(machines.networkId)));
     const own = await findThisMachine(db, config);
     const online = (reportAt: Date | null) => reportAt !== null && Date.now() - reportAt.getTime() < ONLINE_MS;

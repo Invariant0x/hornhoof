@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { departments, tasks, testParts, turns } from '../src/db/schema.js';
+import { departments, tasks, turns } from '../src/db/schema.js';
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
-import { testsFixture } from './development-echelons-verification.js';
+import { changeReport, testsFixture } from './development-echelons-verification.js';
 
 /* A checked candidate of the department's work, which goes into its open turn, or of a product with a repository of its
    own, which goes to main with a person's approval. */
@@ -18,11 +18,10 @@ async function readyFixture(inTurn = true) {
     await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
   }
   f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
-  const run = await f.run();
-  await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+  await report(f.ctx, f.tester.id, f.task.id, f.verified());
   const route = (await f.detail()).echelons;
   const acceptance = { candidateId: route.candidateId!, revision: route.revision, integrationCommit: f.finalCommit };
-  return { ...f, acceptance, run, integrationBranch };
+  return { ...f, acceptance, integrationBranch };
 }
 
 describe('accepting only a checked and integrated candidate', () => {
@@ -32,10 +31,9 @@ describe('accepting only a checked and integrated candidate', () => {
     expect(moved.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     const detail = await f.detail();
     expect(detail.echelons).toMatchObject({ phase: 'done', candidateId: f.acceptance.candidateId });
-    expect(detail.log.findLast(event => event.kind === 'report')?.data).toMatchObject({ acceptedCandidate: {
-      candidateId: f.acceptance.candidateId, commit: f.finalCommit, routeRevision: detail.echelons.revision,
-      evidence: [{ runId: f.run.id, commit: f.finalCommit }], integration: { branch: f.integrationBranch, commit: f.finalCommit },
-    } });
+    const accepted = detail.log.findLast(event => event.kind === 'report')?.data;
+    expect(accepted).toMatchObject({ acceptedCandidate: { candidateId: f.acceptance.candidateId, commit: f.finalCommit, routeRevision: detail.echelons.revision, integration: { branch: f.integrationBranch, commit: f.finalCommit } } });
+    expect(accepted).not.toHaveProperty('acceptedCandidate.evidence');
   });
   it.each(['candidate', 'revision', 'integration'])('refuses stale %s identity without closing the result', async changed => {
     const f = await readyFixture();
@@ -46,10 +44,15 @@ describe('accepting only a checked and integrated candidate', () => {
     await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Stale integration.', ...{ acceptance } }).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await loadTask(f.db, f.task.id)).status).not.toBe('done');
   });
-  it('refuses acceptance when a Tests part became invalid after its report', async () => {
+  it('refuses acceptance when the Tests report names another commit', async () => {
     const f = await readyFixture();
-    await f.db.update(testParts).set({ status: 'failed', exitCode: 1 }).where(eq(testParts.runId, f.run.id));
-    await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'The evidence changed.', ...{ acceptance: f.acceptance } }).then(() => null)).rejects.toMatchObject({ status: 409 });
+    await changeReport(f.db, f.task.id, 'verifiedCandidate', proof => ({ ...proof, commit: 'd'.repeat(40) }));
+    await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'The report changed.', ...{ acceptance: f.acceptance } }).then(() => null)).rejects.toMatchObject({ status: 409 });
+  });
+  it('accepts a candidate whose Tests report still names test runs, as reports did before', async () => {
+    const f = await readyFixture();
+    await changeReport(f.db, f.task.id, 'verifiedCandidate', proof => ({ ...proof, evidence: [{ runId: randomUUID(), commit: f.finalCommit }] }));
+    expect((await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Accepted.', ...{ acceptance: f.acceptance } })).task.status).toBe('done');
   });
   it('refuses a source branch that advanced after Tests', async () => {
     const f = await readyFixture();
@@ -110,7 +113,6 @@ describe('accepting only a checked and integrated candidate', () => {
       acceptedCandidate: {
         candidateId: afterTests.candidateId,
         commit: f.finalCommit,
-        evidence: [],
         integration: { branch: `turn-${turn.number}`, commit: f.finalCommit },
       },
     });
@@ -125,7 +127,7 @@ describe('accepting only a checked and integrated candidate', () => {
     await report(f.ctx, f.tester.id, f.task.id, {
       done: true,
       summary: 'Verified named local tests, types and lint on the task branch.',
-      verification: { candidateId: before.candidateId!, revision: before.revision, runIds: [] },
+      verification: { candidateId: before.candidateId!, revision: before.revision },
     });
     const ready = (await f.detail()).echelons;
     const accepted = await report(f.ctx, f.head.id, f.task.id, {
@@ -135,16 +137,12 @@ describe('accepting only a checked and integrated candidate', () => {
     });
     expect(accepted.task).toMatchObject({ status: 'done', turnId: expect.any(String) });
   });
-  it('still requires completed run_tests evidence for a product whose results go to its own main line straight', async () => {
+  it('verifies by local checks a product whose results go to its own main line straight too', async () => {
     const f = await testsFixture();
     const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, parentId: f.task.departmentId!, roleCode: 'DEV', repoUrl: 'https://github.com/acme/app.git' }).returning();
     await f.db.update(tasks).set({ turnId: null, productId: product!.id }).where(eq(tasks.id, f.task.id));
-    f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
-    const direct = (await f.detail()).echelons;
-    await expect(report(f.ctx, f.tester.id, f.task.id, {
-      done: true,
-      summary: 'Only local checks.',
-      verification: { candidateId: direct.candidateId!, revision: direct.revision, runIds: [] },
-    })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/run_tests/i) as unknown });
+    const moved = await report(f.ctx, f.tester.id, f.task.id, f.verified());
+    expect(moved.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    expect((await f.detail()).echelons.phase).toBe('ready');
   });
 });

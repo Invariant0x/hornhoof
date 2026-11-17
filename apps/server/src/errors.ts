@@ -28,6 +28,7 @@ export type ErrorReason =
   | 'outbound_not_allowed'
   | 'outbound_unknown'
   | 'outbound_conflict'
+  | 'outbound_changed'
   | 'outbound_unavailable'
   | 'decision_context_missing'
   | 'decision_context_changed'
@@ -116,6 +117,7 @@ export type ErrorReason =
   | 'task_changed'
   | 'task_not_yours'
   | 'test_mode_conflict'
+  | 'tests_not_release'
   | 'task_invalid'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'
@@ -157,6 +159,10 @@ export type ErrorReason =
   | 'repo_exists'
   | 'google_sheets_invalid'
   | 'google_sheets_share_needed'
+  | 'vault_invalid'
+  | 'vault_unknown'
+  | 'vault_not_allowed'
+  | 'vault_name_taken'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'file_empty'
@@ -315,7 +321,7 @@ export function refusal(err: unknown): { status: number; body: ReturnType<typeof
 
 const statusOf = (err: FastifyError | Error): number => ('statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500);
 
-function errorAnswer(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
+export function errorAnswer(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
   const refused = refusal(err);
   const wait = retryAfterOf(err);
   if (wait) reply.header('retry-after', wait);

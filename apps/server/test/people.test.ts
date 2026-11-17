@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, invites, people, personKeys, sessions, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { sessionFrom, setUpCompany, testApp } from './helpers.js';
 
 const as = (token: string) => ({ cookies: { hh_session: token } });
@@ -218,7 +219,7 @@ describe('PATCH /api/people/:id', () => {
     for (const name of ['   ', 'x'.repeat(81)]) {
       expect((await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name }, ...as(olga.token) })).statusCode).toBe(400);
     }
-    expect((await db.select({ name: people.name }).from(people).where(eq(people.id, owner!.id)))[0]!.name).toBe('Ivan');
+    expect((await db.select(only(people, 'name')).from(people).where(eq(people.id, owner!.id)))[0]!.name).toBe('Ivan');
 
     const { agentParty, personParty } = await import('../src/modules/events/parties.js');
     const { messageHeading } = await import('../src/modules/conversation/prompt.js');

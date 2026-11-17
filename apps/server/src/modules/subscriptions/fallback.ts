@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import { agentChanges, agentEvents, agentFallbacks, agents, people, subscriptions, teams, type PlanFallback } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
@@ -36,7 +36,7 @@ async function planOf(ctx: Ctx, id: string): Promise<Plan | null> {
 async function tierOf(ctx: Ctx, agent: Agent) {
   if (agent.kind === 'orchestrator') return null;
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
-  const [team] = agent.teamId ? await ctx.db.select({ turnkey: teams.turnkey }).from(teams).where(eq(teams.id, agent.teamId)) : [];
+  const [team] = agent.teamId ? await ctx.db.select(only(teams, 'turnkey')).from(teams).where(eq(teams.id, agent.teamId)) : [];
   return tierIn(role ?? { tier: 'standard' }, team);
 }
 
@@ -184,7 +184,7 @@ async function toTell(ctx: Ctx, home: Plan, caseId: string): Promise<Agent | nul
 }
 
 async function ownerName(ctx: Ctx, home: Plan): Promise<string> {
-  const [owner] = await ctx.db.select({ name: people.name }).from(people).where(eq(people.id, home.ownerPersonId));
+  const [owner] = await ctx.db.select(only(people, 'name')).from(people).where(eq(people.id, home.ownerPersonId));
   return owner?.name ?? '';
 }
 

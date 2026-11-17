@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { briefings, departments, people, type BriefingRepository } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { authorOf } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 
@@ -42,7 +43,7 @@ const connected = (dept: Dept) => (dept.repoUrl ? { url: dept.repoUrl, branch: d
 /* The record as people see it on the department's screen, with who wrote it last. */
 export async function briefingView(db: Reader, dept: Dept) {
   const row = await storedBriefing(db, dept);
-  const [person] = row?.personId ? await db.select({ name: people.name }).from(people).where(eq(people.id, row.personId)) : [];
+  const [person] = row?.personId ? await db.select(only(people, 'name')).from(people).where(eq(people.id, row.personId)) : [];
   return {
     text: row?.text ?? '',
     repositories: row?.repositories ?? [],

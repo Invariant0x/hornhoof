@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { waitPolicies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { mayChangeRules, ownDepartment } from './approval-policy.js';
 
@@ -45,7 +46,7 @@ export function waitPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
     const dept = await ownDepartment(db, me.companyId, id);
     if (!(await mayChangeRules(db, me, dept.id))) throw new ApiError(403, 'forbidden', 'Only the owner of this department, the CEO or the CEO delegate set its dates.', 'decision_not_allowed');
     await db.transaction(async tx => {
-      const [last] = await tx.select({ version: waitPolicies.version }).from(waitPolicies)
+      const [last] = await tx.select(only(waitPolicies, 'version')).from(waitPolicies)
         .where(and(eq(waitPolicies.departmentId, dept.id), eq(waitPolicies.kind, kind), eq(waitPolicies.stage, body.stage))).orderBy(desc(waitPolicies.version)).limit(1).for('update');
       await tx.insert(waitPolicies).values({ companyId: me.companyId, departmentId: dept.id, kind, version: (last?.version ?? 0) + 1, ...body, createdByPersonId: me.id });
     });

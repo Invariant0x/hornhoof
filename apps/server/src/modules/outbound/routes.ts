@@ -9,7 +9,7 @@ import { ApiError } from '../../errors.js';
 import { ownDepartment } from '../departments/approval-policy.js';
 import { jobOf } from '../tools/job.js';
 import { accountRoutes } from './accounts.js';
-import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision } from './catalog.js';
+import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision, ShownRevision } from './catalog.js';
 import { catalogOf } from './catalog-view.js';
 import { digestOf } from './checks.js';
 import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
@@ -135,7 +135,7 @@ function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/outbound/catalog/:id/publish', async req => {
     const me = await requirePerson(req, db);
     const row = await manageRevision(ctx, me, idOf(req));
-    const published = await publishRevision(db, row, me.id);
+    const published = await publishRevision(db, row, me.id, ShownRevision.parse(req.body ?? {}));
     await logSetup(db, me, { companyId: row.companyId, departmentId: row.departmentId, channelId: row.channelId, kind: 'catalog_published', subjectId: row.id, detail: { entryId: row.entryId, revision: row.revision, kind: row.kind } });
     logged(req, me, { revisionId: row.id, did: 'published' });
     return published;
@@ -144,7 +144,7 @@ function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/outbound/catalog/:id/revoke', async req => {
     const me = await requirePerson(req, db);
     const row = await manageRevision(ctx, me, idOf(req));
-    const revoked = await revokeRevision(db, row);
+    const revoked = await revokeRevision(db, row, ShownRevision.parse(req.body ?? {}));
     await logSetup(db, me, { companyId: row.companyId, departmentId: row.departmentId, channelId: row.channelId, kind: 'catalog_revoked', subjectId: row.id, detail: { entryId: row.entryId, revision: row.revision, kind: row.kind } });
     logged(req, me, { revisionId: row.id, did: 'revoked' });
     return revoked;

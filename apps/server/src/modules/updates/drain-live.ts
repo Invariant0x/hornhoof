@@ -2,6 +2,7 @@ import { TOOL_QUIET_ALARM_MS, type TurnProgram } from '@hornhoof/protocol/map';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, nodeConnections, nodes, tasks, testParts, testRuns } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { jobCheckLastEnd, jobCheckQueued } from '../nodes/check-slots.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { agentProgramState, signInTurn, SILENT_TURN_MS } from '../tasks/silent.js';
@@ -30,9 +31,9 @@ function lastTakenWorkAt(runningJobs: RunningJob[], runningParts: RunningPart[])
 
 async function persistedNodeSignAt(ctx: Ctx, node: NodeIdentity): Promise<number | null> {
   if (node.kind === 'builtin') return null;
-  const [row] = await ctx.db.select({ lastSeenAt: nodes.lastSeenAt }).from(nodes).where(eq(nodes.id, node.nodeId));
+  const [row] = await ctx.db.select(only(nodes, 'lastSeenAt')).from(nodes).where(eq(nodes.id, node.nodeId));
   const [conn] = await ctx.db
-    .select({ connectedAt: nodeConnections.connectedAt })
+    .select(only(nodeConnections, 'connectedAt'))
     .from(nodeConnections)
     .where(eq(nodeConnections.nodeId, node.nodeId))
     .orderBy(desc(nodeConnections.connectedAt))

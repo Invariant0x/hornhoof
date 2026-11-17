@@ -7,6 +7,7 @@ import { limiter } from '../../auth/limit.js';
 import { requireCompanyPerson, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { feedbackInbox, improvements, repoHosts } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { improvementsChanged, moveImprovement } from '../improvements/store.js';
 import { ISSUE_REPOSITORY, issueOf } from './github-issue.js';
@@ -130,7 +131,7 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requireCompanyPerson(req, db);
     humanOnly(me);
     const { improvement } = Repeats.parse(req.body);
-    const [found] = await db.select({ agentId: improvements.agentId }).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
+    const [found] = await db.select(only(improvements, 'agentId')).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
     if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
     if (telling.has(improvement)) throw new ApiError(409, 'conflict', 'Its repeats are being told already.', 'feedback_no_repeats');
     const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());

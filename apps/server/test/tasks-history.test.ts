@@ -5,7 +5,7 @@ import { agents, companies, departments, people, subscriptions, taskEvents, task
 import { cancel, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks } from './development-echelons-verification.js';
+import { verified } from './development-echelons-verification.js';
 import { setUpCompany, statements, testApp, ownDatabases } from './helpers.js';
 import { readIn, type PlanNode } from './rows-read.js';
 
@@ -54,9 +54,7 @@ async function company() {
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const accept = async (id: string) => {
     const task = await read(id), snapshot = routeSnapshot(await routeOf(db, task), task.assigneeAgentId);
-    const checks = await candidateChecks({ ctx, db, task, tester: tess }, snapshot, HEAD);
-    const run = await checks.run();
-    await report(ctx, tess.id, id, checks.verified([run.id]));
+    await report(ctx, tess.id, id, verified(snapshot));
     const ready = await routeOf(db, task);
     return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in the current turn.', acceptance: { candidateId: ready.state.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };

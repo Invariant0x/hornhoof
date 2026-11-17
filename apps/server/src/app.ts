@@ -99,6 +99,7 @@ import { RELEASED, type Released } from './modules/feedback/released.js';
 import { feedbackRoutes } from './modules/feedback/routes.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 import { googleSheetsRoutes } from './modules/google/routes.js';
+import { vaultRoutes } from './modules/vault/routes.js';
 import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
 import { modelsReader, type ModelsReader } from './modules/subscriptions/api-models.js';
 
@@ -454,6 +455,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   challengeRoutes(app, ctx.challenges);
   telegramRoutes(app, ctx);
   googleSheetsRoutes(app, ctx);
+  vaultRoutes(app, ctx);
   assistantRoutes(app, ctx);
   assistantMcpRoutes(app, ctx);
   return app;

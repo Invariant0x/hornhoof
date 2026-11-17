@@ -5,6 +5,7 @@ import { canViewAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { turnGoingOn } from '../conversation/queue.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
@@ -234,7 +235,7 @@ class Listener {
       return;
     }
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
-    const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
+    const [job] = await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
     const over = !job || !(OPEN as readonly string[]).includes(job.status);
     const answered = await this.sayWords(person, row);
     if (answered === null || !over) return;

@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { departments, teams } from '../db/schema.js';
-import { idOnly } from '../db/selections.js';
+import { idOnly, only } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import { accessOf, type Access } from './access.js';
 import { actsAsCeo } from './decisions.js';
@@ -44,7 +44,7 @@ export async function requireDepartmentHad(db: Pick<Db, 'select'>, me: Pick<Pers
 export async function runsDepartment(db: Pick<Db, 'select'>, me: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status' | 'isOwner' | 'isCeoDelegate'>, departmentId: string | null): Promise<boolean> {
   if (actsAsCeo(me)) return true;
   if (!departmentId) return false;
-  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, me.companyId)));
+  const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, me.companyId)));
   if (!dept) return false;
   return (await accessOf(db, me)).owns?.has(dept.parentId ?? departmentId) === true;
 }

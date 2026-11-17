@@ -1,4 +1,4 @@
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -203,7 +203,7 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
    work stays outside releases. Only the yes or no, never the repository. */
 async function releasesTurns(db: Db, departmentId: string | null): Promise<boolean> {
   if (!departmentId) return false;
-  const [department] = await db.select({ repoUrl: departments.repoUrl }).from(departments).where(eq(departments.id, departmentId));
+  const [department] = await db.select(only(departments, 'repoUrl')).from(departments).where(eq(departments.id, departmentId));
   return !!department?.repoUrl;
 }
 
@@ -348,7 +348,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = ReplanBody.parse(req.body);
-    const [seen] = await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
+    const [seen] = await db.select(only(taskWaits, 'taskId')).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
     if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
     const task = await changed(me, seen.taskId);
     const viewer = await viewerOf(db, me);
