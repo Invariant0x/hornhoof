@@ -9,6 +9,8 @@ describe('sensitive tool telemetry', () => {
     expect(values.hide({ task: 'a', kind: 'text', type: 'text', text: 'a text report' })).toEqual({ task: 'a', kind: 'text', type: 'text', text: '[hidden] [hidden] report' });
     const args = { wait: 'a0000000-0000-4000-8000-000000000000', riskClass: 'data', workKind: 'legacy', skills: { on: ['data'], off: [] }, summary: 'a text report' };
     expect(values.input(args)).toEqual({ ...args, summary: '[hidden] [hidden] report' });
+    expect(JSON.parse(values.hide(JSON.stringify({ task: 'a', riskClass: 'data', summary: 'a report' }))))
+      .toEqual({ task: 'a', riskClass: 'data', summary: '[hidden] report' });
   });
 
   it('keeps safe reports and hides values even when they are short, escaped or regex characters', () => {
