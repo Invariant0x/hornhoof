@@ -29,6 +29,7 @@ import {
   outboundReviewReceipts,
   subscriptions,
 } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { publicUrl } from '../link/link.js';
 import { bindingDigest } from '../model-checks/lifecycle.js';
 import type { RunModelCheck } from '../model-checks/run.js';
@@ -269,7 +270,7 @@ function pickSubscriptionId(jobSubId: string | null, agentSubId: string | null |
 
 async function fetchJobSubscriptionId(db: Pick<Db, 'select'>, jobId: string | null): Promise<string | null> {
   if (!jobId) return null;
-  const [job] = await db.select({ subscriptionId: jobs.subscriptionId }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await db.select(only(jobs, 'subscriptionId')).from(jobs).where(eq(jobs.id, jobId));
   return job ? job.subscriptionId : null;
 }
 

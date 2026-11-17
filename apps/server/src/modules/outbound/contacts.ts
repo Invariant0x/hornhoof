@@ -6,6 +6,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import { signedBody, signedToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { outboundChannels, outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
@@ -64,7 +65,7 @@ export async function addContact(ctx: Pick<Ctx, 'db' | 'config'>, input: NewCont
 
 /* The place a permission is of: that of its channel. */
 export async function permissionPlace(db: Pick<Db, 'select'>, companyId: string, permissionId: string): Promise<{ departmentId: string }> {
-  const [place] = await db.select({ departmentId: outboundChannels.departmentId }).from(outboundPermissions).innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId)).where(and(eq(outboundPermissions.id, permissionId), eq(outboundPermissions.companyId, companyId)));
+  const [place] = await db.select(only(outboundChannels, 'departmentId')).from(outboundPermissions).innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId)).where(and(eq(outboundPermissions.id, permissionId), eq(outboundPermissions.companyId, companyId)));
   if (!place) throw notFound();
   return place;
 }

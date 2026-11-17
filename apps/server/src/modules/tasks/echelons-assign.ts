@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, departments, subscriptions } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -53,7 +53,7 @@ export async function uncheckable(db: Reader['db'], task: Pick<Task, 'companyId'
   if (!task.departmentId || !authorId) return false;
   const [department] = await db.select({ key: departments.templateKey }).from(departments).where(and(eq(departments.id, task.departmentId), eq(departments.companyId, task.companyId)));
   if (!department?.key || department.key === 'development') return false;
-  const [author] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
+  const [author] = await db.select(only(agents, 'kind')).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
   if (!author || author.kind === 'head') return false;
   return !(await hasChecker(db, { id: authorId, companyId: task.companyId, departmentId: task.departmentId }, ability));
 }
