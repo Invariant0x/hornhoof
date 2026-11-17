@@ -4,7 +4,9 @@ import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, type CheckQueueReply, ty
 type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
 type Sample = { cpus: number; load: number; at?: number };
 type Member = { host: string; sample: Sample; online: boolean; at: number };
-type Entry = { node: string; request: Acquire; state: CheckQueueReply['state']; position: number; stop: AbortController; finish(): void; retired: boolean };
+export type CheckClaim = { node: string; request: Acquire; position: number; queuedAt: number; startedAt: number | null; retired: boolean };
+export type CheckSnapshot = { capacity: number; holders: CheckClaim[]; queue: CheckClaim[] };
+type Entry = CheckClaim & { state: CheckQueueReply['state']; stop: AbortController; finish(): void };
 /* heard: when the server last took in a frame from the node, whether or not it has handled it yet (#1060). */
 type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number; heard?(node: string): number | null };
 
@@ -39,11 +41,11 @@ export class CheckCoordinator {
     const member = this.nodes.get(node);
     /* A claim to resume a lease this machine no longer holds here is late, or not its own: it is ended, never queued anew. */
     if (previous || !member?.online || request.resume) { this.options.send(node, { type: 'check.state', id: request.id, state: 'ended', position: 0 }); return; }
-    const entry: Entry = { node, request, state: 'queued', position: 1, stop: new AbortController(), finish: () => {}, retired: false };
+    const entry: Entry = { node, request, state: 'queued', position: 1, queuedAt: this.now(), startedAt: null, stop: new AbortController(), finish: () => {}, retired: false };
     this.entries.set(key, entry);
     const run = this.pools.get(member.host)!.withSlot(() => new Promise<void>(resolve => {
       entry.finish = resolve;
-      entry.state = 'running'; entry.position = 0; this.rememberEnd(entry);
+      entry.state = 'running'; entry.position = 0; entry.startedAt = this.now(); this.rememberEnd(entry);
       this.tell(entry);
     }), { signal: entry.stop.signal, onPosition: position => { entry.position = position; this.tell(entry); } });
     void run.catch(() => {}).finally(() => {
@@ -82,6 +84,19 @@ export class CheckCoordinator {
   lastEnd(jobId: string, now = this.now()): number | null {
     const ended = this.queueEnds.get(jobId);
     return ended && this.live(ended.node, now) && now - ended.at < TOOL_QUIET_ALARM_MS ? ended.at : null;
+  }
+
+  /* Reading a snapshot never refreshes admission or retires leases. Cleanup still holds its slot until release. */
+  inspect(node: string): CheckSnapshot | null {
+    const member = this.nodes.get(node);
+    if (!member) return null;
+    const entries = [...this.entries.values()].filter(entry => this.nodes.get(entry.node)?.host === member.host);
+    const copy = ({ node, request, position, queuedAt, startedAt, retired }: Entry): CheckClaim => ({ node, request: { ...request }, position, queuedAt, startedAt, retired });
+    return {
+      capacity: this.capacity(member.host),
+      holders: entries.filter(entry => entry.state === 'running').map(copy),
+      queue: entries.filter(entry => entry.state === 'queued' && !entry.stop.signal.aborted).sort((a, b) => a.position - b.position).map(copy),
+    };
   }
 
   private rememberEnd(entry: Entry): void {
