@@ -635,6 +635,40 @@ describe('templates', () => {
       expect(body).not.toMatch(/at most 20 keys|takes no Escape|Press nothing on/);
     });
 
+    it('is called to a thinking program whose screen stood still, and looks at it the same way', () => {
+      expect(step('Hornhoof also calls you')).toMatch(/screen stood still while it thinks/);
+    });
+
+    describe('on a window of the program\'s own', () => {
+      const section = body.slice(body.indexOf('### Windows of the program'), body.indexOf('### Permission questions'));
+      const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
+
+      it('passes the window itself at once, as the agent\'s owner would with the safe choice', () => {
+        expect(body.indexOf('### Windows of the program')).toBeGreaterThan(body.indexOf('\n9. '));
+        for (const part of ['no hook tells of', 'Pass each one yourself at once', 'get the turn moving', "the agent's owner", 'safe choice', 'screen stood still']) expect(section, part).toContain(part);
+      });
+
+      it('skips polls, trusts only the working folder, puts off updates and keeps the model', () => {
+        expect(point('A survey')).toMatch(/skip or dismiss it[\s\S]*share nothing/);
+        expect(point('Trust')).toMatch(/trust the agent's own working folder[\s\S]*deny any other folder/);
+        expect(point('An update')).toMatch(/never update in the middle of a turn/);
+        expect(point('An offer to switch')).toMatch(/keep the one it runs/);
+      });
+
+      it('signs in from the vault itself, and asks a person only for their own password or account', () => {
+        const signIn = point('A sign-in');
+        for (const part of ['vault_entries', 'vault_entry', 'program_keys', 'as a person does', 'their own password or account', 'needs_owner']) expect(signIn, part).toContain(part);
+      });
+
+      it('waits out a limit that ran out and never buys more of it', () => {
+        expect(point('A limit')).toMatch(/waits for it to come back[\s\S]*costs money[\s\S]*needs_owner/);
+      });
+
+      it('keeps the work, the session and the data in any other window', () => {
+        expect(point('Any other window')).toMatch(/keeps the work, the session and the data/);
+      });
+    });
+
     describe('on a question about permission', () => {
       const section = body.slice(body.indexOf('### Permission questions'));
       const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
@@ -691,6 +725,10 @@ describe('templates', () => {
   /* An employee reads its role's line from the template every turn. */
   it('tells a head of Operations hired before it got the operator skill, in its own line, that it lifts a hold with program_recovery_release', () => {
     expect(templates.roles.get('OPS-HEAD')!.body).toContain('program_recovery_release');
+  });
+
+  it('tells the orchestrator that a thinking program whose screen stood still waits on a window of its own', () => {
+    expect(templates.skills.get('orch-trouble')!.body).toMatch(/still thinking is not a stall, unless its screen stood still: a window of the program waits for an answer there/);
   });
 
   it('names in orch-trouble exactly who acts on another employee\'s program, and why a release is refused', () => {
