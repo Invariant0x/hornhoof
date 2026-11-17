@@ -169,9 +169,12 @@ test('real server shows everyone the whole department and its work, and opens on
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
     for (const name of ['Mina', 'Otto']) await expect(ann.locator('.tv-labs')).toContainText(name);
     await expect(ann.locator('.tv-in')).toContainText('Hidden work');
+    /* The tracker (#1152) lists the department's whole work when she picks the department among its lists. */
     await ann.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
-    await expect(ann.locator('.tasks')).toContainText('Own work');
-    await expect(ann.locator('.tasks')).toContainText('Hidden work');
+    await ann.getByRole('navigation', { name: 'Task lists' }).getByRole('button', { name: /^Development/ }).click();
+    await expect(ann.getByRole('heading', { level: 1, name: 'Development' })).toBeVisible();
+    await expect(ann.locator('.tr-main')).toContainText('Own work');
+    await expect(ann.locator('.tr-main')).toContainText('Hidden work');
     const closed = await openAgent(ann, 'Otto');
     await expect(ann.getByText('Otto: everyone sees the work, and only the people of this department open the window.').first()).toBeVisible();
     await expect(closed).toHaveCount(0);
