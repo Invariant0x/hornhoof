@@ -47,9 +47,10 @@ export function ContactImport({ channel, onChanged, onCancel }: { channel: Setup
     finally { setBusy(false); }
   }
   return (
-    <form className="repo-form" aria-label={c.importAddresses} noValidate onSubmit={event => void save(event)}>
+    <form className="repo-form contact-import" aria-label={c.importAddresses} noValidate onSubmit={event => void save(event)}>
       <p className="muted" dir="auto">{c.importHint}</p>
-      <Field label={c.file} problem={problems.file}>{p => <input {...p} ref={refs.file} type="file" accept=".csv,.xlsx" onChange={event => setFile(event.target.files?.[0] ?? null)} />}</Field>
+      <Field label={c.file} problem={problems.file}>{p => <input {...p} ref={refs.file} type="file" accept=".csv,.xlsx" disabled={busy} onChange={event => { setFile(event.target.files?.[0] ?? null); setReport(null); setFailed(false); }} />}</Field>
+      {file && <p className="muted outbound-added" dir="auto">{file.name}</p>}
       <Field label={c.source} hint={c.sourceHint} problem={problems.source}>{p => <input {...p} ref={refs.source} value={source} onChange={event => setSource(event.target.value)} maxLength={200} />}</Field>
       <Field label={c.evidence} hint={c.evidenceHint} problem={problems.evidence}>{p => <textarea {...p} ref={refs.evidence} value={evidence} onChange={event => setEvidence(event.target.value)} maxLength={2000} rows={3} />}</Field>
       <div className="form-foot entry-actions">

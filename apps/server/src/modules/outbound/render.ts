@@ -1,4 +1,4 @@
-import { SENDER_FIELDS } from '@hornhoof/protocol';
+import { ContactFieldValue, SENDER_FIELDS } from '@hornhoof/protocol';
 import type { CatalogValue, GateCode, MessageDocument } from '@hornhoof/protocol';
 import { catalogValue, checkPrice, digestOf, formatMoney, scanText, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
 
@@ -26,8 +26,6 @@ export type SourceRef = { entryId: string; revision: number; digest: string };
 export type Rendered = { subject: string; text: string; sources: SourceRef[]; sourceRevisionsDigest: string; money: Money[] };
 type RenderResult = { ok: true; rendered: Rendered } | { ok: false; reasonCodes: GateCode[] };
 
-const MAX_FIELD = 200;
-const ONE_LINE = /^[^\p{Cc}\p{Zl}\p{Zp}]+$/u;
 const BLOCK_REFUSAL: Record<BlockKind, GateCode> = { price: 'price_unapproved', link: 'link_unapproved', claim: 'claim_unapproved', knowledge: 'claim_unapproved' };
 
 /* One render's notes: the codes so far and the revisions it rests on. All failures come at once. */
@@ -123,7 +121,7 @@ function fieldValue(valueRef: string, request: RenderRequest, notes: Notes): str
   const contact = !(SENDER_FIELDS as readonly string[]).includes(value.field);
   const said = Object.hasOwn(request.fields, value.field) ? request.fields[value.field] : undefined;
   if (said === undefined) return refuse(notes, contact ? 'contact_field_missing' : 'template_unapproved');
-  if (said.length > MAX_FIELD || !said.trim() || !ONE_LINE.test(said)) return refuse(notes, contact ? 'contact_field_invalid' : 'template_unapproved');
+  if (!ContactFieldValue.safeParse(said).success) return refuse(notes, contact ? 'contact_field_invalid' : 'template_unapproved');
   return said;
 }
 

@@ -1,6 +1,6 @@
 # Contact values for outbound templates
 
-Task 1254, known behavior, data risk. Base: cf8b05fed0a2c80cb8cd6794d579bc4abcc8397c. Work stays on task-1254 until the head names the next turn after 0.31.0.
+Task 1254, known behavior, data risk. Base: 82d62a6bebb3ffde6c21ae89274d85ece89b5685 (released main, as directed by the head on November 17). Work stays on task-1254 for a separate 0.31.1 release. No old turn-31 history is integrated.
 
 Contact values are encrypted JSON in a new outbound_contact_fields table, scoped by company, department and contact. Contacts and suppression remain company wide. Department scoping prevents another department from changing the values used in an approved message. The contact lock already used by consent and dispatch serializes updates. Missing records mean no optional fields, not a compatibility path.
 

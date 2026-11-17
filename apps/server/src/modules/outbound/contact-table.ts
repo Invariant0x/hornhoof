@@ -3,7 +3,6 @@ import { parse } from 'csv-parse/sync';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { Parser } from 'saxen';
 import { readSheet } from 'read-excel-file/universal';
-import { ApiError } from '../../errors.js';
 
 export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const MAX_ROWS = 1000;
@@ -12,7 +11,11 @@ const MAX_EXPANDED = 8 * 1024 * 1024;
 export type ImportReason = 'address_missing' | 'consent_missing' | 'field_invalid' | 'extra_columns' | 'address_invalid' | 'contact_suppressed';
 export type ImportRow = { row: number; address: string; fields: ContactFields };
 export type SkippedRow = { row: number; reason: ImportReason };
-const invalid = () => new ApiError(400, 'validation', 'Use a CSV or XLSX table with unique address, consent and field-name columns, up to 1000 rows and 50 fields. Values must be plain single lines of up to 200 characters.', 'outbound_import_invalid');
+export class ContactTableError extends Error {
+  readonly reason = 'outbound_import_invalid';
+  constructor() { super('Use a CSV or XLSX table with unique address, consent and field-name columns, up to 1000 rows and 50 fields. Values must be plain single lines of up to 200 characters.'); }
+}
+const invalid = () => new ContactTableError();
 
 /* Bounds are checked before the workbook parser sees any expanded XML or sparse row/cell coordinates. */
 function boundedWorkbook(bytes: Buffer): ArrayBuffer {
@@ -21,7 +24,7 @@ function boundedWorkbook(bytes: Buffer): ArrayBuffer {
   const files = unzipSync(bytes, { filter: entry => {
     expanded += entry.originalSize;
     if (++entries > 200 || expanded > MAX_EXPANDED) throw invalid();
-    return /\.xml(?:\.rels)?$/.test(entry.name);
+    return /\.(?:xml|rels)$/.test(entry.name);
   } });
   for (const bytes of Object.values(files)) checkXml(strFromU8(bytes));
   return Uint8Array.from(zipSync(files, { level: 0 })).buffer;
@@ -36,12 +39,16 @@ function checkCoordinate(value: string, cell: boolean): void {
 
 function checkXml(xml: string): void {
   const parser = new Parser();
+  let rows = 0;
+  let cells = 0;
   parser.on('error', () => { throw invalid(); });
   parser.on('warn', () => { throw invalid(); });
   parser.on('attention', () => { throw invalid(); });
   parser.on('openTag', (name, attributes, decode) => {
     const tag = name.split(':').at(-1);
     if (tag === 'f') throw invalid();
+    if (tag === 'row') { if (++rows > MAX_ROWS + 1) throw invalid(); cells = 0; }
+    if (tag === 'c' && ++cells > MAX_COLUMNS) throw invalid();
     if (tag !== 'row' && tag !== 'c') return;
     const ref = attributes()['r'];
     if (ref !== undefined) checkCoordinate(decode(ref), tag === 'c');
@@ -72,7 +79,7 @@ function readRow(columns: string[], cells: unknown[], row: number): ImportRow | 
   if (!address) return { row, reason: 'address_missing' };
   if (!['true', 'yes', '1'].includes(cellText(cells[columns.indexOf('consent')]).trim().toLowerCase())) return { row, reason: 'consent_missing' };
   if (cells.slice(columns.length).some(v => v !== null && v !== '')) return { row, reason: 'extra_columns' };
-  const values = Object.fromEntries(columns.flatMap((name, i) => name === 'address' || name === 'consent' || cells[i] === null || cells[i] === undefined || cells[i] === '' ? [] : [[name, cells[i]]]));
+  const values = Object.fromEntries(columns.flatMap((name, i) => name === 'address' || name === 'consent' || cells[i] === null || cells[i] === undefined || cells[i] === '' ? [] : [[name, cellText(cells[i])]]));
   const parsed = ContactFields.safeParse(values);
   return parsed.success ? { row, address, fields: parsed.data } : { row, reason: 'field_invalid' };
 }

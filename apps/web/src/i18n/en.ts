@@ -2487,6 +2487,8 @@ export const en = {
     },
   },
   outbound: {
+    contactFieldMissing: 'This contact is missing a field required by the template. Add its value before sending again.',
+    contactFieldInvalid: 'A contact field is not one short plain line. Correct its value before sending again.',
     intro: 'What the departments send to people outside the company, by mail or webhook: messages waiting for approval and sent, unknown delivery outcomes, support escalations, and the channels with their accounts. Account secrets and recipient addresses stay on the server.',
     empty: 'Nothing has been sent or queued outside yet.',
     approvalsHeading: 'Waiting for exact approval',

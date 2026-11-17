@@ -337,3 +337,14 @@ describe('External messaging in Settings, bound Requests snapshot, and routing',
     snapErr.unmount();
   });
 });
+
+it.each([
+  ['contact_field_missing', 'This contact is missing a field required by the template. Add its value before sending again.'],
+  ['contact_field_invalid', 'A contact field is not one short plain line. Correct its value before sending again.'],
+])('explains a refusal due to %s without showing private values', async (reason, line) => {
+  const refused = { ...OVERVIEW.messages[0]!, status: 'rejected' as const, reasonCodes: [reason], unknownRecovery: null };
+  mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [refused], approvals: [], escalations: [] }] });
+  render(<LanguageProvider><ExternalMessaging onOpenTask={() => {}} /></LanguageProvider>);
+  await screen.findByText('Sales Mail · Sales Primary');
+  expect(screen.getByText(line)).toBeInTheDocument();
+});
