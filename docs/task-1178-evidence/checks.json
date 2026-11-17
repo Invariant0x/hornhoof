@@ -1,0 +1,102 @@
+{
+  "initialBase": "41d37dd3d4f919e63ed39f4f0ce0d898e440f4c5",
+  "integrationBase": "c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6",
+  "checkedCodeCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+  "fingerprintCommand": "git ls-tree -r COMMIT -- apps packages scripts templates .hornhoof package.json package-lock.json tsconfig.base.json",
+  "fingerprintSha256": "23b985dbd0779ab15c038bb04eddc100c45974b1c9a41c2fce4a8501535e6f3b",
+  "checks": [
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/vault-tools.test.ts test/vault.test.ts test/vault-totp.test.ts test/tool-calls.test.ts test/read-tools.test.ts test/vault-phone-privacy.test.ts test/private-upload.test.ts test/orchestrator-any-tool.test.ts test/assistant-agent.test.ts test/task-files.test.ts test/node-messages.test.ts test/events.test.ts test/tools-outside-turn.test.ts test/phone-tools.test.ts test/phone-recording.test.ts test/phone-lifecycle.test.ts --maxWorkers=1 --coverage --coverage.include=src/modules/tools/calls.ts --coverage.include=src/modules/tools/privacy.ts --coverage.include=src/modules/tools/private-turns.ts --coverage.include=src/modules/tools/private-upload.ts --coverage.include=src/modules/tools/mcp.ts --coverage.include=src/modules/tools/outside.ts --coverage.include=src/modules/tools/shelf.ts --coverage.include=src/modules/events/store.ts --coverage.include=src/modules/nodes/messages.ts --coverage.include=src/modules/tasks/attachments.ts --coverage.include=src/modules/tasks/wake.ts --coverage.include=src/modules/conversation/queue.ts --coverage.include=src/modules/phones/recording.ts --coverage.include=src/modules/phones/tools.ts --coverage.include=src/modules/assistants/mcp.ts --coverage.include=src/modules/vault/tools.ts --coverage.include=src/modules/computer/tools.ts --coverage.reporter=lcov",
+      "exit": 0,
+      "result": "16 files passed; 155 tests passed",
+      "output": "server-named.log",
+      "note": "The later completion delta supersedes the changed Vault test file; production sources are identical.",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07"
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/vault-tools.test.ts test/node-messages.test.ts --maxWorkers=1 --coverage --coverage.include=src/modules/nodes/messages.ts --coverage.reporter=lcov --coverage.reportsDirectory=coverage-private-completion",
+      "exit": 0,
+      "result": "2 files passed; 31 tests passed",
+      "output": "server-completion-delta.log",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/runner.test.ts test/terminal-bridge.test.ts test/terminal-bridge-outside.test.ts test/terminal-host-secrets.test.ts test/terminal-host-live-review.test.ts test/terminal-host-live-review-returns.test.ts test/terminal-host-operator.test.ts test/terminal-tmux.test.ts test/recording-cursor.test.ts test/capture-tail.test.ts test/capture-position.test.ts --maxWorkers=1 --coverage --coverage.include=src/runner.ts --coverage.include=src/terminal/bridge.ts --coverage.include=src/terminal/host.ts --coverage.include=src/terminal/tmux.ts --coverage.include=src/terminal/recordings.ts --coverage.reporter=lcov",
+      "exit": 0,
+      "result": "11 files passed; 211 tests passed",
+      "output": "node-named.log",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/attach.test.ts",
+      "exit": 0,
+      "result": "1 file passed; 10 tests passed",
+      "output": "node-attach.log",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07"
+    },
+    {
+      "cwd": "packages/protocol",
+      "command": "npx vitest run test/tool-privacy.test.ts --coverage --coverage.include=src/tool-privacy.ts --coverage.reporter=lcov",
+      "exit": 0,
+      "result": "1 file passed; 12 tests passed",
+      "output": "protocol.log",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07",
+      "note": "Superseded by final 13-test protocol check after report delta protection."
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/shared-test-database.test.ts test/test-database-parsers.test.ts --maxWorkers=1",
+      "exit": 0,
+      "result": "2 files passed; 43 passed and 2 expected failures",
+      "output": "helper-tests.log",
+      "checkedCommit": "792ca47fb44b2d26155b26574181efd9551c2b07"
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/vault-tools.test.ts test/tool-calls.test.ts test/read-tools.test.ts test/orchestrator-any-tool.test.ts --maxWorkers=1",
+      "exit": 0,
+      "result": "4 files passed; 49 tests passed",
+      "checkedCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+      "output": "integrated-server.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/runner.test.ts test/terminal-bridge.test.ts test/terminal-host-secrets.test.ts --maxWorkers=1",
+      "exit": 0,
+      "result": "3 files passed; 79 tests passed",
+      "checkedCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+      "output": "integrated-node.log"
+    },
+    {
+      "cwd": "packages/protocol",
+      "command": "npx vitest run test/tool-privacy.test.ts --coverage --coverage.include=src/tool-privacy.ts --coverage.reporter=lcov",
+      "exit": 0,
+      "result": "1 file passed; 13 tests passed",
+      "checkedCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+      "output": "integrated-protocol.log"
+    },
+    {
+      "cwd": ".",
+      "command": "mutator --root . --source-root packages/protocol/src/tool-privacy.ts --no-coverage --mutate-all --max-workers 1 --lines 73,83,114,123,142,147 --test-command 'npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts' --verbose",
+      "exit": 0,
+      "result": "6 sampled mutants killed; 0 survived; 0 uncovered; 0 compile errors; 0 timeouts; not a whole-file mutation score",
+      "checkedCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+      "output": "mutation.log"
+    }
+  ],
+  "staticChecks": "static-checks.txt",
+  "quality": "quality.json",
+  "limitations": [
+    "No run_tests, whole suite, real-tmux sleep test or release mutation profile was run. These remain with the release owner.",
+    "No main merge or release is authorized by these local checks.",
+    "Earlier timeout and mixed-version attempts were not counted as final PASS."
+  ],
+  "preMergeCheckedCodeCommit": "792ca47fb44b2d26155b26574181efd9551c2b07",
+  "preMergeIntegrationBase": "a27bc368b1e027af70883d06d1da9ba2b07985ab",
+  "preMergeFingerprintSha256": "34f2779b5efa77efca4331edd8b8b99c59ff39737e08cfe76d4bf6286c2eb4d3",
+  "reuse": "The merged turn-31 changed task routes and browser tests, without changing the repair paths. Final server/Node callers, builds, types and changed-file lint passed again. The only repair delta after the broad run adds verification.delta to the prose set and its direct RED/GREEN test. Other repair paths and their tests remain byte-identical."
+}
