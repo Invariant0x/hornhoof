@@ -8,6 +8,10 @@ import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelo
 import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+/* The first copy of the shared database opens as the file is collected: a cold open is no part of the first test's time. */
+await prepareSharedDatabase();
 
 async function crossingRound(atOpening = false) {
   const c = await failureCompany();

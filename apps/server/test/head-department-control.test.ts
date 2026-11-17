@@ -6,6 +6,10 @@ import { agentChanges, agents, departments, jobs, teams } from '../src/db/schema
 import { only } from '../src/db/selections.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { company } from './department-owner-fixture.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+/* The first copy of the shared database opens as the file is collected: a cold open is no part of the first test's time. */
+await prepareSharedDatabase();
 
 /* A department runs itself: what a person who runs it decides in its head's window, its head carries out at once, as that
    person, with no word of the orchestrator or the CEO. Nothing outside the department comes with it. */

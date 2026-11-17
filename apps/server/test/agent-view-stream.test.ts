@@ -4,6 +4,10 @@ import { agents, jobs } from '../src/db/schema.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { as, openStream, until, type StreamReader } from './helpers.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+/* The first copy of the shared database opens as the file is collected: a cold open is no part of the first test's time. */
+await prepareSharedDatabase();
 
 /* A stream needs no wait once it answers: the server takes the bus in the same step it sends the headers. */
 
