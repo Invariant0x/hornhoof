@@ -38,6 +38,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Right-to-left: isolated phrases follow their block's alignment, and short sentences keep their period at the end.
 - An agent still gets a phone screen's elements when its picture is too large to send.
 - `npm run deps` and the author check install again when `node_modules` came from another lockfile.
+- A closed operator case no longer fails a turn whose program took later words, so a working program keeps its turn.
 
 ### Added
 
