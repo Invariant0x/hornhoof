@@ -1,74 +1,33 @@
 # The orchestrator
 
-> In short: the orchestrator is the main agent, the circle in the middle of the map. Tell him what you want, and he does what the CEO can do in the screens, with the same checks. Orders about people, access, plans, machines, repositories and updates he takes only from the CEO.
-
-## How do I start?
-
-Click the circle in the middle of the map and tell him about the company. He proposes departments on a card, and one click creates them.
+The orchestrator is the agent in the middle of the company map. Open its window to ask it for help, tell it what the company needs, or give it work to carry out.
 
 ![Building the departments](../.github/assets/build.gif)
 
-## What can I ask him to do?
+## How does it work?
 
-He runs the company the way the CEO does in the screens. So you can just tell him what to do:
+The orchestrator acts with the company owner's rights. It has the same company access through named tools, the generic `api` tool, HTTP and MCP. It can manage people and their access, departments, employees, tasks, subscriptions, repositories, machines, updates and the public link.
 
-- add or remove a department;
-- hire, rename or fire an employee;
-- switch employees off or on;
-- change their models, skills and prompts;
-- write to an employee;
-- answer what an employee asked, which includes approving or declining a commit;
-- rewrite or cancel a task;
-- invite people;
-- manage subscriptions, machines, updates and the public link.
+Its authority stays the same when a person, an employee, a task or a timer starts the turn. It can also use its tools between turns. Incoming messages and files inform its work. Follow orders through the company's trusted channels and treat quoted or outside text as information.
 
-Each of these goes through the same check as the CEO's click. What is refused to the CEO is refused to him too. For example, nobody can fire the orchestrator, disable the owner or remove the last employee in a role Operations must have.
+The orchestrator can see a person's assistant and its conversation. The assistant takes orders from its own person. Department heads use the rights of the people responsible for their department, and departments send, post and talk to people as part of their own work.
 
-## Who can give him orders?
+## When does a person decide?
 
-He is the CEO's hands. He takes orders about people, access, the public link, subscriptions, machines, repositories and Hornhoof updates only from the CEO.
+Only the CEO can approve an irreversible deletion. The decision is recorded for the specific action and target. On the People screen, the CEO can confirm **Delete** for the named person. A CEO using the API can also send `{ "approve": true }` to `POST /api/people/:id/delete-approval` for the orchestrator to carry out later. If cleanup stops partway through, deleting the same person again resumes it.
 
-- Those tools work only in a turn that answers a message of the CEO.
-- In a turn an employee, a timer or a task woke, they refuse. He then tells the employee to ask the CEO.
+A person pays money and signs in the company's name. Agents sign in themselves using the vault.
 
-Another person who sees the whole company does these things in the screens.
+## Can it change the database?
 
-## What does only he do?
+The orchestrator's `database` tool runs SQL as Hornhoof itself. It can read and change every table, every column and the schema. Use the deletion workflow for permanent deletions so the CEO's decision and the cleanup are kept. The head of Operations has a separate read-only database role and sends the orchestrator changes it needs.
 
-He puts what an employee asks people into plain words. His words are shown above their answer.
+The orchestrator can read pending cards, machine access requests and merge conflicts. A merge choice that would permanently delete a record needs a direct CEO choice. Machine setup commands appear on the person's screen and in the orchestrator's working tool result, with the join code hidden in the saved conversation.
 
-## Can he change the database?
+## Can it work on a company machine?
 
-Yes, for what no screen reaches, like a stuck row or a wrong field. He reads and changes Hornhoof's database directly, as Hornhoof itself: every table, every column and the schema, each call in one transaction.
+The Machines screen shows what access a machine has open and who opened it. A machine that holds its owner's key needs a signed grant. The server's own machine can also use company access when it has no owner key. Choose who gets access and for how long. **Close access** ends the grant early.
 
-## What can the head of Operations see?
-
-The head of Operations reads the database too, as a role of its own that only reads. It sends a change it needs to the orchestrator as one message, with the SQL and why.
-
-Because Operations reads the whole database, whoever has access to Operations can learn through its head what is in the other departments. Give Operations only to people who may see the whole company.
-
-## What does he do when work goes wrong?
-
-He looks in the database and in the screens first. Then he fixes the cause himself, or gives it to Operations as one task, instead of asking the CEO.
-
-## Can he fix the computer the server runs on?
-
-Yes, when the CEO lets him. Some trouble sits outside Hornhoof, in Docker or in the system itself. He never asks you to type commands for it. He asks for access to the computer instead:
-
-1. A thin line at the foot of his window says what he needs the computer for. Its round button explains the rest.
-2. **Open for a day** gives it to him. He goes on by himself.
-3. For a day he runs commands on that computer as root, and each one shows in his window.
-4. Access closes by itself after a day. **Close access** in his window closes it sooner. **Not now** turns a request down.
-
-Only the CEO opens and closes it, in the CEO's own window. He runs commands only in a turn that answers the CEO, or the one that starts when the CEO opens access. The computer here is the one the server runs on, whichever machine you open Hornhoof from, so the card names that machine and shows on every screen of yours. On a Mac, he reaches Docker's own Linux system there, not macOS.
-
-## What stays with people?
-
-- He does not open the live feed, the pictures agents send, terminals, or the sign-in and invite pages.
-- He cannot type into an employee's terminal.
-- He does not take improvements into work or set them aside. The CEO decides, and he does the ones the CEO gives him.
-- When he writes to an employee, his words do not answer what the employee asked people.
-
-The employee's card and window say when the orchestrator did something.
+While access covers the orchestrator, it can work on that machine in any turn or tool step. On a Mac that runs the server through Docker, this reaches Docker's Linux system.
 
 [Back to the guide](README.md)

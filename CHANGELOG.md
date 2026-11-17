@@ -5,6 +5,19 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
+- Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
+- The orchestrator can use an open machine grant whoever started the turn or last wrote.
+- Choosing access for every agent opens the machine for the selected duration in one step.
+- The orchestrator can see personal assistants and their conversations while each assistant takes orders from its person.
+- The orchestrator can read and settle ordinary merge conflicts, and only a direct CEO choice can pick a permanent deletion.
+- A department head can enable a skill that grants only department tracker work.
+- The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
