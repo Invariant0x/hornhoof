@@ -162,7 +162,7 @@ function DeptMessaging({ shown, onOpen }: { shown: boolean; onOpen(): void }) {
   return (
     <section aria-labelledby={`${id}-messaging`}>
       <h3 id={`${id}-messaging`}>{t.settings.groups.messaging}</h3>
-      <p className="muted">{t.dept.messagingHere}</p>
+      <p className="muted" dir="auto">{t.dept.messagingHere}</p>
       <div className="entry-actions">
         <button className="btn ghost" type="button" onClick={onOpen}>{t.dept.openMessaging}</button>
       </div>

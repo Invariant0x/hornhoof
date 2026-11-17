@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, desc, eq, gt, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -171,11 +171,19 @@ type TaskMessage = { companyId: string; agentId: string; task?: number | string;
 type MessageTurn = Parameters<typeof enqueueTurn>[1] & { message: TurnMessage };
 
 type ResumedWait = { task: Task; before: ExternalWait };
-type QueuedMessage = { id: string; resumed?: ResumedWait };
+type QueuedMessage = { id: string; resumed?: ResumedWait; repeated?: true };
+/* The turn a message went into or waits with, and whether it went there before, from the same turn of its sender. */
+export type SentMessage = { id: string; repeated: boolean };
 
 /* Input precedes the agent line, as it does for a decision that changes its own agent. An employee's message that is
    refused is kept where failures reads it, and its sender hears why, to whom and on which task. */
 export async function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
+  return (await sendTaskMessage(ctx, input, turn)).id;
+}
+
+/* The same, saying whether the words went before: a sender whose call broke off, or never heard its answer, sends them
+   again from the same turn, and they go once. */
+export async function sendTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<SentMessage> {
   try {
     return await withInputLock(ctx, input.agentId, () => queueMessage(ctx, input, turn));
   } catch (error) {
@@ -184,13 +192,32 @@ export async function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: Messa
   }
 }
 
+/* The turn an employee's words went into before, from the same turn of the same sender, on the same task or on none: the
+   input lock holds the recipient's words in line, so a repeat comes after them. Words whose turn never went out, failed or
+   dropped as stale before it started, did not reach the recipient, and go again. */
+async function sentBefore(ctx: Ctx, agentId: string, message: TurnMessage, taskId: string | null): Promise<string | null> {
+  if (!message.by || !message.byTurn) return null;
+  const [sender] = await ctx.db.select(only(jobs, 'startedAt')).from(jobs).where(eq(jobs.id, message.byTurn));
+  if (!sender?.startedAt) return null;
+  const [before] = await ctx.db.select(only(agentEvents, 'jobId')).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId)).where(and(
+    eq(agentEvents.agentId, agentId), gte(agentEvents.createdAt, sender.startedAt), sql`${agentEvents.data}->>'from' = 'agent'`, eq(agentEvents.kind, 'message'),
+    sql`${agentEvents.data}->>'by' = ${message.by}`, sql`${agentEvents.data}->>'byTurn' = ${message.byTurn}`, sql`${agentEvents.data}->>'text' = ${message.text}`,
+    taskId ? sql`${agentEvents.data}->'task'->>'id' = ${taskId}` : sql`${agentEvents.data}->'task' is null`,
+    or(isNotNull(jobs.startedAt), notInArray(jobs.status, ['failed', 'obsolete'])),
+  )).limit(1);
+  return before?.jobId ?? null;
+}
+
 /* An employee's message goes into the turn that runs or waits in its recipient's line; a person's may wait for whatever
    holds that line back. */
-async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
+async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<SentMessage> {
   const required = !!input.actor.agentId;
-  const queued: QueuedMessage = await onAgent(ctx, input.agentId, async () => input.task === undefined
-    ? { id: await insertOrDeliverTurn(ctx, turn) }
-    : queueBoundMessage(ctx, { ...input, task: input.task }, turn));
+  const queued: QueuedMessage = await onAgent(ctx, input.agentId, async () => {
+    if (input.task !== undefined) return queueBoundMessage(ctx, { ...input, task: input.task }, turn);
+    const before = await sentBefore(ctx, input.agentId, turn.message, null);
+    return before ? { id: before, repeated: true } : { id: await insertOrDeliverTurn(ctx, turn) };
+  });
+  if (queued.repeated) return { id: queued.id, repeated: true };
   try {
     await pump(ctx, input.agentId);
     if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, input, queued.id));
@@ -199,7 +226,7 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
     if (resumed) await onAgent(ctx, input.agentId, () => restoreWait(ctx, resumed, input.actor));
     throw error;
   }
-  return queued.id;
+  return { id: queued.id, repeated: false };
 }
 
 type AgentNow = Awaited<ReturnType<typeof agentState>>;
@@ -220,8 +247,10 @@ async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; create
 }
 
 /* Why a turn that did not go out cannot wait its line, or null when it waits for something that ends by itself. One its
-   plan cannot run for now does not: the sender hears at once and can tell someone else, as it does of one that cannot run
-   for any other reason, or whose turn did not go out. */
+   plan cannot run for now does not: the sender hears at once and can tell someone else, as it does of one whose employee
+   cannot run for any other reason. An employee that can run takes it once its window does: the window may still give
+   back the words of the turn that ended, or not have taken the turn that went to it, and the turn goes out with the next
+   try, which the minute round makes if nothing comes before. */
 async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string | null> {
   const [turn] = await ctx.db.select({ id: jobs.id, taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   if (!turn) return 'turn_not_sent';
@@ -229,7 +258,8 @@ async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string
   if (updating(state)) return null;
   const held = planHold(state, turn.taskId !== null);
   if (held) return held;
-  return (await waitsInLine(ctx, agentId, turn, state)) ? null : (state.reason ?? 'turn_not_sent');
+  if (state.reason === null) return null;
+  return (await waitsInLine(ctx, agentId, turn, state)) ? null : state.reason;
 }
 
 /* A letter in the inbox waits there for the turn that takes it, which other letters wait for too, whatever holds that turn back. */
@@ -275,6 +305,8 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
   const [sender] = input.actor.agentId ? await party(input.actor.agentId) : [];
   const [recipient] = await party(input.agentId);
   requireMessageTask(task, recipient, sender);
+  const before = await sentBefore(ctx, input.agentId, turn.message, task.id);
+  if (before) return { id: before, repeated: true };
   const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) });
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));
