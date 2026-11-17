@@ -20,7 +20,7 @@ type Agent = typeof agents.$inferSelect;
 type Case = typeof programOperatorCases.$inferSelect;
 export type ReleaseInput = { case: string; reason: string };
 type Refusal = OperatorError | 'no_plan';
-export type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: Refusal };
+type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: Refusal };
 
 /* Hornhoof's own words that never went are erased by the saved words, which go in once in their place. */
 const READY_INPUT = new Set<OperatorRecoveryState['input']>(['empty', 'hornhoof']);

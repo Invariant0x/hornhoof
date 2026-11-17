@@ -5,7 +5,7 @@ export { PROGRAM_OPERATOR_ROLE };
 /* Who Operations always has, in every company: people cannot leave them out of a card or remove the last one, and
    Hornhoof hires whoever is missing. */
 export const REQUIRED_OPERATIONS_ROLES = ['OPS-HEAD', 'OPS-WATCH', 'OPS-BUGS', PROGRAM_OPERATOR_ROLE] as const;
-export type RequiredRole = (typeof REQUIRED_OPERATIONS_ROLES)[number];
+type RequiredRole = (typeof REQUIRED_OPERATIONS_ROLES)[number];
 
 export const isRequiredRole = (role: string): role is RequiredRole => (REQUIRED_OPERATIONS_ROLES as readonly string[]).includes(role);
 

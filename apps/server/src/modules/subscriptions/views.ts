@@ -50,7 +50,7 @@ export type SubView = {
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 /* Who asks for the view: the address of a plan's account goes to its owner and to the CEO. */
-export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string };
+export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string; viaHead?: true };
 
 /* The tier all these accounts are on, and whether they are on different accounts or tiers. */
 export function agreed(accounts: Account[]): { tier: string | null; differ: boolean } {
@@ -61,7 +61,7 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
 
 /* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
    work runs. */
-export type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
 
 export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
   node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);
@@ -119,8 +119,8 @@ function ownerDepartments(ownerId: string, access: (typeof personAccess.$inferSe
 }
 
 function accountViews(mine: NodeRow[], accountOf: Map<string, Account | null>, viewer: Viewer | null, ownerId: string): Pick<SubView, 'accounts' | 'tier' | 'accountsDiffer'> {
-  /* The address goes to the plan's owner and the CEO, never to an agent acting for them. */
-  const sees = viewer !== null && !viewer.via && (viewer.id === ownerId || viewer.isOwner === true);
+  /* The address goes to the plan's owner and the CEO, and to the orchestrator acting for the CEO: never to a head. */
+  const sees = viewer !== null && !viewer.viaHead && (viewer.id === ownerId || viewer.isOwner === true);
   const signed = mine.flatMap(node => {
     const account = accountOf.get(node.id);
     return account ? [{ node, account }] : [];

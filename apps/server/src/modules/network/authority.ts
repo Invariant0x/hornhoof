@@ -5,10 +5,10 @@ import type { MachineRole } from '../../db/schema.js';
 import { toPem } from '../tls/x509.js';
 import { UUID } from '../../net/proxy.js';
 
-export const AUTHORITY_YEARS = 20;
+const AUTHORITY_YEARS = 20;
 export const CERT_DAYS = 30;
 export const RENEW_AFTER_DAYS = 7;
-export const SKEW_MS = 5 * 60_000;
+const SKEW_MS = 5 * 60_000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CRL_BACK_DAYS = 1;
@@ -23,8 +23,8 @@ const NAMES_NO_MACHINE = 'This certificate names no machine of a company.';
 
 export type Authority = { certPem: string; keyPem: string };
 export type Issued = { certPem: string; serial: string; until: Date };
-export type IssueRequest = { machineId: string; role: MachineRole; signKey: string; now?: Date };
-export type CertFacts = { machineId: string; role: MachineRole; serial: string; notBefore: Date; notAfter: Date; signKey: string };
+type IssueRequest = { machineId: string; role: MachineRole; signKey: string; now?: Date };
+type CertFacts = { machineId: string; role: MachineRole; serial: string; notBefore: Date; notAfter: Date; signKey: string };
 
 function yearsLater(from: Date, years: number): Date {
   const later = new Date(from);

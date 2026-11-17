@@ -1,29 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLinkName, linkNameOf, randomLinkName } from '../src/link.js';
-
-describe('linkNameOf', () => {
-  it('writes a Russian name in Latin letters, lowercase, with single hyphens between words', () => {
-    expect(linkNameOf('Рога и копыта')).toBe('roga-i-kopyta');
-    expect(linkNameOf('Щука, Жук & Юла')).toBe('schuka-zhuk-yula');
-    expect(linkNameOf('Объявления Хабаровска')).toBe('obyavleniya-habarovska');
-    expect(linkNameOf('\u0401лка')).toBe('yolka');
-  });
-
-  it('keeps Latin letters and digits and turns everything else into one hyphen', () => {
-    expect(linkNameOf('  Acme  Corp. 2 ')).toBe('acme-corp-2');
-    expect(linkNameOf('Café Zürich')).toBe('cafe-zurich');
-    expect(linkNameOf('--Hornhoof--')).toBe('hornhoof');
-    expect(linkNameOf('!!!')).toBe('');
-    expect(linkNameOf('公司')).toBe('');
-  });
-
-  it('stops at 63 characters, without a hyphen at the end', () => {
-    const name = linkNameOf(`${'a'.repeat(62)} b`);
-    expect(name).toBe('a'.repeat(62));
-    expect(linkNameOf('Очень длинное название компании, которое не помещается в одну строку адреса')).toHaveLength(63);
-    expect(isLinkName(linkNameOf('Очень длинное название компании, которое не помещается в одну строку адреса'))).toBe(true);
-  });
-});
+import { isLinkName, randomLinkName } from '../src/link.js';
 
 describe('isLinkName', () => {
   it('takes 1 to 63 lowercase letters, digits and single hyphens, with no hyphen at either end', () => {

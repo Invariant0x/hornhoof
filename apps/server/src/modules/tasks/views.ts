@@ -74,7 +74,8 @@ export type RequestView = {
 export type AfterView = { id: string; number: number; title: string; status: Task['status'] };
 /* A file an agent put on the task, which any agent downloads by its name. */
 /* fromPerson: by is a person, the file's author, not the agent it is kept under. */
-export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string };
+/* big: the file lives on one machine's disk for 30 days, and is lost if that machine goes. */
+export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string; big?: true };
 export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
   body: string;
@@ -209,7 +210,7 @@ async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<type
   return files.map(f => {
     const a = n.agent(f.agentId);
     const author = authors.find(p => p.id === f.personId);
-    return { id: f.id, name: f.name, size: f.size, by: author ?? (a && { id: a.id, name: a.name }), fromPerson: Boolean(author), at: f.at.toISOString() };
+    return { id: f.id, name: f.name, size: f.size, by: author ?? (a && { id: a.id, name: a.name }), fromPerson: Boolean(author), at: f.at.toISOString(), ...(f.big ? { big: true as const } : {}) };
   });
 }
 

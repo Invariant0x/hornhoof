@@ -11,7 +11,7 @@ import { currentCandidate } from './echelons-candidates.js';
 import { pathInScope, RepoPath, ReviewSha } from './review-schema.js';
 
 export const IssueInput = z.object({ taskId: z.uuid().optional(), category: z.enum(['security', 'data', 'spec', 'other', 'mechanical']), blocking: z.boolean(), path: RepoPath, line: z.number().int().positive(), harm: z.string().trim().min(1).max(2000) }).strict();
-export const FindingRecord = IssueInput.extend({ taskId: z.uuid(), findingId: z.uuid(), revision: z.uuid(), candidateId: z.uuid(), stage: z.enum(['review', 'security', 'cleanup']), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), reviewedCommit: ReviewSha, authorId: z.uuid(), reviewerId: z.uuid(), reviewerVendor: z.string().min(1) });
+const FindingRecord = IssueInput.extend({ taskId: z.uuid(), findingId: z.uuid(), revision: z.uuid(), candidateId: z.uuid(), stage: z.enum(['review', 'security', 'cleanup']), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), reviewedCommit: ReviewSha, authorId: z.uuid(), reviewerId: z.uuid(), reviewerVendor: z.string().min(1) });
 export type Finding = z.infer<typeof FindingRecord>;
 export type NewIssue = z.infer<typeof IssueInput>;
 export const ConfirmationInput = z.object({ findingId: z.uuid(), revision: z.uuid(), confirmed: z.boolean(), reason: z.string().trim().min(1).max(2000), fixCommit: ReviewSha.optional() }).strict();
@@ -20,12 +20,12 @@ type Reader = Ctx['db'] | Tx;
 type Event = Pick<typeof taskEvents.$inferSelect, 'id' | 'companyId' | 'taskId' | 'agentId' | 'kind' | 'data'>;
 export type FindingReport = EchelonFindingsView & { byVendor: { vendor: string; count: number; findingIds: string[] }[] };
 
-export async function reviewEvents(db: Reader, ids: string[]): Promise<Event[]> {
+async function reviewEvents(db: Reader, ids: string[]): Promise<Event[]> {
   return ids.length ? db.select({ id: taskEvents.id, companyId: taskEvents.companyId, taskId: taskEvents.taskId, agentId: taskEvents.agentId, kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(inArray(taskEvents.taskId, ids)).orderBy(asc(taskEvents.id)) : [];
 }
 
 /* Only candidate-bound checker events create findings. Comments and supplied numeric counts have no authority. */
-export function findingsOf(events: Event[]): Finding[] {
+function findingsOf(events: Event[]): Finding[] {
   const candidates = submittedCandidates(events);
   const found = new Map<string, Finding>();
   for (const finding of events.flatMap(event => attestedFindings(event, candidates))) {

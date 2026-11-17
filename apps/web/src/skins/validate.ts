@@ -7,7 +7,7 @@ import { COLOR_ROLES, CUT_RANGE, FONT_ROLES, GENERIC_FONTS, SCHEMES, type ColorR
    the first one that is not names the field to fix. Nothing of the file is kept: the skin is built anew from the values
    that passed. */
 
-export const SKIN_SCHEMA_VERSION = 2;
+const SKIN_SCHEMA_VERSION = 2;
 /* Bytes of a skin file; a sample takes about 2 000. */
 export const SKIN_FILE_LIMIT = 64 * 1024;
 const NAME_LIMIT = 120;
@@ -31,7 +31,7 @@ export const SKIN_ERROR_CODES = [
 export type SkinErrorCode = (typeof SKIN_ERROR_CODES)[number];
 /* What is wrong: the field to fix, and for a font or a pair of colours the value it is about. */
 export type SkinError = { code: SkinErrorCode; key?: string; value?: string };
-export type ParsedSkin = { ok: true; skin: Skin } | { ok: false; error: SkinError };
+type ParsedSkin = { ok: true; skin: Skin } | { ok: false; error: SkinError };
 
 /* Keys that reach the prototype of an object when code copies one: refused wherever they stand. */
 const FORBIDDEN = ['__proto__', 'constructor', 'prototype'];

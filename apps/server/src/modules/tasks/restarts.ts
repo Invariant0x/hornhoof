@@ -63,7 +63,7 @@ async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { ta
 }
 
 /* Operations' reliability engineer who is on and its head who is on, in the order they are called. */
-export async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Agent[]> {
+async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Agent[]> {
   const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
   const staff = await ctx.db
     .select()

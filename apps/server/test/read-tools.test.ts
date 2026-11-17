@@ -132,6 +132,8 @@ describe('the tools of an agent on a machine that only reads', () => {
 
   it("reads the call's name", () => {
     expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'update_task', arguments: {} } })).toBe('update_task');
+    expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'use_tool', arguments: { name: 'tasks', arguments: {} } } })).toBe('tasks');
+    expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'use_tool', arguments: {} } })).toBe('use_tool');
     for (const body of [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }, [{ method: 'tools/call', params: { name: 'x' } }], 'tools/call', null, { method: 'tools/call' }, { method: 'tools/call', params: { name: 7 } }]) {
       expect(callName(body), JSON.stringify(body)).toBeNull();
     }
