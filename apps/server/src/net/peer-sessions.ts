@@ -454,19 +454,27 @@ export class PeerSessions {
       this.cut(before, `a ${session.path} session took its place`, true);
     }
     this.refused = false;
-    session.h2.once('close', () => {
-      for (const timer of session.timers) clearInterval(timer);
-      /* One line for every session that ended, but those this machine closes as it stops. */
-      if (!this.closed || !session.why) this.opts.log(`The ${session.path} session to data machine ${kept.target.machine} ended: ${session.why ?? 'the other side or the network closed it'}.`);
-      if (kept.session !== session) return;
-      kept.session = null;
-      this.opts.changed?.();
-    });
-    session.timers.push(
+    session.h2.once('close', () => this.ended(kept, session));
+    session.timers.push(...this.watch(kept, session));
+    this.opts.changed?.();
+  }
+
+  /* What a kept session does in time: its hellos, its pings, and the looks for bytes that came on it. */
+  private watch(kept: Kept, session: Session): NodeJS.Timeout[] {
+    const silentMs = this.opts.silentMs ?? SILENT_MS;
+    return [
       setInterval(() => this.hello(session, kept), this.opts.helloMs ?? HELLO_MS).unref(),
       setInterval(() => this.ping(session), this.opts.pingMs ?? PING_MS).unref(),
-      setInterval(() => this.listen(session), Math.min(LISTEN_MS, this.opts.silentMs ?? SILENT_MS)).unref(),
-    );
+      setInterval(() => this.listen(session), Math.min(LISTEN_MS, silentMs)).unref(),
+    ];
+  }
+
+  /* One line for every session that ended and why, but those this machine closes as it stops. */
+  private ended(kept: Kept, session: Session): void {
+    for (const timer of session.timers) clearInterval(timer);
+    if (!this.closed || !session.why) this.opts.log(`The ${session.path} session to data machine ${kept.target.machine} ended: ${session.why ?? 'the other side or the network closed it'}.`);
+    if (kept.session !== session) return;
+    kept.session = null;
     this.opts.changed?.();
   }
 
