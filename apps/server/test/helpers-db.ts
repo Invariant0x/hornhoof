@@ -257,16 +257,26 @@ async function putBack(client: PGlite, { tables, numbers }: Rows): Promise<void>
    returned, which holds no function. So one set of rows can stand on another made the same way. On other rows they are
    made again, as on any database, and so they are while the clock is not real: kept ones would hold the time of the real
    one. Under one key, make builds the same rows each time. */
-export async function fixture<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
-  if (vi.isFakeTimers()) return make();
-  const on = `${key}\n${await digestOf(await rowsOf(client))}`;
+export async function fixture<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
+  /* An explicit frozen wall time has its own cache. Ordinary fake-clock callers still make fresh rows, and a caller
+     that moves its clock while making or restoring rows gets no cached result. */
+  const checkClock = () => {
+    if (clock && (!vi.isFakeTimers() || Date.now() !== clock.at)) throw new Error('The fixture clock must stay frozen at its declared time.');
+  };
+  checkClock();
+  if (vi.isFakeTimers() && !clock) return make();
+  const on = `${clock ? `at ${clock.at}` : 'real'}\n${key}\n${await digestOf(await rowsOf(client))}`;
   const kept = made.get(on);
   if (kept) {
     await putBack(client, kept);
+    checkClock();
     return structuredClone(kept.value) as T;
   }
   const value = await make();
-  made.set(on, { ...(await rowsOf(client)), value: structuredClone(value) });
+  checkClock();
+  const rows = await rowsOf(client);
+  checkClock();
+  made.set(on, { ...rows, value: structuredClone(value) });
   return value;
 }
 
