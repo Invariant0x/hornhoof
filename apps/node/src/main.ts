@@ -675,7 +675,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         seat?.settled();
         emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
       };
-      const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
+      const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), log, ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
       return await run(signal);
     } catch (err) {
       return { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };

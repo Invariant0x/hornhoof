@@ -27,6 +27,7 @@ import { instructionsOf } from '../agents/instructions.js';
 import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
+import { openTaskNumbers } from '../tasks/open-numbers.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
@@ -1202,6 +1203,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   let deliveries: { operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery } = {};
   try {
     deliveries = await turnOperatorDeliveries(ctx, agent, job, place.node, prompt);
+    const tasksNow = repo ? await openTaskNumbers(db, agent.companyId) : null;
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
@@ -1222,8 +1224,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       ...deliveries,
       context: job.prompt ? null : catchUp,
       /* Each agent keeps one folder on the node, with its repository's clone inside, which gets the dependencies the
-         company's machines built for its commit. */
-      workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}) },
+         company's machines built for its commit. Which tasks are still open lets the node take away its worktrees of the
+         closed ones. */
+      workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}), ...(tasksNow ? { tasks: tasksNow } : {}) },
       ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {
