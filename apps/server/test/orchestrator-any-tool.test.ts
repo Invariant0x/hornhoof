@@ -31,7 +31,7 @@ describe('the orchestrator takes any tool of Hornhoof when it needs it', () => {
   it('finds stop_tests by name, loads it and stops a run another agent started', async () => {
     const c = await company();
     const box = await c.machine(c.ceo, 'dev-mac');
-    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test' });
+    expect((await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test' })).error).toBe(false);
     const part = await nextOf(box.node, 'tests.run');
     const { call } = await orchestrator(c);
 
