@@ -1,6 +1,7 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { agents, taskEvents, tasks } from '../../db/schema.js';
+import { agents, taskEvents, taskRoutes, tasks } from '../../db/schema.js';
+import { ApiError } from '../../errors.js';
 import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { requireTestsReport } from './echelons-tests.js';
@@ -8,7 +9,7 @@ import { currentCandidate } from './echelons-candidates.js';
 import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
 import { requiredStagesComplete } from './echelons-accept.js';
-import { changeRoute, routeOf, type Route } from './echelons-store.js';
+import { changeRoute, type Route } from './echelons-store.js';
 import { giver, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 
 /* Acceptances and aggregates made before checks went local also name test runs, which are left out. */
@@ -33,12 +34,20 @@ export async function architectureReport(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
-type AcceptedChild = { taskId: string; candidateId: string; commit: string } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
+/* A child closed with no result its route proves: by hand in the database, by the orchestrator past its route, or with a
+   proof that no longer holds. It says how the child stood and who closed it, where its log says so, and passes for accepted
+   with nobody. */
+type Unaccepted = { status: 'done'; phase: Route['state']['phase'] | null; closedBy: { agentId: string } | { personId: string } | null };
+type AcceptedChild = { taskId: string; candidateId: string; commit: string } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string } | { taskId: string; unaccepted: Unaccepted };
 const ChildReference: z.ZodType<AcceptedChild> = z.lazy(() => z.union([
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string() }),
   z.object({ taskId: z.uuid(), children: z.array(ChildReference) }),
   z.object({ taskId: z.uuid(), turnkey: z.literal(true) }),
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), digest: z.string() }),
+  z.object({ taskId: z.uuid(), unaccepted: z.object({
+    status: z.literal('done'), phase: z.enum(['active', 'waiting', 'escalated', 'ready', 'done', 'cancelled']).nullable(),
+    closedBy: z.union([z.object({ agentId: z.uuid() }).strict(), z.object({ personId: z.uuid() }).strict()]).nullable(),
+  }).strict() }),
 ]));
 
 async function acceptedUnder(tx: Tx, task: Task, ancestors = new Set<string>()): Promise<AcceptedChild[]> {
@@ -55,10 +64,35 @@ async function acceptedUnder(tx: Tx, task: Task, ancestors = new Set<string>()):
 
 type ReportData = typeof taskEvents.$inferSelect.data | undefined;
 
+/* A closed child counts whichever way it closed: its accepted result where its completed route still proves one, and
+   otherwise the plain record that it closed without one. Only work still open holds the group open. */
 async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<AcceptedChild> {
-  if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be accepted before the group closes.');
-  const route = await routeOf(tx, child);
-  if (route.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
+  if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be closed before the group closes.');
+  const [route] = await tx.select().from(taskRoutes).where(and(eq(taskRoutes.taskId, child.id), eq(taskRoutes.companyId, child.companyId)));
+  const proven = route?.state.phase === 'done' ? await provenChild(tx, child, route, path) : null;
+  return proven ?? { taskId: child.id, unaccepted: { status: 'done', phase: route?.state.phase ?? null, closedBy: await closerOf(tx, child) } };
+}
+
+/* Who moved the child to the status it holds, as its log says; nobody where it was closed outside Hornhoof. */
+async function closerOf(tx: Tx, child: Task): Promise<Unaccepted['closedBy']> {
+  const [event] = await tx.select({ agentId: taskEvents.agentId, personId: taskEvents.personId }).from(taskEvents)
+    .where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), sql`${taskEvents.data}->>'toStatus' = ${child.status}`)).orderBy(desc(taskEvents.id)).limit(1);
+  if (event?.agentId) return { agentId: event.agentId };
+  return event?.personId ? { personId: event.personId } : null;
+}
+
+/* The result a completed route proves, or null where its proof no longer holds: a refusal of the proof is no refusal of the
+   group, which closes over the child as not accepted. */
+async function provenChild(tx: Tx, child: Task, route: Route, path: Set<string>): Promise<AcceptedChild | null> {
+  try {
+    return await acceptedResult(tx, child, route, path);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) return null;
+    throw error;
+  }
+}
+
+async function acceptedResult(tx: Tx, child: Task, route: Route, path: Set<string>): Promise<AcceptedChild> {
   const [report] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
   /* Turnkey work has no candidate and no stages: its holder closed it alone, and nobody checks it after. */
   if (route.state.resultKind === 'turnkey') return { taskId: child.id, turnkey: true };

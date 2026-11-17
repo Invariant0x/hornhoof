@@ -176,6 +176,7 @@ const ELSEWHERE: Record<string, string> = {
   'PUT /api/company/inbox-mode': 'inbox.test.ts: the CEO or the CEO delegate alone, 403 for everyone else',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
+  'POST /api/tasks/:id/close': 'orchestrator-close.test.ts: the orchestrator alone, through its own calls; 403 for every person, the CEO too, and for a head',
   'GET /api/goals': "tracker-goals.test.ts: the company's goals with their progress, which everyone of it reads",
   'GET /api/goals/:id': 'tracker-goals.test.ts: one goal of the company and its history, which everyone of it reads',
   'POST /api/goals': "tracker-goals.test.ts: company goals by the CEO or a delegate, a department's by whoever reaches it, 403 for everyone else",

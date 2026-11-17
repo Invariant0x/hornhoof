@@ -94,7 +94,9 @@ A task given to a member of a sub-unit marked "Works turnkey" goes through none 
 
 Each stage has one current owner. Review is required even when only one provider or subscription is available. The checker must use a model at least as capable as the producer's; an eligible different provider is preferred when available.
 
-A coordination task with no executable result closes with a checked report and valid reviewed child results. An unfinished, unaccepted or stale child blocks that report. A parent that produces its own executable result follows the route above.
+A coordination task with no executable result closes with a checked report once every child is done or cancelled, however each one closed: through its stages, by the orchestrator or by hand in the database. The report names each child's accepted result, or says that the child closed without one; only a child still open holds it back. A parent that produces its own executable result follows the route above.
+
+The orchestrator can close any task in any state, done or cancelled, with its reason in the task's log. Open work under it is cancelled with it. Closing a task done this way accepts no result and puts nothing into a release or main.
 
 ## How does a member work its piece?
 
