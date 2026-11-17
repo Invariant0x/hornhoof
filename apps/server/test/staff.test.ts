@@ -79,7 +79,7 @@ describe('staffing', () => {
   it('lists what a department can be staffed with', async () => {
     const c = await company();
     const client = await tools(c);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'vault_save', 'wait_for']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_goal', 'set_pipeline', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'vault_save', 'wait_for']);
     const res = await client.callTool({ name: 'staffing_options', arguments: { department: c.dev.id } });
     const options = JSON.parse(text(res));
     expect(options.department).toEqual({ id: c.dev.id, name: 'Development', products: c.products.map(p => ({ id: p.id, name: p.name })), employees: [] });
@@ -269,6 +269,7 @@ describe('staffing', () => {
     expect(staff.map(a => [a.roleKey, a.kind, a.model, a.subscriptionId])).toEqual([
       ['MKT-EDIT', 'worker', 'claude-opus-5-5', c.orchestrator.subscriptionId],
       ['MKT-HEAD', 'head', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
+      ['MKT-PM', 'worker', 'claude-haiku-5-5', c.orchestrator.subscriptionId],
       ['MKT-SEO', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
       ['MKT-SOCIAL', 'worker', 'claude-haiku-5-5', c.orchestrator.subscriptionId],
       ['MKT-WRITE', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
@@ -292,7 +293,7 @@ describe('staffing', () => {
     /* The same role outside the team keeps the strength the role asks for. */
     const [writer] = await c.db.select().from(agents).where(and(eq(agents.departmentId, marketing!.id), eq(agents.roleKey, 'MKT-WRITE'), isNull(agents.teamId)));
     expect(writer!.model).toBe('claude-sonnet-5-5');
-    expect(built.json().hired).toHaveLength(6);
+    expect(built.json().hired).toHaveLength(7);
   });
 
   it('numbers the members of a team that has several of one role', async () => {
@@ -312,7 +313,7 @@ describe('staffing', () => {
     expect(built.statusCode).toBe(201);
     const [finance] = await c.db.select().from(departments).where(eq(departments.templateKey, 'finance'));
     const staff = await c.db.select().from(agents).where(eq(agents.departmentId, finance!.id)).orderBy(asc(agents.roleKey));
-    expect(staff.map(a => [a.roleKey, a.model, a.subscriptionId])).toEqual([['FIN-AUDIT', '', null], ['FIN-BOOK', '', null], ['FIN-FPA', '', null], ['FIN-FPA', '', null], ['FIN-HEAD', '', null]]);
+    expect(staff.map(a => [a.roleKey, a.model, a.subscriptionId])).toEqual([['FIN-AUDIT', '', null], ['FIN-BOOK', '', null], ['FIN-FPA', '', null], ['FIN-FPA', '', null], ['FIN-HEAD', '', null], ['FIN-PM', '', null]]);
   });
 
   it('tells the orchestrator who came with a new department, and to staff only the ones that came without people', async () => {

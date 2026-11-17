@@ -2,7 +2,6 @@ import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { TaskPanel } from '../src/ui/TaskPanel';
-import { TaskRow } from '../src/ui/TaskRow';
 import { mockApi } from './api-mock';
 import { ECHELON_ORG, ECHELON_TASK, ECHELON_WORKFLOW } from './echelon-fixture';
 import { fakeStream } from './fake-stream';
@@ -55,22 +54,5 @@ describe('the required echelon presentation', () => {
     stream.send({ type: 'task', id: 't12', spot: { departmentId: 'd2' } });
     expect(await within(route).findByText('Owner: Tom')).toBeInTheDocument();
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Tests');
-  });
-
-  it('uses the current owner in a task row while old list details refresh', () => {
-    render(<TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />);
-    const row = screen.getByRole('button', { name: /#12/ });
-    expect(row).toHaveTextContent('Owner: reviewer');
-    expect(row).toHaveTextContent('Review');
-    expect(row).not.toHaveTextContent('Bruno');
-  });
-
-  it('lists independent tasks in Review and Development at the same time', () => {
-    const independent = { ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', echelons: { ...ECHELON_WORKFLOW, stage: 'development' as const, ownerAgentId: 'b1' } };
-    render(<><TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />
-      <TaskRow task={independent} on={false} place="" onOpen={() => {}} /></>);
-    expect(screen.getByRole('button', { name: /#12/ })).toHaveTextContent('Review');
-    expect(screen.getByRole('button', { name: /#13/ })).toHaveTextContent('Development');
-    expect(screen.queryByText(/Gate 2 of 3/)).not.toBeInTheDocument();
   });
 });

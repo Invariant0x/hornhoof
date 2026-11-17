@@ -42,7 +42,8 @@ function roles(): string {
   return table(['Department', ...shown], [...new Set(all.map(r => r.department))].sort().map(key => [departmentName(key), ...shown.map(level => inDepartment(key).filter(r => r.effort === level).map(r => r.title.en).join(', ') || '-')]));
 }
 
-const ofTier = (tier: Role['tier']) => [...templates.roles.values()].filter(r => r.tier === tier).sort(byTitle).map(r => r.title.en).join(', ');
+/* A title several departments share, as their product manager's, is named once. */
+const ofTier = (tier: Role['tier']) => unique([[...templates.roles.values()].filter(r => r.tier === tier).sort(byTitle).map(r => r.title.en)]).join(', ');
 
 describe('the guide on programs, models and levels', () => {
   const guide = readFileSync(GUIDE, 'utf8');

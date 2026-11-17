@@ -20,7 +20,7 @@ function fixture(extra: Parameters<typeof mockApi>[0] = {}) {
     ...extra,
   });
 }
-const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 
 describe('shareable workspace', () => {
   it('changes the address for every main tab', async () => {
@@ -34,7 +34,7 @@ describe('shareable workspace', () => {
   });
 
   it.each([
-    ['/tasks', 'heading', 'Tasks'],
+    ['/tasks', 'heading', 'My tasks'],
     ['/people', 'heading', 'People'],
     ['/subscriptions', 'heading', 'Subscriptions & API'],
     ['/machines', 'heading', 'Machines'],
@@ -67,17 +67,19 @@ describe('shareable workspace', () => {
     expect(tab('People')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('keeps the department under its task through close, history and related tasks', async () => {
+  it('keeps the department in the tracker under its task through close, history and related tasks', async () => {
     fixture({
-      'GET /api/tasks?status=open&department=d2': [200, { tasks: TASKS }],
       'GET /api/tasks/t10': [200, { task: { ...TASK_DETAIL, id: 't10', number: 10, title: 'Payments', parent: null } }],
     });
     history.replaceState(null, '', '/departments/d2');
     render(<Shell me={ME} onSignOut={() => {}} />);
     const user = userEvent.setup();
-    const department = await screen.findByRole('heading', { name: 'Development' });
+    await screen.findByRole('heading', { level: 2, name: 'Development' });
     await user.click(screen.getByRole('button', { name: 'Department tasks' }));
-    await user.click(await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#12 Checkout API/ }));
+    expect(location.pathname + location.search).toBe('/tasks?department=d2');
+    const department = await screen.findByRole('heading', { level: 1, name: 'Development' });
+    const row = await within(await screen.findByRole('region', { name: 'List' })).findByRole('listitem', { name: '#12 Checkout API' });
+    await user.click(within(row).getByRole('button', { name: 'Checkout API' }));
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     expect(location.pathname).toBe('/tasks/t12');
     expect(department).toBeVisible();
@@ -92,7 +94,7 @@ describe('shareable workspace', () => {
     expect(location.pathname).toBe('/tasks/t12');
     expect(comment).toHaveValue('Keep this task draft');
     await user.click(within(panel).getByRole('button', { name: 'Close' }));
-    expect(location.pathname).toBe('/departments/d2');
+    expect(location.pathname + location.search).toBe('/tasks?department=d2');
     expect(department).toBeVisible();
     await act(async () => {
       const popped = new Promise<void>(resolve => globalThis.window.addEventListener('popstate', () => resolve(), { once: true }));
@@ -101,11 +103,12 @@ describe('shareable workspace', () => {
     });
     expect(location.pathname).toBe('/tasks/t12');
     expect(department).toBeVisible();
-    await user.click(within(await screen.findByRole('complementary', { name: '#12 Checkout API' })).getByRole('button', { name: '#10 Payments' }));
+    const path = await within(await screen.findByRole('complementary', { name: '#12 Checkout API' })).findByRole('navigation', { name: 'Where it belongs' });
+    await user.click(within(path).getByRole('button', { name: '#10 Payments' }));
     const parent = await screen.findByRole('complementary', { name: '#10 Payments' });
     expect(department).toBeVisible();
     await user.click(within(parent).getByRole('button', { name: 'Close' }));
-    expect(location.pathname).toBe('/departments/d2');
+    expect(location.pathname + location.search).toBe('/tasks?department=d2');
   });
 
   it('closes a directly shared task to its task list', async () => {
@@ -113,7 +116,7 @@ describe('shareable workspace', () => {
     history.replaceState(null, '', '/tasks/t12');
     render(<Shell me={ME} onSignOut={() => {}} />);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    expect(await screen.findByRole('heading', { level: 1, name: 'My tasks' })).toBeVisible();
     await userEvent.setup().click(within(panel).getByRole('button', { name: 'Close' }));
     expect(location.pathname).toBe('/tasks');
   });

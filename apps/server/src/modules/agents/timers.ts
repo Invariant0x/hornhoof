@@ -26,7 +26,8 @@ const TICK_MS = 60_000;
 export const timerOf = (a: AgentRow) =>
   a.timerMinutes && a.timerOrder ? { minutes: a.timerMinutes, order: a.timerOrder, forWork: a.timerForWork, lastAt: a.timerAt?.toISOString() ?? null } : null;
 
-const due = (a: AgentRow, now: Date) => !a.timerAt || now.getTime() - a.timerAt.getTime() >= a.timerMinutes! * 60_000;
+/* Its own interval since the last round has passed, or a change it keeps track of asked for a round sooner. */
+const due = (a: AgentRow, now: Date) => !a.timerAt || now.getTime() - a.timerAt.getTime() >= a.timerMinutes! * 60_000 || (a.timerNudgedAt !== null && now >= a.timerNudgedAt);
 /* Still timed, on and in the company. */
 const timed = and(isNotNull(agents.timerMinutes), isNotNull(agents.subscriptionId), isNull(agents.removedAt), isNull(agents.switchedOffAt));
 
@@ -67,12 +68,12 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     .limit(1);
   if (open) return false;
   if (agent.timerForWork && !(await workFor(ctx, agent))) {
-    await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+    await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
     return false;
   }
   const prompt = roundPrompt(agent);
   const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name, ru: agent.name } } } });
-  await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+  await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
   return jobId;
 }
 

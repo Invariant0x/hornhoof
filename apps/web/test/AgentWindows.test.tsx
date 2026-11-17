@@ -25,7 +25,7 @@ function company(agents = RUNNING_AGENTS) {
   });
 }
 
-const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 
 /* The list of a machine's agents opens any of them, whatever window is on the screen. */
 async function openMachines(user: ReturnType<typeof userEvent.setup>) {

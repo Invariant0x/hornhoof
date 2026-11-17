@@ -26,6 +26,7 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerHolderTools, registerTaskTools } from '../tasks/tools.js';
+import { registerTrackerTools } from '../tracker/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerVaultTools } from '../vault/tools.js';
@@ -81,6 +82,9 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  /* The tracker's tools by the agent's own skills: the orchestrator sets goals and pipelines on its list, and tidying a
+     task stays the product manager's. */
+  registerTrackerTools(server, ctx, job, new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? [])));
   registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);

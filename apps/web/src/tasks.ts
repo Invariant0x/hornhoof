@@ -4,7 +4,7 @@ import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { refetcher } from './refetch';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView, WaitCard } from './types';
+import type { AgentRef, DepartmentTree, Decisions, GoalView, Improvement, Lang, Org, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskPlace, TurnView, WaitCard } from './types';
 import { everyVisible } from './guard';
 
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
@@ -82,6 +82,24 @@ export function useTaskDepartments() {
 export function useTask(id: string) {
   const { data, failure, load } = useLive(`/api/tasks/${id}`, (b: { task: TaskDetail }) => b.task, m => m.type === 'task' || m.type === 'requests');
   return { task: data, failure, load };
+}
+
+/* The company's goals with their progress, fetched again when a goal or a task changes, as tasks move a goal's progress. */
+export function useGoals(enabled = true) {
+  const { data, failure, load } = useLive(enabled ? '/api/goals' : null, (b: { goals: GoalView[] }) => b.goals, m => m.type === 'tracker' || m.type === 'task');
+  return { goals: data, failure, load };
+}
+
+/* One goal with its history. */
+export function useGoal(id: string) {
+  const { data, failure, load } = useLive(`/api/goals/${id}`, (b: { goal: GoalView; log: TaskLogLine[] }) => b, m => m.type === 'tracker' || m.type === 'task');
+  return { goal: data?.goal, log: data?.log, failure, load };
+}
+
+/* The pipelines of every department, with their stages in tree order. */
+export function usePipelines(enabled = true) {
+  const { data, failure, load } = useLive(enabled ? '/api/pipelines' : null, (b: { pipelines: Pipeline[] }) => b.pipelines, m => m.type === 'tracker');
+  return { pipelines: data, failure, load };
 }
 
 /* Everything that waits for people as this person may see it: what agents ask on the tasks they reach, the orchestrator's

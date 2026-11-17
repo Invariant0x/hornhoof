@@ -13,6 +13,7 @@ import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
+import { GoalPanel } from '../ui/GoalPanel';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates, type Updates } from '../updates';
 import { About } from './About';
@@ -31,7 +32,7 @@ import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
-import { useRoute, type Route, type SettingsGroup } from '../routes';
+import { placeOf, useRoute, type Route, type SettingsGroup, type TrackerPlace } from '../routes';
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
 
@@ -48,10 +49,11 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
   const accountDialog = dialogOf(route);
   const contentRoute = accountDialog ? backgrounds[0]! : route;
   const taskId = contentRoute.kind === 'tasks' ? contentRoute.id ?? null : null;
+  const card = contentRoute.kind === 'tasks' && contentRoute.card === 'goal' ? 'goal' : 'task';
   const pageRoute = taskId ? backgrounds[accountDialog ? 1 : 0] ?? { kind: 'tasks' } as const : contentRoute;
   const tab = pageRoute.kind === 'department' ? 'map' : pageRoute.kind;
   const deptId = pageRoute.kind === 'department' ? pageRoute.id : null;
-  return { accountDialog, pageRoute, taskId, tab, deptId };
+  return { accountDialog, pageRoute, taskId, card, tab, deptId };
 }
 
 /* The window of the account menu open over the page. The groups of Settings are one window, so switching between them
@@ -278,9 +280,9 @@ function departmentFallback(deptId: string | null, org: Org | null, orgFailure: 
   return deptId && !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
-  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
-  openTask: (id: string) => void; onHire: (dept: Department) => void;
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, onHire }: MapRouteProps & {
+  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
+  openTask: (id: string) => void; openTracker: (departmentId: string) => void; onHire: (dept: Department) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
   if (!dept) return departmentFallback(deptId, org, orgFailure);
@@ -290,13 +292,13 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       department={dept}
       deputies={org?.people ?? []}
       selected={shown}
-      selectedTask={taskId}
       panel={panel}
       serverNow={org?.serverNow}
       onBack={goHome}
       onOpen={openAgent}
       onOpenTask={openTask}
       onOpenDecisions={openDecisions}
+      onOpenTracker={openTracker}
       onHire={() => onHire(dept)}
     />
   );
@@ -306,7 +308,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
   const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
-  const { accountDialog, pageRoute, taskId, tab, deptId } = workspaceOf(route, backgrounds);
+  const { accountDialog, pageRoute, taskId, card, tab, deptId } = workspaceOf(route, backgrounds);
   const goHome = () => navigate({ kind: 'map' });
   const openAccount = (next: Route) => navigate(next, route);
   const [menu, setMenu] = useState(false);
@@ -336,6 +338,14 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     hideWindow();
     navigate({ kind: 'tasks', id }, pageRoute);
   }, [hideWindow, navigate, pageRoute]);
+  const openGoal = useCallback((id: string) => {
+    hideWindow();
+    navigate({ kind: 'tasks', id, card: 'goal' }, pageRoute);
+  }, [hideWindow, navigate, pageRoute]);
+  /* The tracker's graph grown from a task or a goal. */
+  const openGraph = (root: { task?: string; goal?: string }) => navigate(root.task ? { kind: 'tasks', root: root.task, view: 'graph' } : { kind: 'tasks', goal: root.goal, view: 'graph' });
+  const toPlace = (place: TrackerPlace) => navigate({ kind: 'tasks', ...place });
+  const trackerPlace: TrackerPlace = pageRoute.kind === 'tasks' ? placeOf(pageRoute) : {};
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
@@ -343,7 +353,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
-    navigate({ kind: 'tasks', personId });
+    navigate({ kind: 'tasks', show: 'waits', personId });
   };
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
@@ -393,7 +403,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} />}
         <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
       </SwitchBanner>
-      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
+      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
@@ -401,7 +411,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
@@ -409,14 +419,16 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'tasks' && (
           <GuardBoundary block="tasks">
           <Tasks
+            me={currentMe}
+            place={trackerPlace}
+            onPlace={toPlace}
             onHome={goHome}
             decisions={decisions.all}
             decisionsFailure={decisions.failure}
             onDecisionsChanged={decisions.load}
-            personId={pageRoute.kind === 'tasks' ? pageRoute.personId ?? null : null}
-            onClearPerson={() => navigate({ kind: 'tasks' })}
             selected={taskId}
             onOpenTask={openTask}
+            onOpenGoal={openGoal}
             onOpenAgent={openAgent}
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
@@ -429,17 +441,33 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
       <LightNotice />
-      {taskId && (
+      {taskId && card === 'task' && (
         <TaskPanel
-          key={taskId}
+          key={`task:${taskId}`}
           taskId={taskId}
+          kind={tab === 'tasks' ? 'at-end' : undefined}
           active={!accountDialog && !menu}
           onClose={() => navigate(pageRoute)}
           onOpen={openTask}
+          onOpenGoal={openGoal}
+          onGraph={openGraph}
           onHome={goHome}
           requests={decisions.requestsOf(taskId)}
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
+        />
+      )}
+      {taskId && card === 'goal' && (
+        <GoalPanel
+          key={`goal:${taskId}`}
+          goalId={taskId}
+          kind={tab === 'tasks' ? 'at-end' : undefined}
+          active={!accountDialog && !menu}
+          onClose={() => navigate(pageRoute)}
+          onOpen={openTask}
+          onOpenGoal={openGoal}
+          onGraph={openGraph}
+          onHome={goHome}
         />
       )}
       <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />

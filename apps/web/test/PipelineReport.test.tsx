@@ -8,6 +8,7 @@ import { SpeedPanel } from '../src/screens/SpeedPanel';
 import { useDepartmentPipeline } from '../src/tasks';
 import type { Department } from '../src/types';
 import { DEV_ORG, DEV_TREE, mockApi } from './api-mock';
+import { decl } from './css';
 
 const DEPARTMENT = DEV_ORG.departments.find(d => d.id === 'd2') as Department;
 const PATH = 'GET /api/departments/d2/pipeline';
@@ -299,6 +300,14 @@ describe('the report refreshes', () => {
 
 describe('the third tab of the speed panel', () => {
   const panel = (tree = DEV_TREE) => render(<LanguageProvider><SpeedPanel tree={tree} department={DEPARTMENT} onAgent={() => {}} /></LanguageProvider>);
+
+  it("frames the turn's totals on the surface with a line round them", () => {
+    panel();
+    const totals = document.querySelector('dl');
+    expect(totals).toHaveClass('sum');
+    /* jsdom lays nothing out, so the frame is read from theme.css: the drawer's own rule sets the grid, this one the frame. */
+    expect(['padding', 'background', 'box-shadow', 'min-width'].map(p => decl('.sum', p))).toEqual(['12px 14px', 'var(--surface)', 'inset 0 0 0 1px var(--line)', '0']);
+  });
 
   it('asks for the report only when it is opened', async () => {
     const user = userEvent.setup();

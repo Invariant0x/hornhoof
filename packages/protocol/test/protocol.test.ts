@@ -370,7 +370,8 @@ describe('company templates', () => {
     expect(Object.keys(others).sort()).toEqual([...COMPANY_TEMPLATE_KEYS].sort());
     for (const template of COMPANY_TEMPLATES) {
       const { staff } = template.departments.find(d => d.template === 'operations')!;
-      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, ...others[template.key]!].sort());
+      /* The product manager every department of a template hires is in Operations too, though Hornhoof does not require it. */
+      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, 'OPS-PM', ...others[template.key]!].sort());
       expect(staff.every(line => line.count === 1), template.key).toBe(true);
     }
   });

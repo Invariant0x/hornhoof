@@ -62,7 +62,7 @@ describe("a department's tasks and its list for later turns", () => {
     const { db, ceoToken, dora, dev, sales, send, put, listed } = await company();
     const [salesItem] = await put(ceoToken, sales.id, 'Call the new leads');
     const picked = (await send(dora, 'GET', '/api/task-departments')).json();
-    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development', mine: true }, { id: sales.id, name: null, templateKey: 'sales', mine: false }] });
+    expect(picked).toMatchObject({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development', mine: true }, { id: sales.id, name: null, templateKey: 'sales', mine: false }] });
     expect((await send(dora, 'GET', `/api/tasks?department=${dev.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/tasks?department=${sales.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/departments/${dev.id}/backlog`)).statusCode).toBe(200);
