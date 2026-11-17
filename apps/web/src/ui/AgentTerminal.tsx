@@ -47,14 +47,14 @@ const NO_ACCESS = 4403;
 
 /* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it.
    watching: this person types elsewhere, so the terminal leaves the focus there as it opens. */
-export type TestTerminalGoneReason = 'denied' | 'expired' | 'unavailable' | 'unknown';
+type TestTerminalGoneReason = 'denied' | 'expired' | 'unavailable' | 'unknown';
 type TestTerminalLease = {
   leaseId: string;
   expectedLeaseRevision: number;
   registrationId: string;
   expectedIdentityDigest: string;
 };
-export type TestTerminalSession = TestTerminalLease & {
+type TestTerminalSession = TestTerminalLease & {
   bindView(request: BindViewRequest): Promise<BindViewResponse>;
 };
 type Props = { path: string; program: string; onGone(reason?: TestTerminalGoneReason): void; watching?: boolean; testSession?: TestTerminalSession };

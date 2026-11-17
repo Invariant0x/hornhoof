@@ -3,7 +3,7 @@ import { api, ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import type { TaskFile } from '../types';
 
-export type FullTextRef = { field: 'text' | 'evidence'; id: string; name: string; size: number };
+type FullTextRef = { field: 'text' | 'evidence'; id: string; name: string; size: number };
 
 const AUTO_TEXT_FILE = /^([a-z_]+-(?:text|evidence))-[0-9a-f]{64}(\.txt)$/;
 const attachmentPath = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
@@ -76,7 +76,7 @@ function useFullText(id: string) {
   return { expanded, loaded, busy, failure, toggle };
 }
 
-export function ExpandableLogField({ preview, fullRef, prefix = '', className }: { preview: string; fullRef: FullTextRef; prefix?: string; className?: string }) {
+function ExpandableLogField({ preview, fullRef, prefix = '', className }: { preview: string; fullRef: FullTextRef; prefix?: string; className?: string }) {
   const t = useT();
   const { expanded, loaded, busy, failure, toggle } = useFullText(fullRef.id);
   const shown = expanded ? (loaded as string) : cleanPreview(preview, fullRef.id);

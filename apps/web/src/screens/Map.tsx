@@ -221,7 +221,7 @@ export function pulsePath(from: Endpoint, to: Endpoint, org: Org, arr: MapArrang
 }
 
 /* Work going back up, to a person or from a department to the hub, runs amber; work handed down runs cyan. */
-export const pulseTone = (from: Endpoint, to: Endpoint): 'c' | 'a' => (to.kind === 'person' || (to.kind === 'orchestrator' && from.kind === 'department') ? 'a' : 'c');
+const pulseTone = (from: Endpoint, to: Endpoint): 'c' | 'a' => (to.kind === 'person' || (to.kind === 'orchestrator' && from.kind === 'department') ? 'a' : 'c');
 
 /* The line under a department's name: its products, or its teams. */
 function deptDetail(t: Messages, d: Department): string {

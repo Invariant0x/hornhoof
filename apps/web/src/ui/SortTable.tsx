@@ -9,7 +9,7 @@ import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sor
 /* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card.
    span: for a row whose cell says one thing for this column and the next ones, how many it takes and the label it goes by
    when the table stands as entries. */
-export type ColumnSpan = { columns: number; label: string };
+type ColumnSpan = { columns: number; label: string };
 export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true; span?: (row: T) => ColumnSpan | null };
 type Props<T> = {
   rows: readonly T[];
