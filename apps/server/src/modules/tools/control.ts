@@ -180,6 +180,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     { person: Id('person'), ...PersonPatch.shape },
     ({ person, ...body }) => ({ method: 'PATCH', url: `/api/people/${person}`, payload: body }),
   );
+  tool(
+    'delete_person',
+    'Permanently deletes a person and their assistants after the CEO has recorded a yes for that person. After a failure, call again with the same id to finish cleanup.',
+    { person: Id('person') },
+    ({ person }) => ({ method: 'DELETE', url: `/api/people/${person}` }),
+  );
   tool('invite_again', 'Makes a new invite link for a person who has not joined yet.', { person: Id('person') }, ({ person }) => ({ method: 'POST', url: `/api/people/${person}/invite` }));
 
   tool(

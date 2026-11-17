@@ -20,6 +20,7 @@ export type ErrorReason =
   | 'policy_not_allowed'
   | 'policy_invalid'
   | 'autonomous_release_not_allowed'
+  | 'deletion_needs_ceo'
   | 'decision_context_missing'
   | 'decision_context_changed'
   | 'delegate_requires_company_access'

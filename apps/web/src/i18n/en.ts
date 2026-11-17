@@ -2388,6 +2388,7 @@ export const en = {
     invite_unknown: 'This invite link is not valid. Check that you copied all of it, or ask for a new one.',
     invite_used: 'This invite link was already used or has expired. If you joined with it, sign in with your email and password. If not, ask for a new one.',
     email_taken: 'Someone with this email is already in the company.',
+    deletion_needs_ceo: 'The CEO must approve this permanent deletion.',
     person_unknown: 'This person does not exist.',
     owner_locked: 'This cannot be done to the company owner.',
     self_locked: 'You cannot do this to yourself.',
