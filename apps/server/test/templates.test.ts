@@ -1888,7 +1888,8 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(skill.body).toMatch(/start_calls[\s\S]*calls[\s\S]*stop_calls/);
     expect(skill.body).toMatch(/Use calls when:[\s\S]*independent[\s\S]*judge[\s\S]*one-shot/);
     expect(skill.body).toMatch(/Do it yourself[^:]*when:[\s\S]*questions[\s\S]*browser[\s\S]*depends on the answer/);
-    expect(skill.body).toMatch(/check queue/);
+    expect(skill.body).toMatch(/as many at once as[^.]*memory/);
+    expect(skill.body).not.toMatch(/check queue/);
     expect(skill.body).not.toMatch(/(?:^|\s)#\d+\b|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+|Claude|Codex|Kimi|Antigravity/i);
   });
 

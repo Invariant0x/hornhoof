@@ -18,4 +18,4 @@ Do it yourself when:
 - each step depends on the answer before it;
 - it changes shared things that can clash: one branch, outside accounts, money, messages to people.
 
-Brief a call as you would a stranger: the goal, where to look, what to return. It sees only its brief and input. Name a branch when it needs the code: it gets a fresh clone and pushes only to a branch of its own. Ask for a verdict when you need pass or fail. An answer is a claim, not proof: check what you rely on. Calls wait their turns in the machine's check queue and spend your plan's limits.
+Brief a call as you would a stranger: the goal, where to look, what to return. It sees only its brief and input. Name a branch when it needs the code: it gets a fresh clone and pushes only to a branch of its own. Ask for a verdict when you need pass or fail. An answer is a claim, not proof: check what you rely on. Calls start as many at once as the machine's memory holds, the rest wait for it, and they spend your plan's limits.

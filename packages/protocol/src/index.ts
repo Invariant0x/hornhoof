@@ -740,7 +740,7 @@ const ServerMessage = z.discriminatedUnion('type', [
     skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
     /* A one-shot call: the program runs once in its mode that answers and exits, in a fresh folder of the call's own with
        the workspace's repository cloned in it, which the node removes after. It keeps no session, has no inbox and takes
-       its turn in the machine's check queue. */
+       its turn by the machine's memory: it starts, and says so, once the machine has memory for its program. */
     call: z.literal(true).optional(),
   }),
   z.object({ type: z.literal('programs.update') }),

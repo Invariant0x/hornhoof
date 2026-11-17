@@ -181,7 +181,7 @@ export async function startCalls(ctx: Ctx, job: ToolJob, input: CallsInput, sign
   if (answered) return answered;
   const n = made.length;
   const judged = judgeBrief ? ' Once they have all ended, a judge call reads every answer and gives its verdict.' : '';
-  return `Started ${n} one-shot ${n === 1 ? 'call' : 'calls'} on #${task.number} in batch ${batch}. Each runs once on your plan's machine, as its check queue lets it, and answers.${judged} When the whole batch has ended you are woken on #${task.number} with every answer; calls with batch ${batch} shows how they go before that.`;
+  return `Started ${n} one-shot ${n === 1 ? 'call' : 'calls'} on #${task.number} in batch ${batch}. Each runs once on your plan's machine, as many at once as its memory holds, and answers.${judged} When the whole batch has ended you are woken on #${task.number} with every answer; calls with batch ${batch} shows how they go before that.`;
 }
 
 /* The account of the batch, once it has ended; or, when the caller's tool call goes away first, word that it is woken. */

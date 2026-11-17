@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '@hornhoof/protocol';
-import { CALLS_PER_START, ECHELON_STAGES, type EchelonOneShot, type EchelonStage } from '@hornhoof/protocol/echelons';
+import { ECHELON_STAGES, type EchelonOneShot, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Checker } from '../../checker.js';
@@ -260,7 +260,7 @@ const RouteHead = z
           .object({
             stage: z.enum(ECHELON_STAGES),
             ability: z.string().optional(),
-            oneShot: z.object({ fanOut: z.number().int().min(1).max(CALLS_PER_START), judge: z.string().trim().min(1).optional() }).strict().optional(),
+            oneShot: z.object({ fanOut: z.number().int().min(1), judge: z.string().trim().min(1).optional() }).strict().optional(),
           })
           .strict(),
       )

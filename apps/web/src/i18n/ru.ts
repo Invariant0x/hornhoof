@@ -451,7 +451,7 @@ export const ru: Messages = {
     deputy: (where: string) => `Заместитель: ${where}`,
     agentsWorking: 'агентов в работе',
     deptAgents: 'Агентов в работе из всех',
-    calls: (running, waiting) => `Разовые вызовы: идут ${running}, ждут очереди ${waiting}`,
+    calls: (running, waiting) => `Разовые вызовы: идут ${running}, ждут свободной памяти на машине ${waiting}`,
     call: (n, task, by) => `Вызов ${n} по #${task} от ${by}`,
     judgeCall: (task, by) => `Судья вызовов по #${task} от ${by}`,
     readyForRelease: n => `Готово к выпуску: ${n}`,

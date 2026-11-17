@@ -61,6 +61,15 @@ describe('one-shot calls', () => {
     ]);
   });
 
+  it('take any count in one start_calls, each going to the machine at once', async () => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    const call = await callerOn(c, c.bruno, mac);
+    expect((await call('start_calls', { brief: 'Translate this string.', inputs: Array.from({ length: 150 }, (_, i) => `string ${i + 1}`) })).text).toMatch(/^Started 150 one-shot calls on #1 /);
+    for (let i = 0; i < 150; i += 1) await nextOf(mac.node, 'job.run');
+    expect((await call('start_calls', { brief: 'Try a name for the product.', count: 120 })).text).toMatch(/^Started 120 one-shot calls on #1 /);
+  });
+
   it('clone the branch they name into a fresh folder of each call', async () => {
     const c = await company();
     const mac = await c.machine(c.ceo, 'dev-mac');

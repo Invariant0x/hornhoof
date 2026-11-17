@@ -243,8 +243,8 @@ describe('Map', () => {
       { id: 'c3', number: 3, judge: true, task: 12, by: by.id, stage: 'review', startedAt: null },
     ];
     for (const [lang, name, first, judge] of [
-      ['en', 'One-shot calls: 2 running, 1 waiting for its turn', `Call 1 on #12, started by ${by.name}`, `Judge call on #12, started by ${by.name}`],
-      ['ru', 'Разовые вызовы: идут 2, ждут очереди 1', `Вызов 1 по #12 от ${by.name}`, `Судья вызовов по #12 от ${by.name}`],
+      ['en', 'One-shot calls: 2 running, 1 waiting for free memory on its machine', `Call 1 on #12, started by ${by.name}`, `Judge call on #12, started by ${by.name}`],
+      ['ru', 'Разовые вызовы: идут 2, ждут свободной памяти на машине 1', `Вызов 1 по #12 от ${by.name}`, `Судья вызовов по #12 от ${by.name}`],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       onTestFinished(() => localStorage.removeItem('hh-lang'));

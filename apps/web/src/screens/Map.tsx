@@ -261,7 +261,8 @@ function Cells({ employees, onChange }: { employees: Employee[]; onChange?(): vo
   );
 }
 
-/* One mark per one-shot call of the department while it lives: lit while it runs, pale while it waits for its turn. */
+/* One mark per one-shot call of the department while it lives: lit while it runs, pale while it waits for memory on its
+   machine. */
 function CallMarks({ d }: { d: Department }) {
   const t = useT();
   const calls = d.calls ?? [];

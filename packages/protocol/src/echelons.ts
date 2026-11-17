@@ -12,9 +12,6 @@ export type EchelonStep = {
   inputCandidateId: string | null;
   candidateId: string | null;
 };
-/* The most one-shot calls one start_calls sends, and so a one-shot stage fans out to: one request stays a size a tool call
-   carries, and another start_calls sends more. */
-export const CALLS_PER_START = 100;
 /* A stage its owner runs as one-shot calls: fanOut calls of their plan at once on one brief, then, when it names one, a judge
    call with this brief that reads every answer. */
 export type EchelonOneShot = { fanOut: number; judge: string | null };
