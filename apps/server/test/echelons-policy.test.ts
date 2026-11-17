@@ -24,7 +24,7 @@ describe('pure checker policy', () => {
     expect(modelCapability(model, 'anthropic_api')).toBeNull();
   });
 
-  it.each([['gemini-4-argon', 'antigravity'], ['kimi-code/k3.1-pro', 'kimi']] as const)('puts the flagship %s in the strong band', (model, provider) => {
+  it.each([['gemini-4-argon', 'antigravity'], ['kimi-code/k3.1-pro', 'kimi'], ['gpt-6.2-sol', 'codex'], ['gpt-6.2-astra', 'codex']] as const)('puts the flagship %s in the strong band', (model, provider) => {
     expect(modelCapability(model, provider)).toBe(2);
   });
 

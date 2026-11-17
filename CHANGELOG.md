@@ -11,6 +11,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
+## [0.32.1] - 2026-11-17
+
+### Fixed
+
+- Employees on gpt-6.2-sol or gpt-6.2-astra can hand in their work and be chosen to check others' work, as on gpt-6.1-sol and gpt-6-astra.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
