@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { passResponsibility } from '../tracker/upgrade.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -202,13 +202,12 @@ export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Pr
    invites, keys and own plans; an assistant's own agent leaves too, and so do the person's own assistants. The row stays,
    with its name, for the old tasks and answers that point at it, and leaves the lists and the map. Its email and Telegram
    are free for someone else. */
-export async function removePerson(ctx: Ctx, personId: string, by: Person): Promise<void> {
+export async function removePerson(ctx: Ctx, personId: string, by: Person, now = new Date()): Promise<void> {
   const { db } = ctx;
-  const helpers = await db.select(idOnly(people)).from(people).where(and(eq(people.assistantOf, personId), isNull(people.removedAt)));
-  for (const { id } of helpers) await removePerson(ctx, id, by);
-  const now = new Date();
+  const helpers = await db.select(idOnly(people)).from(people).where(eq(people.assistantOf, personId));
+  for (const { id } of helpers) await removePerson(ctx, id, by, now);
   await db.transaction(async tx => {
-    await tx.update(people).set({ removedAt: now, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null }).where(eq(people.id, personId));
+    await tx.update(people).set({ removedAt: sql`coalesce(${people.removedAt}, ${now.toISOString()}::timestamptz)`, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null }).where(eq(people.id, personId));
     await tx.update(invites).set({ usedAt: now }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(personKeys).where(eq(personKeys.personId, personId));
     await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(eq(assistants.personId, personId));

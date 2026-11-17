@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
