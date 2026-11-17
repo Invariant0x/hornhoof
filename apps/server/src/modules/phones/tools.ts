@@ -43,7 +43,7 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent):
     return { value: await sessionView(ctx, await sessionFor(ctx, me, input.session)) };
   }));
   server.registerTool('phone_action', {
-    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as PNG and its element tree; tap and swipe use screen coordinates; text types into the focused field, a login and password you hold too, printable ASCII only; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
+    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as PNG and its element tree; tap and swipe use screen coordinates; text types any text into the field you tapped, Russian and emoji too, a login and password you hold as well; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {
     const reply = await phoneAction(ctx, me, input.session, input.operation);

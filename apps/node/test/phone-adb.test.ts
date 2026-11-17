@@ -43,6 +43,35 @@ describe('the phone adb boundary', () => {
     expect(calls[0]!.input).toBe("input text 'SECRET_'\ninput text '%'\ninput text 's_$(echo%sbad)'\\''%send'\n");
   });
 
+  it('types Russian, emoji and new lines through the keyboard app, put on the phone once, and gives the phone its own keyboard back', async () => {
+    const calls: AdbCall[] = [];
+    let installed = false;
+    const adb = new PhoneAdb(async call => {
+      calls.push(call);
+      const a = call.args.join(' ');
+      if (a === '-s R58M123 shell pm path com.android.adbkeyboard') return Buffer.from(installed ? 'package:/data/app/adbkeyboard/base.apk\n' : '');
+      if (a === '-s R58M123 install -r /keys/adbkeyboard.apk') { installed = true; return Buffer.from('Performing Streamed Install\nSuccess\n'); }
+      return Buffer.alloc(0);
+    }, async () => '/keys/adbkeyboard.apk');
+    const signal = new AbortController().signal;
+    await adb.act('R58M123', { kind: 'text', text: 'Привет, мир 👋\nВторая строка' }, signal);
+    await adb.act('R58M123', { kind: 'text', text: 'Еще раз' }, signal);
+    expect(calls.map(c => c.args.join(' '))).toEqual([
+      '-s R58M123 shell pm path com.android.adbkeyboard', '-s R58M123 install -r /keys/adbkeyboard.apk', '-s R58M123 shell',
+      '-s R58M123 shell pm path com.android.adbkeyboard', '-s R58M123 shell',
+    ]);
+    const b64 = Buffer.from('Привет, мир 👋\nВторая строка').toString('base64');
+    expect(calls[2]!.input).toBe([
+      'p=$(settings get secure default_input_method)',
+      'ime enable com.android.adbkeyboard/.AdbIME >/dev/null',
+      'ime set com.android.adbkeyboard/.AdbIME >/dev/null',
+      'sleep 1',
+      `am broadcast -a ADB_INPUT_B64 --es msg '${b64}' >/dev/null`,
+      'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null',
+      '',
+    ].join('\n'));
+  });
+
   it('never returns another program\'s error or its echoed output', async () => {
     const adb = new PhoneAdb(async () => { throw new Error('adb echoed SECRET_UNIQUE_MARKER'); });
     await expect(adb.act('R58M123', { kind: 'tap', x: 1, y: 2 }, new AbortController().signal)).rejects.toThrow(/^phone_adb_failed$/);
@@ -57,7 +86,7 @@ describe('the phone adb boundary', () => {
     await expect(adb.act('-s other', { kind: 'tap', x: 1, y: 2 }, signal)).rejects.toThrow();
     await expect(adb.act('R58M123', { kind: 'url', url: 'javascript:alert(1)' }, signal)).rejects.toThrow();
     await expect(adb.connect('phone:5555;id', signal)).rejects.toThrow();
-    await expect(adb.act('R58M123', { kind: 'text', text: 'a\nb' }, signal)).rejects.toThrow();
+    await expect(adb.act('R58M123', { kind: 'text', text: '' }, signal)).rejects.toThrow();
     expect(calls).toEqual([]);
   });
 

@@ -18,7 +18,7 @@ export const PhoneOperation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('capture') }),
   z.strictObject({ kind: z.literal('tap'), x: coordinate, y: coordinate }),
   z.strictObject({ kind: z.literal('swipe'), x: coordinate, y: coordinate, toX: coordinate, toY: coordinate, ms: z.number().int().min(1).max(1000) }),
-  z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4096).regex(/^[\x20-\x7e]+$/) }),
+  z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4096) }),
   z.strictObject({ kind: z.literal('app'), package: z.string().max(200).regex(/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/) }),
   z.strictObject({ kind: z.literal('url'), url: z.string().max(2048).refine(value => {
     try {
