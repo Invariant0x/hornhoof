@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { HIDDEN, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
+import { ASSISTANT_TABLES, HIDDEN, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
 import { notConfirmed } from '../../db/confirm.js';
 import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
 import { sources } from '../../db/sources.js';
@@ -30,6 +30,7 @@ const TESTS = 'Whole-suite runs on free machines and work runs start and stop on
 const HARNESS = 'Hornhoof keeps where a test harness stands itself and builds it by itself: test_harness shows it, and the tool only reads it.';
 const ASSISTANTS = "An assistant, its key and the addresses Hornhoof reaches it at change only on the People screen, by a person who may set it up.";
 const ASSISTANT_READS = 'Hornhoof keeps what an assistant reads and the answers it waits for itself: the tool only reads it.';
+const ASSISTANTS_CLOSED = 'Personal assistants are closed to this tool.';
 /* What the orchestrator may not do with a table, in the words he acts on. */
 const RULES: Record<string, string> = {
   people: PEOPLE,
@@ -42,6 +43,7 @@ const RULES: Record<string, string> = {
   test_parts: TESTS,
   turn_snapshots: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   turn_tokens: 'Hornhoof counts what each turn used itself, from what its program told: the tool only reads it.',
+  agent_fallbacks: 'Hornhoof moves an employee to a fallback plan and back itself: the tool only reads it. A plan of an employee changes by change_employee.',
   test_part_timings: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   test_file_results: 'Hornhoof keeps which test files passed itself, as a forged row would let a test go unrun: the tool only reads it.',
   test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
@@ -57,6 +59,7 @@ const RULES: Record<string, string> = {
   task_events: DECISIONS,
   assistants: ASSISTANTS,
   assistant_events: ASSISTANT_READS,
+  assistant_seqs: ASSISTANT_READS,
   assistant_replies: ASSISTANT_READS,
   assistant_requests: ASSISTANT_READS,
   agent_inbox: "Hornhoof keeps employees' inboxes itself, as each letter names who wrote it: the tool only reads them. An employee marks its own letters with inbox_mark, and the orchestrator any employee's, with inbox_mark and its id in employee.",
@@ -66,18 +69,24 @@ const secretsOf = (table: string) => {
   if (!columns) return undefined;
   return `${columns.join(' and ')} ${columns.length > 1 ? 'are' : 'is'} closed to this tool: name the other columns of ${table} instead of *.`;
 };
+const closedToRead = (table: string): string | undefined =>
+  ASSISTANT_TABLES.includes(table) ? ASSISTANTS_CLOSED : secretsOf(table);
+const isReadOnlyError = (denied: boolean, err: Error & { code?: string }): boolean =>
+  denied || err.code === '25006' || /read-only transaction/.test(err.message);
+function readWhy(denied: boolean, err: Error & { code?: string }, table: string | undefined, readOnly: string): string | undefined {
+  const closed = denied && table ? closedToRead(table) : undefined;
+  return closed ?? (isReadOnlyError(denied, err) ? readOnly : undefined);
+}
 
 /* The database's words, and after them why, when it refused. A read-only role refused only a write, unless the table is
-   hidden or has secrets. */
+   hidden, an assistant table or has secrets. */
 function refusal(err: Error & { code?: string }, mode: SqlMode, readOnly = READ_ONLY): string {
   const table = /permission denied for table "?(\w+)"?/.exec(err.message)?.[1];
   const denied = err.code === '42501' || /permission denied/.test(err.message);
   let why: string | undefined;
   if (table && HIDDEN.includes(table)) why = CLOSED;
-  else if (mode === 'read') {
-    if (denied && table && SECRET[table]) why = secretsOf(table);
-    else if (denied || err.code === '25006' || /read-only transaction/.test(err.message)) why = readOnly;
-  } else if (table) why = [RULES[table], secretsOf(table)].filter(Boolean).join(' ') || undefined;
+  else if (mode === 'read') why = readWhy(denied, err, table, readOnly);
+  else if (table) why = [RULES[table], secretsOf(table)].filter(Boolean).join(' ') || undefined;
   return `The database answered: ${err.message}${why ? `. ${why}` : ''}`;
 }
 

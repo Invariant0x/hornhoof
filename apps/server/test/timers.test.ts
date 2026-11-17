@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, requests, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from './builtin.js';
@@ -47,7 +48,7 @@ describe('timers', () => {
     const { app, db, wandaId, orchestrator } = await company();
     /* A turn put in line whose send was lost: nothing else would start it. */
     const jobId = await insertTurn(app.ctx, { companyId: orchestrator.companyId, agentId: wandaId, prompt: 'Left waiting', createdBy: null });
-    const status = async () => (await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
+    const status = async () => (await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
     expect(await status()).toBe('queued');
     await minuteRound(app.ctx, new Date(), () => () => {});
     expect(await status()).toBe('running');
@@ -87,7 +88,7 @@ describe('timers', () => {
   it('wakes an employee once each interval with its order, outside any task', async () => {
     const { app, db, ceo, wandaId } = await company();
     await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Check that every agent reported its task.' } });
-    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
+    const [{ timerAt }] = (await db.select(only(agents, 'timerAt')).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
     const rounds = async () => db.select().from(jobs).where(eq(jobs.agentId, wandaId));
     expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 9 * MIN))).toBe(0);
     expect(await rounds()).toHaveLength(0);
@@ -128,10 +129,10 @@ describe('timers', () => {
   it('skips the round of a timer for work while nothing is open or failed since the last one, and counts from the skip', async () => {
     const { app, db, ceo, wandaId, orchestrator } = await company();
     expect((await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Look around.', forWork: true } })).json().timer).toMatchObject({ forWork: true });
-    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
+    const [{ timerAt }] = (await db.select(only(agents, 'timerAt')).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
     const at = (minutes: number) => new Date(timerAt.getTime() + minutes * MIN);
     expect(await timerTick(app.ctx, at(10))).toBe(0);
-    expect((await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId)))[0]!.timerAt).toEqual(at(10));
+    expect((await db.select(only(agents, 'timerAt')).from(agents).where(eq(agents.id, wandaId)))[0]!.timerAt).toEqual(at(10));
     const [task] = await db.insert(tasks).values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout', status: 'open' }).returning();
     expect(await timerTick(app.ctx, at(20))).toBe(1);
     await db.update(jobs).set({ status: 'done', finishedAt: at(21) }).where(eq(jobs.agentId, wandaId));
@@ -151,7 +152,7 @@ describe('timers', () => {
   it('skips the round of a timer for work while every open task waits on purpose, for a person or for what it said it waits for', async () => {
     const { app, db, ceo, wandaId, orchestrator } = await company();
     await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Look around.', forWork: true } });
-    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
+    const [{ timerAt }] = (await db.select(only(agents, 'timerAt')).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
     const at = (minutes: number) => new Date(timerAt.getTime() + minutes * MIN);
     const companyId = orchestrator.companyId;
     const [asking] = await db.insert(tasks).values({ companyId, number: 1, title: 'Checkout', status: 'working' }).returning();

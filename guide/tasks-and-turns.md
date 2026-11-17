@@ -213,6 +213,6 @@ Anyone whose access lists a department can give it a task in the tracker. It goe
 
 Nothing reaches the main branch until someone who sees the whole company, or the orchestrator, approves the exact commit. The department's people see it waiting.
 
-The one exception is autonomous release. Only the signed-in CEO turns it on or off, for the whole company, with the switch among a department's approvals. While it is on, an exact commit for the main branch goes in without that approval when it has a green full test run, a PASS from another employee who checked that commit, and a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
+The one exception is autonomous release. Only the signed-in CEO turns it on or off, for the whole company, with the switch among a department's approvals. While it is on, an exact commit for the main branch goes in without that approval when a whole test run of its release passed on it, on the main branch or a release branch, a PASS from another employee who checked that commit, and a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
 
 [Back to the guide](README.md)

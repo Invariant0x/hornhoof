@@ -7,6 +7,7 @@ import { offlineMachine } from '../nodes/offline.js';
 import { worksIn } from '../departments/inside.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, reconnecting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { keepUndelivered, NOT_DELIVERED, UndeliveredRecord, undeliveredLine } from '../conversation/undelivered.js';
@@ -15,7 +16,7 @@ import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { programRestartStatus, restartProgram } from '../tasks/program-restarts.js';
-import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
+import { sendTaskMessage, MESSAGE_TASK_HINT, TaskReference, type SentMessage } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
@@ -212,9 +213,27 @@ const waitsOf = (state: { ready: boolean; machineDrain: unknown }): Waits => (st
 
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
 async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Promise<string> {
-  const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  const [turn] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId));
   if (turn?.status !== 'queued') return `Sent to ${name}.`;
   return `Sent to ${name}. ${WAITS[waits]}`;
+}
+
+/* What the sender of a message hears once it went: its line, after the map runs it between the two departments, or the card
+   between the two agents of one. A repeat of words that went before from the same turn goes nowhere and says so. went: the
+   message is the sender's and what its turn waits for. */
+async function messageSent(ctx: Ctx, companyId: string, { me, target }: { me: Agent; target: Agent }, sent: SentMessage, went: () => Waits) {
+  if (sent.repeated) return say(`Sent to ${target.name} already in this turn, so this repeat was not sent again.`);
+  const waits = went();
+  if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
+  else if (me.departmentId && target.departmentId) {
+    const same = me.departmentId === target.departmentId;
+    ctx.bus.publish(companyId, {
+      type: 'pulse',
+      from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
+      to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
+    });
+  }
+  return say(await sentLine(ctx, target.name, sent.id, waits));
 }
 
 /* Why a message does not go, as a code a failure collector groups by and as words its sender reads. */
@@ -392,7 +411,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         for (const { id, holderId, sight, ...task } of stuck) {
           /* What its holder said when it stopped, and how its last turn on it ended: enough to group causes without the task itself. */
           const [said] = await db
-            .select({ text: taskEvents.text })
+            .select(only(taskEvents, 'text'))
             .from(taskEvents)
             .where(and(eq(taskEvents.taskId, id), inArray(taskEvents.kind, ['blocked', 'report'])))
             .orderBy(desc(taskEvents.id))
@@ -527,11 +546,11 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     const by = target.kind === 'orchestrator'
       ? sql`${agentEvents.data}->>'from' = 'orchestrator'`
       : sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${target.id}`;
-    const [asked] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+    const [asked] = await db.select(only(agentEvents, 'seq')).from(agentEvents)
       .where(and(eq(agentEvents.agentId, me.id), eq(agentEvents.kind, 'message'), by, sql`${agentEvents.data}->'notification' is null`))
       .orderBy(desc(agentEvents.seq)).limit(1);
     if (!asked) return false;
-    const [answered] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+    const [answered] = await db.select(only(agentEvents, 'seq')).from(agentEvents)
       .where(and(eq(agentEvents.agentId, target.id), eq(agentEvents.kind, 'message'), gt(agentEvents.seq, asked.seq), sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${me.id}`))
       .limit(1);
     return !answered;
@@ -559,27 +578,17 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       if (unable) return refused(ctx, job, unable, employee, ref);
       if (!(await counted(me.id))) return refused(ctx, job, { reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
-      return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
+      return sendTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,
           agentId: target.id,
           prompt: `${wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text)}\n\n${answerBy(me)}`,
           createdBy: null,
-          message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+          message: { personId: null, text, from: 'agent', name: me.name, by: me.id, byTurn: job.id },
           withMessage: back.withMessage,
-        }).then(async id => {
+        }).then(sent => messageSent(ctx, job.companyId, { me, target }, sent, () => {
         back.told();
-        /* The map runs it between the two departments, or the card between the two agents of one. */
-        if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
-        else if (me.departmentId && target.departmentId) {
-          const same = me.departmentId === target.departmentId;
-          ctx.bus.publish(job.companyId, {
-            type: 'pulse',
-            from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
-            to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
-          });
-        }
-        return say(await sentLine(ctx, target.name, id, waitsOf(state)));
-      }, taskMessageFailure);
+        return waitsOf(state);
+      }), taskMessageFailure);
     },
   );
 }

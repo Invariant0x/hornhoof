@@ -2,6 +2,7 @@ import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, autonomousReleases, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 import { taskByRef } from './views.js';
@@ -10,6 +11,7 @@ import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
+import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
    turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
@@ -22,7 +24,7 @@ type Release = typeof turnReleases.$inferSelect;
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 /* A version tag: vX.Y.Z, compared by its numbers. */
 const VERSION = /^v(\d+)\.(\d+)\.(\d+)$/;
@@ -37,23 +39,38 @@ export function newerVersion(a: string, b: string): boolean {
   return false;
 }
 
-/* The real full run of R: of the turn branch at R, every part passed, nothing reused, and no newer run of R failed since. */
+/* A whole run of R's release: of the turn branch at R, with no one suite, every part passed, taking only what its release proved, and
+   no newer run of R failed since. */
 async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<void> {
-  const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no full run of ${commit} on ${branch}: ${why}. A release needs a real full run on its exact commit: every test, nothing reused.`);
+  const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
   if (!run) throw notFull('there is no such run');
-  if (run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit) throw notFull(`it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}`);
-  if (run.status !== 'passed') throw notFull(`it ${run.status === 'running' ? 'is still running' : run.status}`);
-  if (run.fileCache && (run.fileCache.mode !== 'full' || run.fileCache.reused > 0)) throw notFull(`it reused ${run.fileCache.reused} green results`);
-  const parts = await db.select({ status: testParts.status }).from(testParts).where(eq(testParts.runId, run.id));
-  if (!parts.length || parts.length !== run.parts || parts.some(part => part.status !== 'passed')) throw notFull('not every part of it passed');
-  const [newer] = await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
+  const problem = placeProblem(run, branch, departmentId, commit) ?? endProblem(run);
+  if (problem) throw notFull(problem);
+  const parts = await db.select(only(testParts, 'status')).from(testParts).where(eq(testParts.runId, run.id));
+  if (!allPartsPassed(run, parts)) throw notFull('not every part of it passed');
+  const [newer] = await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }
 
+type ReleaseRun = typeof testRuns.$inferSelect;
+/* Why a run checked another place than R's release on the turn branch, or null. */
+const placeProblem = (run: ReleaseRun, branch: string, departmentId: string, commit: string): string | null =>
+  run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit ? `it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}` : null;
+/* Why the way a run ended does not check its release whole, or null. */
+function endProblem(run: ReleaseRun): string | null {
+  if (run.status !== 'passed') return `it ${run.status === 'running' ? 'is still running' : run.status}`;
+  if (run.environmentRequest?.suite) return `it ran only the suite ${run.environmentRequest.suite}`;
+  if (!ofItsRelease(run.fileCache)) return `it took ${run.fileCache!.reused} green results from before releases were kept`;
+  return null;
+}
+/* Every part of the run passed, or it ran none as every test file kept its green result. */
+const allPartsPassed = (run: ReleaseRun, parts: { status: string }[]): boolean =>
+  parts.length === run.parts && parts.every(part => part.status === 'passed') && (parts.length > 0 || keptEverything(run));
+
 /* A person's approval of exactly R, on the release task, or none. */
 async function personApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
-  const [approval] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id), eq(requests.kind, 'approval'),
+  const [approval] = await db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id), eq(requests.kind, 'approval'),
     eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).orderBy(desc(requests.answeredAt)).limit(1);
   return approval?.id ?? null;
 }
@@ -83,8 +100,8 @@ async function liveCheckers(db: Ctx['db'] | Tx, released: ReleasedTask[]): Promi
    the checkers that passed what R brings. */
 async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, commit: string, base: string, runId: string, released: ReleasedTask[]): Promise<string | null> {
   const checkers = await liveCheckers(tx, released);
-  const [run] = await tx.select({ number: testRuns.number }).from(testRuns).where(eq(testRuns.id, runId));
-  const [holder] = await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [run] = await tx.select(only(testRuns, 'number')).from(testRuns).where(eq(testRuns.id, runId));
+  const [holder] = await tx.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   if (!checkers || !run || !holder) return null;
   const unique = <T,>(items: T[]) => [...new Set(items)];
   const ids = unique(checkers.map(c => c.id));
@@ -112,7 +129,7 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
   const rows = await db.select().from(tasks).where(and(eq(tasks.companyId, turn.companyId), eq(tasks.turnId, turn.id))).orderBy(asc(tasks.number));
   const out: Accepted[] = [];
   for (const task of rows) {
-    const [report] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`(${taskEvents.data} ? 'acceptedCandidate' OR ${taskEvents.data} ? 'integration')`)).orderBy(desc(taskEvents.id)).limit(1);
+    const [report] = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`(${taskEvents.data} ? 'acceptedCandidate' OR ${taskEvents.data} ? 'integration')`)).orderBy(desc(taskEvents.id)).limit(1);
     const accepted = report?.data.acceptedCandidate as { candidateId?: string; commit?: string } | undefined;
     const integration = report?.data.integration as { commit?: string } | undefined;
     const [route] = await db.select().from(taskRoutes).where(eq(taskRoutes.taskId, task.id));
@@ -121,7 +138,7 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
     const commit = accepted?.commit ?? integration?.commit ?? '';
     const verdicts = candidate ? await passingVerdicts(db, task, candidate) : [];
     const owners = stages.map(step => step.ownerAgentId).filter((id): id is string => !!id);
-    const live = owners.length ? await db.select({ id: agents.id }).from(agents).where(and(inArray(agents.id, owners), isNull(agents.removedAt), isNull(agents.switchedOffAt))) : [];
+    const live = owners.length ? await db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, owners), isNull(agents.removedAt), isNull(agents.switchedOffAt))) : [];
     const checkersLive = !!candidate && stages.length > 0 && live.length === new Set(owners).size && owners.every(id => id !== candidate.producedBy.agentId);
     out.push({ task, commit, candidate, verdicts, checkersLive });
   }
@@ -129,13 +146,13 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
 }
 
 async function candidateOf(db: Ctx['db'], task: Task, candidateId: string): Promise<EchelonCandidate | null> {
-  const handed = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'candidate'->>'id' = ${candidateId}`)).limit(1);
+  const handed = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'candidate'->>'id' = ${candidateId}`)).limit(1);
   const parsed = EchelonCandidate.safeParse(handed[0]?.data.candidate);
   return parsed.success ? parsed.data : null;
 }
 
 async function passingVerdicts(db: Ctx['db'], task: Task, candidate: EchelonCandidate): Promise<string[]> {
-  const rows = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'),
+  const rows = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'),
     sql`(${taskEvents.data}->>'pass')::boolean`, sql`${taskEvents.data}->>'reviewedCommit' = ${candidate.commit}`)).orderBy(asc(taskEvents.id));
   return rows.map(row => String(row.id));
 }
@@ -182,7 +199,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!base) throw refuse(409, 'repo_invalid', `${target.repo.branch} could not be read. Try again.`);
   if (base === input.commit || await branchHolds(ctx, target.repo, base, input.commit)) throw refuse(409, 'task_invalid', `${target.repo.branch} already holds ${input.commit}: a release is recorded before main moves.`);
   if (!(await branchHolds(ctx, target.repo, input.commit, base))) throw refuse(409, 'task_invalid', `${input.commit} does not hold ${target.repo.branch} at ${base}, so main cannot go to it by fast-forward. Take ${target.repo.branch} into ${target.branch} first.`);
-  const [owner] = await ctx.db.select({ id: departments.id }).from(departments).where(eq(departments.id, turn.departmentId!));
+  const [owner] = await ctx.db.select(idOnly(departments)).from(departments).where(eq(departments.id, turn.departmentId!));
   await requireFullRun(ctx.db, turn, target.branch, owner!.id, input.runId, input.commit);
   const results = await acceptedResults(ctx.db, turn);
   const uncovered = await coverage(ctx, target.repo, base, input.commit, results);
@@ -195,9 +212,9 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   }
   const record = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
-    const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
+    const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
     if (!open) throw refuse(409, 'task_changed', `Turn ${turn.number} was released meanwhile.`);
-    const still = await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.turnId, turn.id));
+    const still = await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id));
     if (still.length !== released.length || still.some(row => !released.some(r => r.taskId === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
     await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
     const approvalRequestId = await personApproval(tx, task, input.commit);
@@ -226,7 +243,7 @@ const releaseView = (turn: Turn, record: Release, released: ReleasedTask[]) => (
    its line that no standing record names releases nothing: the turn stays open, and its head and the CEO hear of it once. */
 async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   if (!ctx.readTags) return;
-  const before = (await ctx.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
+  const before = (await ctx.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
   const read = await ctx.readTags(repo, 30_000);
   if ('problem' in read) return;
   const versions = Object.entries(read.tags).filter(([name]) => versionOf(name)).sort(([a], [b]) => newerVersion(a, b) ? -1 : newerVersion(b, a) ? 1 : 0);
@@ -256,8 +273,8 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
    only its head hears. */
 async function tellOfTag(ctx: Reader, turn: Turn, version: string, commit: string, why: 'unrecorded' | 'stale'): Promise<void> {
   const [goal] = await ctx.db.select().from(tasks).where(and(eq(tasks.turnId, turn.id), isNull(tasks.parentId))).orderBy(asc(tasks.number)).limit(1);
-  const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), eq(agents.departmentId, turn.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
-  const [ceo] = await ctx.db.select({ id: people.id }).from(people).where(and(eq(people.companyId, turn.companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
+  const [head] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, turn.companyId), eq(agents.departmentId, turn.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  const [ceo] = await ctx.db.select(idOnly(people)).from(people).where(and(eq(people.companyId, turn.companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
   const on = goal ? [{ id: goal.id, number: goal.number }] : [];
   const cause = why === 'unrecorded'
     ? `no release of it was recorded before main moved`
@@ -282,13 +299,13 @@ async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolea
   try { await requireFullRun(tx, turn, `turn-${turn.number}`, turn.departmentId!, record.runId, record.commit); }
   catch { return false; }
   if (record.approvalRequestId) {
-    const [approval] = await tx.select({ id: requests.id }).from(requests).where(and(eq(requests.id, record.approvalRequestId), eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
+    const [approval] = await tx.select(idOnly(requests)).from(requests).where(and(eq(requests.id, record.approvalRequestId), eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
       eq(requests.commit, record.commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt)));
     return !!approval;
   }
   if (!record.autonomousReleaseId || !record.covered) return false;
   const [department] = await tx.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, turn.departmentId!)).for('share');
-  const [entry] = await tx.select({ id: autonomousReleases.id }).from(autonomousReleases).where(and(eq(autonomousReleases.id, record.autonomousReleaseId), eq(autonomousReleases.commitSha, record.commit)));
+  const [entry] = await tx.select(idOnly(autonomousReleases)).from(autonomousReleases).where(and(eq(autonomousReleases.id, record.autonomousReleaseId), eq(autonomousReleases.commitSha, record.commit)));
   return !!department?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;
 }
 

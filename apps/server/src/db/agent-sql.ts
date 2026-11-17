@@ -34,7 +34,7 @@ const OUTBOUND = [
   'outbound_setup_events',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', ...OUTBOUND];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', ...OUTBOUND];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -63,15 +63,18 @@ export const SECRET: Record<string, string[]> = {
    through a person's guarded API. An employee's inbox, whose letters name who wrote them: a forged one would put words in
    a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. What each turn
    used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. A
-   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. */
+   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. Which employee works on a
+   fallback plan and the plan it goes back to, which only Hornhoof writes, as a forged row would move it to another plan. */
+export const ASSISTANT_TABLES = ['assistants', 'assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'];
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'goal_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
-  'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots',
-  'assistants', 'assistant_events', 'assistant_replies', 'assistant_requests',
+  'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots', 'agent_fallbacks',
+  ...ASSISTANT_TABLES,
 ];
+const READER_SECRET = Object.keys(SECRET).filter(table => !ASSISTANT_TABLES.includes(table));
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
    cannot tell a head from a worker. */
@@ -194,18 +197,25 @@ ${readVisible(READ_ONLY, name)}
     CREATE TRIGGER "${name}_assistant_kept" BEFORE UPDATE ON agents FOR EACH ROW
       WHEN (OLD.kind = 'assistant' AND current_user = '${name}')
       EXECUTE FUNCTION hornhoof_assistant_kept()
-  $trigger$;`,
+  $trigger$;
+  ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS "${name}_agents" ON agents;
+  CREATE POLICY "${name}_agents" ON agents TO "${name}" USING (true) WITH CHECK (true);`,
 );
 
-/* The head of Operations' role reads the rows of every table but the hidden ones and the secrets, and changes nothing:
-   it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. It commits
-   nothing, so nothing of the fence is its, and a call may take 15 seconds. */
+/* The head of Operations' role reads the rows of every table but the hidden ones, the assistant tables, the assistant
+   rows of agents and the secrets, and changes nothing: it has no right to, and each of its transactions is read-only too,
+   so a write is told apart from a closed table. It commits nothing, so nothing of the fence is its, and a call may take
+   15 seconds. */
 export const readerGrantsFor = role(
   ["SET statement_timeout = '15s'"],
   name =>
     `  ALTER ROLE "${name}" SET default_transaction_read_only = on;
-${eachTable(Object.keys(SECRET), `GRANT SELECT ON %I TO "${name}"`)}
-${readVisible(Object.keys(SECRET), name)}`,
+${eachTable([...Object.keys(SECRET), ...ASSISTANT_TABLES], `GRANT SELECT ON %I TO "${name}"`)}
+${readVisible(READER_SECRET, name)}
+  ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS "${name}_agents" ON agents;
+  CREATE POLICY "${name}_agents" ON agents FOR SELECT TO "${name}" USING (kind <> 'assistant');`,
 );
 
 const answersOf = (result: pg.QueryResult | pg.QueryResult[]): SqlAnswer[] =>

@@ -1,13 +1,14 @@
 import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { companies, computerRuns, machines, people, personKeys } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
+import { checkHead } from '../src/modules/backups/bundle.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
@@ -23,9 +24,13 @@ import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
-import { as, SETUP, TEST_SECRET, testApp, until } from './helpers.js';
+import { as, SETUP, TEST_SECRET, testApp } from './helpers.js';
 
 import { type Company, DAY_MS, HOST_ID, MAC, SLEEPER, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
+
+import { appAt, controlledTime, registerStep, until } from './worker-keeper-time.js';
+
+beforeEach(controlledTime);
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -41,7 +46,7 @@ async function expire(c: Company, w: { machine: string; config: WorkerConfig }):
    of both: on a loaded runner that takes longer than the limit of a plain test. */
 describe("a worker's keeper", { timeout: 60_000 }, () => {
   it('joins with its ticket and serves the company on its front door', async () => {
-    const c = await company();
+    const c = await company({}, {}, {}, undefined, true);
     const w = await worker(c);
     await until(() => hasLeader(w.status()));
     const server = await c.serverRow();
@@ -174,10 +179,10 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
   });
 
   /* The test in the updater's place on the server: it answers every request for a dump, until the test ends. */
-  function updaterOf(c: Company): void {
+  function updaterOf(c: Company, manual = false): () => void {
     const request = join(c.control, 'dump.json');
     const dumps = join(c.control, 'dumps');
-    const timer = setInterval(() => {
+    const step = () => {
       try {
         const { id } = JSON.parse(readFileSync(request, 'utf8')) as { id: string };
         if (existsSync(join(dumps, `${id}.json`))) return;
@@ -187,8 +192,12 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       } catch {
         /* No request now. */
       }
-    }, 10);
-    onTestFinished(() => clearInterval(timer));
+    };
+    if (!manual) {
+      const remove = registerStep(step);
+      onTestFinished(remove);
+    }
+    return step;
   }
 
   /* The CEO saves the recovery file, so the next bundle gets machines to hold it, and the worker fetches it. */
@@ -233,6 +242,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const control = folder();
     const fresh = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: hostIdOf('new-server-0001') });
     await fresh.app.listen({ host: '127.0.0.1', port: c.appPort });
+    appAt(c.appPort, fresh.app);
     const code = setupCode(fresh.config.secret);
     const begun = await fresh.app.inject({ method: 'POST', url: '/api/recovery', payload: { code, file: held.recoveryFile } });
     expect(begun.statusCode).toBe(200);
@@ -244,7 +254,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     expect(createHash('sha256').update(sent).digest('hex')).toBe(held.sha256);
     expect(w.lines.filter(line => line.startsWith('survivor:') && line.endsWith('answered'))).toHaveLength(1);
     /* The CEO can restore it there, with no database to check it against. */
-    writeFileSync(join(control, 'alive'), '');
+    updaterAlive(control);
     const restore = await fresh.app.inject({ method: 'POST', url: '/api/recovery/restore', payload: { code, id: held.id } });
     expect(restore.statusCode).toBe(202);
   });
@@ -260,20 +270,38 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       const words = Boolean(body) && ('ageKey' in (body as object) || 'heldBackups' in (body as object));
       seen.push({ via, words });
       return words ? 400 : null;
-    });
+    }, true);
     const w = await worker(c, { holderEveryMs: 30 });
-    const held = await bundleHeld(c, w);
+    await until(() => hasLeader(w.status()) && c.keeper['backups'] !== null && w.keeper['ageRecipient'] !== null);
+    await w.keeper['report']();
+    const saved = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) });
+    expect(saved.statusCode).toBe(200);
+    const backups = c.keeper['backups']!;
+    await backups.round();
+    updaterOf(c, true)();
+    await backups.round();
+    const [held] = await bundleRows(c.db, { limit: 1, withRecovery: true });
+    expect(held).toBeDefined();
+    /* Arrange a held, signed bundle directly. Fetching it over a timed socket belongs to the holder's own tests. */
+    const bundle = backups.store().open(held!.id)!;
+    await w.keeper['holder'].store().take(bundle.stream(), head => checkHead(head, { authorityPem: heldIn(w.config.dir).authorityPem, company: null }), { id: held!.id });
+    await w.keeper['report']();
     older = true;
     const before = (await c.rowOf(w.machine)).reportAt;
     /* Its report is refused with the new words and goes again at once without them: first without its newest words
        alone, which this leader refuses as well, then bare. */
     const mine = () => seen.filter(report => report.via !== 'keeper').map(report => report.words).filter((words, at, all) => words !== all[at - 1]);
-    await until(() => mine().length >= 4);
+    vi.setSystemTime(Date.now() + 1);
+    await w.keeper['holder'].round();
+    await w.keeper['report']();
+    await w.keeper['report']();
+    await c.keeper['identity']!['report']();
     expect(mine().slice(0, 4)).toEqual([true, false, true, false]);
-    await until(async () => (await c.rowOf(w.machine)).reportAt!.getTime() > before!.getTime());
+    expect((await c.rowOf(w.machine)).reportAt!.getTime()).toBeGreaterThan(before!.getTime());
     /* The server's own keeper does the same. */
     expect(seen.filter(report => report.via === 'keeper').slice(0, 2).map(report => report.words)).toEqual([true, false]);
-    expect(bundlesIn(w.config.dir)).toEqual([`${held.id}.age`]);
+    expect(bundlesIn(w.config.dir)).toEqual([`${held!.id}.age`]);
+    expect(readFileSync(join(w.config.dir, BUNDLES_DIR, `${held!.id}.age`))).toEqual(readFileSync(backups.store().ageFile(held!.id)));
     expect([...w.lines, ...c.lines].filter(line => line.includes('Could not report'))).toEqual([]);
   });
 
@@ -333,6 +361,8 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await w.stop();
     await c.stop();
     const again = await workerOn(c, w.config);
+    vi.setSystemTime(Date.now() + 50);
+    again.keeper['look']();
     expect(again.status()).toMatchObject({ certificate: true, machine: w.machine, leader: null, disconnected: false });
     const page = await ask(again.front, { path: '/tasks', headers: { accept: 'text/html' } });
     expect(page.status).toBe(503);
@@ -534,7 +564,11 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       return null;
     }
   };
-  const updaterAlive = (control: string) => writeFileSync(join(control, 'alive'), '');
+  const updaterAlive = (control: string) => {
+    const file = join(control, 'alive');
+    writeFileSync(file, '');
+    utimesSync(file, new Date(), new Date());
+  };
   async function command(c: Company, machine: string, text: string): Promise<string> {
     const [acme] = await c.db.select().from(companies);
     const [run] = await c.db.insert(computerRuns).values({ companyId: acme!.id, machineId: machine, command: text, timeoutS: 30 }).returning();
@@ -592,7 +626,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
   });
 
   it('carries computer access over the peer link, opened only by what its owner signed', async () => {
-    const c = await company();
+    const c = await company({}, {}, {}, undefined, true);
     const { subtle } = webcrypto;
     const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
     const ownerKey = Buffer.from(await subtle.exportKey('spki', pair.publicKey)).toString('base64url');
@@ -604,8 +638,11 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     updaterAlive(config.controlDir);
     const w = await workerOn(c, config);
     await until(() => hasLeader(w.status()));
-    await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(ownerKey));
-    await until(() => c.app.ctx.computer.reachable(machine));
+    await w.keeper['report']();
+    expect((await c.rowOf(machine)).ownerPin).toBe(keyPrint(ownerKey));
+    const carrier = w.keeper['carrier'];
+    await carrier.tick();
+    expect(c.app.ctx.computer.reachable(machine)).toBe(true);
     expect(accessIn(config.controlDir)).toMatchObject({ untilSec: null, by: 'keeper' });
 
     const signed = async (over: object = {}) => {
@@ -616,37 +653,45 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const grant = await signed();
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/access/open`, payload: { grant }, ...as(c.ceo) })).statusCode).toBe(200);
     const untilSec = (JSON.parse(grant.payload) as { until: number }).until;
-    await until(() => accessIn(config.controlDir)?.untilSec === untilSec);
+    await carrier.tick();
+    expect(accessIn(config.controlDir)?.untilSec).toBe(untilSec);
     /* A command for it goes through the leader to its updater's folder, and the answer back. */
     const id = await command(c, machine, 'cat /host/etc/hostname');
+    await carrier.tick();
     expect(await updaterAnswers(config.controlDir, id, 'dev-mac\n')).toMatchObject({ command: 'cat /host/etc/hostname' });
-    await until(async () => (await runOf(c, id)).state === 'done');
-    expect(await runOf(c, id)).toMatchObject({ exit: 0, output: 'dev-mac\n' });
+    await carrier.tick();
+    expect(await runOf(c, id)).toMatchObject({ state: 'done', exit: 0, output: 'dev-mac\n' });
     /* Whoever comes to the worker's own web port is no keeper, whatever they write: nothing is taken through it. */
     const next = await command(c, machine, 'id');
     const through = await ask(w.front, { path: '/api/network/computer?updater=1', headers: { 'x-hornhoof-via': 'keeper', 'x-hornhoof-keeper': '1' } });
     expect(through.status).toBe(403);
+    await carrier.tick();
     await updaterAnswers(config.controlDir, next, 'uid=0\n');
-    await until(async () => (await runOf(c, next)).state === 'done');
+    await carrier.tick();
+    expect((await runOf(c, next)).state).toBe('done');
 
     /* A row written past the app that says open, with the old grant or with none, opens nothing on the machine. */
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/access/close`, ...as(c.ceo) })).statusCode).toBe(200);
-    await until(() => accessIn(config.controlDir)?.untilSec === null);
+    await carrier.tick();
+    expect(accessIn(config.controlDir)?.untilSec).toBeNull();
     const { machineAccess } = await import('../src/db/schema.js');
     await c.db.update(machineAccess).set({ until: new Date(Date.now() + 3_600_000), grant }).where(eq(machineAccess.machineId, machine));
-    await until(() => w.lines.some(line => line.includes('with no grant of its owner')));
+    await carrier.tick();
+    expect(w.lines.some(line => line.includes('with no grant of its owner'))).toBe(true);
     expect(accessIn(config.controlDir)?.untilSec).toBeNull();
     /* Its keeper tells the server so, and the row says closed again: nobody is shown an open machine that runs nothing,
        and a command that comes then is ended without reaching the machine. */
-    await until(async () => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, machine)))[0]!.until === null);
+    await carrier.tick();
+    expect((await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, machine)))[0]!.until).toBeNull();
     const late = await command(c, machine, 'id');
-    await until(async () => (await runOf(c, late)).state === 'done');
+    await carrier.tick();
     expect(await runOf(c, late)).toMatchObject({ exit: 126 });
     expect(existsSync(join(config.controlDir, 'computer', `${late}.json`))).toBe(false);
 
     /* Disconnected, it closes and asks no more. */
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
-    await until(() => w.status().disconnected);
+    await w.keeper['readView']();
+    expect(w.status().disconnected).toBe(true);
     expect(accessIn(config.controlDir)).toMatchObject({ untilSec: null, by: 'keeper' });
   });
 
@@ -680,31 +725,38 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const c = await company();
     const w = await worker(c);
     const row = () => c.rowOf(w.machine);
-    /* Two more reports reached the leader. */
-    const reported = async () => {
-      for (let n = 0; n < 2; n++) {
-        const before = (await row()).reportAt?.getTime();
-        await until(async () => (await row()).reportAt?.getTime() !== before);
-      }
+    const control = (name: string) => join(w.config.controlDir, name);
+    /* Rounds until the leader's word on this machine's upload reached it. A round reads the view and then reports, so
+       that report is made on the word; and rounds go one at a time, so none made before a step lands after it. */
+    const told = (upload: 'waiting' | 'wipe') => until(() => w.keeper.known()?.copy?.upload === upload);
+    /* Rounds until one more report of the machine reached the leader. */
+    const report = async () => {
+      const before = (await row()).reportAt?.getTime() ?? 0;
+      await until(async () => ((await row()).reportAt?.getTime() ?? 0) > before);
     };
     /* While its updater still wipes it, it says nothing of the kind. */
-    writeFileSync(join(w.config.controlDir, WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
+    writeFileSync(control(WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
     await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
     /* The updater is done: the leader hears it, and the updater's word goes once it did. */
-    rmSync(join(w.config.controlDir, WIPE_FILE));
-    writeFileSync(join(w.config.controlDir, WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
-    await until(async () => (await row()).uploadState === null);
-    await until(() => !existsSync(join(w.config.controlDir, WIPED_FILE)));
+    rmSync(control(WIPE_FILE));
+    writeFileSync(control(WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
+    await report();
+    expect((await row()).uploadState).toBeNull();
+    expect(existsSync(control(WIPED_FILE))).toBe(false);
     /* The leader counts on a machine for what it held, though a worker's keeper holds no database: it says so, and owes
        nothing. */
     await c.db.update(machines).set({ uploadState: 'waiting' }).where(eq(machines.id, w.machine));
-    await until(async () => (await row()).uploadState === null);
+    await told('waiting');
+    await report();
+    expect((await row()).uploadState).toBeNull();
     /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either. */
-    writeFileSync(join(w.config.controlDir, 'replica.json'), '{}');
+    writeFileSync(control('replica.json'), '{}');
     await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
   });
 });

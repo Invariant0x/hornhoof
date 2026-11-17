@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { and, eq, gt, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
+import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
@@ -65,11 +66,11 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
    ends, so each owner opens their machine again and everyone signs in again. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const { db } = ctx;
-  const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+  const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
   if (!company) return;
   const here = await db.select({ id: people.id, status: people.status }).from(people);
   const known = new Map(here.map(person => [person.id, person.status]));
-  const [placesD, placesT] = [new Set((await db.select({ id: departments.id }).from(departments)).map(row => row.id)), new Set((await db.select({ id: teams.id }).from(teams)).map(row => row.id))];
+  const [placesD, placesT] = [new Set((await db.select(idOnly(departments)).from(departments)).map(row => row.id)), new Set((await db.select(idOnly(teams)).from(teams)).map(row => row.id))];
   /* Who stopped being the owner first, so the company never has two. */
   const theirs = carry.people.filter(person => known.has(person.id)).sort((a, b) => Number(a.isOwner) - Number(b.isOwner));
   for (const person of theirs) {
@@ -89,7 +90,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   }
   /* An invite that was used or called off since is not open again. */
   await db.delete(invites).where(and(isNull(invites.usedAt), carry.invites.length > 0 ? notInArray(invites.tokenHash, carry.invites) : undefined));
-  const live = new Set((await db.select({ id: machines.id }).from(machines).where(isNull(machines.revokedAt))).map(row => row.id));
+  const live = new Set((await db.select(idOnly(machines)).from(machines).where(isNull(machines.revokedAt))).map(row => row.id));
   await disconnectMachines(ctx, carry.machines.filter(machine => machine.revoked && live.has(machine.id)).map(machine => machine.id));
   for (const machine of carry.machines) await db.update(machines).set({ lendsTests: machine.lendsTests, keepsBackups: machine.keepsBackups, ...holdsNow(machine) }).where(eq(machines.id, machine.id));
   await carryLink(db, company.id, carry);
@@ -141,7 +142,7 @@ async function carryLink(db: Db, companyId: string, carry: Carry): Promise<void>
 
 /* The recovery keys as they were when the old database closed: its rows by their ids, and every other one retired. */
 async function carryRecoveryKeys(db: Db, companyId: string, carry: Carry, known: Map<string, string>, now: Date): Promise<void> {
-  const [owner] = await db.select({ id: people.id }).from(people).where(eq(people.isOwner, true)).limit(1);
+  const [owner] = await db.select(idOnly(people)).from(people).where(eq(people.isOwner, true)).limit(1);
   await db.transaction(async tx => {
     const ids = carry.recoveryKeys.map(key => key.id);
     await tx.update(recoveryKeys).set({ retiredAt: now }).where(and(isNull(recoveryKeys.retiredAt), ids.length > 0 ? notInArray(recoveryKeys.id, ids) : undefined));
@@ -163,7 +164,7 @@ export async function warningOf(db: Db, dumpedAt: Date): Promise<{ machines: { n
     .innerJoin(people, eq(people.id, machines.personId))
     .where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), gt(machines.createdAt, dumpedAt)))
     .orderBy(machines.createdAt);
-  const added = await db.select({ name: people.name }).from(people).where(gt(people.createdAt, dumpedAt)).orderBy(people.createdAt);
+  const added = await db.select(only(people, 'name')).from(people).where(gt(people.createdAt, dumpedAt)).orderBy(people.createdAt);
   return { machines: joined, people: added.map(person => person.name) };
 }
 
@@ -203,7 +204,7 @@ export class Restores {
   private async opens(row: BackupRow): Promise<boolean> {
     const { db, config } = this.ctx;
     if (!config.machineId) return false;
-    const [mine] = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(eq(machines.networkId, config.machineId), isNull(machines.revokedAt)));
+    const [mine] = await db.select(only(machines, 'ageKey')).from(machines).where(and(eq(machines.networkId, config.machineId), isNull(machines.revokedAt)));
     return Boolean(mine?.ageKey && row.recipients.includes(mine.ageKey));
   }
 
@@ -291,7 +292,7 @@ export class Restores {
     const from = this.current?.from;
     if (!order || !from) return [];
     const mine = await findThisMachine(this.ctx.db, this.ctx.config);
-    const [here] = mine ? await this.ctx.db.select({ id: machines.id }).from(machines).where(and(eq(machines.id, mine.id), sql`${order.id}::uuid = ANY(${machines.heldBackups})`)) : [];
+    const [here] = mine ? await this.ctx.db.select(idOnly(machines)).from(machines).where(and(eq(machines.id, mine.id), sql`${order.id}::uuid = ANY(${machines.heldBackups})`)) : [];
     return here ? [] : [{ id: order.id, from }];
   }
 

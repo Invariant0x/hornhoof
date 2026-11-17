@@ -4,6 +4,7 @@ import { createServer } from 'node:net';
    meets a port the machine chose at random. Each test worker has its own share of the corridor, and a port in use is passed over. */
 export const CORRIDOR = Object.freeze({ first: 24000, size: 1000, shares: 16 });
 const SHARE = Math.floor(CORRIDOR.size / CORRIDOR.shares);
+/* How far into its share the process has gone: each server starts past the port the last one took. */
 let turn = 0;
 
 /* The share of a worker: vitest numbers its workers from 1; a process outside vitest takes the share of its pid. */
@@ -14,9 +15,8 @@ export function corridorShare(env = process.env, pid = process.pid) {
   return { first, last: first + SHARE - 1 };
 }
 
-function nextPorts() {
+function nextPorts(start) {
   const { first } = corridorShare();
-  const start = turn++ % SHARE;
   return Array.from({ length: SHARE }, (_, i) => first + ((start + i) % SHARE));
 }
 
@@ -27,11 +27,15 @@ const listening = (server, port, host) => new Promise((resolve, reject) => {
   server.listen(port, host);
 });
 
-/* Starts a net or http server on the next free port of this worker's share and returns that port. */
+/* Starts a net or http server on the next free port of this worker's share and returns that port. The next server starts
+   past it, even where ports before it were taken: a process that opened again a port it has just closed would have its
+   client take a connection it keeps to the closed server, which the server ended, for one to the new server. */
 export async function listenIn(server, host = '127.0.0.1') {
-  for (const port of nextPorts()) {
+  const start = turn++;
+  for (const [i, port] of nextPorts(start).entries()) {
     try {
       await listening(server, port, host);
+      turn = Math.max(turn, start + i + 1);
       return port;
     } catch (error) {
       if (error?.code !== 'EADDRINUSE') throw error;

@@ -7,14 +7,16 @@ const A = `aaaaaaaaaaaaaaaa${'1'.repeat(48)}`;
 const B = `bbbbbbbbbbbbbbbb${'2'.repeat(48)}`;
 const slotOf = (id: string, attempt: number) => `copy_${id.slice(0, 16)}_${attempt}`;
 
-type Slot = { name: string; active: boolean; pid: number | null };
+/* copying: a walsender named after the slot runs, as one does while a table's first copy goes over; it holds no slot
+   then, so Postgres lists the slot as read by nobody. */
+type Slot = { name: string; active: boolean; pid: number | null; copying?: boolean };
 
 /* The leader's Postgres as far as the sweep asks it: its slots, the machines that hold the data, and what was done. */
 function server(slots: Slot[], copies: { networkId: string; copyName: string | null }[], stuck: string[] = []) {
   const did: string[] = [];
   const sql: Sql = {
     query: async <R>(text: string, params: unknown[] = []) => {
-      if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(slot => ({ ...slot })) as R[] };
+      if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(slot => ({ copying: false, ...slot })) as R[] };
       if (text.includes('FROM public.machines')) return { rows: copies as R[] };
       if (text.includes('pg_terminate_backend')) {
         did.push(`end ${String(params[0])}`);
@@ -86,6 +88,47 @@ describe("the leader's slots", () => {
     expect(await at(SYNC_SLOT_IDLE_MS + 60_000)).toEqual([]);
     expect(await at(2 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([sync]);
     expect(since.size).toBe(0);
+  });
+
+  it("keeps a slot of a table's first copy for as long as that copy goes over, though Postgres lists it as read by nobody", async () => {
+    const sync = 'pg_16384_sync_16500_7';
+    const s = server([{ name: sync, active: false, pid: null, copying: true }], []);
+    const since = new Map<string, number>();
+    const at = (ms: number) => sweepSlots(s.sql, () => undefined, since, ms);
+    /* A big table over a slow link: its rows go over for half an hour. */
+    for (let ms = 0; ms <= 3 * SYNC_SLOT_IDLE_MS; ms += SLOTS_EVERY_MS) expect(await at(ms)).toEqual([]);
+    expect(since.has(sync)).toBe(false);
+    /* Its copy ended without getting through, as when the link was cut: its ten minutes start then. */
+    s.slots[0]!.copying = false;
+    expect(await at(3 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([]);
+    expect(await at(4 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([sync]);
+  });
+
+  it("drops at its next sweep the slot of a table whose first copy broke off, as its copy named it, and keeps a table's slot that is read", async () => {
+    const broken = 'pg_16384_sync_16500_7';
+    const catching = 'pg_16384_sync_16501_7';
+    const again = 'pg_16384_sync_16502_7';
+    const read = 'pg_16384_sync_16503_7';
+    const s = server(
+      [
+        { name: broken, active: false, pid: null },
+        /* Its copy is through and it catches up between two starts of its worker: nobody reads it this minute, and its
+           copy does not name it. */
+        { name: catching, active: false, pid: null },
+        /* Named in a report from before its copy started again: its rows go over now. */
+        { name: again, active: false, pid: null, copying: true },
+        { name: read, active: true, pid: 31 },
+      ],
+      [],
+    );
+    const named = [broken, again, read, 'copy_aaaaaaaaaaaaaaaa_1', 'pg_16384_sync_16599_7'];
+    const since = new Map<string, number>();
+    expect(await sweepSlots(s.sql, () => undefined, since, 0, named)).toEqual([broken]);
+    expect(s.did).toEqual([`drop ${broken}`]);
+    /* A slot nobody named still goes after its ten minutes, as before. */
+    expect(await sweepSlots(s.sql, () => undefined, since, SYNC_SLOT_IDLE_MS - 1, [])).toEqual([]);
+    expect(await sweepSlots(s.sql, () => undefined, since, SYNC_SLOT_IDLE_MS, [])).toEqual([catching]);
+    expect(s.slots.map(slot => slot.name)).toEqual([again, read]);
   });
 
   it('says so when a slot will not go, and tries again with the next sweep', async () => {

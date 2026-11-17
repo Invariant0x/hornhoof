@@ -1,3 +1,4 @@
+import { idOnly, only } from '../../db/selections.js';
 import { createCoordinationRoute } from './echelons-store.js';
 import { lastTaskNumber } from './numbers.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
@@ -27,7 +28,7 @@ type Planner = { agentId: string; personId?: string };
 /* The top-level department whose work and turns a planner may touch: a head only its own, the orchestrator any (none named). */
 export type Scope = string | null;
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 async function headOf(db: Live['db'] | Tx, departmentId: string) {
   const [head] = await db
@@ -41,7 +42,7 @@ async function headOf(db: Live['db'] | Tx, departmentId: string) {
 /* A department is off when its head is, or when it has employees, in it or in its products, and every one of them is off. */
 async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { off: Date | null }): Promise<boolean> {
   if (head.off) return true;
-  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, departmentId));
+  const products = await db.select(idOnly(departments)).from(departments).where(eq(departments.parentId, departmentId));
   const places = [departmentId, ...products.map(p => p.id)];
   const staff = await db.select({ off: agents.switchedOffAt }).from(agents).where(and(inArray(agents.departmentId, places), eq(agents.kind, 'worker'), isNull(agents.removedAt)));
   return staff.length > 0 && staff.every(a => a.off);
@@ -69,7 +70,7 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
     const [dept] = await ctx.db.select().from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId), isNull(departments.parentId)));
     if (!dept) throw refuse(404, 'department_unknown', `There is no department ${item.department}. Call company for the ids.`);
     if (item.product) {
-      const [product] = await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, item.product), eq(departments.parentId, dept.id)));
+      const [product] = await ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, item.product), eq(departments.parentId, dept.id)));
       if (!product) throw refuse(404, 'department_unknown', `${item.product} is not a product of this department.`);
     }
     const head = await headOf(ctx.db, dept.id);
@@ -85,7 +86,7 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
 /* The person whose message this orchestrator run answers, not a name supplied to a tool. */
 async function decidingPerson(tx: Tx, by: By): Promise<string | null> {
   const [message] = await tx
-    .select({ personId: agentEvents.personId })
+    .select(only(agentEvents, 'personId'))
     .from(agentEvents)
     .where(and(eq(agentEvents.companyId, by.companyId), eq(agentEvents.agentId, by.agentId), eq(agentEvents.jobId, by.jobId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId)))
     .orderBy(desc(agentEvents.seq))

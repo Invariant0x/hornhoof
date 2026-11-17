@@ -12,6 +12,9 @@ const MAX_BODY = 4 * 1024 * 1024;
 const MAX_FILE = 51 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
+/* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
+   calls, and with Node's 5 seconds its next call on a connection the bridge was closing broke with ECONNRESET. */
+const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
@@ -79,7 +82,7 @@ export class Bridge {
   }
 
   async start(): Promise<void> {
-    const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
+    const server = createServer({ keepAliveTimeout: KEEP_ALIVE_MS }, (req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
       if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
     });
@@ -228,7 +231,7 @@ export class Bridge {
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
-    if (kind === 'attach' && event !== undefined && event !== 'file') return reply(res, 404, '');
+    if (!attachmentPath(kind, event)) return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
        caller closing its socket; it is never applied until ownership succeeds. */
     const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
@@ -238,12 +241,14 @@ export class Bridge {
       return this.refused(req, res, 403, 'owner check failed');
     }
     const body = await reading;
+    /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
+    if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
     if (known !== null) return this.answered(res, key, body, known, asked);
-    const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
+    const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : await this.attachmentTokenFor(key, req.method, event);
     if (!token) return kind === 'mcp' ? this.noTools(res, key, body, asked) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {
@@ -262,6 +267,24 @@ export class Bridge {
     res.end(answer);
     if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  private attachmentTokenFor(key: string, method: string | undefined, event: string | undefined): Promise<string | undefined> {
+    const token = this.tokens.get(key);
+    if (token || method !== 'POST' || event !== undefined) return Promise.resolve(token);
+    return this.attachmentToken(key);
+  }
+
+  /* The program may still work after the host lost its turn token. Ask on the same authenticated node link as MCP,
+     without opening a turn: the server grants only a file upload to that agent's existing running task turn. Never
+     keep this permission as a tool token or across requests. */
+  private async attachmentToken(key: string): Promise<string | undefined> {
+    const answer = await this.options.outside?.(key, JSON.stringify({ jsonrpc: '2.0', id: 'attachment', method: 'attachments/token' }), undefined);
+    if (answer?.status !== 200) return undefined;
+    try {
+      const value = JSON.parse(answer.body) as { result?: { token?: unknown } };
+      return typeof value.result?.token === 'string' ? value.result.token : undefined;
+    } catch { return undefined; }
   }
 
   /* A call that only reads goes again after a short outage, a few times with growing pauses; a write is never sent twice,
@@ -458,3 +481,4 @@ function hookFailure(status: number): string {
 }
 
 const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';

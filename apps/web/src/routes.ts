@@ -3,7 +3,7 @@ import { TRACKER_VIEWS, type TrackerView } from './tracker';
 
 /* The parts of the Settings window that have an address of their own, /settings/<group>: Profile, then the groups after
    Appearance & language, which opens at /settings. */
-export const SETTINGS_GROUPS = ['profile', 'integrations', 'messaging', 'company'] as const;
+export const SETTINGS_GROUPS = ['profile', 'integrations', 'passwords', 'messaging', 'company'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 /* Where the tracker stands: what waits for the person, the work going on now, or turns and releases instead of their own

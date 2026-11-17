@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodes } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { builtinOf, ownBuiltin, type NodeIdentity } from './hub.js';
 
 /* Results can be long; anything bigger than this closes the socket. */
@@ -39,7 +40,7 @@ export async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdent
      new one, is still that machine's. */
   if (machine !== null) return machine ? builtinOf(machine) : ownBuiltin(ctx.config);
   const keyHash = hashToken(key);
-  const [node] = await ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.keyHash, keyHash));
+  const [node] = await ctx.db.select(idOnly(nodes)).from(nodes).where(eq(nodes.keyHash, keyHash));
   return node ? { kind: 'node', nodeId: node.id, keyHash } : null;
 }
 

@@ -1,133 +1,88 @@
 # Changelog
 
-Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD`,
-one plain summary, and short entries under `### Added`, `### Changed` and
-`### Fixed`. Include `### Before you update` only when people need to take action.
-The middle number is the turn; the last counts releases between turns.
+Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD` and is one short list in English: one
+line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, with no summary and no translation. A
+step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
+number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
 ## [Unreleased]
 
-The Tasks tab becomes a tracker: goals that split into smaller goals, one person who answers for each task, why it
-exists and by when, the history of every status, the pipelines of the departments, and the same work as a list, a board
-and a map. Every department gets a product manager who keeps its work clear for people.
+### Fixed
 
-### Before you update
-
-- Migration 0132 comes with this release. It adds goals with their history, pipelines with their stages, and the
-  tracker's fields of a task: its goal, the person who answers for it, why, its date, its pipeline and stage. The first
-  time the updated server leads, it names the person who answers for every open task (the one of the task above it, else
-  of its goal, else the person who decides for its department) and hires one product manager into each top-level
-  department that has none, once. Closed tasks stay without one. Nothing needs doing before or after the update.
-
-### Added
-
-- Goals. A company goal splits into department goals and smaller goals, as deep as needed. A goal has a why, the person
-  who answers for it, a date and a number to reach; its progress is that number against the target, or else how many
-  tasks under it are done, cancelled ones not counted. The CEO and the CEO's delegates set company goals; a department's
-  goals are set by whoever reaches the department, its head, its product manager and the orchestrator. A goal keeps the
-  history of its changes. When a department is removed, its goals stay as the company's and its pipelines go.
-- Each task has one person who answers for it: the one named, else the one of the task above it, else of its goal, else
-  the person who decides for its department. When that person is switched off or loses access to the department, their
-  open tasks and goals pass to the person who decides for it, with a line in the history. A task also has a short why
-  and a date.
-- Every change of a task's status writes where it came from and where it went. The card shows how long the task stands
-  in its status, how long it was worked on and whom it waits for, and since when.
-- Pipelines: a department's map of who hands work to whom, stages in a tree with forks, each owned by a role or one
-  employee. A pipeline gives out no work and moves none: a task on it stands in the stage of whoever holds it now, and
-  stays where it was when its holder owns no stage.
-- The Tasks tab opens on the person's own work: what waits for them, the tasks and goals they answer for, what is being
-  worked on now, the people who answer for departments and goals, and the departments with their employees. The same
-  work shows as a list, a board by status or by a pipeline's stages, and a map of a goal with everything under it. The
-  CEO and the CEO's delegates look at it as another person sees it with "View as", which only filters. Every task opens
-  the same card, with its goal, why, facts, the work under it, what it waits for and what waits for it, and its history
-  in plain words. Whoever acts on a task's work edits its title, short text, why, goal, the person who answers for it,
-  its date and its pipeline there, waking nobody.
-- A product manager in every department template and every company template. It keeps titles, whys, goals, the people
-  who answer for tasks, goal numbers and pipelines clear, and never gives out work or changes who does it, its status,
-  urgency, pause, waits or route. It wakes a few minutes after a task or goal of its department is made or changes
-  status, at most every 15 minutes, and on a timer every 4 hours.
-- Agents' tools: everyone reads `goals` with the department's pipelines; heads, the orchestrator and product managers
-  set goals and pipelines of their own department with `set_goal` and `set_pipeline`, and only the orchestrator sets
-  company goals; a product manager tidies a task of its own department with `tidy_task`. `create_task`, `add_tasks` and
-  `update_task` take a goal, the person who answers, why, date, pipeline and stage; a change of only these wakes nobody.
-- People's routes: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` and
-  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` on the task's version, and `GET /api/tasks?responsible=`.
-  `POST /api/tasks` takes `parent`, and work under a task goes to the head of its department. What a task waits for is
-  still set by the agents through their tools; the card shows it.
-
-### Changed
-
-- The old board of the Tasks tab, its three views and the tiles at the top are gone. A department's own task list is
-  gone too: its "Department tasks" button opens the tracker at that department.
-
-### Russian
-
-Вкладка "Задачи" становится трекером: цели, которые делятся на цели поменьше, один ответственный у каждой задачи,
-зачем она нужна и к какому сроку, история каждого статуса, конвейеры отделов и одна и та же работа списком, доской и
-картой. В каждом отделе появляется продакт-менеджер, который следит, чтобы работа была понятна людям.
-
-- С выпуском приходит миграция 0132. Она добавляет цели с их историей, конвейеры с этапами и новые поля задачи: цель,
-  ответственного, зачем, срок, конвейер и этап. Когда обновленный сервер впервые становится ведущим, он назначает
-  ответственного каждой открытой задаче (того же, что у задачи выше, иначе у ее цели, иначе того, кто решает за отдел) и
-  один раз нанимает продакт-менеджера в каждый отдел верхнего уровня, где его нет. У закрытых задач ответственного не
-  будет. Ничего делать до и после обновления не нужно.
-- Цели. Цель компании делится на цели отделов и цели поменьше, на любую глубину. У цели есть зачем, ответственный,
-  срок и число, к которому идем; прогресс считается по этому числу, а без него по доле готовых задач под целью,
-  отмененные не в счет. Цели компании ставят CEO и его заместители, цели отдела ставят те, у кого есть доступ к отделу,
-  его руководитель, продакт-менеджер и оркестратор. Цель хранит историю изменений. Если отдел удалить, его цели
-  остаются целями компании, а его конвейеры удаляются.
-- У каждой задачи один ответственный: названный, иначе тот же, что у задачи выше, иначе у ее цели, иначе тот, кто решает
-  за отдел. Если ответственного выключили или он потерял доступ к отделу, его открытые задачи и цели переходят к тому,
-  кто решает за отдел, с записью в истории. У задачи есть короткое "зачем" и срок.
-- Каждая смена статуса задачи записывает, откуда и куда она перешла. Карточка показывает, сколько задача стоит в своем
-  статусе, сколько над ней работали и кого она ждет и с какого времени.
-- Конвейеры: схема отдела, кто кому передает работу, этапы деревом с развилками, у каждого этапа своя роль или один
-  сотрудник. Конвейер не раздает и не двигает работу: задача стоит на этапе того, кто ее держит сейчас, и остается на
-  месте, если у держателя нет этапа.
-- Вкладка "Задачи" открывается на своей работе человека: что ждет его, за какие задачи и цели он отвечает, над чем
-  работают прямо сейчас, кто отвечает за отделы и цели, и отделы с сотрудниками. Та же работа видна списком, доской по
-  статусам или по этапам конвейера и картой цели со всем, что под ней. CEO и его заместители смотрят на нее глазами
-  другого человека через "Смотреть как", это только фильтр. Любая задача открывает одну и ту же карточку: цель, зачем,
-  факты, работа под ней, чего она ждет и кто ждет ее, история простыми словами. Тот, кто действует по работе задачи,
-  меняет там ее название, короткий текст, зачем, цель, ответственного, срок и конвейер, никого не будя.
-- Продакт-менеджер во всех шаблонах отделов и компаний. Он следит за понятными названиями, "зачем", целями,
-  ответственными, числами целей и конвейерами и никогда не раздает работу и не меняет, кто ее делает, статус, срочность,
-  паузу, ожидания и маршрут. Он просыпается через несколько минут после того, как задача или цель его отдела появилась
-  или сменила статус, не чаще раза в 15 минут, и по таймеру раз в 4 часа.
-- Инструменты агентов: все читают `goals` вместе с конвейерами отдела; руководители, оркестратор и продакт-менеджеры
-  ставят цели и конвейеры своего отдела через `set_goal` и `set_pipeline`, а цели компании ставит только оркестратор;
-  продакт-менеджер приводит в порядок задачу своего отдела через `tidy_task`. `create_task`, `add_tasks` и
-  `update_task` принимают цель, ответственного, зачем, срок, конвейер и этап; смена только этого никого не будит.
-- Маршруты для людей: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` и
-  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` по версии задачи и `GET /api/tasks?responsible=`.
-  `POST /api/tasks` принимает `parent`, и работа под задачей идет руководителю ее отдела. Чего ждет задача, по-прежнему
-  задают агенты своими инструментами, карточка это показывает.
-- Старой доски вкладки "Задачи", трех ее видов и плиток сверху больше нет. Своего списка задач у отдела тоже больше нет:
-  его кнопка "Задачи отдела" открывает трекер на этом отделе.
-
-## [0.31.0]
-
-The orchestrator clears any employee's inbox, and a machine its owner opened stays open to the orchestrator for as
-long as access lasts.
+- The first result of a new turn is no longer refused because its `turn-N` branch was missing; the server makes it.
+- A program with no screen no longer raises false `node_silent` alarms while its turn is working.
+- An update no longer cuts short a turn that streams its work without a screen.
+- A held turn whose program is gone ends as interrupted, and the next turn goes out.
+- No more false "assignment words not recorded" cases when Claude Code starts a turn for its own notice.
+- Releasing a hold calls a program busy exactly when `program_screen` does.
+- A machine taken off the company's checks no longer lends its built-in node to test and work runs.
+- Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
+- The glow and focus ring of a card follow its cut corner, with no dark triangle there.
+- The map's zoom label, such as 115%, is no longer cut off.
 
 ### Added
 
-- The orchestrator reads any employee's inbox and marks its letters read or done, picked by id, kind, source, task or
-  "received before", with a reason. The CEO and the CEO's delegate do the same with `POST /api/agents/:id/inbox/mark`,
-  for which there is no screen yet. Each such mark goes into the employee's log: who marked how many letters, and why.
-  Another employee gets 403 on an inbox not its own, and an assistant key gets 401. Every new company gets this in the
-  orchestrator's skills.
+- The orchestrator reads and marks any employee's inbox, with a reason that goes into the employee's log.
+- The CEO and the CEO's delegate mark any employee's letters with `POST /api/agents/:id/inbox/mark`.
+- `failures` shows `next` for each blocked task, taken from its holder's last report.
+- Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
+- A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
+- A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
+- Goals split into department goals and smaller goals, each with a why, a person who answers for it, a date and a target; progress comes from the target or from the tasks done under it.
+- Every task has one person who answers for it, a short why and a due date; when that person leaves, their open tasks and goals pass to the one who decides for the department.
+- Every status change of a task is kept, and its card shows how long it stands, how long it was worked on and whom it waits for.
+- Department pipelines map who hands work to whom in stages owned by a role or an employee; a task stands in the stage of whoever holds it.
+- The Tasks tab is a tracker: the person's own work first, the same work as a list, a board and a graph, one card for tasks and goals, and "View as" for the CEO and the CEO's delegate.
+- Every department and company template has a product manager who keeps titles, whys, goals, the people who answer and pipelines clear, and never gives out or moves work.
+- Agents read `goals`, set goals and pipelines with `set_goal` and `set_pipeline`, a product manager tidies a task of its department with `tidy_task`, and task tools take a goal, the person who answers, why, due date, pipeline and stage.
+- People's routes for goals and pipelines, `PATCH /api/tasks/:id` on the task's version, `GET /api/tasks?responsible=`, and `parent` in `POST /api/tasks`.
 
 ### Changed
 
-- Once a machine's owner opens it, the orchestrator works on it in any of its turns while access is open: notices,
-  employees' letters, wake-ups and later turns, not only until that person writes again. Other machines stay closed. A
-  turn whose last words come from a person without rights to the machine, or from no one Hornhoof can name, is still
-  refused. Known limits: the rule looks at the words of the turn, not at data, so the orchestrator still reads tasks and
-  inboxes, a program's session can remember such a person's words from an earlier turn, and a head can pass their
-  request on in a letter, which counts as an employee's words; a turn woken by a task, comment, answer or cancel of a
-  person without rights, or by a department owner on a machine not theirs, now refuses commands there, and the work
-  goes on in the next turn; merges from the network wake the orchestrator as Hornhoof and count as no one's words.
+- A machine its owner opened stays open to the orchestrator in all its turns while access lasts, not just one.
+- Commands on a machine are refused when the turn's last words come from someone without rights or unknown.
+- A message to a busy or reconnecting employee waits for its next turn instead of being lost.
+- A message that cannot be delivered names a reason code, the recipient and the task.
+- Personal assistants are hidden from Operations' SQL reads and from the program operator.
+- The full release check runs in two to four parts of up to an hour each.
+- Release test profiles also reuse green results proved at commits main already holds.
+- A full machine of the company keeps its place whatever its memory, free disk or disk speed.
+- Machines always says why a machine has no place.
+- A machine's card stands in three blocks, and its connection history reads as plain lines.
+- Install commands read left to right in any language, and their flags never break.
+- Machines filters start with All and a count, with chips of at least 44 px.
+- Table headers and row buttons are 44 px in every table.
+- A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- `run_tests` runs only on `main`, `turn-N` or `release-` branches; any other branch gets `tests_not_release` and a sentence why.
+- A release's first run runs every test, its later runs only what failed or changed; Tests and reviewers check locally and name no runs.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
+- A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
+- Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
+- The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
+- Migration 0134 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
+
+## [0.29.3] - 2026-11-16
+
+A department's messaging is found on its screen, and a busy machine gets its turn to install the server's build.
+
+### Added
+
+- Each channel of a department to its contacts takes an address, with the person's consent to the channel's purpose.
+
+### Changed
+
+- The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
+
+### Fixed
+
+- External messaging is a button on the department screen, so whoever runs a department's messaging finds its channels.
+- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
+- The orchestrator and the heads get onto a node whose updater went away before stopping it, within their 3 minutes.
+- program_screen shows a busy employee's program from its running turn, without a false no_program.
+- Four tests of the keeper's lease move fake clocks instead of waiting in real time.
+- The assignment card's browser check loads the page once per test and fits its time on a busy machine.
 
 ## [0.29.2] - 2026-11-16
 
