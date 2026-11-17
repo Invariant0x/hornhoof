@@ -52,7 +52,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
   const closers: (() => void)[] = [];
   afterEach(() => { vi.useRealTimers(); closers.splice(0).forEach(c => c()); });
 
-  it('marks a sensitive request and learns its response before giving that response to the program', async () => {
+  it.each([false, true])('marks a sensitive request and learns its response before giving it to the program, delegated: %s', async delegated => {
     const result = { content: [{ type: 'text', text: '{"password":"private-bridge-marker"}' }] };
     const up = await upstream(result);
     const observed: unknown[] = [];
@@ -61,7 +61,8 @@ describe("the node's bridge to Hornhoof's tools", () => {
     closers.push(() => bridge.stop(), () => up.server.close());
     bridge.setToken('agent-1', 'turn-token');
     const url = bridge.agent('agent-1').mcpUrl;
-    const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_entry', arguments: { entry: 'Partner' } } };
+    const params = { name: 'vault_entry', arguments: { entry: 'Partner' } };
+    const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: delegated ? { name: 'use_tool', arguments: params } : params };
     const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
     expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result });
     expect(observed).toEqual([
