@@ -97,6 +97,12 @@ describe('My tasks and View as', () => {
     expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
   });
 
+  it("keeps the map's way to another person's decisions for anyone, among the decisions they see", async () => {
+    shell('/tasks?show=waits&person=p2', {}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    expect(await screen.findByText('Decisions for Maria')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
+  });
+
   it("opens another person's screen from the address for the CEO delegate", async () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
     const list = await main();

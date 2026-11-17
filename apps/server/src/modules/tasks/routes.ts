@@ -265,11 +265,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
-  /* Whose tasks and decisions a list shows: the person's own, or with View as another person's of the company, which only
-     the CEO and the CEO delegate look at. */
+  /* Whose tasks a list shows: the person's own, or with View as another person's of the company, which only the CEO and the
+     CEO delegate look at. The decisions' person filter is no such key: it picks among the decisions the person sees. */
   async function lookAt(me: Person, person: string | undefined): Promise<void> {
     if (!person || person === me.id) return;
-    if (!actsAsCeo(me)) throw refuse(403, 'view_as_ceo_only', "Only the CEO or the CEO delegate looks at another person's tasks and decisions.");
+    if (!actsAsCeo(me)) throw refuse(403, 'view_as_ceo_only', "Only the CEO or the CEO delegate looks at another person's tasks.");
     const [known] = await db.select({ id: people.id }).from(people).where(and(eq(people.id, person), eq(people.companyId, me.companyId)));
     if (!known) throw refuse(404, 'person_unknown', 'This person does not exist.');
   }
@@ -477,7 +477,6 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/requests', async req => {
     const me = await requirePerson(req, db);
     const { person } = DecisionsQuery.parse(req.query);
-    await lookAt(me, person);
     const viewer = await viewerOf(db, me);
     /* Counts come from everything the person sees; the filter only picks what the lists show. */
     const decisions = await visibleDecisions(ctx, me);

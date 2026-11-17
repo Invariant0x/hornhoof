@@ -113,7 +113,7 @@ describe('a person edits what the tracker keeps of a task', () => {
   });
 });
 
-describe("View as: another person's tasks and decisions", () => {
+describe("View as: another person's tasks", () => {
   it('answers each person about their own, and about another person of the company only the CEO and the CEO delegate', async () => {
     const { app, db, ceo, oleg, maria, ivanId, olegId, get, work } = await company();
     await work('Checkout');
@@ -127,11 +127,11 @@ describe("View as: another person's tasks and decisions", () => {
     expect((await get(oleg, `/api/requests?person=${olegId}`)).statusCode).toBe(200);
     expect(await refused(oleg, `/api/tasks?responsible=${ivanId}`)).toEqual([403, 'view_as_ceo_only']);
     expect(await refused(maria, `/api/tasks?responsible=${olegId}`)).toEqual([403, 'view_as_ceo_only']);
-    expect(await refused(oleg, `/api/requests?person=${ivanId}`)).toEqual([403, 'view_as_ceo_only']);
+    /* The decisions' person filter stays a filter for anyone: it picks among the decisions the person sees. */
+    expect((await get(oleg, `/api/requests?person=${ivanId}`)).statusCode).toBe(200);
     const dave = await invitePerson(app, ceo, { name: 'Dave', email: 'dave@acme.com', access: { whole: true } });
     const daveId = (await db.select({ id: people.id }).from(people).where(eq(people.email, 'dave@acme.com')))[0]!.id;
     expect(await refused(dave, `/api/tasks?responsible=${olegId}`)).toEqual([403, 'view_as_ceo_only']);
-    expect(await refused(dave, `/api/requests?person=${olegId}`)).toEqual([403, 'view_as_ceo_only']);
 
     /* The CEO and the CEO delegate look at anyone's of the company. */
     expect((await app.inject({ method: 'PUT', url: `/api/people/${daveId}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) })).statusCode).toBe(200);
@@ -145,9 +145,7 @@ describe("View as: another person's tasks and decisions", () => {
     const { db, ceo, get } = await company();
     const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [stranger] = await db.insert(people).values({ companyId: other!.id, name: 'Olga', email: 'olga@other.com', status: 'active', scopeKind: 'company' }).returning();
-    for (const url of [`/api/tasks?responsible=${stranger!.id}`, `/api/requests?person=${stranger!.id}`]) {
-      const res = await get(ceo, url);
-      expect([res.statusCode, res.json().error?.reason], url).toEqual([404, 'person_unknown']);
-    }
+    const res = await get(ceo, `/api/tasks?responsible=${stranger!.id}`);
+    expect([res.statusCode, res.json().error?.reason]).toEqual([404, 'person_unknown']);
   });
 });

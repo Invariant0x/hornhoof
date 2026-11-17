@@ -196,16 +196,11 @@ describe('decisions waiting for people', () => {
     expect(ceos.requests).toHaveLength(5);
     expect(ceos.proposals).toHaveLength(2);
     expect(ceos.machineAccess).toHaveLength(1);
-    /* Anyone filters by themselves; another person's filter is View as, the CEO's and the CEO delegate's alone, and only for a
-       person of the company. */
+    /* The filter is no key: someone else's decisions stay out of sight, and a stranger's filter shows nothing. */
     await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
-    expect((await c.view(c.tokens.dan, `?person=${c.ids.dan}`)).requests.map(r => r.id)).toEqual([c.devQuestion.request.id]);
-    const refused = async (token: string, person: string) => {
-      const res = await c.app.inject({ url: `/api/requests?person=${person}`, ...as(token) });
-      return [res.statusCode, res.json().error?.reason];
-    };
-    expect(await refused(c.tokens.dan, c.ids.ivan)).toEqual([403, 'view_as_ceo_only']);
-    expect(await refused(c.tokens.ceo, '00000000-0000-4000-8000-000000000999')).toEqual([404, 'person_unknown']);
+    const sarasForDan = await c.view(c.tokens.dan, `?person=${c.ids.ivan}`);
+    expect(sarasForDan.requests.map(r => r.id).sort()).toEqual([c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
+    expect((await c.view(c.tokens.dan, '?person=00000000-0000-4000-8000-000000000999')).requests).toEqual([]);
     for (const bad of ['?person=me', '?person=', '?owner=x']) expect((await c.app.inject({ url: `/api/requests${bad}`, ...as(c.tokens.ceo) })).statusCode, bad).toBe(400);
   });
 
