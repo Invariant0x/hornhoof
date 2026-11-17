@@ -19,7 +19,12 @@ describe('Tests failure belongs to the current candidate', () => {
     expect((await f.detail()).echelons).toMatchObject({ phase: 'escalated', stage: 'tests', candidateId: f.snapshot.candidateId });
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
     expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
-    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toEqual({ failedVerification: { candidateId: f.snapshot.candidateId, routeRevision: f.snapshot.revision } });
+    /* The tracker's move notes where the status went, beside what the failed check names. */
+    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toEqual({
+      failedVerification: { candidateId: f.snapshot.candidateId, routeRevision: f.snapshot.revision },
+      fromStatus: 'open',
+      toStatus: 'blocked',
+    });
   });
   it('escalates to the department head when a worker originally created the task', async () => {
     const f = await failedFixture();

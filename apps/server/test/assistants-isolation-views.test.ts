@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
-import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
+import { readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agents, assistants, companies, people } from '../src/db/schema.js';
 import { createTestDb, ownDatabases } from './helpers-db.js';
 
@@ -9,9 +9,8 @@ ownDatabases();
 it('enforces OPS-HEAD isolation of assistants tables and assistant agents through security_invoker views without table names in the query', async () => {
   const db = await createTestDb();
   const { $client: client } = db;
-  const writer = agentRole('postgres');
   const reader = readerRole('postgres');
-  await client.exec(`${grantsFor(writer)};\n${readerGrantsFor(reader)}`);
+  await client.exec(readerGrantsFor(reader));
 
   const [acme] = await db.insert(companies).values({ name: 'Acme' }).returning();
   const [owner] = await db
@@ -28,7 +27,7 @@ it('enforces OPS-HEAD isolation of assistants tables and assistant agents throug
 
   await db.execute(sql.raw(`CREATE VIEW public.staff_directory WITH (security_invoker = true) AS SELECT id, name, kind FROM public.agents`));
   await db.execute(sql.raw(`CREATE VIEW public.helper_cards WITH (security_invoker = true) AS SELECT person_id, program, agent_id FROM public.assistants`));
-  await db.execute(sql.raw(`GRANT SELECT ON public.staff_directory, public.helper_cards TO "${reader}", "${writer}"`));
+  await db.execute(sql.raw(`GRANT SELECT ON public.staff_directory, public.helper_cards TO "${reader}"`));
 
   const asRole = (role: string, statement: string) =>
     client.transaction(async tx => {
@@ -41,12 +40,12 @@ it('enforces OPS-HEAD isolation of assistants tables and assistant agents throug
   expect(visibleStaff.rows).toEqual([{ id: worker!.id, name: 'Bruno', kind: 'worker' }]);
   await expect(asRole(reader, 'SELECT person_id, program, agent_id FROM public.helper_cards')).rejects.toThrow(/permission denied/);
 
-  /* Orchestrator role still sees both rows through staff_directory and reads helper_cards. */
-  const allStaff = await asRole(writer, 'SELECT name, kind FROM public.staff_directory ORDER BY name');
+  /* The orchestrator, as Hornhoof itself, sees both rows through staff_directory and reads helper_cards. */
+  const allStaff = await client.query('SELECT name, kind FROM public.staff_directory ORDER BY name');
   expect(allStaff.rows).toEqual([
     { name: 'Ava', kind: 'assistant' },
     { name: 'Bruno', kind: 'worker' },
   ]);
-  const cards = await asRole(writer, 'SELECT person_id, program, agent_id FROM public.helper_cards');
+  const cards = await client.query('SELECT person_id, program, agent_id FROM public.helper_cards');
   expect(cards.rows).toEqual([{ person_id: avaPerson!.id, program: 'avaclone', agent_id: avaAgent!.id }]);
 });

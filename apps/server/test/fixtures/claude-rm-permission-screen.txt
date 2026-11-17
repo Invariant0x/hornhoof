@@ -1,0 +1,47 @@
+     e2e/results/tasks-board -n…)
+  ⎿  234
+     51 unique shots
+     -rw-r--r-- 1 node node      22 Nov 17 09:30 /tmp/claude-1000/-data-work-agents-f7863b74-d43d-49db-9d48-774326e62283/afa1c2a5-7295-4766-9871-e26f97aca1
+     … +4 lines (ctrl+o to expand)
+
+● The name cleaning merged files from different engines, and design shots matched nothing. Looking at the real file names.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Bash(S=/tmp/claude-1000/-data-work-agents-f7863b74-d43d-49db-9d48-774326e62283/afa1c2a5-7295-4766-9871-e26f97aca11e/scratchpad/t1152; rm -f $S/*.zip; python3
+      -I - "$…)
+  ⎿  Waiting…
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Zip shots by engine without duplicates
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ S=/tmp/claude-1000/-data-work-agents-f7863b74-d43d-49db-9d48-774326e62283/afa1c2a5-7295-4766-9871-e26f97aca11e/scratchpad/t1152; rm -f $S/*.zip; python3 -I
+ │ - "$S" <<'EOF'
+ │ import zipfile, glob, os, re, sys
+ │ S = sys.argv[1]
+ │ seen = {}
+ │ for p in sorted(glob.glob('e2e/results/tasks-board/**/*.png', recursive=True)):
+ │     test_dir = p.split('/')[3]
+ │     engine = test_dir.rsplit('-', 1)[1]
+ │     n = re.sub(r'-png-[0-9a-f]{40}\.png$', '.png', os.path.basename(p))
+ │     seen.setdefault(f'{engine}/{n}', p)
+ │ design = {k: v for k, v in seen.items() if '-design-' in k}
+ │ with zipfile.ZipFile(f'{S}/design-1152.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+ │     for k, p in sorted(design.items()): z.write(p, k)
+ │ with zipfile.ZipFile(f'{S}/shots-1152.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+ │     for k, p in sorted(seen.items()): z.write(p, k)
+ │ print(len(seen), 'shots,', len(design), 'design shots')
+ │ print(sorted(design)[:18])
+ │ EOF
+ │ ls -l $S/*.zip
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ Dangerous rm operation on possibly-empty variable path: $S/*.zip in `rm -f $S/*.zip` (rewrite it as "${S:?}"/*.zip or use a literal path)
+ ⚠ Claude Code will automatically block this request in 1:07, to avoid holding up an unattended session
+
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend

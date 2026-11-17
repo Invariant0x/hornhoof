@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
-import { agentRole, openAgentSql, type AgentSql } from '../../src/db/agent-sql.js';
+import { openAgentSql, type AgentSql } from '../../src/db/agent-sql.js';
 import { APP_NAME, KEEPER_NAME, MIGRATE_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
 import { notConfirmed } from '../../src/db/confirm.js';
 import { keeperSql, leaseStore, type LeaseStore } from '../../src/modules/keeper/lease-store.js';
@@ -130,8 +130,9 @@ describe("the keeper's lease on real Postgres", () => {
     await db.execute(sql`SELECT 1`);
     const agents = await agentSql();
     const sleeping = failureOf(agents.run('SELECT pg_sleep(600)', 'write'));
-    const sleeper = await sessionWhere(`usename = '${agentRole(new URL(real.url).pathname.slice(1))}' AND query LIKE '%pg_sleep(600)%'`);
-    const [app] = await sessions(`application_name = '${APP_NAME}' AND usename = current_user`);
+    /* The orchestrator's SQL runs over a session of the app's own. */
+    const sleeper = await sessionWhere(`application_name = '${APP_NAME}' AND query LIKE '%pg_sleep(600)%'`);
+    const [app] = await sessions(`application_name = '${APP_NAME}' AND usename = current_user AND pid <> ${sleeper}`);
     const keeperClient = await named(KEEPER_NAME);
     const migrate = await named(MIGRATE_NAME);
     await keeperClient.query('SELECT 1');

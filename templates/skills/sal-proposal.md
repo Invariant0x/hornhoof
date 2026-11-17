@@ -15,4 +15,4 @@ Use this ability to draft an assigned commercial proposal. Inputs are confirmed 
 6. Use the published price list or exact quote the CEO approved. Discounts, payment terms, legal terms and service levels are human decisions, never implied by this ability.
 7. Give a clear proposed next action, validity period and contact.
 
-Return a concise draft, usually readable in two pages, with sources and open approvals. Sending a proposal requires published catalog revisions through the server outbound gateway and any exact approval required by policy; public proposals require exact per-item approval. A human signs contracts. Drafting grants no authority to accept terms, send, discount or promise delivery.
+Return a concise draft, usually readable in two pages, with sources and open approvals. Sending a proposal is marked in the department's git, and it waits for nobody's yes unless its department set an approval rule for it. A human signs contracts. Drafting grants no authority to accept terms, send, discount or promise delivery.

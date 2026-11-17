@@ -15,10 +15,10 @@ const answer = (c: C, id: string, approve: boolean) => c.app.inject({ method: 'P
 const ruleFor = (c: C, departmentId: string, channel: string) => c.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, departmentId), eq(approvalPolicies.channel, channel as never)));
 
 describe('reading and changing a department\'s approval policy', () => {
-  it('asks every time on each channel while nobody set a rule, and stores nothing for that', async () => {
+  it('asks nothing for what goes out, every commit, and a new kind of the rest while nobody set a rule, and stores nothing for that', async () => {
     const c = await company();
     const view = (await c.policy(c.ceoToken, c.dev.id)).json();
-    expect(view.rules).toEqual(['message', 'price', 'publication', 'commit', 'spend', 'other'].map(channel => ({ channel, mode: 'every' })));
+    expect(view.rules).toEqual([...['message', 'price', 'publication'].map(channel => ({ channel, mode: 'none' })), { channel: 'commit', mode: 'every' }, ...['spend', 'other'].map(channel => ({ channel, mode: 'new_kinds' }))]);
     expect(view).toMatchObject({ departmentId: c.dev.id, owner: null, canSetOwner: true, canChangePolicy: true });
     expect(await c.db.select().from(approvalPolicies)).toEqual([]);
   });
@@ -124,7 +124,7 @@ describe('asking for an approval under the policy', () => {
     return (over: Record<string, unknown> = {}) => call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
   };
 
-  it('asks every time on a channel with no rule, and sends it to the CEO with no owner', async () => {
+  it('asks for a new kind on a channel with no rule, and sends it to the CEO with no owner', async () => {
     const c = await company();
     const ask = await bruno(c);
     const res = await ask({ amount: 1 });
@@ -170,11 +170,36 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('applies each channel\'s own rule: a limit on spend does not free a price', async () => {
+  it('applies each channel\'s own rule: a limit on spend does not free anything else', async () => {
     const c = await company();
     await c.setRule(c.ceoToken, c.dev.id, 'spend', { mode: 'within_limits', limit: 100 });
     const ask = await bruno(c);
-    await ask({ channel: 'price', amount: 1 });
+    await ask({ channel: 'other', amount: 1 });
+    expect(await openRequests(c)).toHaveLength(1);
+  });
+
+  it('asks nobody for a message, a price or a publication while the department set no rule for them, and says so in the task\'s log', async () => {
+    const c = await company();
+    const ask = await bruno(c);
+    for (const channel of ['message', 'price', 'publication']) {
+      const res = await ask({ channel, kind: 'test addresses with consent', amount: 1000 });
+      expect(res.isError).toBeFalsy();
+      expect(said(res)).toMatch(/no approval/i);
+    }
+    expect(await openRequests(c)).toEqual([]);
+    const log = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'comment')));
+    expect(log.map(l => l.text)).toEqual(['message', 'price', 'publication'].map(channel => expect.stringContaining(`asks no approval for ${channel}`)));
+  });
+
+  it('lets a department that wants to approve its own messages ask, and then stop asking', async () => {
+    const c = await company();
+    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'every' });
+    const ask = await bruno(c);
+    await ask({ channel: 'message', kind: 'welcome' });
+    expect(await openRequests(c)).toHaveLength(1);
+    expect((await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'none' })).statusCode).toBe(200);
+    expect(await ruleFor(c, c.dev.id, 'message')).toMatchObject([{ mode: 'none', limitAmount: null }]);
+    expect(said(await ask({ channel: 'message', kind: 'welcome' }))).toMatch(/no approval/i);
     expect(await openRequests(c)).toHaveLength(1);
   });
 

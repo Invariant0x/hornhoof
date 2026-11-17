@@ -142,6 +142,14 @@ function checksWholeRelease(run: Run, snapshot: Snapshot): boolean {
   return !fullRun || (scope.profile === fullRun.profile && ofItsRelease(run.fileCache));
 }
 
+/* A run of the product's tests that checks its release whole on commit: the snapshot of the product described there, its full
+   profile, and every part passed with its receipt on that commit. A run of a command of its own is none, however it ended. */
+export async function wholeProductRun(db: QueryDb, run: Run, companyId: string, departmentId: string, commit: string): Promise<boolean> {
+  if (run.command !== '') return false;
+  const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
+  return completeRunParts(parts, run, companyId, commit) && validFullProductRun(run, parts, companyId, departmentId, commit);
+}
+
 async function validFullProductRun(run: Run, parts: Part[], companyId: string, departmentId: string, commit: string): Promise<boolean> {
   const snapshot = matchingSnapshot(run, companyId, departmentId, commit);
   if (!snapshot || !checksWholeRelease(run, snapshot)) return false;
@@ -172,9 +180,9 @@ function matchesLegacyFullCommand(department: Dept, command: string): boolean {
 
 async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run): Promise<boolean> {
   if (!isPassedCommitRun(run, commit)) return false;
+  if (run.command === '') return wholeProductRun(db, run, companyId, department.id, commit);
   const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  if (!completeRunParts(parts, run, companyId, commit)) return false;
-  return run.command === '' ? validFullProductRun(run, parts, companyId, department.id, commit) : matchesLegacyFullCommand(department, run.command);
+  return completeRunParts(parts, run, companyId, commit) && matchesLegacyFullCommand(department, run.command);
 }
 
 async function newestFailedNumber(db: QueryDb, companyId: string, departmentId: string, commit: string): Promise<number> {

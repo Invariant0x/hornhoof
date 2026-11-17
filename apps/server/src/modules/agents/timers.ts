@@ -17,7 +17,6 @@ import { harnessRound } from '../testruns/harness.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
-import { outboundRounds, reconcileOutbound } from '../outbound/extension.js';
 import { releaseRound } from '../tasks/releases.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
@@ -27,7 +26,8 @@ const TICK_MS = 60_000;
 export const timerOf = (a: AgentRow) =>
   a.timerMinutes && a.timerOrder ? { minutes: a.timerMinutes, order: a.timerOrder, forWork: a.timerForWork, lastAt: a.timerAt?.toISOString() ?? null } : null;
 
-const due = (a: AgentRow, now: Date) => !a.timerAt || now.getTime() - a.timerAt.getTime() >= a.timerMinutes! * 60_000;
+/* Its own interval since the last round has passed, or a change it keeps track of asked for a round sooner. */
+const due = (a: AgentRow, now: Date) => !a.timerAt || now.getTime() - a.timerAt.getTime() >= a.timerMinutes! * 60_000 || (a.timerNudgedAt !== null && now >= a.timerNudgedAt);
 /* Still timed, on and in the company. */
 const timed = and(isNotNull(agents.timerMinutes), isNotNull(agents.subscriptionId), isNull(agents.removedAt), isNull(agents.switchedOffAt));
 
@@ -68,12 +68,12 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     .limit(1);
   if (open) return false;
   if (agent.timerForWork && !(await workFor(ctx, agent))) {
-    await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+    await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
     return false;
   }
   const prompt = roundPrompt(agent);
   const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name, ru: agent.name } } } });
-  await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+  await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
   return jobId;
 }
 
@@ -112,8 +112,8 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 }
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
-   their agent is free, department turns their release tags close, files of turns closed a month ago, the old history of node connections, test run times, Codex plans to
-   move and model checks to run. */
+   their agent is free, department turns their release tags close, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
+   to move. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
@@ -130,7 +130,6 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
-    ...outboundRounds(ctx, now).map(([round, why]) => round.catch(failed(why))),
   ]);
 }
 
@@ -143,7 +142,6 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   await Promise.all([
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
     dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
-    reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed')),
   ]);
 }
 

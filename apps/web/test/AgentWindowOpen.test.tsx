@@ -18,7 +18,7 @@ function company(busy: boolean) {
   });
 }
 
-const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 
 async function openList(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(tab(name));

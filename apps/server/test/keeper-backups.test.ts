@@ -19,6 +19,10 @@ import { authorityOf } from '../src/modules/network/store.js';
 import type { Peer } from '../src/net/peer-server.js';
 import { until } from './helpers-basic.js';
 import { backupCompany, machineKey, OWN } from './helpers-backups.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+/* The embedded database opens as the file is collected, so its cold start is no test's time. */
+await prepareSharedDatabase();
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -230,12 +234,12 @@ describe('the keeper of backups', () => {
   });
 
   it('puts the node key in the bundle', async () => {
-    const c = await backupCompany();
-    const base = { HORNHOOF_SECRET: c.config.secret.toString('base64'), RELAY_URL: c.config.relayUrl };
-    expect(bundleSecrets(c.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) })).toEqual({ ...base, NODE_KEY: 'n'.repeat(40) });
-    expect(bundleSecrets(c.config, { HORNHOOF_NODE_KEY: '' })).toEqual({ ...base, NODE_KEY: '' });
-    expect(bundleSecrets(c.config, {})).toEqual({ ...base, NODE_KEY: '' });
-    const s = await stand({ secrets: () => bundleSecrets(c.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) }) });
+    /* One company: a second app beside it would open a whole second database for its config alone. */
+    const s = await stand({ secrets: () => bundleSecrets(s.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) }) });
+    const base = { HORNHOOF_SECRET: s.config.secret.toString('base64'), RELAY_URL: s.config.relayUrl };
+    expect(bundleSecrets(s.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) })).toEqual({ ...base, NODE_KEY: 'n'.repeat(40) });
+    expect(bundleSecrets(s.config, { HORNHOOF_NODE_KEY: '' })).toEqual({ ...base, NODE_KEY: '' });
+    expect(bundleSecrets(s.config, {})).toEqual({ ...base, NODE_KEY: '' });
     expect((await s.opened(await s.bundle())).secrets.NODE_KEY).toBe('n'.repeat(40));
   });
 

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { parse } from 'yaml';
-import { agentRole, readerRole } from '../../src/db/agent-sql.js';
+import { formerAgentRole, readerRole } from '../../src/db/agent-sql.js';
 import type { Db } from '../../src/db/client.js';
 
 export interface RealDatabase {
@@ -53,7 +53,7 @@ export async function realDatabase(): Promise<RealDatabase> {
   const admin = await connected(url);
   const drop = async (): Promise<void> => {
     await admin.end();
-    await onServer([`DROP DATABASE ${name} WITH (FORCE)`, `DROP ROLE IF EXISTS ${agentRole(name)}`, `DROP ROLE IF EXISTS ${readerRole(name)}`]);
+    await onServer([`DROP DATABASE ${name} WITH (FORCE)`, `DROP ROLE IF EXISTS ${formerAgentRole(name)}`, `DROP ROLE IF EXISTS ${readerRole(name)}`]);
   };
   return { url, admin, drop };
 }

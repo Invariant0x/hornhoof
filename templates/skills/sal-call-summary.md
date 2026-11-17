@@ -14,4 +14,4 @@ Use this ability to summarize an assigned sales conversation from an authorized 
 5. Propose CRM changes to stage, amount, date or contacts, with the supporting source. Apply only changes the assignment authorizes, preserving old and new values where the system permits.
 6. If requested, draft a short follow-up reflecting only confirmed agreements and approved terms.
 
-Return the summary, evidence references, proposed record changes and any follow-up draft. Omit personal remarks and sensitive details unrelated to the deal. A follow-up is an external message: it requires published catalog sources, the server outbound gateway and any exact human approval required by policy. An unknown delivery result must be verified before resending.
+Return the summary, evidence references, proposed record changes and any follow-up draft. Omit personal remarks and sensitive details unrelated to the deal. A follow-up is an external message: it is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it. An unknown delivery result must be verified before resending.

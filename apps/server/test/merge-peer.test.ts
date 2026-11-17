@@ -26,6 +26,9 @@ import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
+/* The first database a worker opens pays what every later one only reuses: it opens, and closes again, as the file is
+   collected, so that cold start is no test's time. */
+await (await openTestDb()).client.close();
 
 type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; error: string | null; machine: string | null; merged_at: string | null; done_at: string | null };
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
@@ -334,10 +337,12 @@ describe("the old database of a copy on another machine", () => {
     expect(await gone.merger.doors()).toEqual([]);
     await gone.look();
     expect((await gone.merges())[0]).toMatchObject({ status: 'done', error: 'dev-mac left before its old copy was read.' });
-    const never = await stand();
-    await never.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, never.machine.id));
-    await never.look();
-    expect(await never.merges()).toEqual([]);
+    /* Another machine of the same company says an old copy waits on it, but it left the data before the leader looked.
+       It stands beside the first, as a second app here would open a whole database of its own. */
+    const [never] = await gone.db.insert(machines).values({ companyId: gone.acme.id, personId: gone.machine.personId, machineKey: 'left-machine', hostname: 'old-mac', role: 'data', networkId: `77cc4455aabbccdd${'3'.repeat(48)}`, copyOld: 1, copyName: 'copy_77cc4455aabbccdd_3', copyState: 'ready' }).returning();
+    await gone.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, never!.id));
+    await gone.look();
+    expect((await gone.merges()).filter(merge => merge.machine === never!.id)).toEqual([]);
   });
 
   it('merges a led database whose source answers each read after 2 s while renewing the lease and letting writes through', async () => {

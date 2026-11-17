@@ -6,6 +6,7 @@ import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
 import { agyPlanLimits } from '../providers/antigravity.js';
+import { CLAUDE_UNSIGNED } from '../providers/claude-attribution.js';
 import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
 import { CLAUDE_NO_AUTO_UPDATE, CODEX_NO_AUTO_UPDATE, KIMI_NO_AUTO_UPDATE } from '../providers/session-updates.js';
@@ -65,6 +66,7 @@ export const claudeProgram: TermProgram = {
   launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
     const id = sessionId ?? randomUUID();
     const settings = {
+      ...CLAUDE_UNSIGNED,
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
       hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop'), StopFailure: hook('stop'), PreToolUse: hook('tool'), PostToolUse: hook('tooldone'), PostToolUseFailure: hook('toolfail'), PermissionRequest: hook('ask'), SessionEnd: hook('end') },
       /* The status line hears the plan's limits; it shows nothing. */

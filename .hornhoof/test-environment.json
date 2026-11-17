@@ -517,9 +517,6 @@
         "apps/server/src/auth/decisions.ts",
         "apps/server/src/auth/limit.ts",
         "apps/server/src/auth/password.ts",
-        "apps/server/src/modules/outbound/checks.ts",
-        "apps/server/src/modules/outbound/delivery.ts",
-        "apps/server/src/modules/outbound/render.ts",
         "apps/server/src/modules/tasks/echelons-policy.ts"
       ],
       "run": {
@@ -716,11 +713,14 @@
           "apps/server/test/tasks-wake.test.ts",
           "apps/server/test/templates-once.test.ts",
           "apps/server/test/templates-pipeline.test.ts",
+          "apps/server/test/templates-tracker.test.ts",
           "apps/server/test/templates-watch-idle.test.ts",
           "apps/server/test/templates.test.ts",
           "apps/server/test/test-environment-templates.test.ts",
           "apps/server/test/test-evidence.test.ts",
           "apps/server/test/timers.test.ts",
+          "apps/server/test/tracker-guards.test.ts",
+          "apps/server/test/tracker-tools.test.ts",
           "apps/server/test/turn-effort-dispatch.test.ts",
           "apps/server/test/turn-effort.test.ts",
           "apps/server/test/turn-endings.test.ts",
@@ -774,9 +774,6 @@
       "apps/server/src/auth/decisions.ts",
       "apps/server/src/auth/limit.ts",
       "apps/server/src/auth/password.ts",
-      "apps/server/src/modules/outbound/checks.ts",
-      "apps/server/src/modules/outbound/delivery.ts",
-      "apps/server/src/modules/outbound/render.ts",
       "apps/server/src/modules/tasks/echelons-policy.ts"
     ],
     "fastTestPaths": [
@@ -785,9 +782,6 @@
       "apps/server/test/crypto.test.ts",
       "apps/server/test/decision-policy.test.ts",
       "apps/server/test/limit.test.ts",
-      "apps/server/test/outbound-checks.test.ts",
-      "apps/server/test/outbound-delivery.test.ts",
-      "apps/server/test/outbound-render.test.ts",
       "apps/server/test/echelons-policy.test.ts"
     ],
     "coverageCommands": [

@@ -31,7 +31,7 @@ const idle = (d: Department): Department => ({ ...d, employees: d.employees.map(
 function show(d: Department, language = 'en') {
   localStorage.setItem('hh-lang', language);
   mockApi({});
-  return render(<LanguageProvider><DepartmentView me={ME} department={d} deputies={[]} selected={null} selectedTask={null}
+  return render(<LanguageProvider><DepartmentView me={ME} department={d} deputies={[]} selected={null}
     panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
 }
 const frame = (name: string) => screen.getByRole('group', { name });

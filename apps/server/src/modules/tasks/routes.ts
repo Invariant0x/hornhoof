@@ -12,14 +12,16 @@ import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { editTask } from '../tracker/edit.js';
+import { mayPlan, placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -50,7 +52,29 @@ const NewTaskBody = z.object({
   afterPlans: z.array(z.strictObject({ task: z.number().int().positive(), plan: WaitPlan })).max(10).optional(),
   independentPart: z.strictObject({ title: z.string().trim().min(1).max(120), brief: z.string().max(600), body: z.string().trim().min(1).max(20000), executor: z.uuid() }).optional(),
   independentNone: z.string().trim().min(1).max(2000).optional(),
+  /* What the tracker keeps; a task under parent goes to the head of the parent's department and serves its goal. */
+  parent: z.uuid().optional(),
+  goal: z.uuid().optional(),
+  responsible: z.uuid().optional(),
+  why: z.string().trim().max(300).optional(),
+  due: z.iso.datetime({ offset: true }).optional(),
+  pipeline: z.uuid().optional(),
+  stage: z.uuid().optional(),
 });
+/* What a person changes of a task beside its work, on the task as they saw it. */
+const TaskPatch = z.strictObject({
+  version: z.number().int().min(0),
+  revision: z.number().int().min(0),
+  title: z.string().trim().min(1).max(120).optional(),
+  brief: z.string().max(600).optional(),
+  why: z.string().trim().max(300).optional(),
+  goal: z.uuid().nullable().optional(),
+  responsible: z.uuid().optional(),
+  due: z.iso.datetime({ offset: true }).nullable().optional(),
+  pipeline: z.uuid().nullable().optional(),
+  stage: z.uuid().nullable().optional(),
+});
+const dateOf = (iso: string | null | undefined) => (iso === undefined ? undefined : iso === null ? null : new Date(iso));
 /* A promise of dates named by the task's number: one for a task it does not come after is refused with the rest of the change. */
 const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
   given ? Object.fromEntries(given.map(({ task, plan }) => [after.find(t => t.number === task)?.id ?? String(task), plan])) : undefined;
@@ -59,7 +83,7 @@ const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positiv
 const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
 /* department: any of the company's, or none for the work given to the orchestrator itself, which only people with the
    whole company read; left out, every task the person reads. */
-const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]).optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
+const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]).optional(), status: z.enum(['open', 'closed', 'all']).default('open'), responsible: z.uuid().optional() });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
@@ -247,6 +271,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
+  /* Whose tasks a list shows: the person's own, or with View as another person's of the company, which only the CEO and the
+     CEO delegate look at. The decisions' person filter is no such key: it picks among the decisions the person sees. */
+  async function lookAt(me: Person, person: string | undefined): Promise<void> {
+    if (!person || person === me.id) return;
+    if (!actsAsCeo(me)) throw refuse(403, 'view_as_ceo_only', "Only the CEO or the CEO delegate looks at another person's tasks.");
+    const [known] = await db.select({ id: people.id }).from(people).where(and(eq(people.id, person), eq(people.companyId, me.companyId)));
+    if (!known) throw refuse(404, 'person_unknown', 'This person does not exist.');
+  }
+
   /* The same, for a person who changes it: the work of an agent they open, or one they gave. */
   async function changed(me: Person, id: string): Promise<Task> {
     const task = await shown(me, id);
@@ -254,8 +287,12 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
-  /* The task as this person reads it. */
-  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId), mayHideSecret: !me.via && !me.assistant && await runsDepartment(db, me, task.departmentId) });
+  /* The task as this person reads it, whether they may pause it and edit what the tracker keeps of it, and the version and
+     the revision an edit names. */
+  const detail = async (me: Person, task: Task) => {
+    const viewer = await viewerOf(db, me);
+    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayHideSecret: !me.via && !me.assistant && await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
+  };
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one
      of the person's own, whose work and list for later turns they change. */
@@ -263,7 +300,17 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const all = await db.select().from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
     const mine = new Set((await departmentsHad(db, me)).map(d => d.id));
-    return { whole: (await accessOf(db, me)).whole, departments: all.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id) })) };
+    /* Who answers for each, as the tracker names them: the person who decides for its work. mayPlan: whether this person
+       gives work and sets goals and pipelines there, as the routes decide it. */
+    const owners = await Promise.all(all.map(d => placeOwner(ctx, me.companyId, { departmentId: d.id, parentId: null })));
+    const named = owners.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, [...new Set(owners)])) : [];
+    const may = await mayPlan(ctx, me);
+    const plans = await Promise.all(all.map(d => may(d.id)));
+    return {
+      whole: (await accessOf(db, me)).whole,
+      mayPlanCompany: actsAsCeo(me),
+      departments: all.map((d, i) => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id), mayPlan: plans[i]!, responsible: named.find(p => p.id === owners[i]) ?? null })),
+    };
   });
 
   /* One department's tasks, or every department's, as this person sees them: any department's. The work given to the
@@ -271,6 +318,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
+    await lookAt(me, q.responsible);
     const whole = (await accessOf(db, me)).whole;
     if (q.department === 'none' && !whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
     if (q.department && q.department !== 'none' && !(await departmentOf(db, me.companyId, q.department))) throw refuse(404, 'department_unknown', 'This department does not exist.');
@@ -280,7 +328,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       db
         .select()
         .from(tasks)
-        .where(and(eq(tasks.companyId, me.companyId), state, place))
+        .where(and(eq(tasks.companyId, me.companyId), state, place, q.responsible ? eq(tasks.responsiblePersonId, q.responsible) : undefined))
         .orderBy(desc(tasks.number))
         .limit(500);
     /* All of them: every open one stays even under many closed ones, the newest closed ones come with them. */
@@ -300,6 +348,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/tasks', async (req, reply) => {
     const me = await requirePerson(req, db);
     const body = NewTaskBody.parse(req.body);
+    const parent = body.parent ? await shown(me, body.parent) : null;
+    if (parent && body.department && body.department !== parent.departmentId) throw refuse(400, 'task_invalid', 'Work under a task stays in the department of the task above it.');
+    if (parent) Object.assign(body, { department: parent.departmentId ?? undefined, product: parent.productId ?? undefined });
     let assignee: { id: string } | null;
     if (!body.department) {
       requireCompanyScope(me);
@@ -321,9 +372,25 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone });
+    const moved = await createTask(ctx, actorOf(me), {
+      title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
+      parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
+      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+    });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* Texts for people and what the tracker keeps, by whoever acts on the task's work. */
+  app.patch('/api/tasks/:id', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const body = TaskPatch.parse(req.body);
+    const task = await changed(me, id);
+    const row = await editTask(ctx, actorOf(me), task, {
+      title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+    }, { version: body.version, revision: body.revision });
+    return { task: await detail(me, row) };
   });
 
   /* A page of a list of waits: how much of it, and from where. */

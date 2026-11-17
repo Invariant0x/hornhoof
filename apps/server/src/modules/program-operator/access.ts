@@ -86,7 +86,7 @@ export async function readProgramView(ctx: Ctx, caller: OperatorCaller, input: V
   const view = await requestProgramView(ctx, program);
   if (!view || view.result !== 'ok' || !view.snapshot) throw unavailable(view?.reason ?? 'node_unavailable');
   const secrets = await pictureSecrets(ctx, me.companyId);
-  const { rendered } = renderPicture(view, secrets);
+  const { rendered } = await renderPicture(view, secrets);
   await keepForCase(ctx, caller, program, rendered.png);
   return {
     employee: program.agentId, name: program.name, job: view.jobId, instance: view.instance, snapshot: view.snapshot, state: view.state,

@@ -60,7 +60,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     const connections = live.connections;
     const main = page.getByRole('main');
     await expect(main).toHaveClass(/with-window/);
-    const drawerNames = en ? ['Department tasks', 'About the department', 'Speed'] : ['Задачи отдела', 'Об отделе', 'Скорость'];
+    const drawerNames = en ? ['About the department', 'Speed'] : ['Об отделе', 'Скорость'];
     for (const name of drawerNames) {
       await activate(department.getByRole('button', { name, exact: true }));
       const drawer = page.getByRole('complementary', { name, exact: true });

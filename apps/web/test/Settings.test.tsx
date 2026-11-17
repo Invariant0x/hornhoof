@@ -13,7 +13,6 @@ const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
 const RANDOM = 'r4nd0mr4nd0mr4nd0m';
 const AGREEMENT = 'Let\'s Encrypt Subscriber Agreement';
 const LISTED = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };
-const OUTBOUND = { channels: [], messages: [], escalations: [], approvals: [] };
 const FORBIDDEN = [403, { error: { code: 'forbidden', message: 'Forbidden.' } }] as [number, unknown];
 const tls = (mode: 'http' | 'https') => ({ mode, certificate: mode === 'https', expiresAt: null, failedAt: null });
 
@@ -180,7 +179,7 @@ describe('your own name under Profile', () => {
     expect(renamed).toEqual(['Lisa']);
   });
 
-  it('gives the name field and every field, list and button of the window but External messaging 44 px, its buttons on the end edge', () => {
+  it('gives the name field and every field, list and button of the window 44 px, its buttons on the end edge', () => {
     const mine = '.settings-window :is(.settings-group, .integrations)';
     expect(decl(`${mine} :is(.field input, .field select, .link-input input)`, 'height')).toBe('44px');
     expect(decl(`${mine} .btn`, 'min-height')).toBe('44px');
@@ -245,7 +244,7 @@ describe('Backups in Settings', () => {
     expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
     /* The groups the window may show, the link and the key of the git host are asked for, the backups never. */
-    await waitFor(() => expect(calls.map(call => call.path).sort()).toEqual(['/api/google-sheets', '/api/link', '/api/outbound', '/api/repo-host', '/api/vault']));
+    await waitFor(() => expect(calls.map(call => call.path).sort()).toEqual(['/api/google-sheets', '/api/link', '/api/repo-host', '/api/vault']));
   });
 
   it('shows nothing of them on a server that knows none yet', async () => {
@@ -269,8 +268,8 @@ describe('Settings in the account menu', () => {
     history.replaceState(null, '', '/');
   });
 
-  it('opens one window on Profile, then five groups in order, for a person who sees the whole company', async () => {
-    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/vault': [200, { entries: [] }], 'GET /api/outbound': [200, OUTBOUND] });
+  it('opens one window on Profile, then four groups in order, for a person who sees the whole company', async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/vault': [200, { entries: [] }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
@@ -280,11 +279,10 @@ describe('Settings in the account menu', () => {
     expect(location.pathname).toBe('/settings/profile');
     expect(within(dialog).getByRole('heading', { name: 'Profile', level: 3 })).toHaveFocus();
     expect(within(dialog).getByRole('button', { name: 'Profile' })).toHaveAttribute('aria-current', 'page');
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'Integrations', 'Passwords', 'External messaging', 'Company & access']));
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'Integrations', 'Passwords', 'Company & access']));
     for (const [name, path, text] of [
       ['Integrations', '/settings/integrations', 'Google Sheets is not connected yet. Until a key is saved here, employees attach a ready .xlsx file to the task and chat instead.'],
       ['Passwords', '/settings/passwords', 'No sign-ins are saved yet.'],
-      ['External messaging', '/settings/messaging', 'Nothing has been sent or queued outside yet.'],
       ['Company & access', '/settings/company', 'Hornhoof opens from anywhere at this link:'],
       ['Appearance & language', '/settings', 'Only for you and only in this browser. Other members keep their language and theme.'],
       ['Profile', '/settings/profile', 'Name'],
@@ -298,13 +296,13 @@ describe('Settings in the account menu', () => {
   });
 
   it('shows a person who sees only some departments their Profile and the groups the server gives them, and no empty Company & access', async () => {
-    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': FORBIDDEN, 'GET /api/vault': [200, { entries: [] }], 'GET /api/outbound': [200, OUTBOUND] });
+    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': FORBIDDEN, 'GET /api/vault': [200, { entries: [] }] });
     const user = userEvent.setup();
     render(<Shell me={LISTED} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'Passwords', 'External messaging']));
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'Passwords']));
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue(LISTED.person.name);
     expect(calls.some(call => ['/api/link', '/api/backups'].includes(call.path))).toBe(false);
     history.pushState(null, '', '/settings/company');
@@ -313,7 +311,7 @@ describe('Settings in the account menu', () => {
   });
 
   it('leaves out a group whose data the server does not give, and says so at its address', async () => {
-    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': FORBIDDEN, 'GET /api/outbound': FORBIDDEN });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': FORBIDDEN });
     history.replaceState(null, '', '/settings/integrations');
     render(<Shell me={LISTED} onSignOut={() => {}} />);
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
@@ -324,11 +322,11 @@ describe('Settings in the account menu', () => {
   /* Design took one group at a time on three conditions (#970, finding 3): the open item stands out and is the current
      page, the open group's heading stands at its top, and at a phone's width the items wrap in rows, whole words. */
   it('marks the open group in the list and stands its heading first, the items in rows at a phone width', async () => {
-    mockApi({ 'GET /api/google-sheets': [200, { google: null }], 'GET /api/outbound': [200, OUTBOUND], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
+    mockApi({ 'GET /api/google-sheets': [200, { google: null }], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
     render(<Settings me={ME} group="integrations" onClose={() => {}} />);
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
     const nav = within(dialog).getByRole('navigation', { name: 'Settings groups' });
-    await waitFor(() => expect(within(nav).getAllByRole('button')).toHaveLength(5));
+    await waitFor(() => expect(within(nav).getAllByRole('button')).toHaveLength(4));
     expect(within(nav).getAllByRole('button').filter(button => button.hasAttribute('aria-current')).map(button => [button.textContent, button.getAttribute('aria-current')])).toEqual([['Integrations', 'page']]);
     const group = dialog.querySelector('.sgroup')!;
     expect(group.firstElementChild).toHaveClass('g-head');
@@ -346,7 +344,7 @@ describe('Settings in the account menu', () => {
 
   it('names the groups in Russian, in the menu and on the window', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/vault': [200, { entries: [] }], 'GET /api/outbound': [200, OUTBOUND] });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/vault': [200, { entries: [] }] });
     const user = userEvent.setup();
     render(
       <LanguageProvider>
@@ -356,7 +354,7 @@ describe('Settings in the account menu', () => {
     await user.click(screen.getByRole('button', { name: 'Аккаунт' }));
     await user.click(screen.getByRole('button', { name: 'Настройки' }));
     const dialog = await screen.findByRole('dialog', { name: 'Настройки' });
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Профиль', 'Оформление и язык', 'Интеграции', 'Пароли', 'Внешние рассылки', 'Компания и доступ']));
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Профиль', 'Оформление и язык', 'Интеграции', 'Пароли', 'Компания и доступ']));
   });
 });
 

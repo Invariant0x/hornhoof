@@ -23,7 +23,7 @@ beforeEach(() => {
 type Company = Awaited<ReturnType<typeof stuckPrograms>>;
 const CELLS = 'Waiting for your input\n> the words nobody sent';
 const seen = (values: Partial<OperatorCheck> = {}): OperatorCheck => ({ input: 'text', screen: { cols: 80, rows: 24, cells: CELLS }, ...values });
-const render = (cells: string, secrets: string[] = []) => renderOperatorScreen({ cells, cols: 80, rows: 24, secrets }).png;
+const render = async (cells: string, secrets: string[] = []) => (await renderOperatorScreen({ cells, cols: 80, rows: 24, secrets })).png;
 
 async function turnOf(c: Company, agentId = c.agent.id) {
   await enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: 'Words.', createdBy: null, message: { personId: null, text: 'Words.', from: 'agent', by: c.head.id, name: c.head.name } });
@@ -64,7 +64,7 @@ it('the operator of the case may open the picture, and the program it shows may 
   const [notice] = await noticesFor(c, incident);
   await c.db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, notice!.job.id));
   const bytes = await agentCasePicture(c.db, { id: notice!.job.id, companyId: c.companyId, agentId: notice!.job.agentId!, agentKind: 'worker', roleKey: 'OPS-PROGRAM', departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!);
-  expect(bytes.equals(render(CELLS))).toBe(true);
+  expect(bytes.equals(await render(CELLS))).toBe(true);
   await expect(agentCasePicture(c.db, { id: turn.id, companyId: c.companyId, agentId: c.agent.id, agentKind: 'worker', roleKey: null, departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!)).rejects.toMatchObject({ status: 404 });
 });
 
@@ -76,8 +76,8 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   const cells = `${CELLS} ${secret}`;
   await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
-  expect(Buffer.from(picture!.bytes).equals(render(cells, [secret]))).toBe(true);
-  expect(Buffer.from(picture!.bytes).equals(render(cells))).toBe(false);
+  expect(Buffer.from(picture!.bytes).equals(await render(cells, [secret]))).toBe(true);
+  expect(Buffer.from(picture!.bytes).equals(await render(cells))).toBe(false);
   const stored = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(eq(agentEvents.jobId, turn.id));
   expect(JSON.stringify(stored)).not.toContain('the words nobody sent');
   expect(JSON.stringify(stored)).not.toContain(secret);
@@ -89,7 +89,7 @@ it('a screen of sign-in or terms is drawn as the program shows it: nothing but t
   const cells = 'Sign in to go on\n> Accept the terms of use';
   await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
-  expect(Buffer.from(picture!.bytes).equals(render(cells))).toBe(true);
+  expect(Buffer.from(picture!.bytes).equals(await render(cells))).toBe(true);
 });
 
 it('the same fact sent again is the same fact: no second picture, case or notice', async () => {
@@ -120,7 +120,7 @@ it('a second look at the same turn goes on its case: the latest picture, and no 
   expect(incident.id).toBe(first.id);
   expect(incident.evidence).toMatchObject([{ input: 'text' }, { input: 'empty' }]);
   const [latest] = await c.db.select().from(attachments).where(eq(attachments.id, incident.pictureId!));
-  expect(Buffer.from(latest!.bytes).equals(render('Second look.'))).toBe(true);
+  expect(Buffer.from(latest!.bytes).equals(await render('Second look.'))).toBe(true);
   expect(await noticesFor(c, incident)).toHaveLength(1);
 });
 
@@ -136,7 +136,7 @@ it('a node that could not look still opens the case', async () => {
 it('a screen that cannot be drawn costs the picture, not the signal', async () => {
   const c = await stuckPrograms(true);
   const turn = await turnOf(c);
-  vi.mocked(renderOperatorScreen).mockImplementationOnce(() => { throw new RangeError('Operator screen PNG exceeds 1 MiB.'); });
+  vi.mocked(renderOperatorScreen).mockRejectedValueOnce(new RangeError('Operator screen PNG exceeds 1 MiB.'));
   await c.unrecorded(c.agent.id, turn.id, new Date(), seen());
   expect(await c.caseOf(turn.id)).toMatchObject({ status: 'open', pictureId: null, evidence: [{ input: 'text' }] });
 });

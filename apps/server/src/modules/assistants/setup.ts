@@ -7,7 +7,7 @@ import { changedBy, personColumns, requireCompanyScope, requirePerson, type Pers
 import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
-import { agentChanges, agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, ASSISTANT_PROGRAMS, assistants, jobs, people, subscriptions } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
@@ -15,6 +15,7 @@ import { afterPlanMove } from '../agents/routes.js';
 import { onAgent } from '../conversation/queue.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
+import { stopJobs } from '../tasks/wake.js';
 import { settingsFor } from './programs.js';
 
 /* Where Hornhoof wakes the assistant, and where its own agent asks the program for its skills: web addresses of the
@@ -40,10 +41,10 @@ const fresh = (prefix: string) => `${prefix}${randomBytes(32).toString('base64ur
 type Owner = Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>;
 
 /* Who sets up an assistant: its owner, or someone with the whole company. The key acts with all its owner's rights, so the
-   CEO's and the CEO delegate's are set up only by the CEO, as their Telegram is, and by the delegate for their own. Never
-   the orchestrator, nor an assistant. */
+   CEO's and the CEO delegate's are set up only by the CEO, as their Telegram is, and by the delegate for their own, or by
+   the orchestrator, which can do everything. Never a department's head, nor an assistant. */
 function guardManager(me: Person, owner: Owner): void {
-  if (me.via || me.assistant) throw new ApiError(403, 'forbidden', "An assistant is set up only from a person's own screen.", 'assistant_not_allowed');
+  if (me.viaHead || me.assistant) throw new ApiError(403, 'forbidden', "An assistant is set up only from a person's own screen.", 'assistant_not_allowed');
   if (owner.id === me.id) return;
   if ((owner.isOwner || owner.isCeoDelegate) && !me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO sets up the assistant of the CEO or the CEO delegate.', 'owner_locked');
   requireCompanyScope(me);
@@ -59,9 +60,9 @@ async function ownerFor(db: Db, me: Person, id: string): Promise<Person> {
   return owner;
 }
 
-/* The assistant a route names, with its owner, for someone who may set it up. */
+/* The assistant a route names, with its owner, for someone who may set it up. A deleted one is gone for good. */
 async function managedAssistant(db: Db, me: Person, id: string): Promise<Person & { assistantOf: string | null }> {
-  const [row] = await db.select({ ...personColumns, assistantOf: people.assistantOf }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+  const [row] = await db.select({ ...personColumns, assistantOf: people.assistantOf }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt)));
   if (!row) throw unknownPerson();
   if (!row.assistantOf) throw new ApiError(409, 'conflict', 'This person is not an assistant.', 'not_an_assistant');
   const [owner] = await db.select(personColumns).from(people).where(eq(people.id, row.assistantOf));
@@ -123,6 +124,21 @@ export async function releaseAssistantAgent(ctx: Ctx, assistantId: string, by: P
     return agent.subscriptionId;
   });
   if (left) await releaseLeftProgram(ctx, id, left);
+}
+
+/* A deleted assistant's own agent leaves the company with it: it lets go of its owner's plan, its turns end, and its
+   conversation stays in the history. */
+export async function removeAssistantAgent(ctx: Ctx, assistantId: string, by: Person): Promise<void> {
+  const { db } = ctx;
+  await releaseAssistantAgent(ctx, assistantId, by);
+  const [row] = await db.select(only(assistants, 'agentId')).from(assistants).where(eq(assistants.personId, assistantId));
+  if (!row?.agentId) return;
+  const id = row.agentId;
+  await db.transaction(async tx => {
+    const [agent] = await tx.update(agents).set({ removedAt: new Date() }).where(and(eq(agents.id, id), isNull(agents.removedAt))).returning(only(agents, 'companyId'));
+    if (agent) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'removed', before: null, after: null });
+  });
+  await stopJobs(ctx, eq(jobs.agentId, id));
 }
 
 /* Adding an assistant on the People screen, changing how it is reached, the plan its own agent thinks on, and its key:

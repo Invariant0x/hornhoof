@@ -1,12 +1,11 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
-import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
-import type { BindingPart } from '../modules/model-checks/lifecycle.js';
+import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
-import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -90,6 +89,9 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
+  /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
+     once, by the server's own rules; a new one starts with them. */
+  trackerDue: boolean('tracker_due').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -121,11 +123,14 @@ export const people = pgTable(
     isAgent: boolean('is_agent').notNull().default(false),
     assistantOf: uuid('assistant_of').references((): AnyPgColumn => people.id),
     createdAt: createdAt(),
+    /* Deleted by the CEO: off the lists and the map, with no sign-in, email or Telegram, while the old tasks and answers
+       that name them keep pointing here. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   t => [
     index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId),
     index('people_assistant_of').on(t.assistantOf),
-    check('people_assistant', sql`(${t.isAgent} AND ${t.assistantOf} IS NOT NULL AND ${t.passwordHash} IS NULL) OR (NOT ${t.isAgent} AND ${t.assistantOf} IS NULL AND ${t.email} IS NOT NULL)`),
+    check('people_assistant', sql`(${t.isAgent} AND ${t.assistantOf} IS NOT NULL AND ${t.passwordHash} IS NULL) OR (NOT ${t.isAgent} AND ${t.assistantOf} IS NULL AND (${t.email} IS NOT NULL OR ${t.removedAt} IS NOT NULL))`),
   ],
 );
 
@@ -697,6 +702,8 @@ export const agents = pgTable(
     timerOrder: text('timer_order'),
     timerAt: timestamp('timer_at', { withTimezone: true }),
     timerForWork: boolean('timer_for_work').notNull().default(false),
+    /* A round sooner than the timer's own, asked for by a change the employee keeps track of; timerAt stays its last round. */
+    timerNudgedAt: timestamp('timer_nudged_at', { withTimezone: true }),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -1040,8 +1047,9 @@ export const turns = pgTable(
 );
 
 /* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
-   the results it brings with the verdicts on them, and who approved it. Only the tag of a release kept here closes a turn. */
-export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[] };
+   the results it brings with the verdicts on them, or for turnkey work the report its holder closed it with after its own
+   review, security check and tests, and who approved it. Only the tag of a release kept here closes a turn. */
+export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[]; report?: string };
 export const turnReleases = pgTable(
   'turn_releases',
   {
@@ -1129,12 +1137,28 @@ export const tasks = pgTable(
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
     createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    /* The goal a task with nothing above it serves; work under a task serves its goal and keeps none of its own. */
+    goalId: uuid('goal_id').references((): AnyPgColumn => goals.id),
+    /* The person who answers for it, named when it is made: it changes attention, counts and filters, never rights. */
+    responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
+    /* Why the task exists, in plain words; the brief says what the result is. */
+    why: text('why').notNull().default(''),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
+    pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
+    pipelineStageId: uuid('pipeline_stage_id').references((): AnyPgColumn => pipelineStages.id),
+    /* Grows with every change of what the tracker keeps, which is no move and leaves the version as it is: two such changes
+       that read the same task cannot both land. */
+    trackerRevision: integer('tracker_revision').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [
     unique('tasks_company_number').on(t.companyId, t.number),
+    index('tasks_goal_id').on(t.goalId),
+    index('tasks_responsible').on(t.responsiblePersonId),
+    index('tasks_pipeline_id').on(t.pipelineId),
     index('tasks_department_id').on(t.departmentId),
     index('tasks_assignee').on(t.assigneeAgentId),
     index('tasks_parent_id').on(t.parentId),
@@ -1183,7 +1207,7 @@ export const taskRoutes = pgTable('task_routes', {
   check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
 ]);
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -1218,6 +1242,103 @@ export const taskEvents = pgTable(
     createdAt: createdAt(),
   },
   t => [index('task_events_task_id').on(t.taskId)],
+);
+
+export const GOAL_STATUSES = ['active', 'reached', 'dropped'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
+
+/* A result the company or a department works towards, made of smaller goals and the tasks that serve it. Its progress is
+   its number target when it has one, else the share of its tasks done. */
+export const goals = pgTable(
+  'goals',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    /* None: a goal of the whole company. */
+    departmentId: uuid('department_id').references(() => departments.id),
+    parentGoalId: uuid('parent_goal_id').references((): AnyPgColumn => goals.id),
+    title: text('title').notNull(),
+    why: text('why').notNull().default(''),
+    responsiblePersonId: uuid('responsible_person_id').notNull().references(() => people.id),
+    targetValue: doublePrecision('target_value'),
+    currentValue: doublePrecision('current_value'),
+    unit: text('unit').notNull().default(''),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    status: text('status', { enum: GOAL_STATUSES }).notNull().default('active'),
+    createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    version: integer('version').notNull().default(0),
+  },
+  t => [
+    unique('goals_company_number').on(t.companyId, t.number),
+    index('goals_department_id').on(t.departmentId),
+    index('goals_parent_goal_id').on(t.parentGoalId),
+    check('goals_status', sql`${t.status} IN ('active', 'reached', 'dropped')`),
+    check('goals_not_own_parent', sql`${t.parentGoalId} IS NULL OR ${t.parentGoalId} <> ${t.id}`),
+  ],
+);
+
+/* Everything that happened to a goal, read as a task's history is. */
+export const goalEvents = pgTable(
+  'goal_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /* What names this event across machines, where the serial id of each differs. */
+    uuid: uuid('uuid').notNull().defaultRandom().unique(),
+    companyId: companyId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    kind: text('kind').notNull(),
+    personId: uuid('person_id').references(() => people.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    text: text('text').notNull().default(''),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  t => [index('goal_events_goal_id').on(t.goalId)],
+);
+
+/* A department's map of who hands work to whom: a tree of stages from its head, with forks and no joins. Tasks are placed
+   on it and stand in a stage while its owner holds them; it makes and moves no work of its own. */
+export const pipelines = pgTable(
+  'pipelines',
+  {
+    id: id(),
+    companyId: companyId(),
+    departmentId: uuid('department_id').notNull().references(() => departments.id),
+    name: text('name').notNull(),
+    why: text('why').notNull().default(''),
+    position: integer('position').notNull().default(0),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    version: integer('version').notNull().default(0),
+  },
+  t => [index('pipelines_department_id').on(t.departmentId)],
+);
+
+/* A stage of a pipeline: none above it for the first ones after the head, owned by a role or by one employee. */
+export const pipelineStages = pgTable(
+  'pipeline_stages',
+  {
+    id: id(),
+    companyId: companyId(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    parentStageId: uuid('parent_stage_id').references((): AnyPgColumn => pipelineStages.id),
+    name: text('name').notNull(),
+    ownerRole: text('owner_role'),
+    ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+    position: integer('position').notNull().default(0),
+  },
+  t => [
+    index('pipeline_stages_pipeline_id').on(t.pipelineId),
+    check('pipeline_stages_one_owner', sql`(${t.ownerRole} IS NULL) <> (${t.ownerAgentId} IS NULL)`),
+    check('pipeline_stages_not_own_parent', sql`${t.parentStageId} IS NULL OR ${t.parentStageId} <> ${t.id}`),
+  ],
 );
 
 /* A line of the map from an agent to the one above it: the orchestrator to a department's head, a head to an employee of
@@ -1609,6 +1730,26 @@ export const harnessProducts = pgTable('harness_products', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/* handed_over: the updater has it. called_off: it went to nobody, for its reason. replaced: a later request took its place. */
+export const UPDATE_WAIT_OUTCOMES = ['handed_over', 'called_off', 'replaced'] as const;
+/* An update that waits for a company's agents to finish before it goes to the updater, and how that wait ended. It is
+   kept here and not only in the server's memory, so a restart or a step-down of the machine that leads never loses it:
+   the next lead picks it up again. One waits at a time; ended is empty while it waits. */
+export const updateWaits = pgTable('update_waits', {
+  /* The request's own id, as the updater gets it. */
+  id: uuid('id').primaryKey(),
+  companyId: companyId(),
+  request: jsonb('request').$type<UpdateRequest>().notNull(),
+  since: timestamp('since', { withTimezone: true }).notNull(),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  outcome: text('outcome', { enum: UPDATE_WAIT_OUTCOMES }),
+  reason: text('reason').$type<UpdateCalledOff['reason']>(),
+  /* The turns that still ran when it was called off, and what went wrong when it failed. */
+  turns: jsonb('turns').$type<NamedTurn[]>(),
+  error: text('error'),
+}, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
+
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
@@ -1986,8 +2127,10 @@ export const waitPolicies = pgTable('wait_policies', {
   check('wait_policies_one_author', sql`(${t.createdByPersonId} IS NULL) <> (${t.createdByAgentId} IS NULL)`),
 ]);
 
-/* Checks made by a model. Both SQL roles stay out (HIDDEN): the examples hold private words, the held-out part must not
-   reach whoever tunes a prompt, and a status written by hand could turn a check on. */
+/* What the outbound gateway and its checks made by a model kept, from model_checks down to model_check_certificates.
+   Nothing reads or writes these tables any more: their rows stay, a mailbox password among them, until a later release
+   drops them once every company keeps its mailbox logins in the vault and its letters in git. Both SQL roles stay out
+   (HIDDEN). */
 const MODEL_CHECK_PARTIES = ['person', 'agent'] as const;
 
 export const modelChecks = pgTable('model_checks', {
@@ -1995,14 +2138,14 @@ export const modelChecks = pgTable('model_checks', {
   companyId: companyId(),
   departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
   productId: uuid('product_id').references(() => departments.id, { onDelete: 'cascade' }),
-  kind: text('kind', { enum: MODEL_CHECK_KINDS }).notNull(),
+  kind: text('kind').notNull(),
   /* Off until a run of this very binding passes, and off again when its week ends or a part of it changes. */
   status: text('status', { enum: ['off', 'on'] }).notNull().default('off'),
-  offReason: text('off_reason', { enum: INVALIDATION_CODES }),
+  offReason: text('off_reason'),
   bindingDigest: text('binding_digest'),
   validUntil: timestamp('valid_until', { withTimezone: true }),
   /* Set by the owner of the department, not by whoever wrote the check. */
-  thresholds: jsonb('thresholds').$type<Thresholds>(),
+  thresholds: jsonb('thresholds'),
   thresholdsBy: uuid('thresholds_by').references(() => people.id),
   createdAt: createdAt(),
 }, t => [
@@ -2022,7 +2165,7 @@ export const modelCheckRevisions = pgTable('model_check_revisions', {
   outputSchemaHash: text('output_schema_hash').notNull(),
   sourceListHash: text('source_list_hash').notNull(),
   taxonomyHash: text('taxonomy_hash'),
-  model: jsonb('model').$type<ModelIdentity>().notNull(),
+  model: jsonb('model').notNull(),
   authorKind: text('author_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
   authorId: uuid('author_id').notNull(),
   createdAt: createdAt(),
@@ -2058,18 +2201,18 @@ export const modelCheckEvaluations = pgTable('model_check_evaluations', {
   revisionId: uuid('revision_id').notNull().references(() => modelCheckRevisions.id, { onDelete: 'cascade' }),
   datasetId: uuid('dataset_id').notNull().references(() => modelCheckDatasets.id, { onDelete: 'cascade' }),
   /* The binding it ran, whole: the next change compares against it, and a report says what it was about. */
-  binding: jsonb('binding').$type<CheckBinding>().notNull(),
+  binding: jsonb('binding').notNull(),
   bindingDigest: text('binding_digest').notNull(),
   trigger: text('trigger', { enum: ['change', 'weekly'] }).notNull(),
-  parts: jsonb('parts').$type<BindingPart[]>().notNull().default([]),
+  parts: jsonb('parts').$type<string[]>().notNull().default([]),
   dedupKey: text('dedup_key').notNull(),
   status: text('status', { enum: ['queued', 'running', 'passed', 'failed', 'incomplete'] }).notNull().default('queued'),
   complete: boolean('complete').notNull().default(false),
   infraErrors: integer('infra_errors').notNull().default(0),
   mustBlockMisses: integer('must_block_misses').notNull().default(0),
-  metrics: jsonb('metrics').$type<EvaluationCounts>(),
-  holdoutMetrics: jsonb('holdout_metrics').$type<EvaluationCounts>(),
-  problems: jsonb('problems').$type<RunProblem[]>().notNull().default([]),
+  metrics: jsonb('metrics'),
+  holdoutMetrics: jsonb('holdout_metrics'),
+  problems: jsonb('problems').$type<string[]>().notNull().default([]),
   /* Ids of missed examples of the part authors may see. Held-out ones are never named. */
   missedDevCases: jsonb('missed_dev_cases').$type<string[]>().notNull().default([]),
   startedAt: timestamp('started_at', { withTimezone: true }),
@@ -2096,9 +2239,7 @@ const isDigest = (name: string, column: AnyPgColumn) => check(name, sql`${column
 const placeColumns = () => ({ companyId: companyId(), departmentId: uuid('department_id').notNull(), productId: uuid('product_id') });
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
-/* A way out of the company: one adapter, one purpose, direct to contacts or public. A stop holds a reason and only a
-   person's decision ends it; each stop or reopening is a new generation, so what was admitted under an older one is stale. */
-export type StopReason = GateCode | 'complaint_threshold' | 'refusal_threshold' | 'bounce_threshold';
+/* The outbound gateway's tables, down to outbound_sampling_counters: kept unused with their rows, like the checks above. */
 export const outboundChannels = pgTable('outbound_channels', {
   id: id(),
   ...placeColumns(),
@@ -2108,7 +2249,7 @@ export const outboundChannels = pgTable('outbound_channels', {
   audience: text('audience', { enum: ['direct', 'public'] }).notNull(),
   status: text('status', { enum: ['new', 'active', 'stopped'] }).notNull().default('new'),
   generation: integer('generation').notNull().default(1),
-  stoppedReason: text('stopped_reason').$type<StopReason>(),
+  stoppedReason: text('stopped_reason'),
   stoppedAt: at('stopped_at'),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),
@@ -2130,7 +2271,7 @@ export const outboundPolicies = pgTable('outbound_policies', {
   channelId: uuid('channel_id').notNull(),
   revision: integer('revision').notNull(),
   digest: text('digest').notNull(),
-  value: jsonb('value').$type<OutboundPolicyValue>().notNull(),
+  value: jsonb('value').notNull(),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),
 }, t => [
@@ -2195,9 +2336,9 @@ export const outboundCatalogRevisions = pgTable('outbound_catalog_revisions', {
   channelId: uuid('channel_id'),
   entryId: uuid('entry_id').notNull(),
   revision: integer('revision').notNull(),
-  kind: text('kind', { enum: CATALOG_KINDS }).notNull(),
+  kind: text('kind').notNull(),
   locale: text('locale'),
-  value: jsonb('value').$type<CatalogValue>().notNull(),
+  value: jsonb('value').notNull(),
   digest: text('digest').notNull(),
   status: text('status', { enum: ['proposed', 'published', 'revoked'] }).notNull().default('proposed'),
   validFrom: at('valid_from').notNull().defaultNow(),
@@ -2314,8 +2455,8 @@ export const supportClassifications = pgTable('support_classifications', {
   status: text('status', { enum: ['pending', 'ready', 'unavailable'] }).notNull().default('pending'),
   classId: text('class_id'),
   requiresHuman: boolean('requires_human'),
-  reasonCodes: jsonb('reason_codes').$type<ReasonCode[]>().notNull().default([]),
-  reviewer: jsonb('reviewer').$type<ModelIdentity>(),
+  reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
+  reviewer: jsonb('reviewer'),
   decidedAt: at('decided_at'),
   createdAt: createdAt(),
 }, t => [
@@ -2355,8 +2496,8 @@ export const outboundMessages = pgTable('outbound_messages', {
   segmentId: uuid('segment_id'),
   samplingOrdinals: jsonb('sampling_ordinals').$type<Record<string, number>>().notNull().default({}),
   revision: integer('revision').notNull().default(1),
-  status: text('status', { enum: MESSAGE_STATUSES }).notNull(),
-  reasonCodes: jsonb('reason_codes').$type<GateCode[]>().notNull().default([]),
+  status: text('status').notNull(),
+  reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
   scheduledAt: at('scheduled_at').notNull(),
   createdAt: createdAt(),
   updatedAt: at('updated_at').notNull().defaultNow(),
@@ -2390,7 +2531,7 @@ export const outboundMessageRevisions = pgTable('outbound_message_revisions', {
   companyId: companyId(),
   messageId: uuid('message_id').notNull(),
   revision: integer('revision').notNull(),
-  document: jsonb('document').$type<MessageDocument>().notNull(),
+  document: jsonb('document').notNull(),
   contentDigest: text('content_digest').notNull(),
   sealedEnc: text('sealed_enc').notNull(),
   sourceRevisionsDigest: text('source_revisions_digest').notNull(),
@@ -2454,8 +2595,8 @@ export const outboundReviewReceipts = pgTable('outbound_review_receipts', {
   checkId: uuid('check_id').notNull().references(() => modelChecks.id),
   bindingDigest: text('binding_digest').notNull(),
   subjectDigest: text('subject_digest').notNull(),
-  reviewer: jsonb('reviewer').$type<ModelIdentity>().notNull(),
-  result: jsonb('result').$type<CheckResult>().notNull(),
+  reviewer: jsonb('reviewer').notNull(),
+  result: jsonb('result').notNull(),
   createdAt: createdAt(),
 }, t => [
   unique('outbound_review_receipts_once').on(t.messageId, t.messageRevision, t.bindingDigest),
@@ -2590,7 +2731,7 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   evaluatedAt: at('evaluated_at').notNull(),
   validUntil: at('valid_until').notNull(),
   status: text('status', { enum: ['active', 'invalidated'] }).notNull().default('active'),
-  invalidatedReason: text('invalidated_reason', { enum: INVALIDATION_CODES }),
+  invalidatedReason: text('invalidated_reason'),
   invalidatedAt: at('invalidated_at'),
   createdAt: createdAt(),
 }, t => [
@@ -2751,6 +2892,7 @@ export const machineAccess = pgTable(
       .primaryKey()
       .references(() => machines.id),
     companyId: companyId(),
+    scope: text('scope', { enum: ['orchestrator', 'all_agents'] }).notNull().default('orchestrator'),
     until: timestamp('until', { withTimezone: true }),
     askedReason: text('asked_reason'),
     askedAt: timestamp('asked_at', { withTimezone: true }),
@@ -2758,7 +2900,7 @@ export const machineAccess = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
   },
-  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
+  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`), check('machine_access_scope', sql`scope IN ('orchestrator', 'all_agents')`)],
 ).enableRLS();
 
 /* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO

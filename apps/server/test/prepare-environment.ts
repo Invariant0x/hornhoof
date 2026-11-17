@@ -40,7 +40,7 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     { PGlite },
     { drizzle: pgliteDb },
     { migrate: migratePglite },
-    { agentRole, grantsFor, readerGrantsFor, readerRole },
+    { readerGrantsFor, readerRole },
     { applyMissingMigrations, MIGRATIONS },
     { AFTER_MIGRATIONS },
     schema,
@@ -60,9 +60,8 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
     await client.exec(AFTER_MIGRATIONS);
     await client.exec(ENDLESS_LEASE);
-    /* The roles of agent SQL with their rights, as a server makes them as it starts: a test that runs agent SQL then
-       changes nothing beyond rows of the database its file shares. */
-    await client.exec(`${grantsFor(agentRole('postgres'))};\n${readerGrantsFor(readerRole('postgres'))}`);
+    /* Operations' role with its rights, as a server makes it as it starts. */
+    await client.exec(readerGrantsFor(readerRole('postgres')));
     return Buffer.from(await (await client.dumpDataDir('none')).arrayBuffer());
   } finally { await client.close(); }
 }

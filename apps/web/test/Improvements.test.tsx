@@ -327,7 +327,7 @@ describe('improvements', () => {
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
     /* Top to bottom as Design's reference orders them: Settings, the pages of the whole company, then About and Log out.
-       The themes, the languages and Outbound are no longer in the menu. */
+       The themes and the languages are no longer in the menu. */
     await user.tab();
     expect(settings).toHaveFocus();
     await user.tab();

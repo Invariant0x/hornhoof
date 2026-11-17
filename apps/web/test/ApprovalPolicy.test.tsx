@@ -5,7 +5,6 @@ import { ru } from '../src/i18n/ru';
 import type { ApprovalPolicyView, WaitingRequest } from '../src/types';
 import { ApprovalPolicy } from '../src/ui/ApprovalPolicy';
 import { DecidedByNote } from '../src/ui/DecidedBy';
-import { DepartmentMessaging } from '../src/ui/OutboundSetup';
 import { Requests } from '../src/ui/Requests';
 import { mockApi } from './api-mock';
 import { decl } from './css';
@@ -86,7 +85,7 @@ describe('ApprovalPolicy', () => {
   });
 
   it('shows someone with access the rules in words, with nothing to change', async () => {
-    mockApi({ [POLICY]: [200, view({ rules: [{ channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' }, { channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }] })] });
+    mockApi({ [POLICY]: [200, view({ rules: [{ channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' }, { channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'none' }] })] });
     render(<ApprovalPolicy departmentId="d1" />);
     expect(await screen.findByText(t.ownerNone)).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
@@ -94,6 +93,7 @@ describe('ApprovalPolicy', () => {
     expect(rowOf('spend').getByText(t.limitIs(100, 'USD'))).toBeInTheDocument();
     expect(rowOf('message').getByText(t.readModes.new_kinds)).toBeInTheDocument();
     expect(rowOf('price').getByText(t.readModes.every)).toBeInTheDocument();
+    expect(rowOf('publication').getByText(t.readModes.none)).toBeInTheDocument();
     /* "To me" would be wrong here: the approval does not go to the person reading. */
     expect(screen.queryByText(t.modes.every)).not.toBeInTheDocument();
   });
@@ -121,6 +121,15 @@ describe('ApprovalPolicy', () => {
     await screen.findByRole('combobox', { name: t.owner });
     fireEvent.change(rowOf('message').getByRole('combobox', { name: t.mode }), { target: { value: 'new_kinds' } });
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'new_kinds' }));
+  });
+
+  it('offers no approval at all as one of the ways, saved at once', async () => {
+    const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/spend': [200, ceoView()] });
+    render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByRole('combobox', { name: t.owner });
+    expect(within(rowOf('spend').getByRole('combobox', { name: t.mode })).getByRole('option', { name: t.modes.none })).toBeInTheDocument();
+    fireEvent.change(rowOf('spend').getByRole('combobox', { name: t.mode }), { target: { value: 'none' } });
+    await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'none' }));
   });
 
   it('asks for a limit before it saves the mode of limits, and sends a number', async () => {
@@ -174,34 +183,14 @@ describe('ApprovalPolicy', () => {
     await waitFor(() => expect(calls.length).toBe(before + 1));
   });
 
-  it('draws each channel fieldset without a browser frame through the shared field-group rule used in outbound setup', async () => {
-    mockApi({
-      [POLICY]: [200, ceoView()],
-      'GET /api/outbound?department=d1': [
-        200,
-        {
-          channels: [{ id: 'c1', departmentId: 'd1', name: 'Mail', adapter: 'smtp', purpose: 'first_contact', audience: 'direct', status: 'new', canManage: true, policy: null, accounts: [] }],
-          messages: [], escalations: [], approvals: [], departments: [{ id: 'd1', name: 'Development', templateKey: null }],
-        },
-      ],
-      'GET /api/outbound/catalog?department=d1': [200, { entries: [] }],
-      'GET /api/outbound/setup-log?department=d1': [200, { entries: [] }],
-      'GET /api/outbound/contacts?department=d1': [200, { contacts: [] }],
-    });
-    const { container } = render(
-      <>
-        <ApprovalPolicy departmentId="d1" />
-        <DepartmentMessaging departmentId="d1" />
-      </>,
-    );
+  it('draws each channel fieldset without a browser frame through the shared field-group rule', async () => {
+    mockApi({ [POLICY]: [200, ceoView()] });
+    const { container } = render(<ApprovalPolicy departmentId="d1" />);
     await screen.findByRole('combobox', { name: t.owner });
-    fireEvent.click(await screen.findByRole('button', { name: 'Set limits and sending' }));
 
     const approvalGroups = [...container.querySelectorAll('.appr-rules > fieldset')];
-    const outboundGroups = [...container.querySelectorAll('.outbound-numbers')];
     expect(approvalGroups).toHaveLength(CHANNELS.length);
-    expect(outboundGroups).toHaveLength(2);
-    for (const group of [...approvalGroups, ...outboundGroups]) {
+    for (const group of approvalGroups) {
       expect(group).toHaveClass('field-group');
       expect(group.querySelector(':scope > legend + .field-group-body')).not.toBeNull();
     }
@@ -214,7 +203,6 @@ describe('ApprovalPolicy', () => {
     expect(decl('.field-group-body', 'clear')).toBe('both');
     expect(decl('.field-group-body', 'padding-block-start')).toBe('4px');
     expect(decl('.appr-rule', 'border')).toBeUndefined();
-    expect(decl('.outbound-numbers', 'border')).toBeUndefined();
   });
 });
 
@@ -259,9 +247,9 @@ describe('the words', () => {
   it('has every channel and mode in both languages, in plain Russian with no letter yo and no long dash', () => {
     const r = ru.dept.approvals;
     expect(Object.keys(r.channels).sort()).toEqual([...CHANNELS].sort());
-    expect(Object.keys(r.modes).sort()).toEqual(['every', 'new_kinds', 'within_limits']);
-    expect(Object.keys(r.readModes).sort()).toEqual(['every', 'new_kinds']);
-    expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов' });
+    expect(Object.keys(r.modes).sort()).toEqual(['every', 'new_kinds', 'none', 'within_limits']);
+    expect(Object.keys(r.readModes).sort()).toEqual(['every', 'new_kinds', 'none']);
+    expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов', none: 'Без одобрения' });
     const words = JSON.stringify(r, (_k, v: unknown) => (typeof v === 'function' ? String((v as (a: string, b: string) => string)('a', 'b')) : v));
     expect(words).not.toMatch(/[\u0451\u0401\u2014]/);
     expect(en.dept.approvals).toHaveProperty('autonomousRelease');

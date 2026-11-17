@@ -15,15 +15,16 @@ import type { IssueCreator } from '../src/modules/feedback/github-issue.js';
 import type { ModelsReader } from '../src/modules/subscriptions/api-models.js';
 import type { BranchCreator, CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, gated, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
+import { gated, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
-import type { LeaseKind, LeaseSync } from '../src/db/net.js';
+import { FENCED, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
-import { openTestDb, timed } from './helpers-db.js';
+import { openTestDb, prepareSharedDatabase, sharedDatabase, timed } from './helpers-db.js';
 import { TEST_SECRET } from './helpers-basic.js';
+import { SETUP } from './helpers-company.js';
 import { templatesFor } from './templates-once.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 import { recordSources } from '../src/db/sources.js';
@@ -59,18 +60,19 @@ export const viaLink = (token?: string) => ({
   cookies: (token ? { [LINK_SESSION_COOKIE]: token } : {}) as Record<string, string>,
 });
 
-/* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
-   hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
+/* Agents' database access on PGlite. PGlite has one user, a superuser, which is Hornhoof's own as the orchestrator's is;
+   Operations' role is taken with SET LOCAL ROLE: its rights hold, though a statement could take the superuser back, which
+   on Postgres a separate sign-in rules out. */
 export function agentSqlOn(client: PGlite): AgentSql {
-  const roles = { write: agentRole('postgres'), read: readerRole('postgres') };
+  const reader = readerRole('postgres');
   let granted: Promise<unknown> | null = null;
   return {
     run: async (text, mode, call) => {
-      granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
+      granted ??= client.exec(`${PUBLIC_REVOKES};\n${readerGrantsFor(reader)}`);
       await granted;
       return gated(mode, () => client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
-        await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
+        if (mode === 'read') await tx.query(`SET LOCAL ROLE "${reader}"`);
         const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
         if (mode === 'write' && call) {
           await tx.exec(PRE_COMMIT_SETTINGS);
@@ -106,11 +108,32 @@ const noApis: ModelsReader = async () => ({ ok: false, reason: 'unreachable' });
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
+  const made = await builtOn(client, env, logger);
+  onTestFinished(() => timed('teardownMs', () => made.app.close()));
+  return made;
+}
+
+/* The first app a file builds loads and compiles what every later one only reuses, and the first company set up on it
+   does the same for its routes. Called at the top of a file, this is done once as the file is collected, so it is no
+   test's time; what it leaves in the shared database goes with the emptying that hands the first test its database. */
+export async function prepareApp(env: NodeJS.ProcessEnv = {}): Promise<void> {
+  await prepareSharedDatabase();
+  const client = sharedDatabase()!;
+  await client.exec(`SET ${FENCED} = 'on'`);
+  const { app } = await builtOn(client, env);
+  try {
+    const setUp = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    if (setUp.statusCode !== 201) throw new Error(`The first company was not set up (${setUp.statusCode}): ${setUp.body}`);
+  } finally {
+    await app.close();
+  }
+}
+
+async function builtOn(client: PGlite, env: NodeJS.ProcessEnv, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
   const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), createBranch: noBranches, readTags: async () => ({ tags: {} }), readMerged: async () => null }));
-  onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }
 

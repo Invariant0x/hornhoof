@@ -31,7 +31,7 @@ async function browserKey() {
   const publicKey = b64(await subtle.exportKey('spki', pair.publicKey));
   const grant = async (machine: string, over: Record<string, unknown> = {}): Promise<Grant> => {
     const at = Math.floor(Date.now() / 1000);
-    const payload = JSON.stringify({ v: 1, machine, until: at + DAY_S, at, nonce: b64(webcrypto.getRandomValues(new Uint8Array(16))), ...over });
+    const payload = JSON.stringify({ v: 1, machine, until: at + 3600, at, nonce: b64(webcrypto.getRandomValues(new Uint8Array(16))), ...over });
     return { payload, signature: b64(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(payload))) };
   };
   return { publicKey, grant };
@@ -101,6 +101,14 @@ async function company(env: NodeJS.ProcessEnv = {}) {
 }
 
 describe('computer access to a machine of the company', () => {
+  it('includes scope and the opener in the machine card response', async () => {
+    const c = await company();
+    const opened = await c.open(c.tokens.marat, c.mac, { scope: 'all_agents', confirm: true, grant: await c.key.grant(c.NETWORK_ID) });
+    expect(opened.statusCode).toBe(200);
+    const listed = (await c.app.inject({ url: '/api/machines', ...as(c.tokens.ceo) })).json() as { machines: { id: string; access: unknown }[] };
+    expect(listed.machines.find(machine => machine.id === c.mac)?.access).toMatchObject({ scope: 'all_agents', openedBy: { id: c.ids.marat, name: 'Marat' }, openedAt: opened.json().openedAt });
+  });
+
   it("opens only for the machine's owner", async () => {
     const c = await company();
     const grant = { grant: await c.key.grant(c.NETWORK_ID) };
@@ -138,7 +146,7 @@ describe('computer access to a machine of the company', () => {
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) })).statusCode).toBe(200);
   });
 
-  it('asks for a named machine, and its owner opens it for a day', async () => {
+  it('asks for a named machine, and its owner opens it for the signed hour', async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     const asked = await call(client, 'ask_computer_access', { machine: 'Marat-Mac', reason: 'Clean Docker images.' });
@@ -161,7 +169,7 @@ describe('computer access to a machine of the company', () => {
     const said = (await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer')))).map(event => event.data);
     expect(said).toEqual([
       { state: 'asked', reason: 'Clean Docker images.', machine: 'marat-mac' },
-      { state: 'opened', until: opened.json().until, machine: 'marat-mac' },
+      { state: 'opened', scope: 'orchestrator', until: opened.json().until, machine: 'marat-mac' },
     ]);
     /* The note is Marat's order: the turn it starts may use his machine. */
     const [note] = await c.db.select().from(jobs).where(eq(jobs.agentId, c.orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
@@ -277,17 +285,17 @@ describe('computer access to a machine of the company', () => {
     now += 500_000;
     await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, next));
     expect((await computer.take(c.mac, [held])).runs).toEqual([]);
-    expect(await computer.wait(held, c.acme.id)).toBe('running');
+    expect(await computer.wait(held, c.acme.id, c.orchestrator.id)).toBe('running');
     /* No longer named: lost, and the next goes out. */
     expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([next]);
-    expect(await computer.wait(held, c.acme.id)).toBe('lost');
+    expect(await computer.wait(held, c.acme.id, c.orchestrator.id)).toBe('lost');
     expect(await computer.answer(c.mac, held, { exit: 0, output: '' })).toBe(false);
     /* One just taken is given its keeper a moment to write it down. */
     now += (HELD_GRACE_S - 1) * 1000;
     expect((await computer.take(c.mac, [])).runs).toEqual([]);
     expect((await c.runsOf(c.mac)).map(run => run.state)).toEqual(['lost', 'sent']);
     /* A command of another company's id is none. */
-    expect(await computer.wait(next, '0f0f0f0f-0000-4000-8000-00000000000a')).toBe('gone');
+    expect(await computer.wait(next, '0f0f0f0f-0000-4000-8000-00000000000a', c.orchestrator.id)).toBe('gone');
   });
 
   it('does not give up a command that waits behind one that still runs', async () => {
@@ -307,7 +315,7 @@ describe('computer access to a machine of the company', () => {
     now += WAITING_MS + 60_000;
     await stillOpen();
     expect((await computer.take(c.mac, [long])).runs).toEqual([]);
-    expect(await computer.wait(queued, c.acme.id)).toBe('running');
+    expect(await computer.wait(queued, c.acme.id, c.orchestrator.id)).toBe('running');
     expect((await c.runsOf(c.mac)).map(run => run.state)).toEqual(['sent', 'waiting']);
     /* The first ends, and the second goes out at the keeper's next ask, however long it waited behind it. */
     expect(await computer.answer(c.mac, long, { exit: 0, output: 'made' })).toBe(true);
@@ -318,18 +326,18 @@ describe('computer access to a machine of the company', () => {
     await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, lonely));
     now += WAITING_MS + 1000;
     await stillOpen();
-    expect(await computer.wait(lonely, c.acme.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
+    expect(await computer.wait(lonely, c.acme.id, c.orchestrator.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
     /* A command given up puts off none that waits behind it: each has its own time from when it was asked. */
     const [early, late] = [await c.start(c.mac, 'one'), await c.start(c.mac, 'two')];
     await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, early));
     await c.db.update(computerRuns).set({ createdAt: new Date(now + WAITING_MS / 2) }).where(eq(computerRuns.id, late));
     now += WAITING_MS + 1000;
     await stillOpen();
-    expect(await computer.wait(early, c.acme.id)).toMatchObject({ exit: 126 });
-    expect(await computer.wait(late, c.acme.id)).toBe('running');
+    expect(await computer.wait(early, c.acme.id, c.orchestrator.id)).toMatchObject({ exit: 126 });
+    expect(await computer.wait(late, c.acme.id, c.orchestrator.id)).toBe('running');
     now += WAITING_MS / 2;
     await stillOpen();
-    expect(await computer.wait(late, c.acme.id)).toMatchObject({ exit: 126 });
+    expect(await computer.wait(late, c.acme.id, c.orchestrator.id)).toMatchObject({ exit: 126 });
   });
 
   it('gives up a command that waited or was out too long, and tells the keeper what to let go of', async () => {
@@ -346,7 +354,7 @@ describe('computer access to a machine of the company', () => {
     await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, stale));
     now += WAITING_MS + 1000;
     await stillOpen();
-    expect(await computer.wait(stale, c.acme.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
+    expect(await computer.wait(stale, c.acme.id, c.orchestrator.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
     expect((await computer.take(c.mac, [])).runs).toEqual([]);
 
     /* One its keeper took and still names, long past the time it was given: its outcome is unknown, the keeper is told
@@ -362,7 +370,7 @@ describe('computer access to a machine of the company', () => {
     const taken = await computer.take(c.mac, [out, '0f0f0f0f-0000-4000-8000-00000000000a']);
     expect(taken.forget.sort()).toEqual(['0f0f0f0f-0000-4000-8000-00000000000a', out].sort());
     expect(taken.runs.map(run => run.id)).toEqual([next]);
-    expect(await computer.wait(out, c.acme.id)).toBe('lost');
+    expect(await computer.wait(out, c.acme.id, c.orchestrator.id)).toBe('lost');
   });
 
   it("closes a machine whose keeper did not take what its owner signed, and says so", async () => {
@@ -652,7 +660,7 @@ describe("the orchestrator's commands on a machine", () => {
     const until_ = (await c.accessOf(c.mac))!.until!.toISOString();
     expect(text(await call(client, 'machines')).split('\n')).toEqual([
       `the company server (${c.server}), data, owner Ivan, unknown, holds the company's data, reachable, closed`,
-      `marat-mac (${c.mac}), worker, owner Marat, darwin, reachable, access open until ${until_}`,
+      `marat-mac (${c.mac}), worker, owner Marat, darwin, reachable, access open to orchestrator until ${until_}`,
     ]);
   });
 });

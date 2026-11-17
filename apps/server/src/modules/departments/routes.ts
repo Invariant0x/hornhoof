@@ -13,7 +13,7 @@ import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, goals, personAccess, pipelines, pipelineStages, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
@@ -29,12 +29,12 @@ import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensur
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { repoHostRoutes } from './repo-hosts.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
-import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
 import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
+import { nextRevision } from '../tracker/edit.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
@@ -316,6 +316,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!dept) continue;
         if (item.remove) {
           const inside = [dept.id, ...(await tx.select(idOnly(departments)).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
+          /* Its pipelines before any of its tasks, as every change that puts a task on a stage takes them. */
+          const itsPipelines = (await tx.select(idOnly(pipelines)).from(pipelines).where(inArray(pipelines.departmentId, inside)).orderBy(asc(pipelines.id)).for('update')).map(p => p.id);
           /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
           await tx
             .update(agents)
@@ -327,6 +329,13 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
              the product, so they are found through the department, not among all the tasks there are. */
           await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
+          /* Its goals stay as the company's, with their history; its pipelines go, and the tasks on them leave them. */
+          await tx.update(goals).set({ departmentId: null }).where(inArray(goals.departmentId, inside));
+          if (itsPipelines.length) {
+            await tx.update(tasks).set({ pipelineId: null, pipelineStageId: null, trackerRevision: nextRevision() }).where(inArray(tasks.pipelineId, itsPipelines));
+            await tx.delete(pipelineStages).where(inArray(pipelineStages.pipelineId, itsPipelines));
+            await tx.delete(pipelines).where(inArray(pipelines.id, itsPipelines));
+          }
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
           /* Its turns end with it and stay in the history without it: its open one as it got its release ready. */
           await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.departmentId, dept.id), ne(turns.status, 'closed')));
@@ -562,5 +571,4 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   approvalPolicyRoutes(app, ctx);
   repoHostRoutes(app, ctx);
   waitPolicyRoutes(app, ctx);
-  modelCheckRoutes(app, ctx);
 }

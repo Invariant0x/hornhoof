@@ -8,7 +8,7 @@ import { clock } from './subscription';
 function cardWords(t: Messages, card: WaitCard): { title: string; text: string } {
   const words = t.tasks.cards, number = card.number ?? 0;
   if (card.about === 'release_tag' && card.tag && card.turn) return { title: words.tagTitle, text: words.tag(card.tag.version, card.turn.number, card.tag.why) };
-  if (card.about === 'turn_summary' && card.turn) return { title: words.summaryTitle(card.turn.number), text: words.summary(card.turn.number, card.turn.version, t.tasks.board.views.releases) };
+  if (card.about === 'turn_summary' && card.turn) return { title: words.summaryTitle(card.turn.number), text: words.summary(card.turn.number, card.turn.version, t.tracker.side.turns) };
   if (card.about === 'goal_risk') return { title: words.goalTitle, text: words.goal(number) };
   if (card.about === 'final_review') return { title: words.stillOpenTitle, text: words.stillOpen(number) };
   return { title: words.lateTitle, text: words.late(number, card.kind ? words.waitsFor[card.kind] : null) };

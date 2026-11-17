@@ -69,9 +69,10 @@ for (const settings of SETTINGS) {
 
     await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
     await page.getByRole('button', { name: /^Development/ }).click();
-    const department = page.getByRole('heading', { name: 'Development', exact: true });
     await page.getByRole('button', { name: t.dept.tasksButton, exact: true }).click();
-    await page.getByRole('button', { name: /#1 Checkout step 1 / }).click();
+    await expect(page).toHaveURL(/\/tasks\?department=d2$/);
+    const department = page.getByRole('heading', { level: 1, name: 'Development', exact: true });
+    await page.locator('.tr-main').getByRole('listitem', { name: '#1 Checkout step 1', exact: true }).locator('.tr-title').click();
     const departmentTask = page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true });
     await expect(page).toHaveURL(/\/tasks\/t1$/);
     await expect(departmentTask).toBeVisible();
@@ -87,7 +88,7 @@ for (const settings of SETTINGS) {
     await expect(departmentComment).toHaveValue('Keep this department task draft');
     await page.screenshot({ path: info.outputPath(`task-department-${lang}-${theme}-${width}.png`), animations: 'disabled' });
     await departmentTask.getByRole('button', { name: t.window.close, exact: true }).click();
-    await expect(page).toHaveURL(/\/departments\/d2$/);
+    await expect(page).toHaveURL(/\/tasks\?department=d2$/);
     await expect(department).toBeVisible();
     expect(errors).toEqual([]);
   });

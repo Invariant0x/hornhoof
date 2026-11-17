@@ -1,16 +1,16 @@
 ---
 id: mkt-publish-approval
-title: { en: "Publish approval", ru: "Одобрение публикации" }
-description: { en: "Routes public posts, pages and announcements through the server outbound gateway, published catalog sources and per-item owner approval.", ru: "Проводит публичные посты, страницы и объявления через серверный шлюз исходящих, опубликованный каталог и поштучное одобрение владельца." }
+title: { en: "Publishing", ru: "Публикация" }
+description: { en: "Publishes posts, pages and announcements itself through the company's accounts and marks each one in the department's git.", ru: "Сам публикует посты, страницы и объявления через аккаунты компании и отмечает каждую публикацию в git отдела." }
 kind: gate
-sources: [affaan-m/ECC skills/operator-approval-loop/SKILL.md]
+sources: []
 ---
-Use this ability to validate or carry out an assigned public publication: a post, announcement, newsletter or external page. Every such item goes through the server outbound gateway ("outbound_submit" and "outbound_status"). Publishing credentials stay on the server and are never exposed to agents.
+Use this ability to publish for the department: a post, a reply, an announcement, a newsletter or a page. No program publishes for you: you do it like a person.
 
-1. **Published sources**: select the registered audience, language and published template, claim, price, terms and `https:` link revisions. Each language is a separate submission; never substitute another language silently. Propose missing sources with "outbound_propose"; your department's head publishes them with "outbound_publish" on the word of a person who runs the department.
-2. **Server checks**: the server renders the exact bytes, rejects unapproved claims, prices, secrets or personal data, and enforces consent, suppression, unsubscribe and applicable account or domain limits. Required independent-vendor model checks run in a fresh context with valid certification; unavailable checks do not count as a pass.
-3. **Exact human approval**: every public item requires explicit approval of its exact rendered content from the department owner, or the CEO / CEO delegate when no owner is set. Campaign, approach or batch approval never waives per-item approval. Silence is not approval.
-4. **Frozen revision**: dispatch only the approved bytes through the server and within the assignment's authority. Any wording or source change creates a new revision requiring a new approval.
-5. **Delivery and correction**: read delivery state. An `unknown` result requires destination verification before retrying. Notify the authorized owner promptly of a live error with a proposed correction; never delete or overwrite public records without approval.
+1. **Where**: social networks and comments go through the company's connected phones, so ask for the phone queue; a site goes through its own page, and a letter or a newsletter from the department's mailbox on your machine, as the ability "Mail from your machine" shows. The accounts the department publishes from are listed in its git, and their sign-ins are only in the vault.
+2. **Records in git**: keep what was published, where, when and from which account in the department's repository, in whatever format suits the work. Mark each post or reply at once and commit, so any colleague can see it and go on.
+3. **Facts**: prices, claims and links come from the department's own records. Each language is its own text, never a silent fallback to another.
+4. **No yes by default**: publishing is the department's own work. A post waits for no one unless the department itself set an approval rule for publications. Never send a person a card to publish, check or confirm what you can do yourself.
+5. **Corrections**: fix a live error yourself and tell your head; deleting a public record for good is irreversible and needs the CEO's yes.
 
-Return the submission revision, check outcomes, exact approval reference and delivery state. This ability does not grant account access or authorize publication outside the assignment.
+Return what was published, where, and the commit that records it.

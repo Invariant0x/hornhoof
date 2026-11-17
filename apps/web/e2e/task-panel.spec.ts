@@ -2,18 +2,20 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, openTaskCard as openTask, serveApi, TASKS } from './api';
+import { box, detail, openTaskCard, serveApi, TASKS } from './api';
 
-/* A task or an agent's window slides over a page: the page keeps its width and place, the panel runs to the bottom of the
-   window, scrolls by itself and leaves the page scrolled where it was. */
+/* A task or an agent's window slides over a page: the page keeps its place, the panel runs to the bottom of the window,
+   scrolls by itself and leaves the page scrolled where it was. On the tracker a task's card stands at the end side, and from
+   1100 px the tracker's work narrows to make room for it beside it (style book, PROPOSAL Tracker). */
 
 test.use({ locale: 'en-US' });
 
-test('a tab closes the task, history restores it, and the agent window stays on the right', async ({ page }) => {
+test('a tab closes the task, history restores it, and the task and the agent window stay on the right', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTasks(page);
   await openTask(page, 1);
-  expect((await box(panelOf(page, 1))).x).toBe(16);
+  const card = await box(panelOf(page, 1));
+  expect(card.x + card.width).toBe(1424);
   await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(panelOf(page, 1)).toHaveCount(0);
@@ -41,23 +43,29 @@ async function openPage(page: Page, heading: string, ...buttons: (string | RegEx
   for (const name of buttons) await page.getByRole('button', { name }).click();
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
 }
+/* The tracker at the department of the tasks, as its list. */
 async function openTasks(page: Page) {
-  await openPage(page, 'Tasks', /^Tasks/);
-  await expect(page.getByText('Nothing waits for you.')).toBeVisible();
-  await expect(page.getByRole('radio', { name: 'In progress' })).toBeChecked();
-  await expect(card(page, 1)).toBeVisible();
+  await openPage(page, 'My tasks', /^Tasks/);
+  /* On a phone the lists open as a drawer first. */
+  const lists = page.getByRole('button', { name: 'Lists', exact: true });
+  if (await lists.isVisible()) await lists.click();
+  await page.getByRole('navigation', { name: 'Task lists' }).getByRole('button', { name: /^Development/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Development' })).toBeVisible();
+  await expect(row(page, 1)).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 const openImprovements = (page: Page) => openPage(page, 'Improvements', 'Account', 'Improvements');
 
-const card = (page: Page, n: number) => page.getByRole('article', { name: `#${n} Checkout step ${n}`, exact: true });
+const row = (page: Page, n: number) => page.locator('.tr-main').getByRole('listitem', { name: `#${n} Checkout step ${n}`, exact: true });
+/* A task opens from its title in the list. */
+const openTask = (page: Page, n: number) => row(page, n).locator('.tr-title').click();
 const panelOf = (page: Page, n: number) => page.getByRole('complementary', { name: `#${n} Checkout step ${n}` });
 
 /* What scrolls on a page is its main part under the header, not the document. */
 const pageScroll = (page: Page) => page.getByRole('main').evaluate(el => el.scrollTop);
 /* Scrolls the page down until the card of task n is in sight, so opening it moves nothing. */
 async function scrollTo(page: Page, n: number) {
-  await card(page, n).scrollIntoViewIfNeeded();
+  await row(page, n).scrollIntoViewIfNeeded();
   await expect.poll(() => pageScroll(page)).toBeGreaterThan(0);
 }
 
@@ -66,7 +74,8 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: 'a task from the list',
     go: openTasks,
-    content: page => card(page, 1),
+    /* The tracker's view tabs keep their place and width; its work beside them narrows for the card. */
+    content: page => page.locator('.tr-views'),
     open: async page => {
       await openTask(page, 1);
       await expect(panelOf(page, 1).getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
@@ -76,7 +85,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: "the orchestrator's window",
     go: openTasks,
-    content: page => card(page, 1),
+    content: page => row(page, 1),
     open: async page => {
       await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
       const panel = page.getByRole('complementary', { name: 'Orchestrator' });
@@ -196,7 +205,7 @@ for (const lang of CHECKED_LOCALES) {
         }));
         await page.goto('/');
         await page.getByRole('button', { name: lang === 'ru' ? 'Задачи' : 'Tasks', exact: true }).click();
-        await openTask(page, 1);
+        await openTaskCard(page, 1);
         const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
         const part = panel.getByRole('region', { name: MESSAGES[lang].tasks.independentPart });
         await expect(part).toBeVisible();

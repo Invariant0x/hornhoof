@@ -1,5 +1,5 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
@@ -306,11 +306,15 @@ export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
 
 /* Turns on cancelled tasks end: a waiting one at once, a running one through its node. The agent that cancelled keeps its own. */
 export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Promise<void> {
-  if (!taskIds.length) return;
+  if (taskIds.length) await stopJobs(ctx, inArray(jobs.taskId, taskIds), keep);
+}
+
+/* These turns end: a waiting one at once, a running one through its node. The agent named keeps its own. */
+export async function stopJobs(ctx: Ctx, scope: SQL, keep?: string): Promise<void> {
   const open = await ctx.db
     .select({ id: jobs.id, status: jobs.status, agentId: jobs.agentId })
     .from(jobs)
-    .where(and(inArray(jobs.taskId, taskIds), inArray(jobs.status, ['queued', 'running'])));
+    .where(and(scope, inArray(jobs.status, ['queued', 'running'])));
   for (const job of open) {
     if (keep && job.agentId === keep) continue;
     if (job.status === 'running') {

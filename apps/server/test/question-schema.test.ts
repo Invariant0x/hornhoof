@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
+import { readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { createTestDb, freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
@@ -33,11 +33,12 @@ const LEGACY = `
     ('00000000-0000-4000-8000-000000000012','${COMPANY}','00000000-0000-4000-8000-000000000003','Historical dismissed proposal','[]','dismissed',null,null);
 `;
 
+/* The orchestrator's SQL runs as Hornhoof itself, here PGlite's own user; Operations' under its role. */
 async function roles(client: PGlite) {
-  const names = [agentRole('postgres'), readerRole('postgres')];
-  await client.exec(`${grantsFor(names[0]!)};\n${readerGrantsFor(names[1]!)}`);
+  const names = ['orchestrator', readerRole('postgres')];
+  await client.exec(readerGrantsFor(names[1]!));
   return { names, run: (name: string, statement: string) => client.transaction(async tx => {
-    await tx.exec(`SET LOCAL ROLE "${name}"`);
+    if (name !== 'orchestrator') await tx.exec(`SET LOCAL ROLE "${name}"`);
     return tx.exec(statement);
   }) };
 }
@@ -63,7 +64,7 @@ describe('canonical private question storage', () => {
   it.each([
     { table: 'requests', columns: 'text,options,explained' },
     { table: 'proposals', columns: 'brief,items' },
-  ])("keeps $table raw source content from Operations, shows it to the orchestrator, and keeps both from people's keys", async ({ table, columns }) => {
+  ])("keeps $table raw source content and people's keys from Operations, and shows both to the orchestrator", async ({ table, columns }) => {
     const { $client: client } = await createTestDb();
     const { names, run } = await roles(client);
     const [orchestrator, operations] = names as [string, string];
@@ -71,10 +72,9 @@ describe('canonical private question storage', () => {
       await expect(run(operations, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
       expect((await run(orchestrator, `SELECT ${column} FROM ${table}`))[0]!.rows).toEqual([]);
     }
-    for (const name of names) {
-      expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
-      await expect(run(name, 'SELECT password_hash FROM people')).rejects.toThrow(/permission denied/);
-    }
+    for (const name of names) expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
+    await expect(run(operations, 'SELECT password_hash FROM people')).rejects.toThrow(/permission denied/);
+    expect((await run(orchestrator, 'SELECT password_hash FROM people'))[0]!.rows).toEqual([]);
   });
 
   it('cannot attach private content to another company request', async () => {

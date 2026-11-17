@@ -93,7 +93,10 @@ const ROUTES: Record<string, unknown> = {
   '/api/link': { link: null, domain: 'hornhoof.org' },
   '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] } satisfies BackupsView,
   '/api/turns': { turns: [TURN] },
-  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true }] },
+  '/api/task-departments': { whole: true, mayPlanCompany: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true, mayPlan: true, responsible: null }] },
+  /* The tracker's goals and pipelines: none set yet. */
+  '/api/goals': { goals: [] },
+  '/api/pipelines': { pipelines: [] },
   '/api/tasks?status=all': { tasks: TASKS },
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
@@ -103,8 +106,6 @@ const ROUTES: Record<string, unknown> = {
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },
   '/api/google-sheets': { google: null },
-  /* What the departments send outside: nothing yet. Settings asks it to know whether to show External messaging. */
-  '/api/outbound': { channels: [], messages: [], escalations: [], approvals: [] },
   /* The company's saved sign-ins: none yet. Any person of the company reads them, and Settings asks to know whether to show
      Passwords. */
   '/api/vault': { entries: [] },
@@ -131,8 +132,6 @@ export async function serveApi(page: Page) {
     if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
     /* A department has no task branch outside main unless a test says otherwise. */
     if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
-    /* A department's screen asks what it sends outside and who runs it: nothing, and nobody here. */
-    if (/^\/api\/outbound\?department=[^&]+$/.test(path)) return route.fulfill(json({ channels: [], messages: [], escalations: [], approvals: [], departments: [] }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
@@ -168,6 +167,10 @@ export const tableFits = (page: Page) => page.locator('.tbl').evaluate(el => el.
 
 /* A task opens from the Tasks board, not from a request above it that names the same number: the title of its card
    opens the panel. */
+/* Opens a task from the tracker as a person does: finds it by its number and clicks its title, then clears the search. */
 export async function openTaskCard(page: Page, number: number) {
-  await page.locator('.board').getByRole('article', { name: new RegExp(`^#${number} `) }).first().locator('.goal-title button').click();
+  const search = page.getByRole('searchbox');
+  await search.fill(String(number));
+  await page.locator('.tr-found').getByRole('listitem', { name: new RegExp(`^#${number} `) }).first().locator('.tr-title').click();
+  await search.fill('');
 }

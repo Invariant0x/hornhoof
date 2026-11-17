@@ -28,26 +28,11 @@ const GROUPS = [
   { id: 'appearance', path: '/settings' },
   { id: 'integrations', path: '/settings/integrations' },
   { id: 'passwords', path: '/settings/passwords' },
-  { id: 'messaging', path: '/settings/messaging' },
   { id: 'company', path: '/settings/company' },
 ] as const;
 type GroupId = (typeof GROUPS)[number]['id'];
 const SHOTS = process.env.SHOTS;
 
-const OUTBOUND = {
-  channels: [{
-    id: 'ch1', departmentId: 'd2', productId: null, name: 'Sales Mail', adapter: 'smtp', purpose: 'first_contact', audience: 'direct', status: 'active',
-    generation: 2, stoppedReason: null, stoppedAt: null,
-    accounts: [{ id: 'ac1', label: 'Sales Primary', senderDomain: 'mail.acme.example', status: 'active', configGeneration: 1, available: true }],
-  }],
-  messages: [{
-    id: 'm1', departmentId: 'd2', productId: null, taskId: 't1', channelId: 'ch1', channelName: 'Sales Mail', accountId: 'ac1', accountLabel: 'Sales Primary',
-    senderDomain: 'mail.acme.example', revision: 1, contentDigest: '9f86d081884c7d659a2feaa0c55ad015', status: 'sent', reasonCodes: [], scheduledAt: '2026-11-15T09:00:00.000Z',
-    updatedAt: '2026-11-15T09:01:00.000Z', unknownRecovery: null,
-  }],
-  escalations: [],
-  approvals: [],
-};
 const GOOGLE = { kind: 'service_account', account: 'sheets-bot@acme.iam.gserviceaccount.com', shareEmail: 'ivan@acme.com', keyLast4: '9876' };
 const EMPTY_VAULT: { entries: VaultEntry[] } = { entries: [] };
 const FORBIDDEN = { status: 403, json: { error: { code: 'forbidden', message: 'Forbidden.' } } };
@@ -72,7 +57,6 @@ async function prepare(page: Page, lang: string, skin: string, width: number, pe
   await serveApi(page);
   await page.route('**/api/version', route => route.fulfill({ json: { version: '0.24.0', commit: 'c6bd5a8', migrations: 1 } }));
   await page.route('**/api/updates/current', route => route.fulfill({ json: { version: '0.24.0', commit: 'c6bd5a8' } }));
-  await page.route('**/api/outbound', route => route.fulfill({ json: OUTBOUND }));
   await page.route('**/api/vault', route => route.fulfill({ json: EMPTY_VAULT }));
   await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' } }));
   if (person === 'listed') {
@@ -101,59 +85,53 @@ async function shot(page: Page, info: TestInfo, name: string) {
   await page.setViewportSize(viewport);
 }
 
-/* What Design checks on the open group, measured on what is drawn. External messaging keeps its own look and is left out
-   of the targets, the end edge and the words. */
+/* What Design checks on the open group, measured on what is drawn. */
 async function layout(page: Page) {
   return page.evaluate(() => {
     const rtl = document.documentElement.dir === 'rtl';
     const dialog = document.querySelector<HTMLElement>('.settings-window')!;
     const main = dialog.querySelector('.settings-main')!.getBoundingClientRect();
     const group = dialog.querySelector<HTMLElement>('.sgroup')!;
-    const mine = group.dataset.group !== 'messaging';
     const shown = (element: Element) => element.getBoundingClientRect().width > 0 && getComputedStyle(element).visibility !== 'hidden';
     const end = (box: DOMRect) => (rtl ? box.left : box.right);
     const say = (element: Element) => `${element.tagName.toLowerCase()}.${element.className} "${element.textContent?.trim().slice(0, 30)}"`;
-    const parts = [...dialog.querySelectorAll<HTMLElement>('.settings-main > .sgroup > *, .sgroup > :is(.settings-group, .integrations, .messaging) > *')].filter(shown);
+    const parts = [...dialog.querySelectorAll<HTMLElement>('.settings-main > .sgroup > *, .sgroup > :is(.settings-group, .integrations) > *')].filter(shown);
     const off = parts.filter(part => {
       const box = part.getBoundingClientRect();
       return Math.abs(box.left - main.left) > 1 || Math.abs(box.right - main.right) > 1;
     }).map(say);
     const targets = [...dialog.querySelectorAll('.settings-nav .btn, .settings-window > header .btn')];
-    if (mine) targets.push(...group.querySelectorAll('.btn, select, input:not([type="checkbox"], [type="radio"], [type="file"])'));
+    targets.push(...group.querySelectorAll('.btn, select, input:not([type="checkbox"], [type="radio"], [type="file"])'));
     const small = targets.filter(shown).filter(target => Math.round(target.getBoundingClientRect().height) < 44).map(say);
     /* The last button of each row of actions ends where the column ends; on a skin's card, where the card's content ends. */
     const edge: string[] = [];
-    if (mine) {
-      for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-add)')) {
-        const buttons = [...row.querySelectorAll(':scope > .btn, :scope > .entry-actions > .btn')].filter(shown);
-        const last = buttons.at(-1);
-        if (last && Math.abs(end(last.getBoundingClientRect()) - end(main)) > 1) edge.push(say(last));
-      }
-      for (const card of group.querySelectorAll<HTMLElement>('.skin-card')) {
-        const last = [...card.querySelectorAll('.skin-actions > .btn')].at(-1);
-        const box = card.getBoundingClientRect();
-        const inner = rtl ? box.left + 13 : box.right - 13;
-        if (last && Math.abs(end(last.getBoundingClientRect()) - inner) > 1) edge.push(say(last));
-      }
+    for (const row of group.querySelectorAll(':is(.settings-actions, .repo-actions, .skins-add)')) {
+      const buttons = [...row.querySelectorAll(':scope > .btn, :scope > .entry-actions > .btn')].filter(shown);
+      const last = buttons.at(-1);
+      if (last && Math.abs(end(last.getBoundingClientRect()) - end(main)) > 1) edge.push(say(last));
+    }
+    for (const card of group.querySelectorAll<HTMLElement>('.skin-card')) {
+      const last = [...card.querySelectorAll('.skin-actions > .btn')].at(-1);
+      const box = card.getBoundingClientRect();
+      const inner = rtl ? box.left + 13 : box.right - 13;
+      if (last && Math.abs(end(last.getBoundingClientRect()) - inner) > 1) edge.push(say(last));
     }
     /* A word broken over two lines although it would fit a line of its own. */
     const broken: string[] = [];
-    if (mine) {
-      const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const parent = node.parentElement!;
-        if (parent.closest('select, option, textarea') || !shown(parent)) continue;
-        const room = parent.getBoundingClientRect().width;
-        const text = node.textContent ?? '';
-        for (const match of text.matchAll(/\S+/g)) {
-          const range = document.createRange();
-          range.setStart(node, match.index);
-          range.setEnd(node, match.index + match[0].length);
-          const rects = [...range.getClientRects()].filter(rect => rect.width > 0);
-          const lines = new Set(rects.map(rect => Math.round(rect.top)));
-          const width = rects.reduce((sum, rect) => sum + rect.width, 0);
-          if (lines.size > 1 && width <= room) broken.push(match[0]);
-        }
+    const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement!;
+      if (parent.closest('select, option, textarea') || !shown(parent)) continue;
+      const room = parent.getBoundingClientRect().width;
+      const text = node.textContent ?? '';
+      for (const match of text.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const rects = [...range.getClientRects()].filter(rect => rect.width > 0);
+        const lines = new Set(rects.map(rect => Math.round(rect.top)));
+        const width = rects.reduce((sum, rect) => sum + rect.width, 0);
+        if (lines.size > 1 && width <= room) broken.push(match[0]);
       }
     }
     const nav = dialog.querySelector('.settings-nav')!.getBoundingClientRect();
@@ -290,7 +268,6 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     expect(tones.danger, `${look}: Disconnect is pink, last of its row`).toEqual([[t.googleSheets.remove, true, true]]);
     expect(tones.main, `${look}: Save a key, the one action of a record with no key, is the main button`).toEqual([[t.repoHost.save, true]]);
   }
-  if (group === 'messaging') await expect(dialog.getByRole('heading', { name: 'Sales Mail', exact: true })).toBeVisible();
   if (group === 'passwords') await expect(dialog.getByText(t.vault.none, { exact: true })).toBeVisible();
   if (group === 'company') {
     await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
@@ -386,7 +363,7 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
     await expect(page.locator('.account-menu').getByRole('button')).toHaveText([t.settings.menu, t.about.menu, t.shell.logOut]);
     await shot(page, info, `menu-person-${look}`);
-    const shown: GroupId[] = ['profile', 'appearance', 'passwords', 'messaging'];
+    const shown: GroupId[] = ['profile', 'appearance', 'passwords'];
     for (const id of shown) {
       await openGroup(page, t, id, GROUPS.find(group => group.id === id)!.path, 'ltr', shown);
       await checkGroup(page, t, id, `${look} ${id}`);

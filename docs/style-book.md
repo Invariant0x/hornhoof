@@ -323,6 +323,22 @@ Built with the classes `.mat*`, `.mv*`, `.opt*` and `.answer-zone`. What each fi
 | `.ptable` | Plain table, at 760 px of window and under each row becomes a block | `screens/People.tsx` |
 | `.dt`, `.sortbar` | Sort table, at 780 px of its own width and under each row becomes a block with a sort bar | `ui/SortTable.tsx` |
 
+### Tracker
+
+**PROPOSAL.** The tracker page, `/tasks`, and the card it opens use existing tokens only. Its classes below are in `theme.css` and wait for the head's approval. The page is seen in `apps/web/e2e/tasks-board/tasks-board.spec.ts`, whose shots go to `HH_SCREENSHOT_DIR`.
+
+| Class | What it is | Source |
+|---|---|---|
+| `.tracker`, `.tr-main`, `.tr-top`, `.tr-menu`, `.tr-where`, `.tr-tools`, `.tr-write` | Page grid: the left panel from 220 to 280 px and the main area, one column at 760 px and under; the head with where the person is, View as and the search, the button to the orchestrator beside the heading at a desk; at 760 px and under `.tr-menu` opens the left panel | `screens/Tasks.tsx` |
+| `.tr-side`, `.tr-item`, `.tr-count`, `.tr-dept-head`, `.tr-dept-body`, `.tr-people`, `.tr-turns` | Left panel: items 44 px high, the chosen one with a 3 px `--cyan` start line on `--glow`; a department unfolds to its goals, pipelines, products and employees; at 760 px and under a drawer over the page down to the bottom of the screen, with its close button | `ui/TrackerSide.tsx` |
+| `.tr-bar`, `.tr-views` with `.segments.board-views`, `.tr-chips`, `.tr-chip` | Three equal view tabs, then filter chips 44 px high that wrap; a chip in use has a `--cyan` frame | `screens/Tasks.tsx` |
+| `.tr-list`, `.tr-group`, `.tr-rows`, `.tr-row`, `.tr-cells`, `.tr-head`, `.tr-k`, `.tr-v` | List grouped by status in words; columns above it where the list is wider than 640 px, under that each value under its task with its name | `ui/TrackerViews.tsx` |
+| `.tr-columns`, `.tr-col`, `.tr-card`, `.tr-card-facts` | Board: as many columns of at least 220 px as fit; a card with a 3 px status strip at its start edge and the status in words | `ui/TrackerViews.tsx` |
+| `.tr-graph`, `.tr-crumbs`, `.tr-modes`, `.tr-canvas`, `.tr-map`, `.tr-wires`, `.tr-node` | Graph on the map's dotted canvas with the map's zoom bar: the way back up, nodes 290 px wide that grow to hold their words, a 4 px status strip with the status in words, solid lines for parts, dashed `--amber-ink` lines with words for waits. A tree bigger than the canvas opens at 60 % on its first goal | `ui/TrackerViews.tsx` |
+| `.acard.at-end` | The card at the end side over the tracker from 761 px, the tracker leaving 432 px for it from 1100 px | `ui/SidePanels.tsx`, `screens/Shell.tsx` |
+| `.tp-path`, `.tp-type`, `.tp-state`, `.tp-why`, `.tp-leads`, `.tp-materials`, `.tr-form`, `.tr-stages`, `.tr-stage` | The card's path, kind, state, why, ways on, materials and edit forms | `ui/TaskPanel.tsx`, `ui/GoalPanel.tsx`, `ui/TrackerForms.tsx` |
+| `.tp-late`, `.tr-wait` | A due day passed, and what a task waits for, in `--amber-ink` and in words | `ui/TrackerViews.tsx`, `ui/TaskPanel.tsx` |
+
 ## 5. Languages
 
 **Goal: ready for 20 to 30 languages.** Today the registry holds two: `en`, the source, and `ru`, in `apps/web/src/i18n/`. `LANGUAGES` lists them in `index.tsx`. `isLanguage` there also names `en` and `ru` by hand, so a new language changes both, in addition to what `CONTRIBUTING.md` lists.

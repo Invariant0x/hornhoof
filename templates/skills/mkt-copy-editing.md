@@ -17,4 +17,4 @@ Use this ability to edit an assigned draft while preserving its intended meaning
 - **Mechanics**: check grammar, spelling, names, dates, prices and language-specific formats against the brief and house style.
 - **Read aloud**: rewrite anything whose wording obstructs the meaning.
 
-Return the edited draft and a short list of changes that affect meaning, so the assignment owner can assess them. Editing does not approve new commercial terms or publication. Public use requires the server gateway and exact approval for the edited revision, even if an earlier revision was approved.
+Return the edited draft and a short list of changes that affect meaning, so the assignment owner can assess them. Editing does not approve new commercial terms or publication. Public use of the edited revision is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.

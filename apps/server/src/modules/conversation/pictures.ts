@@ -58,7 +58,7 @@ export function pictureRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: READ_BYTES }, (_req, body, done) => done(null, body));
     scope.post('/api/agents/:id/pictures', { bodyLimit: READ_BYTES, onRequest: async req => void (await agentFor(ctx, req)) }, async (req, reply) => {
       const { me, agent } = await agentFor(ctx, req);
-      if (me.via) throw new ApiError(403, 'forbidden', 'Only a person sends a file to an agent.', 'attachment_invalid');
+      if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only a person or the orchestrator sends a file to an agent.', 'attachment_invalid');
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       if (!bytes.length) throw new ApiError(400, 'validation', 'This file is empty, or it is a folder. Send a file with something in it.', 'file_empty');
       if (bytes.length > MESSAGE_FILE_BYTES) throw new ApiError(413, 'validation', `A file is at most ${MESSAGE_FILE_BYTES / 1024 / 1024} MB.`, 'file_too_big');

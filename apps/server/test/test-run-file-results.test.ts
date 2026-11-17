@@ -1,14 +1,20 @@
 import { PREPARATION_UNIT, hashTestEnvironment, parseTestEnvironment, type NodeMessage, type TestsDescribed } from '@hornhoof/protocol';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
+import { wholeProductRun } from '../src/modules/tasks/autonomous-release.js';
 import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
 import { keptEverything, keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+import { prepareTemplates } from './templates-once.js';
+
+await prepareSharedDatabase();
+prepareTemplates();
 
 const NODE_KEY = 'file-results-node-0123456789abcdef';
 const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'd'.repeat(64) }];
@@ -16,6 +22,8 @@ const FILES = ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts'];
 const print = (name: string) => name.repeat(64).slice(0, 64);
 const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
+/* What a runner said of a part where a failed and b and c passed. */
+const FAILED_A = [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' as const }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' as const }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' as const }];
 
 const manifest = (preparation = false, full = true) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
@@ -87,13 +95,17 @@ async function fixture(turnNumber = 3, preparation = false, full = true) {
     }
     await pumpTests(app.ctx);
   };
+  /* Another slot of the machine takes the parts of a run that wait while a part of an older run still runs, as a second machine would. */
+  const runBeside = (runId: string) => db.update(testParts).set({ status: 'running', builtin: true, startedAt: new Date() }).where(and(eq(testParts.runId, runId), eq(testParts.status, 'queued')));
   const greenRows = () => db.select().from(testFileResults).orderBy(asc(testFileResults.file));
   const told = async () => {
     const rows = await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, agent!.id));
     return rows.map(row => row.prompt).join('\n');
   };
-  return { app, db, agent: agent!, job: job!, task: task!, start, finish, partsOf, runOf, ranFiles, greenRows, told, companyId };
+  return { app, db, agent: agent!, job: job!, task: task!, start, finish, runBeside, partsOf, runOf, ranFiles, greenRows, told, companyId };
 }
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 /* What a run asked GitHub to set on a commit, in the order it asked. */
 function marked(f: Awaited<ReturnType<typeof fixture>>): { commit: string; state: string }[] {
@@ -293,6 +305,85 @@ describe('reusing green test results', () => {
     expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
   });
 
+  /* A whole run of a release after one that ended runs what that release failed and takes what it proved green. */
+  it.each([
+    ['passed', undefined, []],
+    ['failed', FAILED_A, ['test/a.test.ts']],
+  ] as const)('runs again, in a second whole run of a release after one that %s, only what failed, and takes the green of its release', async (_end, files, ran) => {
+    const f = await fixture();
+    const first = await f.start({});
+    await f.finish(first, files ? { ok: false, files: [...files] } : {});
+    const second = await f.start({});
+    expect(await f.ranFiles(second)).toEqual(ran);
+    expect((await f.runOf(second)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: FILES.length - ran.length });
+  });
+
+  /* Each release proves its own files: what another release passed at the same fingerprint stands for nothing in this one. */
+  it('runs a file its release failed again, though the next release then passed it at the same fingerprint', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+    /* The next release changed b and c, and passed a as it is. */
+    await f.finish(await f.start({}, fingerprints({ 'test/b.test.ts': print('e'), 'test/c.test.ts': print('f') }), 'turn-4'));
+    const next = await f.start({});
+    expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
+    expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: 2 });
+  });
+
+  /* Two releases checked at once keep one row of a file at a fingerprint, whichever wrote it last. A file of this release that failed runs
+     again whatever the other release left there, and so does one whose row the other release took over: the safe side. */
+  it('runs a file its release failed again while another release ran beside it and passed every file at the same fingerprints', async () => {
+    const f = await fixture();
+    const here = await f.start({}), beside = await f.start({}, undefined, 'turn-4');
+    await f.finish(here, { ok: false, files: FAILED_A });
+    await f.finish(beside);
+    expect((await f.greenRows()).map(row => row.runId)).toEqual([beside, beside, beside]);
+    const next = await f.start({});
+    expect(await f.ranFiles(next)).toEqual(FILES);
+    expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: 0 });
+  });
+
+  /* A part of an older run may answer after a newer run of the release failed its file: the newest run's word on the file stands. */
+  it('runs a file again that the newest run of its release failed, though an older run of it passed the file after that', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+    const older = await f.start({}), newer = await f.start({});
+    expect([await f.ranFiles(older), await f.ranFiles(newer)]).toEqual([['test/a.test.ts'], ['test/a.test.ts']]);
+    await f.runBeside(newer);
+    await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    await f.finish(older);
+    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+  });
+
+  it('keeps the green result of a newer run of its release when an older run passes the file after it', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+    const older = await f.start({}), failing = await f.start({});
+    await f.runBeside(failing);
+    await f.finish(failing, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    const passing = await f.start({});
+    await f.runBeside(passing);
+    await f.finish(passing);
+    await f.finish(older);
+    expect((await f.greenRows()).find(row => row.file === 'test/a.test.ts')?.runId).toBe(passing);
+    expect(await f.ranFiles(await f.start({}))).toEqual([]);
+  });
+
+  /* A run that was stopped, or whose preparation failed, checked its release only in part: what it passed closes no file that failed. */
+  it.each(['was stopped', 'failed in its preparation'] as const)('runs a failed file again that a run of its release passed, when that run then %s', async end => {
+    const f = await fixture();
+    await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+    const cut = await f.start({});
+    await f.finish(cut);
+    expect((await f.greenRows()).find(row => row.file === 'test/a.test.ts')?.runId).toBe(cut);
+    /* As the run stands when it was stopped, or its preparation failed, after this part passed. */
+    if (end === 'was stopped') await f.db.update(testRuns).set({ status: 'stopped' }).where(eq(testRuns.id, cut));
+    else {
+      await f.db.insert(testParts).values({ companyId: f.companyId, runId: cut, part: 2, status: 'failed', environmentSelection: { selection: { kind: 'prepare', version: 2, expectedCommitSha: TEST_COMMIT }, after: [] } });
+      await f.db.update(testRuns).set({ status: 'failed', parts: 2 }).where(eq(testRuns.id, cut));
+    }
+    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+  });
+
   it('keeps no result of a file that failed and keeps those that passed beside it', async () => {
     const f = await fixture();
     const first = await f.start({});
@@ -392,6 +483,39 @@ describe('reusing green test results', () => {
     const reused = await f.start({});
     expect(await f.runOf(reused)).toMatchObject({ status: 'passed', parts: 0 });
     expect(marks).toEqual([{ commit: TEST_COMMIT, state: 'success' }, { commit: TEST_COMMIT, state: 'success' }]);
+  });
+
+  /* A run that kept every file green marks its commit, and the autonomous release takes it: what it kept must be what its own
+     release proved. A file its release failed runs again, so no success goes out before it passes. */
+  const FAILED_ALL = FILES.map(file => ({ suiteId: 'unit', file, status: 'failed' as const }));
+  it.each([
+    /* Its release failed every file, and the next release passed them all at the same fingerprints. */
+    ['every file was green only in another release', FILES, async (f: Fixture) => {
+      await f.finish(await f.start({}), { ok: false, files: FAILED_ALL });
+      await f.finish(await f.start({}, undefined, 'turn-4'));
+    }],
+    ['another release passed a file this release failed, at the same fingerprint', ['test/a.test.ts'], async (f: Fixture) => {
+      await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+      await f.finish(await f.start({}, fingerprints({ 'test/b.test.ts': print('e'), 'test/c.test.ts': print('f') }), 'turn-4'));
+    }],
+    ['an older run of the release passed a file after a newer one failed it', ['test/a.test.ts'], async (f: Fixture) => {
+      await f.finish(await f.start({}), { ok: false, files: FAILED_A });
+      const older = await f.start({}), newer = await f.start({});
+      await f.runBeside(newer);
+      await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+      await f.finish(older);
+    }],
+  ] as const)('marks no success and proves no whole run where it would keep what its release did not prove: %s', async (_how, ran, before) => {
+    const f = await fixture(), marks = marked(f);
+    await before(f);
+    const marked0 = marks.length, next = await f.start({});
+    const run = await f.runOf(next);
+    expect(run.status).toBe('running');
+    expect(await f.ranFiles(next)).toEqual(ran);
+    expect(marks.slice(marked0)).toEqual([]);
+    expect(await wholeProductRun(f.db, run, f.companyId, run.departmentId!, TEST_COMMIT)).toBe(false);
+    await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    expect(marks.slice(marked0)).toEqual([{ commit: TEST_COMMIT, state: 'failure' }]);
   });
 
   it('marks failure when a run of the whole product failed', async () => {

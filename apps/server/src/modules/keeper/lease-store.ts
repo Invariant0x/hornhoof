@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { agentRole, readerRole, REFUSED_NAME_PATTERN } from '../../db/agent-sql.js';
+import { readerRole, REFUSED_NAME_PATTERN } from '../../db/agent-sql.js';
 import { APP_NAME, KEEPER_NAME, stripSettings } from '../../db/client.js';
 import { keepErrors } from '../../db/confirm.js';
 import { FENCE_TRIGGER, JOURNAL_TRIGGER, type LeaseKind, type LeaseSync, type Term } from '../../db/net.js';
@@ -140,10 +140,10 @@ const PROBLEMS = `SELECT line FROM (
   ) found ORDER BY at, line`;
 
 export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machineId: string }): LeaseStore {
-  /* The agents' roles are named after the database, which does not change under a connection. */
+  /* Operations' role is named after the database, which does not change under a connection; the orchestrator's sessions are the app's. */
   let roles: Promise<string[]> | null = null;
   const agentRoles = (): Promise<string[]> =>
-    (roles ??= sql.query<{ name: string }>('SELECT current_database() AS name').then(({ rows }) => [agentRole(rows[0]!.name), readerRole(rows[0]!.name)]));
+    (roles ??= sql.query<{ name: string }>('SELECT current_database() AS name').then(({ rows }) => [readerRole(rows[0]!.name)]));
   const endSessions = async (): Promise<number> => (await sql.query<{ ended: number }>(END_SESSIONS, [APP_NAME, await agentRoles()])).rows[0]!.ended;
   const fence = async (): Promise<void> => {
     await sql.query(FENCE);

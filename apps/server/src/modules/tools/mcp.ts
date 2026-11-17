@@ -26,6 +26,7 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerHolderTools, registerTaskTools } from '../tasks/tools.js';
+import { registerTrackerTools } from '../tracker/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerVaultTools } from '../vault/tools.js';
@@ -36,7 +37,6 @@ import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
-import { registerOutboundControlTools, registerOutboundHeadTools, registerOutboundTools } from '../outbound/extension.js';
 import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
@@ -45,6 +45,7 @@ import { GRANTS } from '../templates/load.js';
 import { actingFor, Shelf } from './shelf.js';
 import { registerSourceTool } from './source.js';
 import { registerLogsTool } from './logs.js';
+import { registerShellTool } from './shell.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -81,14 +82,17 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  /* The tracker's tools by the agent's own skills: the orchestrator sets goals and pipelines on its list, and tidying a
+     task stays the product manager's. */
+  registerTrackerTools(server, ctx, job, new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? [])));
   registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);
   registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerPhoneTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerApprovalTools(server, ctx, job);
-  registerOutboundTools(server, ctx, job);
   if (shelf) registerOrchestratorTools(server, ctx, app, job, reading);
+  else registerComputerTools(server, ctx, job);
   /* A department's own tools go for the department the orchestrator names. */
   shelf?.shelve(true);
   registerBriefingTool(server, ctx, job);
@@ -103,7 +107,6 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
     registerAssignmentTools(server, ctx, job);
     registerDepartmentControlTools(server, ctx, app, job);
     registerHeadPolicyTools(server, ctx, app, job);
-    registerOutboundHeadTools(server, ctx, app, job);
     shelf?.shelve();
   }
   if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
@@ -185,7 +188,6 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
   );
   registerControlTools(server, ctx, app, job);
   registerApprovalControlTools(server, ctx, app, job);
-  registerOutboundControlTools(server, ctx, app, job);
   registerComputerTools(server, ctx, job);
   /* The orchestrator answers for nothing standing still anywhere: it sees any employee's program, types into it and releases
      its recovery hold, as Operations do. */
@@ -195,6 +197,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
   registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
   registerSourceTool(server, ctx);
   registerLogsTool(server, ctx, job);
+  registerShellTool(server);
   registerOrchestratorImprovementTools(server, ctx, job);
   registerMergeTools(server, ctx, job);
 }

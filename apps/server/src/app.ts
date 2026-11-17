@@ -19,10 +19,10 @@ import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
 import { improvementRoutes } from './modules/improvements/routes.js';
 import { backlogRoutes } from './modules/backlog/routes.js';
+import { trackerRoutes } from './modules/tracker/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
-import { outboundRoutes } from './modules/outbound/extension.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub, type NodeIdentity } from './modules/nodes/hub.js';
 import type { ToolsCall } from './modules/tools/outside.js';
@@ -33,6 +33,7 @@ import { handleNumbered } from './modules/nodes/numbered.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { startOperationsCheck } from './modules/operations/ensure.js';
+import { startTrackerUpgrade } from './modules/tracker/upgrade.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
@@ -60,6 +61,7 @@ import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
+import { expireAccess } from './modules/computer/expiry.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { startNodeDrains } from './modules/updates/node-drain.js';
@@ -360,6 +362,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     () => clearInterval(holdersTimer),
   );
   app.addHook('onClose', async () => clearInterval(holdersTimer));
+  let accessExpiryTimer: NodeJS.Timeout | undefined;
+  ctx.mode.whenLead(
+    () => { accessExpiryTimer = setInterval(() => void expireAccess(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not expire machine access.')), 60_000).unref(); },
+    () => clearInterval(accessExpiryTimer),
+  );
+  app.addHook('onClose', async () => clearInterval(accessExpiryTimer));
   /* While this app leads it takes over the server's own computer access as an app from before left it, and looks
      again until that is done, at first every second and then less often: its own machine gets its row only once its
      keeper has asked. The other machines are served meanwhile. */
@@ -433,6 +441,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   backlogRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);
+  startTrackerUpgrade(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
   inboxRoutes(app, ctx);
@@ -440,6 +449,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   updateRoutes(app, ctx);
   computerRoutes(app, ctx);
   taskRoutes(app, ctx);
+  trackerRoutes(app, ctx);
   attachmentRoutes(app, ctx);
   partFileRoutes(app, ctx);
   harnessRoutes(app, ctx);
@@ -453,7 +463,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   backupRoutes(app, ctx);
   totalLossRoutes(app, ctx);
   mergeRoutes(app, ctx);
-  outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
   telegramRoutes(app, ctx);
   googleSheetsRoutes(app, ctx);

@@ -17,7 +17,7 @@ import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, ty
 export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId'>;
 
 /* Every task of the company, but the work of another person's assistant's own agent. */
-export function seesTask(viewer: AgentViewer, task: TaskPlace): boolean {
+export function seesTask(viewer: Pick<AgentViewer, 'apart'>, task: TaskPlace): boolean {
   return [task.assigneeAgentId, task.executorAgentId].every(id => !id || knowsAgentId(viewer, id));
 }
 
@@ -72,8 +72,13 @@ function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: st
   return { ...findings, issues: [], ...(findings.byVendor ? { byVendor: findings.byVendor.map(vendor => ({ ...vendor, findingIds: [] })) } : {}) };
 }
 
+/* Whom a task waits for, as whom its waits answer to shows: no employee the reader does not know of, and no other person. */
+const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number]['who']) =>
+  !who || (who.kind === 'agent' ? knowsAgentId(viewer, who.id) : who.id === viewer.personId) ? who : null;
+const shownTime = (viewer: AgentViewer, time: TaskLine['time']): TaskLine['time'] => ({ ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who) })) });
+
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
+  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time) };
 }
 
 /* Task lines as this person reads them. */
@@ -117,7 +122,6 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   return {
     ...maskLine(viewer, detail, detail.parent !== null),
     echelonFindings: shownFindings(viewer, detail.echelonFindings, detail.department?.id ?? null),
-    executor: shownRef(viewer, detail.executor),
     createdBy: detail.createdBy?.kind === 'agent' && !knowsAgentId(viewer, detail.createdBy.id) ? null : detail.createdBy,
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
     log: shownLog(viewer, detail.log),

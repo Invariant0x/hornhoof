@@ -29,7 +29,7 @@ const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.l
 async function updatesView(ctx: Ctx, wait: UpdateWait, companyId: string) {
   const { version, commit, migrations } = ctx.config;
   const state = ctx.updates.state();
-  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: await wait.shown(companyId), calledOff: wait.shownCalledOff(companyId) };
+  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: await wait.shown(companyId), calledOff: await wait.shownCalledOff(companyId) };
   return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
 }
 
@@ -81,6 +81,7 @@ function howFast(body: z.infer<typeof UpdateBody>): Pick<UpdateRequest, 'urgent'
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { version, commit } = ctx.config;
   const wait = new UpdateWait(ctx);
+  ctx.mode.whenLead(() => wait.lead(), () => undefined);
   ctx.mode.whenLeaving(() => wait.standDown());
 
   app.get('/api/updates/current', async req => {
@@ -115,9 +116,10 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       const request = { ...(await requestFor(ctx, await publishedBuild(ctx, body.version), id)), ...howFast(body) };
       /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
       await modeGate(ctx.mode)(req);
-      wait.callOff();
-      if (request.urgent || request.immediate) sendToUpdater(ctx, request);
-      else await wait.sendWhenIdle(me.companyId, request, body.idleWaitMinutes);
+      if (request.urgent || request.immediate) {
+        sendToUpdater(ctx, request);
+        await wait.handedOver(me.companyId, request);
+      } else await wait.sendWhenIdle(me.companyId, request, body.idleWaitMinutes);
     } catch (err) {
       ctx.updater.free(id);
       /* An update that waited before this one still waits, and holds the updater as it did. */
@@ -130,7 +132,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete('/api/updates', STARTS_FIRST, async (req, reply) => {
     await requireCompanyPerson(req, ctx.db);
-    wait.callOff();
+    await wait.cancel();
     return reply.code(204).send();
   });
 }

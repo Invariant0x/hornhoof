@@ -16,6 +16,9 @@ import { stopStaleProgram } from './stale-program.js';
 import { dropTurnSign, lastTurnSigns } from './turn-signs.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
+/* Every program shows a spinner or a clock while it thinks, so its screen moves. A thinking program whose screen stood still
+   this long waits on something the screen shows, most often a window of its own that asks what no hook tells of. */
+const STILL_SCREEN_MS = 180_000;
 
 export type { TurnAlarm, TurnAlarmReason, TurnProgram } from '@hornhoof/protocol/map';
 
@@ -25,12 +28,13 @@ type ProgramReport = Extract<NodeMessage, { type: 'job.program' }>;
 type GoneProgram = { state: 'gone'; exitCode: number | null; signal: string | null; screen: string | null };
 /* goneAt: when the node first said, in this server's time, that the program is gone, while it still says so. */
 type StoredProgram = { program: TurnProgram; gone: GoneProgram | null; goneAt: number | null };
-type SilentTurn = {
+/* An alarm, and the wait that raised it. */
+type Quiet = { alarm: TurnAlarm; wait: number };
+type SilentTurn = Quiet & {
   job: Job;
   agent: Agent;
   task: { id: string; number: number; title: string } | null;
   program: TurnProgram | null;
-  alarm: TurnAlarm;
 };
 
 const turnPrograms = new WeakMap<Ctx, Map<string, StoredProgram>>();
@@ -146,30 +150,37 @@ export function lostTurn(ctx: Ctx, job: Pick<Job, 'id' | 'startedAt' | 'createdA
   return nowMs - heardAt(job, mapOf(turnPrograms, ctx).get(job.id)?.program ?? null, worked) >= SILENT_TURN_MS;
 }
 
-function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): TurnAlarm | null {
+const quietFor = (wait: number, since: number, nowMs: number): Quiet | null =>
+  nowMs - since >= wait ? { alarm: { reason: 'program_stalled', since }, wait } : null;
+
+function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): Quiet | null {
   if (signAt !== null) {
     if (program.state === 'asking') return null;
-    const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
-    return nowMs - signAt >= threshold ? { reason: 'program_stalled', since: signAt } : null;
+    return stillScreen(program, signAt, nowMs) ?? quietFor(program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS, signAt, nowMs);
   }
-  const lastChange = Math.max(program.since, program.screenAt);
-  return nowMs - lastChange >= SILENT_TURN_MS ? { reason: 'program_stalled', since: lastChange } : null;
+  return quietFor(SILENT_TURN_MS, Math.max(program.since, program.screenAt), nowMs);
+}
+
+/* Counted from the last of its sign, its state and its screen's change. A tool runs with its screen still, and a retry or an
+   idle program has its own waits. */
+function stillScreen(program: TurnProgram, signAt: number, nowMs: number): Quiet | null {
+  return program.state === 'thinking' ? quietFor(STILL_SCREEN_MS, Math.max(program.since, program.screenAt, signAt), nowMs) : null;
 }
 
 /* What the watchdog knows of a running turn: its program as its node reported it, and the turn's last sign besides. */
 type Watched = { job: Job; program: TurnProgram | null; worked: number | undefined };
 
-function alarmForTurn({ job, program, worked }: Watched, nowMs: number): TurnAlarm | null {
+function alarmForTurn({ job, program, worked }: Watched, nowMs: number): Quiet | null {
   const heard = heardAt(job, program, worked);
-  if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
+  if (nowMs - heard >= SILENT_TURN_MS) return { alarm: { reason: 'node_silent', since: heard }, wait: SILENT_TURN_MS };
   return program ? alarmForProgram(program, signInTurn(program, job), nowMs) : null;
 }
 
-function alarmForTask(turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+function alarmForTask(turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): Quiet | null {
   return task?.externalWait ? null : alarmForTurn(turn, nowMs);
 }
 
-function alarmWithCheckQueue(ctx: Ctx, turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+function alarmWithCheckQueue(ctx: Ctx, turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): Quiet | null {
   const { job, program } = turn;
   const detected = alarmForTask(turn, task, nowMs);
   if (missingProgramReport(detected)) return detected;
@@ -177,11 +188,11 @@ function alarmWithCheckQueue(ctx: Ctx, turn: Watched, task: { externalWait: type
   return afterQueuedCheck(program, detected, jobCheckLastEnd(ctx, job.id, nowMs), nowMs);
 }
 
-const missingProgramReport = (alarm: TurnAlarm | null): boolean => alarm?.reason === 'node_silent';
+const missingProgramReport = (quiet: Quiet | null): boolean => quiet?.alarm.reason === 'node_silent';
 
-function afterQueuedCheck(program: TurnProgram | null, alarm: TurnAlarm | null, checkEnd: number | null, now: number): TurnAlarm | null {
+function afterQueuedCheck(program: TurnProgram | null, quiet: Quiet | null, checkEnd: number | null, now: number): Quiet | null {
   const threshold = program?.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
-  return checkEnd !== null && now - checkEnd < threshold ? null : alarm;
+  return checkEnd !== null && now - checkEnd < threshold ? null : quiet;
 }
 
 const sameAlarm = (a: TurnAlarm | null, b: TurnAlarm | null) => a?.reason === b?.reason && a?.since === b?.since;
@@ -228,9 +239,9 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
        alarm is raised for it until the machine is back. */
     const node = job.nodeId ? nodeIdentity(job.nodeId) : job.builtinMachine ? builtinOf(job.builtinMachine) : null;
     const turn = { job, program, worked: signs.get(job.id) };
-    const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, turn, task, nowMs);
-    await updateTurnAlarm(ctx, job, alarm, now);
-    if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
+    const quiet = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, turn, task, nowMs);
+    await updateTurnAlarm(ctx, job, quiet?.alarm ?? null, now);
+    if (quiet) silent.push({ job, agent, task: task?.id ? task : null, program, ...quiet });
   }
   return silent;
 }
@@ -308,6 +319,12 @@ const reasonLabel = (reason: TurnAlarmReason) =>
   reason === 'program_stalled'
     ? `program_stalled (program state and screen unchanged for ${QUIET_MINUTES} minutes)`
     : `node_silent (node has not reported for ${QUIET_MINUTES} minutes)`;
+const STILL_LABEL = `program_stalled (its screen stood still for ${STILL_SCREEN_MS / 60_000} minutes while it thinks: a window of the program may wait for an answer)`;
+
+function alarmLabel(s: SilentTurn): string {
+  if (s.wait === STILL_SCREEN_MS) return STILL_LABEL;
+  return s.program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason);
+}
 
 async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<string> {
   const who = agentLabel(ctx, s.agent);
@@ -322,7 +339,7 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
   const restartLine = restart.allowed ? 'restart_program is allowed now, for a wait the screen shows dead.' : `restart_program is not allowed now: ${restart.reason}`;
   const action = `Read program_screen for employee ${s.agent.id} and do at its screen what it needs to go on. ${restartLine} When nothing you may do helps, tell your head what the screen shows.`;
-  const reason = program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason);
+  const reason = alarmLabel(s);
   /* The reason and who come first: an inbox turn shows each letter cut at 300 characters. */
   return (
     `Hornhoof: turn alarm, reason ${reason}: ${who}, in turn ${s.job.id} (${where}). ` +
@@ -372,10 +389,9 @@ export async function screenReader(ctx: Ctx, companyId: string, of: string, unav
 }
 
 /* One call when the quiet begins and one more each time it doubles, so a program nobody brought back is looked at again.
-   The quiet is counted in the wait that raised the alarm: the longer one only for a tool of a node that tells its signs. */
+   The quiet is counted in the wait that raised the alarm. */
 function quietCase(s: SilentTurn, now: Date): string {
-  const threshold = s.alarm.reason === 'program_stalled' && s.program?.state === 'tool' && s.program.signAt !== null ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
-  const doubled = Math.floor(Math.log2(Math.max(1, (now.getTime() - s.alarm.since) / threshold)));
+  const doubled = Math.floor(Math.log2(Math.max(1, (now.getTime() - s.alarm.since) / s.wait)));
   return doubled ? `${s.job.id}:quiet:${doubled}` : s.job.id;
 }
 

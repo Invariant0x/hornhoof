@@ -436,7 +436,7 @@ select:disabled { opacity: .55; }
 .settings-window .settings-part { gap: 12px; }
 .settings-part :is(h3, h4, p) { overflow-wrap: break-word; }
 /* Every field, list and button of the groups is a 44 px target, Save and the other actions on the end edge of the
-   column. External messaging keeps its own. */
+   column. */
 .settings-window :is(.settings-group, .integrations) .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
 .settings-window :is(.settings-group, .integrations) :is(.field input, .field select, .link-input input) { height: 44px; }
 .settings-window :is(.settings-group, .integrations) :is(.settings-actions, .repo-actions) { justify-content: flex-end; justify-self: stretch; }
@@ -467,8 +467,7 @@ select:disabled { opacity: .55; }
 }
 /* Integrations: one record for each outside tool, a line between them: its name and whether it is connected, then what it
    gives, what it holds and its actions. */
-.integrations, .messaging { display: grid; gap: 16px; min-width: 0; }
-.integrations { gap: 0; }
+.integrations { display: grid; gap: 0; min-width: 0; }
 .integration { display: grid; gap: 8px; min-width: 0; padding-block: 16px; border-block-start: 1px solid var(--line); }
 .integration:first-child { padding-block-start: 0; border-block-start: 0; }
 .integration p { margin: 0; overflow-wrap: break-word; }
@@ -482,49 +481,14 @@ select:disabled { opacity: .55; }
 .integration-state::before, .skin-state::before { content: ''; flex: none; inline-size: 8px; block-size: 8px; border: 1px solid currentColor; border-radius: 50%; }
 .integration-state[data-connected='true'] { border-color: var(--ok); color: var(--ok); }
 .integration-state[data-connected='true']::before { background: currentColor; }
-.messaging > p { margin: 0; overflow-wrap: break-word; }
-/* A department's own outbound setup: its channels and accounts, its catalog and its log. */
-.outbound-setup { display: grid; gap: 16px; min-width: 0; }
-.outbound-setup > p, .outbound-setup .settings-part h4 { margin: 0; overflow-wrap: break-word; }
-.outbound-setup .settings-part h4 { font-family: var(--f-display); font-weight: 600; font-size: 15px; line-height: 1.15; }
-/* A name with its status beside it, and a card's caption: how and to whom on one line, its limits on the next. */
-.outbound-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.outbound-title > :is(h3, b) { min-width: 0; overflow-wrap: break-word; }
-.outbound-meta { display: grid; gap: 4px; margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: break-word; }
-/* Lists with nothing of the browser's; revisions and log entries stand 16px apart, with a line from the second on. */
-.outbound-list { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; list-style: none; }
-.outbound-list.outbound-entries { gap: 16px; }
-.outbound-entries > li + li { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
-.outbound-entry { display: grid; gap: 4px; min-width: 0; overflow-wrap: break-word; }
-.outbound-entry small { color: var(--muted); font-size: 12px; }
-.outbound-entry > .entry-actions { margin-block-start: 4px; }
-.outbound-address { overflow-wrap: anywhere; }
-/* A channel's addresses: a block of their own after its buttons, under a line, with a subheading of the panel. */
-.outbound-contacts { display: grid; gap: 8px; min-width: 0; margin-block-start: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
-.outbound-contacts > h4 { margin: 0; font-family: var(--f-display); font-weight: 600; font-size: 14px; line-height: 1.15; overflow-wrap: break-word; }
-.outbound-setup .form-foot { margin-block-start: 8px; }
-/* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
-.outbound-setup .field :is(input, select) { height: 44px; }
-.outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
-.outbound-added { margin: 0; overflow-wrap: anywhere; }
-/* A revision as a person reads it before publishing it: its facts, its words with the places a message fills in marked,
-   and what changed: words put in in the text's own colour over a 2px line of success, words taken out struck through,
-   the colour only repeating it; spaces stand outside both (Design #1181). */
-.outbound-view { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface2); overflow-wrap: break-word; }
-.outbound-facts { display: grid; gap: 4px; min-width: 0; margin: 0; }
-.outbound-facts dt { font-size: 12px; font-weight: 600; color: var(--muted); }
-.outbound-facts dd { display: grid; gap: 4px; min-width: 0; margin: 0; }
-.outbound-words { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
-.outbound-slot { display: inline-block; padding: 0 6px; border: 1px solid currentColor; color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.6; white-space: normal; }
-.outbound-changes { display: grid; gap: 4px; min-width: 0; padding-block-start: 8px; border-block-start: 1px solid var(--line); }
-.outbound-changes ins { color: var(--ink); text-decoration-line: underline; text-decoration-thickness: 2px; text-decoration-color: var(--ok); }
-.outbound-changes del { color: var(--pink-ink); text-decoration: line-through; }
-.outbound-note { margin: 0; color: var(--muted); overflow-wrap: break-word; }
-.outbound-view > .entry-actions { margin-block-start: 4px; }
-/* The groups of the limits form share .field-group, standing 8px below what precedes them and 10px between their fields. */
-.outbound-numbers { margin-block-start: 8px; }
-.outbound-numbers > .field-group-body { gap: 10px; }
-/* The box of sending without a yes stands at the first line of its words. */
+/* The passwords of the vault and an entry's log: lists with nothing of the browser's, entries 16px apart with a line from
+   the second on. */
+.vault-list { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.vault-list > li + li { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.vault-entry { display: grid; gap: 4px; min-width: 0; overflow-wrap: break-word; }
+.vault-entry small { color: var(--muted); font-size: 12px; }
+.vault-site { overflow-wrap: anywhere; }
+/* A tick box stands at the first line of its words. */
 .check-card > .tick-box { margin-block-start: 2px; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -1496,7 +1460,6 @@ body:has(.form-foot) .version-mark { display: none; }
 /* The department's tasks under its people, and a new task written in place. */
 .dv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dv-h h3 { margin-bottom: 10px; }
-.dv-tasks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .new-task { display: grid; gap: 12px; max-width: 640px; margin-bottom: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); }
 .new-task > p { margin: 0; font-size: 13px; }
 .new-task textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
@@ -1703,15 +1666,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .goal-fold:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .goal-subs { display: grid; gap: 6px; margin: 0; padding: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line2); list-style: none; min-width: 0; }
 .goal-closed { display: grid; gap: 8px; min-width: 0; }
-/* At a glance under the heading: three numbers, what waits for the person's answer first and framed in the colour of
-   attention while anything does. */
-.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.sum { display: grid; gap: 4px; min-width: 0; padding: 12px 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
-.sum b { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1.15; }
-.sum span { color: var(--muted); overflow-wrap: anywhere; }
-.sum.you:not(.calm) { box-shadow: inset 0 0 0 2px var(--pink); }
-.sum.you:not(.calm) b { color: var(--pink-ink); }
-.sum.you:not(.calm) span { color: var(--ink); font-weight: 600; }
 /* A goal whose work waits for the person's answer: framed, its state marked, a button to the task that asks. */
 .goal.you { border: 2px solid var(--pink); box-shadow: inset 4px 0 0 var(--pink); }
 [dir="rtl"] .goal.you { box-shadow: inset -4px 0 0 var(--pink); }
@@ -1740,6 +1694,191 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
+/* The tracker, PROPOSAL items "Tracker" of the style book: the left panel, then the main area with where the person is,
+   the view and its filters and the work, and the card at the end side. On a phone the left panel is a drawer over the page,
+   the board's columns stand one under another and the card takes the whole width. */
+.tracker { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; max-width: 1440px; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
+@media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
+/* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
+   stays where the person scrolled it. */
+.body.tracker-page { overflow-anchor: none; }
+@media (min-width: 761px) {
+  .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
+}
+.tr-side { position: sticky; top: 84px; display: grid; gap: 8px; align-content: start; min-width: 0; max-height: calc(100vh - 100px); overflow: auto; scrollbar-width: none; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
+/* The panel scrolls with no bar of its own, so every engine leaves its content the same width (style book section 9). */
+.tr-side::-webkit-scrollbar { display: none; }
+.tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+.tr-side-close { display: none; justify-content: flex-end; }
+.tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; width: 100%; min-height: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
+.tr-item:hover { background: var(--surface2); }
+.tr-item.on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
+.tr-item:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.tr-item-name { min-width: 0; overflow-wrap: anywhere; }
+.tr-item small { grid-column: 1 / -1; font-size: 12px; font-weight: 400; color: var(--muted); overflow-wrap: anywhere; }
+.tr-count { font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; }
+.tr-unfold .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
+.tr-unfold[aria-expanded="true"] .chev { transform: rotate(90deg); }
+[dir="rtl"] .tr-unfold .chev { transform: scaleX(-1); }
+[dir="rtl"] .tr-unfold[aria-expanded="true"] .chev { transform: scaleX(-1) rotate(90deg); }
+.tr-unfold:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.tr-dept-body { display: grid; gap: 4px; min-width: 0; margin-inline-start: 10px; padding-inline-start: 8px; border-inline-start: 1px solid var(--line2); }
+.tr-dept-body h3 { margin: 8px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.tr-dept-body > p { margin: 0; padding-inline: 10px; font-size: 12.5px; }
+.tr-dept-body > .goal-fold { margin-inline-start: 10px; }
+.tr-people li { display: grid; gap: 2px; min-width: 0; padding: 6px 10px; font-size: 13px; }
+.tr-person { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.tr-person b { font-weight: 600; overflow-wrap: anywhere; }
+.tr-people .linkish { justify-self: start; font-size: 12.5px; overflow-wrap: anywhere; }
+.tr-turns { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
+.tr-main { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.tr-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px 16px; min-width: 0; }
+.tr-top > .btn { min-height: 44px; }
+.tr-write { grid-row: 1; grid-column: 2; align-self: start; }
+.tr-menu { display: none; }
+.tr-where { display: grid; gap: 4px; min-width: 0; }
+.tr-where h1 { margin: 0; overflow-wrap: anywhere; }
+.tr-where p { margin: 0; overflow-wrap: anywhere; }
+.tr-tools { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; min-width: 0; }
+.tr-make { justify-content: flex-start; }
+.tr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-width: 0; }
+.tr-views { flex: 0 1 360px; min-width: min(100%, 260px); }
+.tr-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.tr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding-inline-start: 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface); font-size: 13px; font-weight: 600; color: var(--muted); }
+.tr-chip > span { overflow-wrap: anywhere; }
+.tr-chip.on { border-color: var(--cyan); color: var(--cyan-ink); }
+/* The chip's choice is as wide in every engine, its arrow at the end side of the line in both directions. */
+.tr-chip select {
+  inline-size: 160px; max-inline-size: 100%; min-inline-size: 0; block-size: 40px; padding-block: 0; padding-inline: 8px 28px;
+  border: 0; background-color: var(--surface); font: inherit; font-weight: 500; line-height: 40px; color: var(--ink);
+}
+[dir="rtl"] .tr-chip select { background-position: 10px 50%, 15px 50%; }
+.tr-chip select:is(:focus, :focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
+/* In the light skin a cyan line on white is too faint for a border, and cyan words over the glow too faint for words. */
+:root[data-scheme="light"] :is(.tr-chip.on, .tr-node.goal) { border-color: var(--cyan-ink); }
+:root[data-scheme="light"] .tr-views label.on { color: var(--ink); }
+.tr-goals { display: grid; gap: 8px; min-width: 0; }
+.tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
+.tr-goals ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.tr-goals li { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); }
+.tr-goals .linkish { justify-self: start; font-weight: 600; overflow-wrap: anywhere; }
+.tr-found { display: grid; gap: 10px; min-width: 0; }
+.tr-waits { display: grid; gap: 6px; }
+.tr-waits h3 { margin: 0; font-size: 14px; }
+.tr-wait { color: var(--amber-ink); }
+.tp-late { color: var(--amber-ink); font-weight: 600; }
+
+/* The list: a group per state in words, the names of its columns above it where the list is wide, each task a row of name,
+   executor, responsible, goal and due; where it is narrow, each value with its name under the task. */
+.tr-list { container: tr-list / inline-size; display: grid; gap: 18px; min-width: 0; }
+.tr-group { display: grid; gap: 6px; min-width: 0; }
+.tr-group-head { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.tr-group-head > .goal-fold { font-size: inherit; color: var(--ink); }
+.tr-rows { display: grid; margin: 0; padding: 0; list-style: none; min-width: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.tr-rows.sub { margin-block-start: 4px; margin-inline-start: 12px; background: var(--surface2); }
+.tr-row { display: grid; gap: 2px; min-width: 0; padding: 8px 12px; border-block-start: 1px solid var(--line); }
+.tr-row:first-child { border-block-start: 0; }
+.tr-row.on { box-shadow: inset 3px 0 0 var(--cyan); }
+[dir="rtl"] .tr-row.on { box-shadow: inset -3px 0 0 var(--cyan); }
+.tr-cells { display: grid; grid-template-columns: minmax(0, 3fr) repeat(3, minmax(0, 1.2fr)) minmax(0, 1fr); align-items: baseline; gap: 4px 12px; min-width: 0; font-size: 13px; }
+.tr-head { padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.tr-head > span { overflow-wrap: anywhere; }
+.tr-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 14px; }
+.tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.tr-title:hover { color: var(--cyan-ink); }
+.tr-name .tstate, .tr-name .badge { white-space: normal; }
+.tr-name small { flex-basis: 100%; font-size: 12px; }
+.tr-cell { min-width: 0; overflow-wrap: anywhere; }
+.tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tr-v { color: var(--muted); }
+@container tr-list (max-width: 640px) {
+  .tr-head { display: none; }
+  .tr-cells { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .tr-cell { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 12.5px; }
+  .tr-cell:has(.tr-v:empty) { display: none; }
+  .tr-k { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
+  .tr-k::after { content: ':'; }
+  .tr-v { color: var(--ink); }
+}
+
+/* The board: as many columns side by side as the width holds, each with its name and count, cards one under another. */
+.tr-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; align-items: start; min-width: 0; }
+.tr-col { display: grid; gap: 8px; align-content: start; min-width: 0; padding: 10px; background: var(--surface2); border: 1px solid var(--line); }
+.tr-col-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.tr-col > p { margin: 0; font-size: 12.5px; }
+.tr-card { position: relative; display: grid; gap: 4px; min-width: 0; padding: 10px 12px; padding-inline-start: 14px; background: var(--surface); border: 1px solid var(--line); }
+.tr-card::before { content: ''; position: absolute; inset-block: -1px; inset-inline-start: -1px; width: 3px; background: var(--line2); }
+.tr-card.working::before, .tr-card.review::before { background: var(--cyan); }
+.tr-card.waiting::before, .tr-card.blocked::before { background: var(--amber); }
+.tr-card.you::before { background: var(--pink); }
+.tr-card.done::before { background: var(--ok); }
+.tr-card.on { border-color: var(--cyan); }
+.tr-card-title { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.tr-card-title .linkish { color: var(--ink); overflow-wrap: anywhere; }
+.tr-card-title .linkish:hover { color: var(--cyan-ink); }
+.tr-card .tstate { white-space: normal; }
+.tr-card-facts { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
+.tr-card-facts li { overflow-wrap: anywhere; }
+
+/* The graph: the breadcrumb back up, what to draw with a pipeline, and the map's canvas with its zoom bar. */
+.tr-graph { display: grid; gap: 10px; min-width: 0; }
+.tr-crumbs ol, .tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.tr-crumbs li, .tp-path li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.tr-crumbs li + li::before, .tp-path li + li::before { content: '/'; color: var(--muted); }
+.tr-crumbs .linkish, .tp-path .linkish { overflow-wrap: anywhere; }
+/* A link that stands alone takes a finger: at least 44 px high, its words in the middle as before. Links inside a line of
+   words keep the line's height. */
+:is(.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-block-size: 44px; }
+.tr-crumbs [aria-current] { font-weight: 600; }
+.tr-modes { max-width: 420px; }
+.tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }
+.tr-canvas { position: relative; height: clamp(360px, calc(100vh - 300px), 900px); min-width: 0; overflow: hidden; background: var(--bg); border: 1px solid var(--line); }
+.tr-map:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.tr-wires .part { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.tr-wires .wait path { fill: none; stroke: var(--amber-ink); stroke-width: 1.4; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
+.tr-wires .wait text { fill: var(--amber-ink); font-family: var(--f-body); font-size: 12px; }
+.tr-node { position: absolute; display: grid; align-content: center; gap: 2px; margin: 0; padding: 6px 10px; padding-inline-start: 14px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; text-align: start; }
+button.tr-node { cursor: pointer; }
+.tr-node::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; width: 4px; background: var(--line2); }
+.tr-node.working::before, .tr-node.review::before { background: var(--cyan); }
+.tr-node.waiting::before, .tr-node.blocked::before { background: var(--amber); }
+.tr-node.you::before { background: var(--pink); }
+.tr-node.done::before { background: var(--ok); }
+.tr-node.goal { border-color: var(--cyan); background: var(--surface2); }
+.tr-node.plain { border-style: dashed; background: var(--surface2); }
+.tr-node.on, button.tr-node:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.tr-node-title { font-size: 13px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.tr-node-title b { color: var(--muted); font-weight: 500; }
+.tr-node small { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+
+/* The card: the path, the kind, the state with its marks, why, the facts and the ways from it. */
+.tp-path { min-width: 0; }
+.tp-type { font-size: 12.5px; }
+.tp-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tp-why p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tp-leads { justify-content: flex-start; }
+.tp-materials { display: grid; gap: 10px; }
+.tp-materials h5 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.tr-form { padding: 14px; background: var(--surface2); border: 1px solid var(--line); }
+.tr-form > h4 { margin: 0; }
+.tr-stages .field-group-body { display: grid; gap: 12px; }
+.tr-stage { display: grid; gap: 8px; padding-block-end: 12px; border-block-end: 1px solid var(--line); }
+
+@media (max-width: 760px) {
+  .tracker { grid-template-columns: minmax(0, 1fr); }
+  /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
+  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-height: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
+  .tr-side.open { display: grid; }
+  .tr-side-close { display: flex; }
+  .tr-top { grid-template-columns: minmax(0, 1fr); }
+  .tr-write { grid-row: auto; grid-column: auto; }
+  .tr-menu { display: inline-flex; justify-self: start; min-height: 44px; }
+  .tr-canvas { height: calc(100vh - 220px); min-height: 320px; }
+}
 .machine-away { display: grid; gap: 4px; padding: 8px 12px; border-left: 2px solid var(--amber); }
 .machine-away h3 { font-size: 14px; }
 .machine-away p { margin: 0; }
@@ -1750,7 +1889,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .wait-card p { margin: 0; }
 /* The person whose decisions show, with a cross that shows everyone's again. */
 .filter-chip { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 0; padding-left: 12px; border: 1px solid var(--amber); background: var(--surface); font-size: 13px; font-weight: 600; }
-.filter-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-chip > span { min-width: 0; overflow-wrap: anywhere; }
 .imps { display: grid; gap: 10px; }
 .imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); }
 .imp-taken { border-inline-start-color: var(--cyan); }
@@ -1940,20 +2079,10 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .task-search input { width: 100%; min-width: 0; padding-right: 44px; }
 .task-search input::-webkit-search-cancel-button { display: none; }
 .task-search .zbtn { position: absolute; right: 0; top: 0; height: 40px; }
-.trow { display: grid; gap: 4px; width: 100%; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.trow:hover, .trow.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
-.trow:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.trow-title { font-weight: 600; overflow-wrap: anywhere; }
-.trow-title b { font-family: var(--f-display); color: var(--cyan-ink); }
-.trow-brief { min-width: 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; white-space: normal; }
-.trow-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--muted); }
-.trow-gate { color: var(--cyan-ink); font-weight: 600; }
-.trow-back { color: var(--amber-ink); }
 .tstate { justify-self: start; white-space: nowrap; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); color: var(--muted); }
 .tstate.working, .tstate.review { color: var(--cyan-ink); border-color: currentColor; }
 .tstate.waiting, .tstate.blocked { color: var(--amber-ink); border-color: currentColor; }
 .tstate.done { color: var(--ok); border-color: currentColor; }
-.tp-parent { font-size: 13px; color: var(--muted); }
 .tgates { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; counter-reset: gate; }
 .tgates li { position: relative; padding: 6px 0 6px 22px; font-size: 13.5px; }
 .tgates li::before { content: ''; position: absolute; left: 4px; top: 12px; width: 9px; height: 9px; border-radius: 50%; background: var(--idle); }
@@ -2111,6 +2240,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .dv-drawer.spd .spd-tabs button { height: 40px; padding: 0 8px; margin-right: 10px; border: 0; background: none; cursor: pointer; font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted); box-shadow: inset 0 -2px 0 transparent; }
 .dv-drawer.spd .spd-tabs button:hover { color: var(--ink); }
 .dv-drawer.spd .spd-tabs button[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--cyan); }
+/* The frame of the Speed panel's totals; the rule after it sets their grid. */
+.sum { display: grid; gap: 4px; min-width: 0; padding: 12px 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .dv-drawer.spd .sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .dv-drawer.spd .sum div { display: grid; gap: 1px; padding-left: 10px; border-left: 2px solid var(--line2); }
 .dv-drawer.spd .sum div.c { border-left-color: var(--cyan); }

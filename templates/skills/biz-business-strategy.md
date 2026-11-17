@@ -15,4 +15,4 @@ Use this ability to propose a direction for an assigned growth decision. Inputs 
 6. State the options not recommended and why.
 7. Give each bet a kill condition: an observable result or date that triggers reconsideration.
 
-Return a short strategy proposal with sources, assumptions, alternatives and approval needs. The CEO decides the strategic commitment; proposing a plan does not assign other departments or spend money. External promises require approval of their exact message through the authorized outbound gateway, and a human signs any contract.
+Return a short strategy proposal with sources, assumptions, alternatives and approval needs. The CEO decides the strategic commitment; proposing a plan does not assign other departments or spend money. An external message is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it, and a human signs any contract.

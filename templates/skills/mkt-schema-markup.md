@@ -14,4 +14,4 @@ Use this ability to prepare and validate structured data for assigned pages. Inp
 5. Return the markup, affected pages, evidence and proposed changes. Edit or ship code only when the assignment authorizes it and required task gates permit it.
 6. If the assignment includes an already released page, inspect the available search reports for errors and propose corrections.
 
-A validation result does not authorize changing a public page or widening access. Public changes still require applicable server publication controls and exact human approval. Leave out a type whose fit cannot be established.
+A validation result does not authorize changing a public page or widening access. A public change is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it. Leave out a type whose fit cannot be established.

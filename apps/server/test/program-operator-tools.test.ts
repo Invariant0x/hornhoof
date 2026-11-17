@@ -1,16 +1,18 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_PICTURE_BYTES, PROGRAM_OPERATOR_ROLE, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { agentEvents, agents, attachments, jobs, machines, nodes, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, jobs, machines, nodes, people, programOperatorCases, subscriptions, vaultEntries, type AgentKind } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import * as programRpc from '../src/modules/program-operator/rpc.js';
 import * as turnLog from '../src/modules/tasks/turn-log.js';
 import { readProgramView, reportOperatorCase, sendProgramInput } from '../src/modules/program-operator/tools.js';
+import { PainterError } from '../src/modules/program-operator/painter.js';
 import * as screenRenderer from '../src/modules/program-operator/screen.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { operatorCompany } from './program-operator-company.js';
@@ -19,6 +21,9 @@ type Caller = { id: string; companyId: string; agentId: string; agentKind: Agent
 const SECRET = 'sk-live-0123456789abcdef-???';
 /* Another machine's network id, whose built-in node an API key's turn can go out to. */
 const MACHINE = 'b'.repeat(32);
+/* Claude Code's own safety check asking before a removal on a variable that may be empty, as Neo's program showed it on 17 Nov
+   at 09:30 (the picture of that operator case). Unanswered, Claude Code blocks the call by itself two minutes later. */
+const RM_PERMISSION = readFileSync(new URL('./fixtures/claude-rm-permission-screen.txt', import.meta.url), 'utf8');
 
 /* An employee of Development with its program on a node, and the orchestrator, the head of Operations and the program operator,
    each in a turn of its own. The node answers as ProgramAccess does: what the screen shows, and what came of the input. */
@@ -32,12 +37,12 @@ async function fixture() {
     return { id: job!.id, companyId: c.companyId, agentId: agent.id, agentKind: agent.kind, roleKey: agent.roleKey };
   };
   const callers = { orchestrator: await turn(orchestrator!), opsHead: await turn(opsHead!), operator: await turn(c.operator!), developer: await turn(developer!), watcher: await turn(c.watcher) };
-  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', question: null as OperatorQuestion | null, tool: null as string | null, input: 'applied' as 'applied' | 'refused', answers: true };
+  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', cols: 80, rows: 24, question: null as OperatorQuestion | null, tool: null as string | null, input: 'applied' as 'applied' | 'refused', answers: true };
   const snapshot = randomUUID();
   const frames = () => c.sent.mock.calls.map(([node, frame]) => ({ node, frame: frame as OperatorServerMessage })).filter((sent): sent is { node: typeof sent.node; frame: Extract<OperatorServerMessage, { type: 'program.view_get' | 'program.input_send' }> } => sent.frame.type === 'program.view_get' || sent.frame.type === 'program.input_send');
   c.sent.mockImplementation((node, frame) => {
     if (!screen.answers) return false;
-    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: 80, rows: 24, cells: screen.cells }));
+    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: screen.cols, rows: screen.rows, cells: screen.cells }));
     if (frame.type === 'program.input_send') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.input_result', agentKey: frame.agentKey, action: frame.action, result: screen.input, reason: screen.input === 'refused' ? 'snapshot_stale' : null, jobId: c.job.id, instance: c.fact.instance, question: screen.question, text: frame.text?.replaceAll(SECRET, '[hidden]') ?? null, auditReason: frame.auditReason.replaceAll(SECRET, '[hidden]') }));
     return true;
   });
@@ -101,6 +106,27 @@ it("asks the node of a busy employee's running turn for its screen, not a newer 
   await queuedAfter(c, c.agent.id);
   expect(await readProgramView(c.ctx, c.callers.orchestrator, { employee: c.agent.id })).toMatchObject({ employee: c.agent.id, snapshot: c.snapshot });
   expect(c.frames().map(({ node, frame }) => [node, frame.type, frame.agentKey])).toEqual([[{ kind: 'node', nodeId: c.identity.nodeId }, 'program.view_get', c.agent.id]]);
+});
+
+it("shows Claude Code's own permission question of a busy employee whose next turns wait in its queue on no node, and takes the operator's answer", async () => {
+  const c = await fixture();
+  /* Turns of two other tasks wait behind the running one on no node yet, as Neo's did while the question stood. */
+  await queuedAfter(c, c.agent.id);
+  await queuedAfter(c, c.agent.id);
+  const command = 'S=/tmp/claude-1000/-data-work-agents-f7863b74-d43d-49db-9d48-774326e62283/afa1c2a5-7295-4766-9871-e26f97aca11e/scratchpad/t1152; rm -f $S/*.zip; python3 -I - "$S" <<\'EOF\'';
+  const question: OperatorQuestion = { id: randomUUID(), kind: 'permission', tool: 'Bash', text: JSON.stringify({ tool: 'Bash', request: { command, description: 'Zip shots by engine without duplicates' } }), callId: 'toolu_015wakBwT26wHFL3DaVCTamK' };
+  Object.assign(c.screen, { cells: RM_PERMISSION, cols: 162, rows: 47, tool: 'Bash', question });
+  const view = await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id });
+  expect(view).toMatchObject({ employee: c.agent.id, job: c.job.id, snapshot: c.snapshot, tool: 'Bash', question });
+  expect(view.text).toContain('Dangerous rm operation on possibly-empty variable path: $S/*.zip in `rm -f $S/*.zip`');
+  expect(view.text).toContain('Claude Code will automatically block this request in 1:07');
+  expect(view.text).toContain('Do you want to proceed?');
+  /* Only a person may approve such a removal: the operator answers No, as its rights let it. */
+  expect(await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, keys: ['Down', 'Enter'], decision: 'denied' })).toMatchObject({ result: 'applied' });
+  const node = { kind: 'node', nodeId: c.identity.nodeId };
+  expect(c.frames().map(({ node, frame }) => [node, frame.type, frame.agentKey])).toEqual([[node, 'program.view_get', c.agent.id], [node, 'program.input_send', c.agent.id]]);
+  const [entry] = await c.journal();
+  expect(entry!.operatorAction).toMatchObject({ keys: ['Down', 'Enter'], question, requestedDecision: 'denied', decision: 'denied', result: 'applied' });
 });
 
 it('asks the node a newer turn went out to while it still waits there, on a plan and on an API key', async () => {
@@ -170,6 +196,20 @@ it('masks known secrets in input reasons, encoded text and every question field'
     expect(entry.operatorAction).toMatchObject({ reason: 'Use [hidden] to continue.', text: '[hidden]', question: { tool: '[hidden]', text: 'Use [hidden]?', callId: '[hidden]' } });
     expect(entry.text).toContain('Reason: Use [hidden] to continue.');
   }
+});
+
+/* An agent signs in like a person, with a sign-in of the vault typed into the program: no node knows that password. */
+it('masks a vault password the operator types into a sign-in, on the screen and in the log', async () => {
+  const c = await fixture();
+  const password = 'vault-pass-7d1f2a9c';
+  await c.db.insert(vaultEntries).values({ companyId: c.companyId, name: 'Mail', site: 'mail.example.com', login: 'ops@example.com', passwordEnc: encryptSecret(password, c.ctx.config.secret) });
+  c.screen.cells = `Password: ${password}\nPress Enter to sign in`;
+  const view = await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id });
+  expect(view.text).toBe('Password: [hidden]\nPress Enter to sign in');
+  expect(await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, text: password, keys: ['Enter'], reason: 'Sign in with the Mail entry of the vault.' })).toMatchObject({ result: 'applied' });
+  const [entry] = await c.journal();
+  expect(JSON.stringify(entry)).not.toContain(password);
+  expect(entry!.operatorAction).toMatchObject({ text: '[hidden]' });
 });
 
 it('saves the masked actor and input intent before dispatch, then records its matching result', async () => {
@@ -272,11 +312,19 @@ it('leaves an input the node did not answer unknown and sends it once', async ()
 
 it('rejects a rendered picture above the protocol limit and accepts the exact boundary', async () => {
   const c = await fixture();
-  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockReturnValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES + 1), text: 'Screen', width: 80, height: 24 });
+  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockResolvedValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES + 1), text: 'Screen', width: 80, height: 24 });
   onTestFinished(() => render.mockRestore());
   await expect(readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).rejects.toMatchObject({ status: 413, code: 'validation', message: 'The program picture is too large.' });
-  render.mockReturnValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES), text: 'Screen', width: 80, height: 24 });
+  render.mockResolvedValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES), text: 'Screen', width: 80, height: 24 });
   expect((await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).png.length).toBe(OPERATOR_PICTURE_BYTES);
+});
+
+it('says the picture could not be drawn when its drawing failed, and the next look draws it', async () => {
+  const c = await fixture();
+  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockRejectedValueOnce(new PainterError('out of time'));
+  onTestFinished(() => render.mockRestore());
+  await expect(readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).rejects.toMatchObject({ status: 409, code: 'unavailable', reason: 'programs_unavailable', message: 'The program picture could not be drawn (out of time). Look again.' });
+  expect((await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).text).toContain('Choose a theme.');
 });
 
 /* A case the program operator was given, for its report. */

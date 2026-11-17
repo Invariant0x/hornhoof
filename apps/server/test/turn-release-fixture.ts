@@ -1,6 +1,7 @@
+import { EnvironmentSnapshot, hashTestEnvironment, parseTestEnvironment, type RepositoryScope, type TestEnvironmentReceipt } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -69,6 +70,31 @@ export async function readyInTurn() {
   return { ...f, turn: turn!, branch, repo, acceptance, accept, openTurn };
 }
 
+const PRODUCT_FILES = ['test/a.test.ts', 'test/b.test.ts'];
+const RUNTIMES = [{ id: 'node', version: '22.0.0', fingerprint: 'e'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'f'.repeat(64) }];
+/* What the machine that described a commit said of the product: its manifest, whose full run is the profile full, and its test files. */
+async function productSnapshot(repositoryScope: RepositoryScope, commitSha: string): Promise<EnvironmentSnapshot> {
+  const manifest = parseTestEnvironment({
+    version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
+    profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
+    dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
+    suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' } }],
+    impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
+    mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
+    execution: { version: 2, fullRun: { replaces: 'fast', profile: 'full' } },
+  });
+  const manifestSource = JSON.stringify(manifest);
+  return EnvironmentSnapshot.parse({ profile: 'full', description: { version: 1, repositoryScope, commitSha, manifestSource, manifest, manifestHash: await hashTestEnvironment(manifestSource),
+    inputDigests: [], inventory: PRODUCT_FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: RUNTIMES } });
+}
+const partSelection = (commit: string, file: string) => ({ kind: 'batch' as const, version: 2 as const, expectedCommitSha: commit, selections: [{ kind: 'suite' as const, suiteId: 'unit', files: [file], shard: { index: 1, count: 1 } }] });
+/* What the node that ran a part sent with its end. */
+const partReceipt = (snapshot: EnvironmentSnapshot, selection: ReturnType<typeof partSelection>, passed: boolean): TestEnvironmentReceipt => ({
+  version: 2, profile: snapshot.profile, selection, commitSha: snapshot.description.commitSha, manifestHash: snapshot.description.manifestHash, runtimes: RUNTIMES,
+  outcomes: [passed ? { index: 0, status: 'passed', exitCode: 0 } : { index: 0, status: 'failed', exitCode: 1 }],
+  dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 },
+});
+
 /* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
    approval of it, asked through the release tool of a head. */
 export async function releasing() {
@@ -82,17 +108,28 @@ export async function releasing() {
   f.repo.between[`${BASE}..${R}`] = [{ sha: R, parents: [BASE] }];
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.head.id, subscriptionId: f.head.subscriptionId!, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('release-head-tool-token-0123456789abcdef0123') }).returning();
   let runs = 0;
-  /* A run of the turn's branch, as the machines would have finished it. */
-  /* reused: green results it took, of its release unless it is from before releases were kept (ofRelease false). */
-  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number } = {}) => {
-    const commit = options.commit ?? R;
+  const scope = { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) };
+  /* A run of the turn's branch, as the machines would have finished it: of the product's full profile, each part with its receipt
+     on the commit, unless it ran a command of its own (command), which leaves neither.
+     reused: green results it took, of its release unless it is from before releases were kept (ofRelease false). */
+  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number; command?: string } = {}) => {
+    const commit = options.commit ?? R, manual = options.command !== undefined;
+    const snapshot = await productSnapshot(scope, commit);
     const [run] = await f.db.insert(testRuns).values({
       companyId: f.task.companyId, number: 9000 + ++runs, taskId: release!.id, agentId: f.head.id, jobId: job!.id, departmentId: f.task.departmentId!,
-      branch: options.branch ?? f.branch, commitSha: commit, command: 'npm test', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
-      ...(options.suite ? { environmentRequest: { version: 1 as const, repositoryScope: { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) }, suite: options.suite, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null } } : {}),
-      fileCache: { mode: options.reused ? 'cached' : 'full', ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+      branch: options.branch ?? f.branch, commitSha: commit, command: options.command ?? '', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
+      ...(manual ? {} : {
+        environmentRequest: { version: 1 as const, repositoryScope: scope, ...(options.suite ? { suite: options.suite } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
+        environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
+        fileCache: { mode: options.reused ? 'cached' as const : 'full' as const, ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+      }),
     }).returning();
-    if (options.parts !== 0) await f.db.insert(testParts).values([1, 2].map(part => ({ companyId: f.task.companyId, runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
+    const failed = (part: number) => options.failedPart === true && part === 2;
+    if (options.parts !== 0) await f.db.insert(testParts).values(PRODUCT_FILES.map((file, index) => {
+      const part = index + 1, selection = partSelection(commit, file);
+      return { companyId: f.task.companyId, runId: run!.id, part, status: failed(part) ? 'failed' as const : 'passed' as const, commit, exitCode: failed(part) ? 1 : 0, finishedAt: new Date(),
+        ...(manual ? {} : { environmentSelection: { selection, after: [] }, environmentReceipt: partReceipt(snapshot, selection, !failed(part)) }) };
+    }));
     return run!;
   };
   const approve = async (commit = R) => {
@@ -110,4 +147,43 @@ export async function releasing() {
   const recordRelease = (args: Record<string, unknown> = {}) => call('release_turn', { task: release!.number, commit: R, ...args });
   const department = async () => (await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!)))[0]!;
   return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department };
+}
+
+type Releasing = Awaited<ReturnType<typeof releasing>>;
+const MADE = '5'.repeat(40);
+const TOP = '6'.repeat(40);
+
+/* Work of task-N after R, as its holder joins it to the turn branch: its commit made on R, then a merge on top. Without stray
+   the merge takes task-N into the turn branch, whose head it is, and task-N stays at made. A stray commit pushed straight to the
+   turn branch on R comes first: taken, the merge takes the turn branch into task-N and the turn branch goes to it by
+   fast-forward; not taken, task-N is made on it and the merge takes task-N into the turn branch as before. own is the commit
+   task-N is at, head the turn branch's. */
+export function joinedAfterR(f: Releasing, task: number, stray?: { sha: string; taken: boolean }): { own: string; head: string } {
+  const under = stray && !stray.taken ? stray.sha : f.R;
+  if (stray) f.repo.holds[stray.sha] = [f.R, BASE];
+  f.repo.holds[MADE] = [...(stray && !stray.taken ? [stray.sha] : []), f.R, BASE];
+  const strayCommit = stray ? [{ sha: stray.sha, parents: [f.R] }] : [];
+  if (stray?.taken) {
+    f.repo.holds[TOP] = [MADE, stray.sha, f.R, BASE];
+    f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [f.R] }, { sha: TOP, parents: [MADE, stray.sha] }];
+    f.repo.heads[f.branch] = f.repo.heads[`task-${task}`] = TOP;
+    return { own: TOP, head: TOP };
+  }
+  f.repo.holds[TOP] = [MADE, ...(stray ? [stray.sha] : []), f.R, BASE];
+  f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [under] }, { sha: TOP, parents: [under, MADE] }];
+  f.repo.heads[`task-${task}`] = MADE;
+  f.repo.heads[f.branch] = TOP;
+  return { own: MADE, head: TOP };
+}
+
+/* Turnkey work after R: a member of a turnkey team did it whole on task-N with its own review, security check and tests,
+   joined it to the turn branch and closed it with report. */
+export async function turnkeyAfterR(f: Releasing, stray?: { sha: string; taken: boolean }) {
+  const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+  const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+  await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
+  const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  const joined = joinedAfterR(f, task.number, stray);
+  await report(f.ctx, holder.id, task.id, { done: true, summary: 'Merged task-N into the turn branch after my own review, security check and tests.' });
+  return { task, holder, ...joined };
 }

@@ -5,7 +5,7 @@ import type { MaterialManifest } from '../src/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { openFromBoard } from './open-task';
+import { openFromTracker } from './open-task';
 import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
@@ -27,7 +27,7 @@ function shell(routes: Record<string, unknown> = {}) {
 
 async function openTask(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-  await openFromBoard(user, /#12/);
+  await openFromTracker(user, 12);
   return screen.findByRole('complementary', { name: '#12 Checkout API' });
 }
 
@@ -93,7 +93,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, ...labels } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     expect(within(panel).getByText(line)).toHaveClass('tp-kind');
   });
@@ -114,7 +114,7 @@ describe('a task', () => {
     const log = ['restart', 'merge', 'continue', 'assigned'].map((wake, i) => ({ kind: 'wake_skipped', text: 'Server fallback.', data: { wake, job: i === 0 ? 'abcdefgh-0000' : null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }));
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, status: 'done', log } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const lines = within(within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' })).getAllByRole('listitem');
     expect(lines).toHaveLength(4);
@@ -132,7 +132,7 @@ describe('a task', () => {
     const log = [{ kind: 'wake_obsolete', text: 'Server fallback.', data: { wake: 'merge', job: null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }];
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, log } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const logList = within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
     expect(within(logList).getByRole('listitem')).toHaveTextContent(expected);
@@ -145,7 +145,7 @@ describe('a task', () => {
     const externalWait = { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2026-11-03T11:30:00.000Z' };
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const clock = new Date(externalWait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
     const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
@@ -255,8 +255,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Starts after', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Начнется после', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -273,7 +273,7 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       const workflow = within(panel).getByRole('list', { name: words.workflow });
       expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
@@ -311,7 +311,7 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       expect(panel).toHaveTextContent(line);
       unmount();
@@ -344,7 +344,7 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       expect(panel).toHaveTextContent(line);
       expect(within(panel).getAllByText(mark)).toHaveLength(2);
@@ -373,7 +373,7 @@ describe('a task', () => {
       const user = userEvent.setup();
       shell({ 'GET /api/tasks/t12': [200, { task: away }] });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await within(panel).findAllByRole('listitem');
       const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
@@ -408,7 +408,7 @@ describe('a task', () => {
       const user = userEvent.setup();
       shell({ 'GET /api/tasks/t12': [200, { task: cut }] });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await within(panel).findAllByRole('listitem');
       const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
@@ -640,7 +640,7 @@ describe('a task', () => {
     shell();
     await user.click(within(await openTask(user)).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     await screen.findByRole('complementary', { name: '#12 Checkout API' });
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();

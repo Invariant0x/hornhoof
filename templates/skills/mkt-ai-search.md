@@ -14,4 +14,4 @@ Use this ability to assess and improve how an assigned product appears in AI-ass
 5. Inspect whether the content is reachable without scripts, structured data matches it and crawler settings match the owner's policy. Propose changes; do not widen access by assumption.
 6. Identify relevant outside sources assistants cite and possible corrections to false information. Research does not authorize posting, account creation or contacting their owners.
 
-Return a dated question-by-question comparison, citation share with its denominator, evidence and proposed page changes. Public changes require the authorized publication path and exact human approval of each public item; this ability grants no publishing access.
+Return a dated question-by-question comparison, citation share with its denominator, evidence and proposed page changes. A public change is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; this ability grants no publishing access.

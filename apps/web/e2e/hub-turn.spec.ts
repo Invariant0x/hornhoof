@@ -113,10 +113,6 @@ for (const lang of ['en', 'ru'] as const) {
         await looksRight(page);
         await shot('one');
 
-        /* The Tasks screen counts the same at a glance: what the open turn has ready for its release. */
-        await page.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
-        await expect(page.getByRole('list', { name: t.tasks.board.summary.label }).getByRole('listitem').nth(2)).toHaveText(`3 ${t.tasks.board.summary.ready}`);
-        await page.getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
         await expect(dev).toHaveAttribute('aria-valuenow', '18');
 
         /* Tasks close while the map is open. */
