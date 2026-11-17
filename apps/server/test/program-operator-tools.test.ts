@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_PICTURE_BYTES, PROGRAM_OPERATOR_ROLE, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { agentEvents, agents, attachments, jobs, machines, nodes, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, jobs, machines, nodes, people, programOperatorCases, subscriptions, vaultEntries, type AgentKind } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
@@ -196,6 +196,20 @@ it('masks known secrets in input reasons, encoded text and every question field'
     expect(entry.operatorAction).toMatchObject({ reason: 'Use [hidden] to continue.', text: '[hidden]', question: { tool: '[hidden]', text: 'Use [hidden]?', callId: '[hidden]' } });
     expect(entry.text).toContain('Reason: Use [hidden] to continue.');
   }
+});
+
+/* An agent signs in like a person, with a sign-in of the vault typed into the program: no node knows that password. */
+it('masks a vault password the operator types into a sign-in, on the screen and in the log', async () => {
+  const c = await fixture();
+  const password = 'vault-pass-7d1f2a9c';
+  await c.db.insert(vaultEntries).values({ companyId: c.companyId, name: 'Mail', site: 'mail.example.com', login: 'ops@example.com', passwordEnc: encryptSecret(password, c.ctx.config.secret) });
+  c.screen.cells = `Password: ${password}\nPress Enter to sign in`;
+  const view = await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id });
+  expect(view.text).toBe('Password: [hidden]\nPress Enter to sign in');
+  expect(await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, text: password, keys: ['Enter'], reason: 'Sign in with the Mail entry of the vault.' })).toMatchObject({ result: 'applied' });
+  const [entry] = await c.journal();
+  expect(JSON.stringify(entry)).not.toContain(password);
+  expect(entry!.operatorAction).toMatchObject({ text: '[hidden]' });
 });
 
 it('saves the masked actor and input intent before dispatch, then records its matching result', async () => {

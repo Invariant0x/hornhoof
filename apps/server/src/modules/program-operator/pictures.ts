@@ -2,7 +2,7 @@ import { and, eq, isNotNull } from 'drizzle-orm';
 import { OPERATOR_PICTURE_BYTES } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { agents, attachments, programOperatorCases, subscriptions } from '../../db/schema.js';
+import { agents, attachments, programOperatorCases, subscriptions, vaultEntries } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
@@ -42,7 +42,10 @@ export async function renderPicture(screen: { cols: number; rows: number; cells:
   return { rendered };
 }
 
+/* The plans' own secrets, and the passwords of the company's vault, which an agent types into a program to sign in as a person
+   does and no node knows. */
 export async function pictureSecrets(ctx: Ctx, companyId: string): Promise<string[]> {
   const rows = await ctx.db.select({ secret: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.companyId, companyId), isNotNull(subscriptions.secretEnc)));
-  return rows.flatMap(row => row.secret ? [decryptSecret(row.secret, ctx.config.secret)] : []);
+  const vault = await ctx.db.select({ secret: vaultEntries.passwordEnc }).from(vaultEntries).where(eq(vaultEntries.companyId, companyId));
+  return [...rows, ...vault].flatMap(row => row.secret ? [decryptSecret(row.secret, ctx.config.secret)] : []);
 }
