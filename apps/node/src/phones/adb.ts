@@ -8,7 +8,7 @@ export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
 export type AdbRun = (call: AdbCall) => Promise<Buffer>;
 
-export const ADB_MAX_BYTES = 8 * 1024 * 1024;
+export const ADB_MAX_BYTES = 16 * 1024 * 1024;
 
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
 export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;

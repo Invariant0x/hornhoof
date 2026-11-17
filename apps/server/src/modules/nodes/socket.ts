@@ -8,8 +8,8 @@ import { nodes } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { builtinOf, ownBuiltin, type NodeIdentity } from './hub.js';
 
-/* Results can be long; anything bigger than this closes the socket. */
-const MAX_FRAME = 4 * 1024 * 1024;
+/* Results can be long, and a phone's screen with its elements is the longest; anything bigger than this closes the socket. */
+const MAX_FRAME = 20 * 1024 * 1024;
 
 function sameKey(given: string, expected: string): boolean {
   const a = Buffer.from(given);
