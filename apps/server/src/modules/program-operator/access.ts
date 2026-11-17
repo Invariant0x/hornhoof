@@ -23,8 +23,8 @@ const SECRET_MIN = 8;
 type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 type Program = ProgramAt & { job: Job; name: string };
-export type ViewInput = { employee: string };
-export type KeysInput = { employee: string; snapshot: string; keys?: string[]; text?: string; reason: string; decision?: 'allowed' | 'denied' };
+type ViewInput = { employee: string };
+type KeysInput = { employee: string; snapshot: string; keys?: string[]; text?: string; reason: string; decision?: 'allowed' | 'denied' };
 
 export const accessRefused = () => new ApiError(403, 'forbidden', "Only the orchestrator and Operations look at another employee's program and type into it.", 'agent_not_ready');
 const unavailable = (reason: string) => new ApiError(409, 'unavailable', `The program screen is unavailable: ${reason}.`, 'programs_unavailable');

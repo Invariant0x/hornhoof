@@ -3,13 +3,13 @@
    what these answer. */
 
 export const ALWAYS_SHARE = 0.95;
-export const MOSTLY_SHARE = 0.75;
+const MOSTLY_SHARE = 0.75;
 /* A machine younger than this is a newcomer, ranked after every established one. */
 export const NEWCOMER_MS = 3 * 86_400_000;
 /* A machine passes the one above it in its class only when it leads by more than this, so two close ones do not swap. */
-export const PASS_POINTS = 5;
+const PASS_POINTS = 5;
 /* A part under this share of its points is poor, and the line names it. */
-export const POOR_PART = 0.4;
+const POOR_PART = 0.4;
 const GIB = 2 ** 30;
 
 /* What a machine measures. share: how much of the last week it was online, 0 to 1. */

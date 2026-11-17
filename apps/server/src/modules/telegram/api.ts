@@ -4,7 +4,7 @@
 export type TelegramUser = { id: number; is_bot: boolean; first_name: string; username?: string; language_code?: string };
 /* A file as Telegram gives it in a message: its id to ask getFile for, and what Telegram says of it. */
 export type TelegramFile = { file_id: string; file_unique_id?: string; file_size?: number; file_name?: string; mime_type?: string; duration?: number };
-export type TelegramSticker = TelegramFile & { emoji?: string; set_name?: string; is_animated?: boolean; is_video?: boolean };
+type TelegramSticker = TelegramFile & { emoji?: string; set_name?: string; is_animated?: boolean; is_video?: boolean };
 export type TelegramMessage = {
   message_id: number;
   from?: TelegramUser;
@@ -61,7 +61,7 @@ function refusal(status: number, answer: Answer | null, token: string): Telegram
   return new TelegramError(answer?.error_code ?? status, words, answer?.parameters?.retry_after ?? null);
 }
 
-export async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {
+async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {
   return postTelegram<T>(base, token, method, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -71,7 +71,7 @@ export async function callTelegram<T>(base: string, token: string, method: strin
 }
 
 /* How long getUpdates waits for news before it answers with none, in seconds: Telegram's own long polling. */
-export const POLL_SECONDS = 30;
+const POLL_SECONDS = 30;
 
 export const getMe = (base: string, token: string) => callTelegram<TelegramUser>(base, token, 'getMe', {});
 
@@ -85,7 +85,7 @@ export const getUpdates = (base: string, token: string, offset: number, signal: 
 export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
   callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
 
-export const TELEGRAM_SEND_FILE_BYTES = 50 * 1024 * 1024;
+const TELEGRAM_SEND_FILE_BYTES = 50 * 1024 * 1024;
 export const TELEGRAM_CAPTION_MAX = 1024;
 
 export async function sendDocument(
@@ -107,7 +107,7 @@ export async function sendDocument(
 }
 
 /* The most one Telegram message holds. */
-export const TELEGRAM_TEXT_MAX = 4096;
+const TELEGRAM_TEXT_MAX = 4096;
 
 const highHalf = (code: number) => code >= 0xd800 && code <= 0xdbff;
 

@@ -10,7 +10,7 @@ export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by 
 /* Sent copies, visible facts and coalesced lines with a separate input receipt are no words into a turn. */
 export const incomingWords = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out' and coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true' and coalesce(${agentEvents.data}->>'inputShadow', 'false') <> 'true'`;
 export type TurnWords = { personId: string | null; data: unknown };
-export type ClickGrant = { personId: string; machineId: string | null; seq: number | null };
+type ClickGrant = { personId: string; machineId: string | null; seq: number | null };
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
 type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 'answersCeo' | 'inboxWake' | 'decisionInputPending'>;

@@ -16,7 +16,7 @@ export const orchestratorDecisionHeaders = (d: { personId: string; agentId: stri
   [HEADERS.seq]: d.sourceSeq === null ? '' : String(d.sourceSeq),
 });
 
-export type InternalCall = { personId: string; agentId: string; decision?: { jobId: string; sourceSeq: number | null } };
+type InternalCall = { personId: string; agentId: string; decision?: { jobId: string; sourceSeq: number | null } };
 
 /* The person and the orchestrator a call of Hornhoof's own comes for, or null for any other request. */
 export function internalCall(req: FastifyRequest): InternalCall | null {

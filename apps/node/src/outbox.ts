@@ -5,7 +5,7 @@ import { HELLO_IDS_BEFORE_ACKS, HELLO_IDS_MAX, parseNodeMessage, type NodeMessag
 import { z } from 'zod';
 
 export const OUTBOX_FILE = 'outbox.jsonl';
-export const OUTBOX_MAX = 20_000;
+const OUTBOX_MAX = 20_000;
 const FLUSH_MS = 1000;
 
 export type End = Extract<NodeMessage, { type: 'job.done' | 'tests.done' }>;

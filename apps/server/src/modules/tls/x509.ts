@@ -9,8 +9,8 @@ const STAND_IN_DAYS = 30;
 const KEY_ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256' } as const;
 const SIGNING_ALGORITHM = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
-export type SelfSignedOptions = { days?: number; serial?: string; now?: Date };
-export type CertInfo = { names: string[]; notBefore: Date; notAfter: Date; fingerprint256: string };
+type SelfSignedOptions = { days?: number; serial?: string; now?: Date };
+type CertInfo = { names: string[]; notBefore: Date; notAfter: Date; fingerprint256: string };
 
 // The library's PEM text has no final newline, and two such texts joined into a chain do not load in TLS.
 export function toPem(label: string, der: ArrayBuffer): string {

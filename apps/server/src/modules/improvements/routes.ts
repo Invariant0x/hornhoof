@@ -14,7 +14,7 @@ import { listImprovements, moveImprovement, requireOwnWork } from './store.js';
 const Params = z.object({ id: z.uuid() });
 
 /* What the orchestrator reads when the CEO takes an improvement into work. */
-export function takenPrompt(person: string, i: { id: string; title: string; text: string }): string {
+function takenPrompt(person: string, i: { id: string; title: string; text: string }): string {
   return (
     `${person} took an improvement into work: "${i.title}" (${i.id}).\n\n${i.text}\n\n` +
     'Do it with your tools, or give it as a task to the department that can. When it is done, or if it cannot be done, close it with close_improvement and say in a line what came of it.'
