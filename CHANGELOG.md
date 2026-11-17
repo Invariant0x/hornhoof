@@ -33,6 +33,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A program's idle connection to its node's bridge lasts 72 s, so tool calls no longer break with ECONNRESET.
 - External messaging keeps each sentence in its own direction in right-to-left languages.
 - A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
+- A session between machines stays open while bytes arrive and ends after 30 s of silence, so slow links keep copies.
 
 ### Added
 
@@ -79,6 +80,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 - A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
 - `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
+- Type checks run TypeScript 7, several times faster; the `typescript` package stays 5.9 for its API.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
