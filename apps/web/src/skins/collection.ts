@@ -8,7 +8,6 @@ export type CustomSkin = { id: string; skin: Skin };
 export const COLLECTION_LIMIT = 30;
 const ID = /^custom-[1-9][0-9]{0,5}$/;
 
-export const isCustomId = (id: string) => ID.test(id);
 const numberOf = (id: string) => Number(id.slice('custom-'.length));
 const nextId = (list: readonly CustomSkin[]) => `custom-${list.reduce((top, entry) => Math.max(top, numberOf(entry.id)), 0) + 1}`;
 const isEntry = (value: unknown): value is { id: string; skin?: unknown } => typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string';
