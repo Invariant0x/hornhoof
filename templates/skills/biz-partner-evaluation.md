@@ -16,4 +16,4 @@ Use this ability to assess an assigned prospective partner or channel. Inputs ar
 7. Assess exit conditions, notice and treatment of shared customers and data.
 8. Record dependence, brand exposure, data access, exclusivity, legal concerns and uncertainty.
 
-Return the evaluation with sources, dates and confidence. Never send it as an offer or promise terms. The CEO authorizes commercial commitments; any partner message needs exact approval from the department owner or CEO through the authorized server outbound gateway, and a human signs the contract.
+Return the evaluation with sources, dates and confidence. Never send it as an offer or promise terms. The CEO authorizes commercial commitments; a partner message is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it, and a human signs the contract.

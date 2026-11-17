@@ -14,4 +14,4 @@ Use this ability to summarize an assigned community's discussion and prepare res
 5. Recommend silence for spam, provocation or a case where a reply would expose private information; state why.
 6. Group the findings for the assigned period, with counts, sources and proposed product or communication changes.
 
-Return the summary and clearly marked response drafts. Never promise unannounced dates, fixes, compensation or terms. Each public reply requires the server outbound gateway, published sources and explicit approval of its exact content; observing a community does not authorize posting there.
+Return the summary and clearly marked response drafts. Never promise unannounced dates, fixes, compensation or terms. A public reply is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; observing a community does not authorize posting there.

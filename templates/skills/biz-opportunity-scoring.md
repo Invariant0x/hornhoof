@@ -13,4 +13,4 @@ Use this ability to compare assigned opportunities under one explicit scoring mo
 4. Rank the table. Risk 1 or 2 requires the CEO's decision regardless of the total; scoring never approves an unsafe commitment.
 5. For leading candidates, propose an evidenced next step, required capability and kill condition. Preserve ties and uncertainty rather than manufacturing precision.
 
-Return the ranked table, definitions, sources, arithmetic and reasons for any changed score. Never raise scores to fit a preferred answer. A ranking is advice, not authority to assign work, spend, contact partners or promise terms. Partner commitments require exact approval and the authorized outbound gateway; a human signs contracts.
+Return the ranked table, definitions, sources, arithmetic and reasons for any changed score. Never raise scores to fit a preferred answer. A ranking is advice, not authority to assign work, spend, contact partners or promise terms. A partner message is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; a human signs contracts.

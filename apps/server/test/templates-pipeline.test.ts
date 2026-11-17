@@ -22,10 +22,8 @@ const PIPELINES: Record<TemplateKey, string> = {
 const SKILL_IDS = [...new Set(Object.values(PIPELINES))];
 const bodyOf = (id: string) => templates.skills.get(id)!.body;
 const localIds = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-const SET_LINKS: Record<string, string[]> = {
-  'sup-work-pipeline': ['support_classification', 'support_reply_review'],
-  'sal-work-pipeline': ['outbound_review'], 'mkt-work-pipeline': ['outbound_review'], 'biz-work-pipeline': ['outbound_review'],
-};
+/* No skill names a private example set: the sets of the checks Hornhoof once ran on messages are gone with them. */
+const SET_LINKS: Record<string, string[]> = {};
 
 /* Assertions protect meaning and evidence, not one heading layout, role roster or review schedule. */
 const COMMON = [
@@ -43,12 +41,14 @@ const COMMON = [
 const POINTS: Record<string, RegExp[]> = {
   'sup-work-pipeline': [
     /\bperson\b[^.!?\n]*decides every refund[^.!?\n]*legal question[^.!?\n]*personal data/i,
-    /support_classify[\s\S]*before drafting[\s\S]*receipt/i,
-    /requiresHuman[\s\S]*department owner[\s\S]*CEO/i,
+    /Sort each ticket by type and urgency before drafting/i,
+    /not support's to decide[\s\S]*department owner[\s\S]*CEO/i,
     /highest urgency[\s\S]*security or privacy[\s\S]*at once/i,
-    /support_submit[\s\S]*published template[\s\S]*customer's language/i,
-    /No freeform reply[\s\S]*silent language fallback/i,
-    /untrusted data[\s\S]*credentials stay on the server[\s\S]*raw secrets/i,
+    /Replies go from the department's own mailbox[\s\S]*sign-in only in the vault[\s\S]*phone queue/i,
+    /Every contact is marked at once in the department's git[\s\S]*committed/i,
+    /asked not to be written to is marked so and never written to again/i,
+    /customer's language, with no silent language fallback/i,
+    /untrusted data[\s\S]*sign-in stays in the vault[\s\S]*raw secrets/i,
     /timestamps[\s\S]*never estimated/i,
     /failed sample[\s\S]*every reply/i,
   ],
@@ -82,28 +82,27 @@ const POINTS: Record<string, RegExp[]> = {
     /private to the home[\s\S]*never ask for or store card, bank or account secrets/i,
   ],
   'sal-work-pipeline': [
-    /every external message[\s\S]*server outbound gateway[\s\S]*published catalog/i,
-    /Consent[\s\S]*suppression[\s\S]*unsubscribe[\s\S]*prices[\s\S]*daily account\/domain limits/i,
-    /credentials stay server-side/i,
-    /fresh context[\s\S]*independent provider/i,
-    /Custom prices[\s\S]*contract or legal terms[\s\S]*owner's decision/i,
-    /Public items always retain exact per-item approval[\s\S]*human signs contracts/i,
-    /failed samples[\s\S]*stop channel dispatch/i,
+    /claims, links, prices and "do not write" marks[\s\S]*daily limits/i,
+    /every contact is marked in the department's git at once and committed/i,
+    /Sign-ins stay in the vault/i,
+    /second read by another employee in a fresh context/i,
+    /Custom prices and discounts go by the department's price rule/i,
+    /waits for nobody unless its department set an approval rule[\s\S]*human signs contracts/i,
+    /Rising bounces or complaints stop the sending/i,
   ],
   'mkt-work-pipeline': [
-    /Public items require explicit human approval of each exact rendered item[\s\S]*server outbound gateway/i,
-    /Campaign or approach approval never waives this/i,
-    /credentials remain on the server/i,
-    /prices[\s\S]*claims and links[\s\S]*consent[\s\S]*suppression[\s\S]*unsubscribe[\s\S]*limits/i,
-    /fresh context[\s\S]*provider independent/i,
-    /failed sample[\s\S]*stops channel dispatch/i,
-    /Sampling never substitutes for public per-item approval/i,
+    /Public items wait for nobody unless the department set an approval rule/i,
+    /deletion of a public record for good needs the CEO's yes/i,
+    /Sign-ins stay in the vault, and every post is marked in the department's git at once and committed/i,
+    /prices, claims and links[\s\S]*"do not write" marks[\s\S]*limits/i,
+    /second read by another employee in a fresh context/i,
+    /rising complaints stop the channel/i,
   ],
   'biz-work-pipeline': [
-    /No promise reaches a partner without[\s\S]*human approval[\s\S]*server outbound gateway[\s\S]*human signs every contract/i,
+    /every partner message is written from the department's own mailbox, marked in its git at once and committed, and waits for nobody unless the department set an approval rule[\s\S]*human signs every contract/i,
     /score totals[\s\S]*market-size arithmetic[\s\S]*sourced inputs[\s\S]*formulas or a script/i,
     /unsupported number is a finding/i,
-    /No model result waives exact message approval/i,
+    /No model result waives a check the department set/i,
   ],
   'dev-work-pipeline': [
     /task, employee assignment[\s\S]*rather than a fixed sequence of roles/i,
@@ -122,7 +121,7 @@ function problemsOf(id: string, body: string): string[] {
   const named = [...body.matchAll(/model-check-set:([^\s`.,;:]*)/g)].map(m => m[1]!).sort();
   if (named.join() !== [...(SET_LINKS[id] ?? [])].sort().join()) problems.push('wrong private example set');
   if (/[Ѐ-ӿ]|\b(?:Claude|Codex|GitHub)\b|#\d+|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+/.test(body)) problems.push('incident or non-English body');
-  if (/\b(?:may|can) waive (?:public|per-item) approval|\bskip the server gateway/i.test(body)) problems.push('approval bypass');
+  if (/\bper-item approval\b|\bexplicit (?:human )?approval of each\b/i.test(body)) problems.push('a person\'s yes to what goes out by default');
   return problems;
 }
 
@@ -147,14 +146,15 @@ describe('standalone verification planning abilities', () => {
 
   it.each([
     ['restricted refund decision', (body: string) => body.replace('A person with that authority decides every refund', 'An agent decides every refund')],
-    ['missing reply receipt', (body: string) => body.replaceAll('receipt', 'note')],
+    ['the record in git', (body: string) => body.replaceAll("department's git", "head's memory")],
     ['missing model rejection count', (body: string) => body.replaceAll('false rejects', 'results')],
     ['independent model labels', (body: string) => body.replace('labelled by someone other than its author', 'labelled by its author')],
     ['unvalidated model acceptance', (body: string) => body.replace('Until a set has run for a check, that check proves nothing', 'Before validation, the model check certifies acceptance')],
     ['unknown private set', (body: string) => `${body} model-check-set:invented`],
     ['skill dependency', (body: string) => `${body} Follow sup-support-policy.`],
     ['incident', (body: string) => `${body} See task #42.`],
-    ['public approval bypass', (body: string) => `${body} You may waive public approval and skip the server gateway.`],
+    ['the stop mark', (body: string) => body.replace('never written to again', 'written to again later')],
+    ['no default yes to what goes out', (body: string) => `${body} Public items require explicit human approval of each exact rendered item.`],
   ])('rejects loss of %s', (_, broken) => {
     const original = bodyOf('sup-work-pipeline');
     const changed = broken(original);

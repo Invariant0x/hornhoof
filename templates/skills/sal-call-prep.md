@@ -17,4 +17,4 @@ Write a short page covering:
 - **Limits**: unapproved prices, discounts, terms, dates and unavailable features that must not be promised.
 - **Possible next step**: an action the person may propose, within approved authority.
 
-Return the briefing page and unresolved questions for their authorized owners. Missing product or security facts remain unknown; do not fabricate another department's commitment. This ability prepares the human caller and grants no authority to hold calls or make commercial commitments. Any external follow-up requires the server outbound gateway and the applicable exact approval.
+Return the briefing page and unresolved questions for their authorized owners. Missing product or security facts remain unknown; do not fabricate another department's commitment. This ability prepares the human caller and grants no authority to hold calls or make commercial commitments. Any external follow-up is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
