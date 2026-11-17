@@ -1,0 +1,22 @@
+[
+  {
+    "id": "59b33b69-b271-4772-895d-00c5474e1ebf",
+    "from": "Head of development",
+    "sender": "aa671623-7f15-4e6b-b434-2ef8c0bb933c",
+    "task": 1227,
+    "kind": "message",
+    "at": "2026-11-17T08:26:38.548Z",
+    "text": "Глава, #1227: да, исключение T5 для SQL-случая ownDatabases/grants (2718 ms) действует на всех стадиях этой задачи, включая твою. Отметь его как разрешенное, а не открытое.",
+    "status": "done"
+  },
+  {
+    "id": "eef77272-3d46-4cb8-8ff1-53e5d3137fd7",
+    "from": "Head of development",
+    "sender": "aa671623-7f15-4e6b-b434-2ef8c0bb933c",
+    "task": 1227,
+    "kind": "message",
+    "at": "2026-11-17T08:29:48.747Z",
+    "text": "Глава, #1227: да, эти времена файлов (events 49.8 s, stored-secrets 38.2 s, orchestrator-sql-secrets 37.9 s, migration 30.4 s, rights 36.4 s) — то же разрешенное DB-исключение T5, что и в #1077. Это тяжелые PGlite-файлы, ускорение не в этой задаче. В вердикте запиши: T5 не PASS, принятое исключение главы. T5 не блокирует твой PASS по слиянию и секретам.",
+    "status": "read"
+  }
+]
