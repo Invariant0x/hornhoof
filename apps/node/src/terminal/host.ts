@@ -532,7 +532,7 @@ export class TerminalHost {
     const [size, cells] = await Promise.all([this.opts.tmux.run(['display-message', '-p', '-t', a.name, '#{pane_width} #{pane_height}']), this.opts.tmux.screen(a.name, 0, true)]);
     const [cols, rows] = size.trim().split(/\s+/).map(Number);
     if (!cols || !rows) throw new Error('The existing pane size is unknown.');
-    return { cols, rows, cells: a.privateOutput ? PRIVATE_TOOL_NOTE : cells };
+    return { cols, rows, cells: this.terminalText(a, cells) };
   }
 
   private terminalText(agent: Agent, text: string): string {

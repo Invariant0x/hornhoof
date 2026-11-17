@@ -100,6 +100,8 @@ describe('what a turn tells Hornhoof', () => {
       expect(response.status).toBe(200);
       await response.text();
     }));
+    t.screen.mockResolvedValueOnce(`screen with ${marker}`);
+    expect((await t.host['operatorPane']('receipt')).cells).toMatch(/hidden/i);
     t.finish(`Report with ${marker}.`);
     const result = await t.on(t.running);
     expect(result.result).toBe('Report with [hidden].');
