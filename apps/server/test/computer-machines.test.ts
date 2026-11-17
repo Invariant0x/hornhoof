@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, desc, eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, jobs, machineAccess, machines, people, personKeys, subscriptions } from '../src/db/schema.js';
@@ -748,8 +748,13 @@ describe('what an app from before access was per machine left', () => {
     const untilSec = Math.floor(Date.now() / 1000) + 3600;
     legacy(control, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null });
     const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
+    /* The app looks again for its own machine's row on a timer: the test's clock moves it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     await setUpCompany(app);
     const server = await serverMachine(app);
+    expect(app.ctx.computer.ready()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
     await until(() => app.ctx.computer.ready());
     expect((await db.select().from(machineAccess))[0]).toMatchObject({ machineId: server, until: new Date(untilSec * 1000) });
     /* A server installed before machines had ids has no machine of its own to open: there is nothing to wait for. */
