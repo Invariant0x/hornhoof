@@ -1,19 +1,16 @@
 {
-  "status": "WORKING",
+  "status": "DONE",
   "codeBranch": "task-1203-iv-queue",
-  "candidate": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "candidate": "a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18",
   "originalCandidate": "d140cec945b368b16b1415639fa7cc1d76661119",
   "base": "816d02652f0c671cd609fa3adeda9e6520865e4f",
   "comparedTurn31": "887fa6540bad796c30ed907fb14a2b48d3f7994c",
   "ownNamedPassedTests": 53,
   "fullSuiteRun": false,
   "pending": [
-    "remote node build",
-    "remote types under NODE_OPTIONS=2048",
-    "remote affected lint",
-    "complete check-command file",
-    "server node-programs proof",
-    "inbox recovery probe",
-    "final verdict and independent gates"
-  ]
+    "independent Review and Security",
+    "integration by head",
+    "release owner full run"
+  ],
+  "verdict": "PASS code audit; mandatory independent gates pending"
 }

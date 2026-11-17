@@ -1,0 +1,18 @@
+{
+  "command": [
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=2048",
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/inbox-carrier-recovery.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server",
+  "commit": "166e0cdf631b18e1194c7a7d110b7a44899dc31c",
+  "endCommit": "166e0cdf631b18e1194c7a7d110b7a44899dc31c",
+  "exitCode": 1,
+  "seconds": 5.44
+}

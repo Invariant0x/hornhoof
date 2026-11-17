@@ -1,0 +1,15 @@
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/check-command.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/node", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870"}
+
+ RUN  v5.0.5 /data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/node
+
+ ✓ test/check-command.test.ts (19 tests) 1380ms
+   ✓ a heavy check in the agent's own shell (5)
+     ✓ makes an agent's tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else 479ms
+
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+   Start at  05:43:46
+   Duration  2.17s (tests 66%, transform 22%, import 12%)
+
+
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/check-command.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/node", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "endCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "exitCode": 0, "seconds": 2.661}

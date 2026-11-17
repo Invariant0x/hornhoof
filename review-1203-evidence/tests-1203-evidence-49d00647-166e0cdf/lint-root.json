@@ -1,0 +1,15 @@
+{
+  "command": [
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=2048",
+    "npx",
+    "--no-install",
+    "eslint",
+    "vitest.review-1203.config.ts"
+  ],
+  "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof",
+  "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "endCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "exitCode": 0,
+  "seconds": 0.37
+}

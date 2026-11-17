@@ -1,0 +1,16 @@
+{
+  "command": [
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=2048",
+    "npx",
+    "--no-install",
+    "eslint",
+    "apps/server/src/modules/tasks/wake.ts",
+    "apps/server/test/inbox-carrier-recovery.test.ts"
+  ],
+  "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof",
+  "commit": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6",
+  "endCommit": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6",
+  "exitCode": 0,
+  "seconds": 3.52
+}

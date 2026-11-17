@@ -1,0 +1,12 @@
+Status: DONE. Назначенная проверка переноса config PASS на точном a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18, origin/task-1203-iv-queue.
+
+Выполнено последовательно из корня репозитория, все с NODE_OPTIONS=--max-old-space-size=2048:
+1. npx --no-install vitest run apps/server/test/program-room-review.test.ts --config apps/server/vitest.review-1203.config.ts --maxWorkers=1 --no-file-parallelism: 1 file passed, 3 tests passed, exit 0, 0.787 s. Использован новый config с root от import.meta.url; фактический root в выводе apps/server. Выбран ровно назначенный файл, глобальная подготовка серверной БД не подключена.
+2. npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit: exit 0, 0.943 s. Этот tsconfig включает *.config.ts.
+3. npx --no-install eslint apps/server/vitest.review-1203.config.ts: exit 0, 3.045 s, без warning и сообщения об ignored file. Прежний пробел lint корневого config закрыт на новом расположении.
+
+Прочитан весь diff 29df7bf84..a2b07e3a4: удален корневой vitest.review-1203.config.ts, добавлен apps/server/vitest.review-1203.config.ts; задан root относительно import.meta.url, include остается только test/program-room-review.test.ts; testTimeout 20000 не повышен. Других изменений нет. Production и тестовые деревья server/src, server/test, node, web, protocol и lock/config совпадают с 29df по git objects (source-binding.json).
+
+Прежние inbox/node/build/web проверки не повторял. PASS inbox 2 + 36 на 29df7bf848f7a4ca248534fd1cbb200eb6988cc6 остается применимым для неизмененных production/test деревьев; его фактические журналы в 5ea71d08-ae83-4129-96f4-55d0579e7a0e, не выданы за новый запуск. Старые RED и SHA в архиве a66d626e сохранены. Здесь три новых журнала с командами, cwd, начальным/конечным SHA и exit.
+
+HEAD и origin/task-1203-iv-queue совпадали на a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18, рабочее дерево чистое. Код, коммиты и общие ветки я не менял. Полный прогон, run_tests и интеграцию не выполнял. Итоговый отчет и вердикт по задаче выпускает ее владелец Code reviewer.

@@ -1,0 +1,15 @@
+Status: DONE. Affected proof PASS на точном 29df7bf848f7a4ca248534fd1cbb200eb6988cc6 в origin/task-1203-iv-queue.
+
+Назначенные проверки выполнены последовательно; везде NODE_OPTIONS=--max-old-space-size=2048, без повышения timeout:
+1. cwd apps/server: npx --no-install vitest run test/inbox-carrier-recovery.test.ts --maxWorkers=1 --no-file-parallelism: 2 passed, exit 0, файл 701 ms, процесс 5.192 s. typed=false теперь возвращает письмо в unread; typed=true остается read.
+2. cwd apps/server: npx --no-install vitest run test/inbox.test.ts --maxWorkers=1 --no-file-parallelism: 36 passed, exit 0, файл 6097 ms, процесс 10.631 s. Время сценариев управляется fake Date и прямым setSystemTime.
+3. cwd root: npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit: exit 0, процесс 0.868 s.
+4. cwd root: npx --no-install eslint apps/server/src/modules/tasks/wake.ts apps/server/test/inbox-carrier-recovery.test.ts: exit 0, без предупреждений и отказа по бюджету файла, процесс 3.520 s.
+
+Прочитан весь diff 166e0cdf6..29df7bf84: изменен только wake.ts. В failed conversation afterJob вызывает restoreUnheardInbox; для обычного носителя он проверяет запись typed по точному jobId и сохраняет read после подтвержденного ввода; без typed вызывает mailBack и inboxChanged. Для inboxWake прежний вызов mailBack не зависит от typed. Тесты и production я не менял.
+
+Ранее сохраненный поведенческий RED на 166e0cdf631b18e1194c7a7d110b7a44899dc31c (1 failed / 1 passed, exit 1) остается в #1203: 7e079dd1-76d3-4ae3-b6b8-efb5def5bd58. Это теперь RED/GREEN на неизменной регрессии с одним email исправлением фикстуры между исходным 49d и 166.
+
+Прежние node/build/web проверки не повторял. source-binding.json фиксирует совпадение git objects apps/node, apps/web, packages/protocol, package-lock.json, package.json, root tsconfig и server tsconfig на 49d006478171c8cac4cf5639b4f6cc4d45647870 и 29df7bf848f7a4ca248534fd1cbb200eb6988cc6. Дельта от 49d содержит только wake.ts и исправленный email в inbox-carrier-recovery.test.ts. Старый server tsc не выдается за текущий: он заново выполнен на 29df. Предыдущий архив a66d626e-5f57-45ba-94e5-fad97c2ada48 сохраняет свои SHA и исходные неуспешные записи; предупреждение ESLint о корневом vitest.review-1203.config.ts остается прежним ограничением, а не PASS этого файла.
+
+HEAD и origin/task-1203-iv-queue совпадали на 29df7bf848f7a4ca248534fd1cbb200eb6988cc6 при проверке, рабочее дерево чистое. Полные логи с командами, cwd, начальным/конечным SHA и exit, source binding и diff приложены. Код, коммиты и общие ветки я не менял; run_tests, целые наборы и интеграцию не выполнял. Этот результат покрывает только назначенные affected checks; итоговое ревью и маршрут задачи остаются у владельца #1203.

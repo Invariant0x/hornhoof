@@ -1,0 +1,26 @@
+Status: DONE_WITH_CONCERNS. Назначенные проверки завершены; общий результат FAIL, не PASS. Код не менял, пределы не повышал, run_tests и интеграцию не выполнял.
+
+Первый проверенный SHA: 49d006478171c8cac4cf5639b4f6cc4d45647870, исходный origin/task-1203-iv-queue. Подготовка npm run -s deps по lockfile завершена exit 0. Все проверки запускались последовательно одним процессом с NODE_OPTIONS=--max-old-space-size=2048.
+
+Завершенные PASS на 49d00647:
+- npm run build -w @hornhoof/node: exit 0.
+- npx --no-install tsc -p apps/node/tsconfig.eslint.json --noEmit: exit 0.
+- npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit: exit 0.
+- npx --no-install tsc -p apps/web/tsconfig.json --noEmit: exit 0.
+- node test/check-command.test.ts: 19 passed, exit 0, файл 1380 ms, процесс 2.661 s.
+- server test/node-programs.test.ts: 2 passed, exit 0, файл 893 ms, процесс 6.187 s.
+- apps/server/test/program-room-review.test.ts с корневым vitest.review-1203.config.ts: 3 passed, exit 0, процесс 0.750 s.
+Команды тестов: npx --no-install vitest run <один названный файл> --maxWorkers=1 --no-file-parallelism, без timeout overrides. Для program-room-review дополнительно --config vitest.review-1203.config.ts. В каждом полном журнале и отдельном JSON есть command, cwd, начальный/конечный SHA, фактический exit и время процесса.
+
+ESLint на 49d00647: буквальная область указанного главой diff 887fa6540bad796c30ed907fb14a2b48d3f7994c..49d006478171c8cac4cf5639b4f6cc4d45647870, только существующие JS/TS файлы. Это две расходящиеся линии с merge-base 816d02652f0c671cd609fa3adeda9e6520865e4f: в область также вошли чужие расхождения turn-31. Всего передано 163 пути в 10 последовательных процессах: node 35, web 21, protocol 3, scripts 5, root 1, server 98 в 5 разделах штатного lint:part. Все команды exit 0, ошибок нет. Действительно lint проверил 162 файла. Один корневой vitest.review-1203.config.ts имеет предупреждение «File ignored because no matching configuration was supplied»; shell exit 0 не принят за lint PASS этого файла. Удаленные файлы, CSS и другие нетипизированные документы не lintились; все включенные и исключенные пути перечислены в lint-scope.json, каждая реальная команда записана в журнале. Конфигурацию ради PASS не менял.
+
+FAIL на 49d00647: test/inbox-carrier-recovery.test.ts 2 failed, exit 1, оба до afterJob. В строке 12 синтетический Owner вставляется без email, что нарушает people_assistant (23514). Это отказ фикстуры, не доказательство потери письма. Ограничение проверено в schema.ts:128 и миграции 0100_assistants.sql:76. Полный лог отдельно в задаче: 9f3659db-e4ae-4130-bd96-14a2473ecd68.
+
+Ревьюер исправил ровно поле email и прислал 166e0cdf631b18e1194c7a7d110b7a44899dc31c. Я прочитал весь diff 49d..166: только apps/server/test/inbox-carrier-recovery.test.ts, один добавленный email. Проверены совпадающие git objects apps/node, apps/server/src, apps/web, packages/protocol, package-lock.json, package.json, root tsconfig и server tsconfig. Прежние результаты сохраняют собственный SHA; весь набор на 166 повторно не запускался.
+
+Повтор по просьбе ревьюера на точном 166e0cdf631b18e1194c7a7d110b7a44899dc31c:
+NODE_OPTIONS=--max-old-space-size=2048 npx --no-install vitest run test/inbox-carrier-recovery.test.ts --maxWorkers=1 --no-file-parallelism, cwd apps/server.
+Результат: 1 failed / 1 passed, exit 1, файл 992 ms, процесс 5.440 s.
+Теперь проверка доходит до afterJob. typed=false: expected unread, received read, строка 22. Синтетический обычный ход inboxWake=false уже failed, письмо привязано к нему и read, события typed нет; после afterJob оно не возвращается в unread. typed=true сохраняет read и проходит. Это поведенческий RED в назначенном сценарии, не ошибка ограничения фикстуры. Полный лог отдельно в задаче: 7e079dd1-76d3-4ae3-b6b8-efb5def5bd58.
+
+Next: ревьюеру требуется исправить или разобрать поведенческий RED, затем проверить исправленный кандидат. PASS текущему результату не выдаю. Production, тесты и ветки я не менял; состояние моего checkout чистое. Окончательный origin/task-1203-iv-queue на момент повторной проверки — 166e0cdf631b18e1194c7a7d110b7a44899dc31c. Полный прогон и решение о turn-31 остаются у владельца выпуска.

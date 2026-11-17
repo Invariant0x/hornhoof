@@ -1,0 +1,32 @@
+diff --git a/apps/server/src/modules/tasks/wake.ts b/apps/server/src/modules/tasks/wake.ts
+index 100129ac9..e538808dc 100644
+--- a/apps/server/src/modules/tasks/wake.ts
++++ b/apps/server/src/modules/tasks/wake.ts
+@@ -705,8 +705,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
+   await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
+   if (!job?.agentId || job.kind !== 'conversation') return;
+   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
+-  /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
+-  if (job.status === 'failed' && job.inboxWake && (await mailBack(ctx.db, job.agentId, jobId))) await inboxChanged(ctx, job.agentId);
++  if (job.status === 'failed') await restoreUnheardInbox(ctx, jobId, { agentId: job.agentId, inboxWake: job.inboxWake });
+   const handled = await afterFailure(ctx, jobId);
+   if (job.taskId) {
+     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
+@@ -718,6 +717,17 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
+   await pump(ctx, job.agentId);
+ }
+ 
++/* Inbox wakes keep their retry policy. An ordinary turn can carry the same summary: until its prompt is confirmed
++   typed, its failed delivery must not consume those letters. A confirmed prompt stays read to avoid a second delivery. */
++async function restoreUnheardInbox(ctx: Ctx, jobId: string, job: { agentId: string; inboxWake: boolean }): Promise<void> {
++  if (!job.inboxWake) {
++    const [typed] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
++      .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'typed'))).limit(1);
++    if (typed) return;
++  }
++  if (await mailBack(ctx.db, job.agentId, jobId)) await inboxChanged(ctx, job.agentId);
++}
++
+ async function recordFailedTurn(
+   ctx: Ctx,
+   jobId: string,

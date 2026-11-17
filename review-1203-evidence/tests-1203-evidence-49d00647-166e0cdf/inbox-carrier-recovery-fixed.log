@@ -1,0 +1,34 @@
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox-carrier-recovery.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "166e0cdf631b18e1194c7a7d110b7a44899dc31c"}
+
+ RUN  v5.0.5 /data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server
+
+ ❯ test/inbox-carrier-recovery.test.ts (2 tests | 1 failed) 992ms
+   × restores folded inbox mail only before the carrier typed its prompt, typed=false 543ms
+   ✓ restores folded inbox mail only before the carrier typed its prompt, typed=true 408ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/inbox-carrier-recovery.test.ts > restores folded inbox mail only before the carrier typed its prompt, typed=false
+AssertionError: expected 'read' to be 'unread' // Object.is equality
+
+Expected: "unread"
+Received: "read"
+
+ ❯ test/inbox-carrier-recovery.test.ts:22:25
+     20|
+     21|   const [after] = await db.select().from(agentInbox).where(eq(agentInb…
+     22|   expect(after!.status).toBe(typed ? 'read' : 'unread');
+       |                         ^
+     23| });
+     24|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  05:46:32
+   Duration  4.93s (tests 53%, import 30%, transform 17%)
+
+
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox-carrier-recovery.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "166e0cdf631b18e1194c7a7d110b7a44899dc31c", "endCommit": "166e0cdf631b18e1194c7a7d110b7a44899dc31c", "exitCode": 1, "seconds": 5.44}

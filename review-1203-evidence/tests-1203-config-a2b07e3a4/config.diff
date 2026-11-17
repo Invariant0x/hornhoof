@@ -1,0 +1,21 @@
+diff --git a/apps/server/vitest.review-1203.config.ts b/apps/server/vitest.review-1203.config.ts
+new file mode 100644
+index 000000000..1432ec7de
+--- /dev/null
++++ b/apps/server/vitest.review-1203.config.ts
+@@ -0,0 +1,5 @@
++import { fileURLToPath } from 'node:url';
++import { defineConfig } from 'vitest/config';
++
++/* Pure admission-state checks do not open the server or a database. */
++export default defineConfig({ root: fileURLToPath(new URL('.', import.meta.url)), test: { include: ['test/program-room-review.test.ts'], testTimeout: 20000 } });
+diff --git a/vitest.review-1203.config.ts b/vitest.review-1203.config.ts
+deleted file mode 100644
+index 2f8983e37..000000000
+--- a/vitest.review-1203.config.ts
++++ /dev/null
+@@ -1,4 +0,0 @@
+-import { defineConfig } from 'vitest/config';
+-
+-/* Pure admission-state checks do not open the server or a database. */
+-export default defineConfig({ test: { include: ['apps/server/test/program-room-review.test.ts'], testTimeout: 20000 } });

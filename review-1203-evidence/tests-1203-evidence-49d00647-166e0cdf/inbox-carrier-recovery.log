@@ -1,0 +1,68 @@
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox-carrier-recovery.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870"}
+
+ RUN  v5.0.5 /data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server
+
+ ❯ test/inbox-carrier-recovery.test.ts (2 tests | 2 failed) 1095ms
+   × restores folded inbox mail only before the carrier typed its prompt, typed=false 624ms
+   × restores folded inbox mail only before the carrier typed its prompt, typed=true 469ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/inbox-carrier-recovery.test.ts > restores folded inbox mail only before the carrier typed its prompt, typed=false
+Error: Failed query: insert into "people" ("id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at") values (default, $1, $2, default, default, default, $3, $4, $5, default, default, default, default, default, default) returning "id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at"
+params: 4ace1c67-5011-4ba0-99d8-7189fd92a22f,Owner,active,company,true
+ ❯ PglitePreparedQuery.queryWithCache ../../node_modules/src/pg-core/session.ts:73:11
+ ❯ PglitePreparedQuery.execute ../../node_modules/src/pglite/session.ts:95:18
+ ❯ WriteGate.through src/db/gate.ts:54:14
+     52|     const pass: Pass = { left: false };
+     53|     try {
+     54|       return await this.passes.run(pass, work);
+       |              ^
+     55|     } finally {
+     56|       pass.left = true;
+ ❯ test/inbox-carrier-recovery.test.ts:12:19
+
+Caused by: error: new row for relation "people" violates check constraint "people_assistant"
+ ❯ pe.Oe ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:18162
+ ❯ pe.tt ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:15548
+ ❯ pe.parse ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:14222
+ ❯ q.ze ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1759
+ ❯ ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1151
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { length: 364, severity: 'ERROR', code: '23514', detail: 'Failing row contains (994caa67-6160-436e-88a8-a916ca2601d2, 4ace1c67-5011-4ba0-99d8-7189fd92a22f, Owner, null, , null, active, company, t, 2026-11-17 05:44:30.314+00, f, null, null, f, null).', hint: undefined, position: undefined, internalPosition: undefined, internalQuery: undefined, where: undefined, schema: 'public', table: 'people', dataType: undefined, constraint: 'people_assistant', file: 'execMain.c', routine: 'ExecConstraints', query: 'insert into "people" ("id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at") values (default, $1, $2, default, default, default, $3, $4, $5, default, default, default, default, default, default) returning "id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at"', params: [ '4ace1c67-5011-4ba0-99d8-7189fd92a22f', 'Owner', 'active', 'company', true ], queryOptions: { rowMode: 'array', parsers: { '1082': 'Function<1082>', '1114': 'Function<1114>', '1115': 'Function<1115>', '1182': 'Function<1182>', '1184': 'Function<1184>', '1185': 'Function<1185>', '1186': 'Function<1186>', '1187': 'Function<1187>', '1231': 'Function<1231>' } } }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/inbox-carrier-recovery.test.ts > restores folded inbox mail only before the carrier typed its prompt, typed=true
+Error: Failed query: insert into "people" ("id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at") values (default, $1, $2, default, default, default, $3, $4, $5, default, default, default, default, default, default) returning "id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at"
+params: 0ee748b3-72c6-4830-b20c-e9a4de42dd7a,Owner,active,company,true
+ ❯ PglitePreparedQuery.queryWithCache ../../node_modules/src/pg-core/session.ts:73:11
+ ❯ PglitePreparedQuery.execute ../../node_modules/src/pglite/session.ts:95:18
+ ❯ WriteGate.through src/db/gate.ts:54:14
+     52|     const pass: Pass = { left: false };
+     53|     try {
+     54|       return await this.passes.run(pass, work);
+       |              ^
+     55|     } finally {
+     56|       pass.left = true;
+ ❯ test/inbox-carrier-recovery.test.ts:12:19
+
+Caused by: error: new row for relation "people" violates check constraint "people_assistant"
+ ❯ pe.Oe ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:18162
+ ❯ pe.tt ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:15548
+ ❯ pe.parse ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:14222
+ ❯ q.ze ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1759
+ ❯ ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1151
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { length: 364, severity: 'ERROR', code: '23514', detail: 'Failing row contains (01d01319-6c79-4bc9-9b5e-049bdfd752f4, 0ee748b3-72c6-4830-b20c-e9a4de42dd7a, Owner, null, , null, active, company, t, 2026-11-17 05:44:30.788+00, f, null, null, f, null).', hint: undefined, position: undefined, internalPosition: undefined, internalQuery: undefined, where: undefined, schema: 'public', table: 'people', dataType: undefined, constraint: 'people_assistant', file: 'execMain.c', routine: 'ExecConstraints', query: 'insert into "people" ("id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at") values (default, $1, $2, default, default, default, $3, $4, $5, default, default, default, default, default, default) returning "id", "company_id", "name", "email", "title", "password_hash", "status", "scope_kind", "is_owner", "is_ceo_delegate", "telegram_username", "telegram_user_id", "is_agent", "assistant_of", "created_at"', params: [ '0ee748b3-72c6-4830-b20c-e9a4de42dd7a', 'Owner', 'active', 'company', true ], queryOptions: { rowMode: 'array', parsers: { '1082': 'Function<1082>', '1114': 'Function<1114>', '1115': 'Function<1115>', '1182': 'Function<1182>', '1184': 'Function<1184>', '1185': 'Function<1185>', '1186': 'Function<1186>', '1187': 'Function<1187>', '1231': 'Function<1231>' } } }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  05:44:25
+   Duration  5.31s (tests 55%, import 29%, transform 15%)
+
+
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox-carrier-recovery.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "endCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "exitCode": 1, "seconds": 5.802}

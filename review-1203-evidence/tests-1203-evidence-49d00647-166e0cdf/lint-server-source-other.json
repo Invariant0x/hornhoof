@@ -1,0 +1,30 @@
+{
+  "command": [
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=2048",
+    "npx",
+    "--no-install",
+    "eslint",
+    "apps/server/src/db/agent-sql.ts",
+    "apps/server/src/main.ts",
+    "apps/server/src/modules/assistants/mcp.ts",
+    "apps/server/src/modules/computer/tools.ts",
+    "apps/server/src/modules/conversation/queue.ts",
+    "apps/server/src/modules/events/store.ts",
+    "apps/server/src/modules/nodes/connections.ts",
+    "apps/server/src/modules/nodes/hub.ts",
+    "apps/server/src/modules/nodes/lifecycle.ts",
+    "apps/server/src/modules/nodes/messages.ts",
+    "apps/server/src/modules/nodes/program-room.ts",
+    "apps/server/src/modules/nodes/programs.ts",
+    "apps/server/src/modules/nodes/routes.ts",
+    "apps/server/src/modules/phones/recording.ts",
+    "apps/server/src/modules/phones/routes.ts",
+    "apps/server/src/modules/phones/tools.ts"
+  ],
+  "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof",
+  "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "endCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "exitCode": 0,
+  "seconds": 4.791
+}

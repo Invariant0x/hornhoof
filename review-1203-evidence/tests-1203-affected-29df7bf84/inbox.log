@@ -1,0 +1,15 @@
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6"}
+
+ RUN  v5.0.5 /data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server
+
+ ✓ test/inbox.test.ts (36 tests) 6097ms
+   ✓ mail from employees in inbox mode (10)
+     ✓ keeps 25 letters that come while a person talks with the head in her inbox, and gives them in one turn after it 884ms
+
+ Test Files  1 passed (1)
+      Tests  36 passed (36)
+   Start at  05:50:12
+   Duration  10.17s (tests 85%, import 9%, transform 6%)
+
+
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/inbox.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6", "endCommit": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6", "exitCode": 0, "seconds": 10.631}

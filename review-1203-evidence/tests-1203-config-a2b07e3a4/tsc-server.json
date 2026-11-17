@@ -1,0 +1,17 @@
+{
+  "command": [
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=2048",
+    "npx",
+    "--no-install",
+    "tsc",
+    "-p",
+    "apps/server/tsconfig.eslint.json",
+    "--noEmit"
+  ],
+  "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof",
+  "commit": "a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18",
+  "endCommit": "a2b07e3a41709091ad0b5ea7a17ef6e4e9bbbc18",
+  "exitCode": 0,
+  "seconds": 0.943
+}

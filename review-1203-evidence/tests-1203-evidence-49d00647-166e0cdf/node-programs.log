@@ -1,0 +1,15 @@
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/node-programs.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870"}
+
+ RUN  v5.0.5 /data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server
+
+ ✓ test/node-programs.test.ts (2 tests) 893ms
+   ✓ program snapshots on node sockets (2)
+     ✓ keeps only live snapshots for a personal node and accepts older messages 741ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  05:44:06
+   Duration  5.79s (tests 37%, import 32%, transform 31%)
+
+
+{"command": ["env", "NODE_OPTIONS=--max-old-space-size=2048", "npx", "--no-install", "vitest", "run", "test/node-programs.test.ts", "--maxWorkers=1", "--no-file-parallelism"], "cwd": "/data/work/agents/7ee28b82-0081-40a4-bf67-1046544ac653/hornhoof/apps/server", "commit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "endCommit": "49d006478171c8cac4cf5639b4f6cc4d45647870", "exitCode": 0, "seconds": 6.187}

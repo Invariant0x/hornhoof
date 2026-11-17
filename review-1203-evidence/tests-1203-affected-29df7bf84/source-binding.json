@@ -1,0 +1,17 @@
+{
+  "candidate": "29df7bf848f7a4ca248534fd1cbb200eb6988cc6",
+  "previousChecks": "49d006478171c8cac4cf5639b4f6cc4d45647870",
+  "changedPaths": [
+    "apps/server/src/modules/tasks/wake.ts",
+    "apps/server/test/inbox-carrier-recovery.test.ts"
+  ],
+  "unchanged": {
+    "apps/node": "58976a680938cf071f9b272cf8edad992ff5dc09",
+    "apps/web": "89d78e9bdd1a9af32aade2c553f905eaa1d1e996",
+    "packages/protocol": "907649585b0c645cc27f8fa760f21063b4306478",
+    "package-lock.json": "bbed85212f41ae6fd09a2a0f8debd67636e1a231",
+    "package.json": "52da742c6b4a2d1308fde0867abe18aef67640e3",
+    "tsconfig.base.json": "21790209c38ef14639dcf40761bdc9e839e2f7c2",
+    "apps/server/tsconfig.eslint.json": "13a4ff585a39e850198aa5cfd2a822418ea4e9a5"
+  }
+}
