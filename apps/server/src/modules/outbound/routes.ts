@@ -12,7 +12,7 @@ import { accountRoutes } from './accounts.js';
 import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision, ShownRevision } from './catalog.js';
 import { catalogOf } from './catalog-view.js';
 import { digestOf } from './checks.js';
-import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
+import { addContact, contactsOf, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
 import { outboundStatus, submitOutbound } from './core.js';
 import { receiptRoutes } from './dispatcher.js';
 import { addPolicy, channelIn, createChannel, currentPolicy, reopenChannel, stopByPerson, type Channel } from './policies.js';
@@ -153,11 +153,21 @@ function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
 
 function contactRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  /* The addresses added to the department's channels, for the people who run it. */
+  app.get('/api/outbound/contacts', async req => {
+    const me = await requirePerson(req, db);
+    const dept = await manageDepartment(ctx, me, DepartmentQuery.parse(req.query).department);
+    return { departmentId: dept.id, contacts: await contactsOf(ctx, me.companyId, dept.id) };
+  });
+
+  /* The log keeps that an address was added and its kind, never the address. */
   app.post('/api/outbound/contacts', async req => {
     const me = await requirePerson(req, db);
     const body = ContactBody.parse(req.body);
     const channel = await manageChannel(ctx, me, body.channelId);
-    return addContact(ctx, { ...body, companyId: me.companyId, channel });
+    const added = await addContact(ctx, { ...body, companyId: me.companyId, channel });
+    if (added.permissionId) await logSetup(db, me, { ...setupOf(channel), kind: 'contact_added', subjectId: added.permissionId, detail: { kind: body.kind } });
+    return added;
   });
 
   /* Contacts are the company's. A refusal only ever writes less, so any department's owner may record it. */
@@ -173,8 +183,11 @@ function contactRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/outbound/permissions/:id/revoke', async req => {
     const me = await requirePerson(req, db);
     const permissionId = idOf(req);
-    await requireRunner(db, me, (await permissionPlace(db, me.companyId, permissionId)).departmentId, noSuch('permission'));
-    await revokePermission(ctx, { companyId: me.companyId, permissionId });
+    const place = await permissionPlace(db, me.companyId, permissionId);
+    await requireRunner(db, me, place.departmentId, noSuch('permission'));
+    if (await revokePermission(ctx, { companyId: me.companyId, permissionId })) {
+      await logSetup(db, me, { companyId: me.companyId, departmentId: place.departmentId, channelId: place.channelId, kind: 'consent_revoked', subjectId: permissionId, detail: { kind: place.kind } });
+    }
     return { permissionId, status: 'revoked' };
   });
 }
