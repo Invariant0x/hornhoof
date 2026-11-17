@@ -107,13 +107,14 @@ describe("the CEO's request to move the server", () => {
     expect((moving.json() as { error: { details: unknown } }).error.details).toEqual({ host: 'd' });
     expect(await c.moves()).toMatchObject([{ machine_id: c.d.id, state: 'switching' }]);
 
-    /* The CEO alone, on his own session. */
+    /* The CEO alone, by himself or through the orchestrator. */
     const p = await invitePerson(c.app, c.ceo, { name: 'Pat', email: 'pat@acme.test', access: { whole: true } });
+    expect(c.refusal(await c.post(c.a.id, as(p))).slice(0, 2)).toEqual([403, 'not_owner_session']);
+    expect(c.refusal(await c.cancel(c.d.id, as(p))).slice(0, 2)).toEqual([403, 'not_owner_session']);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    for (const who of [as(p), { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) }]) {
-      expect(c.refusal(await c.post(c.a.id, who)).slice(0, 2)).toEqual([403, 'not_owner_session']);
-      expect(c.refusal(await c.cancel(c.d.id, who)).slice(0, 2)).toEqual([403, 'not_owner_session']);
-    }
+    const inside = { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) };
+    expect(c.refusal(await c.post(c.a.id, inside))).toEqual(c.refusal(moving));
+    expect(c.refusal(await c.cancel(c.d.id, inside))).toEqual(c.refusal(await c.cancel(c.d.id)));
     expect((await c.post(c.leader.id)).statusCode).toBe(404);
     expect((await c.post('7c9e6679-7425-40de-944b-e07fc1f90ae7')).statusCode).toBe(404);
   });

@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Org, PersonView } from '../src/types';
@@ -97,6 +97,21 @@ async function serve(page: Page, posted: Posted[]) {
   });
 }
 
+/* Whether the closing dot of an English or Russian phrase is drawn after its last word, and not jumped to its start, as
+   the dot of left to right words does in a right to left block unless the phrase is isolated. */
+const dotAtTheEnd = (phrase: Locator) =>
+  phrase.evaluate(el => {
+    const text = el.firstChild as Text;
+    const box = (from: number) => {
+      const range = document.createRange();
+      range.setStart(text, from);
+      range.setEnd(text, from + 1);
+      return range.getBoundingClientRect();
+    };
+    const last = text.data.length - 1;
+    return box(last).left > box(last - 1).left;
+  });
+
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'cyberpunk' | 'light'; width: number };
 const LOOKS: Look[] = (['cyberpunk', 'light'] as const).flatMap(theme =>
   [1440, 375].flatMap(width => [{ lang: 'en', dir: 'ltr', theme, width }, { lang: 'ru', dir: 'ltr', theme, width }, { lang: 'en', dir: 'rtl', theme, width }] as Look[]),
@@ -126,6 +141,13 @@ for (const look of LOOKS) {
     await open(page, look);
     await serve(page, posted);
     await page.goto(`/departments/${MKT}`);
+    /* The map of a department with no head and no employees: its words keep their dot at their end (Design #1186). */
+    const noHead = page.locator('.shead.empty .hn');
+    await expect(noHead).toHaveText(t.dept.noHead);
+    const hint = page.getByText(t.dept.noMembers, { exact: true });
+    expect(await dotAtTheEnd(noHead)).toBe(true);
+    expect(await dotAtTheEnd(hint)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/map-${browserName}-${name}.png`, animations: 'disabled' });
     await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
     const panel = page.getByRole('complementary', { name: t.settings.groups.messaging });
     const part = panel.locator('.outbound-setup');

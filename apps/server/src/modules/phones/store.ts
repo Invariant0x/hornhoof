@@ -3,7 +3,7 @@ import { PhoneEndpoint, PhonePairing, type PhoneDevice } from '@hornhoof/protoco
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import type { Person } from '../../auth/session.js';
+import { viaOrchestrator, type Person } from '../../auth/session.js';
 import { companies, companyPhones, machines, nodes, people, phoneSessions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
@@ -29,8 +29,9 @@ export async function phoneById(ctx: Ctx, companyId: string, id: string): Promis
   return phone;
 }
 
+/* The phone's owner stops and resumes it, and the orchestrator acting for the CEO; never a head. */
 export function phoneOwner(me: Person, phone: CompanyPhone): void {
-  if (me.via || me.id !== phone.personId || me.companyId !== phone.companyId) throw phoneDenied();
+  if (me.companyId !== phone.companyId || (!viaOrchestrator(me) && (me.via || me.id !== phone.personId))) throw phoneDenied();
 }
 
 export async function nodeForPhone(ctx: Ctx, companyId: string, machineId: string): Promise<string> {
@@ -44,7 +45,7 @@ export async function nodeForPhone(ctx: Ctx, companyId: string, machineId: strin
 }
 
 export async function probePhone(ctx: Ctx, me: Person, input: z.infer<typeof ProbePhone>): Promise<{ nodeId: string; devices: PhoneDevice[] }> {
-  if (me.via) throw phoneDenied();
+  if (me.viaHead) throw phoneDenied();
   const nodeId = await nodeForPhone(ctx, me.companyId, input.machineId);
   const result = await phoneRequest(ctx, nodeIdentity(nodeId), { type: 'phone.probe', requestId: randomUUID(), endpoint: input.endpoint, ...(input.pairing ? { pairing: input.pairing } : {}) });
   if (result.status !== 'ok') throw phoneOffline();
