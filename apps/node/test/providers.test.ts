@@ -185,13 +185,16 @@ function loginIo() {
   return { io: { input: new PassThrough(), output, urlFile: join(dir, 'login-url') }, printed: () => printed };
 }
 
+/* What every Claude Code run is given so that no commit or pull request of it names Claude as co-author. */
+const UNSIGNED = JSON.stringify({ includeCoAuthoredBy: false, attribution: { commit: '', pr: '' } });
+
 describe('Claude Code', () => {
   it('starts a new session with its own id and the prompt after --', async () => {
     const res = await adapter('claude').run(input({ prompt: '-rf looks like a flag' }));
     const { argv, cwd } = lastRun();
     expect(argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--session-id', expect.stringMatching(/^[0-9a-f-]{36}$/),
-      '--permission-mode', 'bypassPermissions', '--', '-rf looks like a flag',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--', '-rf looks like a flag',
     ]);
     expect(cwd).toBe(work);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION, error: null });
@@ -201,9 +204,15 @@ describe('Claude Code', () => {
     const res = await adapter('claude').run(input({ sessionId: CLAUDE_SESSION, model: 'opus' }));
     expect(lastRun().argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--resume', CLAUDE_SESSION,
-      '--permission-mode', 'bypassPermissions', '--model', 'opus', '--', 'say ready',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--model', 'opus', '--', 'say ready',
     ]);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION });
+  });
+
+  it('names Claude as co-author of no commit or pull request it makes', async () => {
+    await adapter('claude').run(input());
+    const { argv } = lastRun();
+    expect(JSON.parse(argv[argv.indexOf('--settings') + 1]!)).toEqual({ includeCoAuthoredBy: false, attribution: { commit: '', pr: '' } });
   });
 
   it('compacts the conversation at the window Hornhoof set, or at its own when none is set', async () => {

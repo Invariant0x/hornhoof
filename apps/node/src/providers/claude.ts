@@ -10,6 +10,7 @@ import { readAccount } from '../account.js';
 import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
+import { CLAUDE_UNSIGNED } from './claude-attribution.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
 import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
@@ -148,7 +149,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
 
     async run(input: RunInput): Promise<RunResult> {
       const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
-      const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions'];
+      const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions', '--settings', JSON.stringify(CLAUDE_UNSIGNED)];
       /* In a file of the agent's folder, as the live terminal gives them: Linux holds one argument to 128 KiB. */
       if (input.instructions) {
         const file = join(input.workDir, '.hh-instructions.md');

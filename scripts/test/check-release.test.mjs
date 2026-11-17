@@ -162,3 +162,38 @@ for (const args of [['--other'], ['--other', '5'], ['--turn'], ['--turn', '05'],
     assert.match(result.stderr, /usage|turn number/i);
   });
 }
+
+/* No commit that goes to a turn branch or main names Claude as its co-author, whatever the case of the line. The check names
+   each such commit of the range over origin/main, before main and in the author's own check alike. */
+const CO_AUTHORED = ['Co-Authored-By: Claude <noreply@anthropic.com>', 'co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>'];
+for (const line of CO_AUTHORED) {
+  for (const mode of [[], ['--local']]) {
+    test(`names the commits that carry ${JSON.stringify(line)}${mode.length ? ' in the local check' : ''}`, () => {
+      const p = project();
+      writeFileSync(join(p.root, 'notes.txt'), 'one\n');
+      p.git('add', '.');
+      p.git('commit', '--quiet', '-m', `Add notes\n\n${line}`);
+      const signed = p.git('rev-parse', 'HEAD');
+      writeFileSync(join(p.root, 'notes.txt'), 'two\n');
+      p.git('commit', '--quiet', '-am', 'Change notes');
+      const clean = p.git('rev-parse', 'HEAD');
+      const result = p.run('check-release.mjs', ...mode);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, new RegExp(signed));
+      assert.doesNotMatch(result.stderr, new RegExp(clean));
+    });
+  }
+}
+
+test('passes a range whose commits name no co-author, and leaves alone what main already holds', () => {
+  const p = project();
+  p.git('commit', '--quiet', '--allow-empty', '-m', `Old commit of main\n\n${CO_AUTHORED[0]}`);
+  p.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  writeFileSync(join(p.root, 'notes.txt'), 'clean\n');
+  p.git('add', '.');
+  p.git('commit', '--quiet', '-m', 'Add clean notes');
+  for (const mode of [[], ['--local']]) {
+    const result = p.run('check-release.mjs', ...mode);
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
