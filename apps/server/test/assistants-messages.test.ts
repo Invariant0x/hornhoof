@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -16,8 +17,9 @@ const state = async (app: FastifyInstance, token: string) => (await app.inject({
 
 /* A company with its orchestrator ready on the built-in node, Sales with its head and a worker on the company's key, and
    the CEO's row. */
-async function company() {
+async function company(beforeReady?: (app: FastifyInstance) => void) {
   const { app, db } = await testApp({ NODE_KEY });
+  beforeReady?.(app);
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -177,6 +179,39 @@ describe('files an assistant sends', () => {
       'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.');
     await refused(await upload(c, ava.key, FILES[0]!, randomUUID(), 'ru'), 404, 'agent_unknown',
       'в Hornhoof нет такого сотрудника, или его убрали.');
+  });
+
+  it.each([8, FILE_BYTES + 1])('stops a chunked assistant file at its %i byte quota and removes any partial file', async limit => {
+    let issued = 0;
+    const body = Object.assign(new Readable({ read() {} }), {
+      async *[Symbol.asyncIterator]() {
+        try { for (const size of [limit, 4, 4]) { issued += size; yield Buffer.alloc(size, 1); } }
+        finally { body.destroy(); }
+      },
+    });
+    const c = await company(app => app.addHook('preParsing', async (req, _reply, payload) => req.url.startsWith('/api/assistant/files?') ? body : payload));
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    const dir = mkdtempSync(join(tmpdir(), 'hh-assistant-quota-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    c.app.ctx.config.taskFilesBytes = limit;
+    const sent = await c.app.inject({ method: 'POST', url: `/api/assistant/files?agentId=${c.head.id}&name=stream.bin`, headers: { authorization: `Bearer ${ava.key}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(413);
+    expect(sent.json().error).toMatchObject({ reason: 'attachment_invalid', message: "Hornhoof has no room left for the company's files." });
+    expect(issued).toBe(limit + 4);
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await c.db.select().from(attachments)).toEqual([]);
+  });
+
+  it('accepts a chunked assistant file exactly at the eight byte quota', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    c.app.ctx.config.taskFilesBytes = 8;
+    const sent = await c.app.inject({ method: 'POST', url: `/api/assistant/files?agentId=${c.head.id}&name=exact.txt`, payload: Readable.from([Buffer.from('1234'), Buffer.from('5678')]), headers: { authorization: `Bearer ${ava.key}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(201);
+    const [kept] = await c.db.select().from(attachments);
+    expect(kept!.size).toBe(8);
+    expect(Buffer.from(kept!.bytes).toString()).toBe('12345678');
   });
 
   it('keeps a file over 50 MB on the disk of the machine that took it and out of the database, for the agent and the owner alike, and says plainly when it is not there', async () => {
