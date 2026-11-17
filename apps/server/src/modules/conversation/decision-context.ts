@@ -299,9 +299,9 @@ export const alsoKept =
   };
 
 /* What a call of the orchestrator or a head decides on: the person its turn answers, found by Hornhoof. The orchestrator's
-   call of its own, as the owner, decides nothing. A person's own screen gives none. */
-export function delegationOf(me: { id: string; via?: string; decision?: { jobId: string; sourceSeq: number | null } }): Delegation | undefined {
-  if (!me.via) return undefined;
+   call of its own decides as the owner, with no turn to check. A person's own screen gives none. */
+export function delegationOf(me: { id: string; via?: string; viaHead?: true; decision?: { jobId: string; sourceSeq: number | null } }): Delegation | undefined {
+  if (!me.via || (!me.viaHead && !me.decision)) return undefined;
   if (!me.decision) throw contextMissing();
   return { agentId: me.via, personId: me.id, ...me.decision };
 }

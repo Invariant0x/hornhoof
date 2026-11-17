@@ -7,13 +7,12 @@ import { everyKind, staffed, registerAnswerCases } from './decisions-company.js'
 
 describe('who may answer, by decision rights', () => {
   registerAnswerCases(['devPlain', 'mktQuestion']);
-it("refuses the orchestrator's own call that carries no turn of a person with the right", async () => {
+it("takes the orchestrator's own call, with no turn of a person in it, as the owner's answer", async () => {
     const c = await everyKind();
     const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.salesQuestion.request.id}`, payload: { pick: 0 }, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error.reason).toBe('decision_context_missing');
+    expect(res.statusCode, res.body).toBe(200);
     const [row] = await c.db.select().from(requests).where(eq(requests.id, c.salesQuestion.request.id));
-    expect(row!.status).toBe('open');
+    expect(row).toMatchObject({ status: 'answered', picked: 0 });
   });
 
 it('shows the computer to people of the whole company and lets only the CEO, the delegate and the orchestrator decide it', async () => {
