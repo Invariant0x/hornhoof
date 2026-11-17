@@ -1,0 +1,22 @@
+[
+  {
+    "path": "1220-refresh-1/rebase.log",
+    "originalSha256": "f41c46e9cc3811ac708dc807d00a7c6cb14205f05100b51002959d08811d41ef",
+    "storedSha256": "c2c09858e353032708e0e957f9f5210691adb1e331d66864ef8f9191270d016c"
+  },
+  {
+    "path": "1220-refresh/rebase.log",
+    "originalSha256": "72f0f64b6f874bcf01226007e67d57a5d873d0d5ac16f8942b1c5ad69d835c31",
+    "storedSha256": "5ed2145117f9945df962df7c7d9c6d078e3de81aa19ccd5e90f56cb5acf9ed2c"
+  },
+  {
+    "path": "../resume-source-sql.patch",
+    "originalSha256": "2f24202942e30b871ea1f82275ef39a1b1a2eef0cdd9354550edd4df28dcc276",
+    "storedSha256": "2f24202942e30b871ea1f82275ef39a1b1a2eef0cdd9354550edd4df28dcc276"
+  },
+  {
+    "path": "../resume-sql-conflict.patch",
+    "originalSha256": "82bfd860fe55ac81833a69ed0b589d1a848c1b0e465d42f68d8b11603319bc2c",
+    "storedSha256": "3a24c0b7dbe1fa11d32f2b3805415cbd2a038465525a7e5c66f3b9d60557e1a9"
+  }
+]

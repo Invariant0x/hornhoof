@@ -70,15 +70,6 @@ describe('the company notebook', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('says when the notebook is full', async () => {
-    const user = userEvent.setup();
-    show({ 'POST /api/notebook': [409, { error: { code: 'conflict', message: 'Full.', reason: 'notebook_full' } }] });
-    await screen.findByText('Turns stay small.');
-    await user.type(screen.getByRole('textbox', { name: 'New note' }), 'More.');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('The notebook is full: 30 notes and 4000 characters at most. Change or remove a note first.');
-  });
-
   it('reads the notes again when the stream says the notebook changed', async () => {
     const stream = fakeStream();
     const calls = show();

@@ -1,0 +1,15 @@
+{
+  "commit": "f3a9064500ffbaf5c4d7d300f834ec10982dafe9",
+  "cwd": ".",
+  "command": [
+    "npm",
+    "run",
+    "-s",
+    "build"
+  ],
+  "exit": 0,
+  "log": "build.log",
+  "sha256": "8f34c414dc9f85ed52f724286f42b53c79859ec536dc192c2342f356f81a5a2c",
+  "gate": "PASS",
+  "originalSha256": "086fb9cc1959e948542965317add01d695868d9c3a999f47caa5bd57c9f04cb3"
+}

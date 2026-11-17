@@ -11,7 +11,7 @@ import { ownsPlace, viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
-import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { actorOf, employeeChangedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, companies, departments, goals, personAccess, pipelines, pipelineStages, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
@@ -145,7 +145,7 @@ export async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, t
     .where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId), isNull(agents.removedAt)));
   await tx.update(agents).set({ teamId: null }).where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId)));
   if (members.length) {
-    await tx.insert(agentChanges).values(members.map(m => ({ companyId: me.companyId, agentId: m.id, ...changedBy(me), field: 'team' as const, before: teamId, after: null })));
+    await tx.insert(agentChanges).values(members.map(m => ({ companyId: me.companyId, agentId: m.id, ...employeeChangedBy(me), field: 'team' as const, before: teamId, after: null })));
   }
   await tx.delete(personAccess).where(eq(personAccess.teamId, teamId));
   await tx.update(subscriptions).set({ targetKind: 'department', targetId: departmentId }).where(and(eq(subscriptions.targetKind, 'team'), eq(subscriptions.targetId, teamId)));
@@ -286,7 +286,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       };
       const hireLines = async (inside: Tx, dept: typeof departments.$inferSelect, lines: HireLine[]): Promise<Hired[]> => {
         const out: Hired[] = [];
-        for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+        for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me)));
         waiting.push(...lines.filter(line => !line.subscription).map(line => line.name));
         return out;
       };
@@ -451,7 +451,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning();
       /* The product comes with the people its department's template keeps one of for each product. */
       const serving = await servingSubscriptions({ db: tx }, me.companyId, spotIn(dept));
-      for (const line of productRoster(ctx, dept, row!, serving)) await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me));
+      for (const line of productRoster(ctx, dept, row!, serving)) await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me));
       return row!;
     });
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -542,7 +542,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
 
       const hired: Hired[] = [];
-      for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+      for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me)));
       return { hired, present, agentId };
     }));
     await tryPlaceOperator(ctx, me.companyId);

@@ -1,0 +1,12 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1220/apps/web
+
+ ✓ test/AgentCard.test.tsx (65 tests) 4882ms
+   ✓ AgentCard (41)
+     ✓ names the acting head and whose rights it used, keeping human, old and automatic changes in both languages 1170ms
+     ✓ sets a timer: how often the employee wakes and what it does each time 303ms
+
+ Test Files  1 passed (1)
+      Tests  65 passed (65)
+   Start at  15:02:10
+   Duration  6.64s (tests 78%, environment 15%, setup 3%, transform 3%, import 1%)

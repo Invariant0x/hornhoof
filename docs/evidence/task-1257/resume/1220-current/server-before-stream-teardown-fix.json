@@ -1,0 +1,31 @@
+{
+  "commit": "0c4c03022d025cb54f8b2d79cd91596fd0d5311a",
+  "cwd": "apps/server",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/agent-changes-migration.test.ts",
+    "test/agents.test.ts",
+    "test/templates.test.ts",
+    "test/network-tables.test.ts",
+    "test/agent-sql-permissions.test.ts",
+    "test/restore.test.ts",
+    "test/merge-rules.test.ts",
+    "test/head-department-control.test.ts",
+    "test/templates-pipeline.test.ts",
+    "test/migration-metadata.test.ts",
+    "test/computer-scope.test.ts",
+    "test/computer-scope-input.test.ts",
+    "test/computer-scope-migration.test.ts",
+    "test/decision-context.test.ts",
+    "test/people-delete.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exit": 0,
+  "log": "server-before-stream-teardown-fix.log",
+  "sha256": "700d0af967e7075cf9ccf5671aec93470fbb392c9379e41f502b9f8651bf8e0e",
+  "originalSha256": "ec3fa36e1267b1367da4bb7d58ea877b066c6dd09046a7bf111dd6dff950c84e"
+}

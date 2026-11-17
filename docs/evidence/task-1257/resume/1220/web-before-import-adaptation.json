@@ -1,0 +1,15 @@
+{
+  "commit": "1ac8c84433a3ad619144f0a6a0d4b3e7f69b653c",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/AgentCard.test.tsx"
+  ],
+  "exit": 0,
+  "log": "web-before-import-adaptation.log",
+  "sha256": "7f8747637a46a0964d0795022c5561eabfd08f3dde0c9dd3af1e3349119ccc94",
+  "originalSha256": "fc2ca378b2eec479c77d05b6c7ee55eaec61d30678de4cebf070afebb081d917"
+}

@@ -34,6 +34,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Security and code review never count what the orchestrator can see or do as a finding.
 - The orchestrator's prompt and the setup screen say plainly that it can do anything and change its own system.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
+- A company or department notebook takes any number of notes and characters; each note is still 300 characters at most, and an agent's instructions carry as much of the notebook as its program reads and say where they cut it.
 - Migration 0138 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
 
 ## [0.31.0] - 2026-11-17

@@ -1,0 +1,17 @@
+{
+  "commit": "f8cd58b63f766a2a473f5f7bb0af17800c379beb",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "playwright",
+    "test",
+    "e2e/agent-history.spec.ts",
+    "--config=e2e/agent-history.config.ts"
+  ],
+  "exit": 0,
+  "log": "browser-before-navigation-teardown-fix.log",
+  "sha256": "5357bf47353e34a67c890541b177644a9517f700c2a556378126ed8f157eb324",
+  "gate": "NOT_PASS",
+  "originalSha256": "5357bf47353e34a67c890541b177644a9517f700c2a556378126ed8f157eb324"
+}

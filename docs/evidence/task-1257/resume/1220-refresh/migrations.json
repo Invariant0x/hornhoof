@@ -1,0 +1,22 @@
+{
+  "commit": "673f447ee5cc6d3abd24cfc500d55c41a4d4ed3f",
+  "cwd": "apps/server",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/migrations.test.ts",
+    "test/migration-metadata.test.ts",
+    "test/agent-changes-migration.test.ts",
+    "test/computer-scope-migration.test.ts",
+    "test/secret-redaction-migration.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exit": 0,
+  "gate": "PASS",
+  "log": "migrations.log",
+  "sha256": "f842f76f296137d303f7b9315378c7fb4da9ebd7d6eb18f3f5d8b8554e89d68c",
+  "originalSha256": "3bc9b82573341d5e106091c8b140feef789ae44add4f279d51d2a8d42da46dea"
+}

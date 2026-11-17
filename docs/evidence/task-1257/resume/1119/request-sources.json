@@ -1,0 +1,17 @@
+{
+  "commit": "f3ef5896c81bec9fa81b5912bfdd84f377372fb7",
+  "cwd": "apps/server",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/request-sources.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exit": 0,
+  "log": "request-sources.log",
+  "sha256": "aee6924949159455eb3edde63073b5745c0c51d0db30065eac3a02e4132e5cae",
+  "originalSha256": "5a9b9e45b54fb9d03b929dc31cd8fc94afda2b3e80aa23537af2563c59d4cab9"
+}
