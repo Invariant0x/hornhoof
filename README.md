@@ -4,7 +4,7 @@
 
 **Your own company of AI agents: any models, your own computers.**
 
-Hornhoof is a system for running AI agents as one company. It works with any models: through subscriptions like Claude, ChatGPT, Kimi, GLM or Google, through API keys, and with new models as they come out. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents on different models check each other's work. You see everything on one map and get the finished result.
+Hornhoof is a system for running AI agents as one company. It works with any models: through subscriptions like Claude, ChatGPT, Kimi, GLM or Google, through API keys, and with new models as they come out. Each employee is a real AI program on your own plan, such as Claude Code, Codex, Kimi Code or Antigravity, and one department can mix them freely. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents on different models check each other's work. You see everything on one map and get the finished result.
 
 It is your own virtual cloud. It runs on the computers you connect, one or many, yours or your team's. No cloud provider, no third-party servers, no account to make. Free and open source.
 
@@ -46,6 +46,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 - ✅ You pay for more than one AI plan and want all of them working, not waiting.
 - ✅ You have a spare laptop, a home server or an old Mac that sits idle most of the day.
 - ✅ You want to give a goal and get a checked result, not watch every step.
+- ✅ You want fifty files reviewed, or one text put into twenty languages, side by side and not one by one.
 - ✅ You want your home looked after too: devices, network, shopping, bills.
 - ✅ You want it all on your own machines, under your own control.
 
@@ -57,9 +58,11 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 | Work goes on when a plan hits its limit | ❌ | ✅ |
 | Every change is reviewed by another agent, preferably of another maker, then tested, and checked for security where it matters | ❌ | ✅ |
 | One map shows every agent, what it does now and who stands idle | ❌ | ✅ |
+| Any agent starts many one-shot calls at once, and every answer stays in the task's history | ❌ | ✅ |
+| A task tracker with goals, owners, dates, a board and a graph, kept by the agents themselves | ❌ | ✅ |
 | Spare computers take the full test runs | ❌ | ✅ |
 | The company keeps running when one of your computers stops | ❌ | ✅ |
-| Nothing reaches your main branch without your approval | ❌ | ✅ |
+| Releases wait for your yes, or go out by themselves once every check is green, as you choose | ❌ | ✅ |
 | Departments beyond code: design, marketing, sales, the home | ❌ | ✅ |
 | Runs on your own machines, with no sign-up | ✅ | ✅ |
 
@@ -91,7 +94,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
    ![The company map](.github/assets/map.gif)
 
-Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. New programs and models are added as they come out. When a new version is out, one "Update" button moves every machine to it.
+Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. Mix them as you like: in one department a developer on Claude Code, a reviewer on Codex and a tester on Kimi Code can work on the same task. New programs and models are added as they come out. When a new version is out, one "Update" button moves every machine to it.
 
 ## For a startup or a team of friends
 
@@ -112,8 +115,32 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 *Marketing, content, sales and support run the same way as development.*
 
 - **A department for every kind of work.** Each has a head and employees who each know one part of the job. In marketing a search specialist, a social media manager and a copywriter work on one campaign; in support the first line answers, the second line takes the hard cases and an editor keeps the knowledge base. The head splits the goal, hands out the parts and checks the result.
-- **A library to start from.** 10 departments, 54 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
+- **Agents work like people.** A letter goes out from the department's own mailbox, social networks go through the company's Android phones, and each step is written down in the department's git. There is no mailing machinery: like Lego, a department builds what it needs from a mailbox, a phone, a script and a skill.
+- **A library to start from.** 10 departments, 64 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
 - **Your own way of working.** Change any employee's role and skills on its card, or write your own roles, skills and departments. The company puts them to work on the next task.
+
+## Ways of working
+
+*Pick the shape that fits the job, and mix them in one company.*
+
+- **Standing employees.** Each keeps its place in a department, its memory and its terminal, and can ask a person midway. *A developer who knows the app takes bug after bug all week.*
+- **Turnkey teams.** One member does a task whole, with its own checks and tests. *A small fix goes out within the hour.*
+- **Routes of stages.** A task passes from owner to owner: written, reviewed by an agent of another maker, tested. A stage can hand in a document instead of code. *An article goes from its writer to an editor.*
+- **One-shot calls.** Any agent runs its program once per piece, like `claude -p` or `codex exec`, whatever the program. Each call starts fresh, answers and ends, and a judge call can weigh all the answers. Thousands can queue: as many run at once as free memory holds, within the plan's limits. *Thirty plant care pages are written side by side, then one judge reads them all.*
+- **Pipelines of calls.** Calls in steps, spread out and brought together, driven by the agent who holds the task or by a one-shot stage of the route. *Five calls chase five causes of a bug, and one more checks the cause that held.*
+- **Personal assistants.** Your own assistant, such as AvaClone, OpenClaw or Hermes Agent, works in the company with your rights. *From your chat you ask how the beta is going.*
+
+![One-shot calls on the map and in the task's history](.github/assets/calls.gif)
+
+| The job | The way |
+| --- | --- |
+| Days of work, questions midway, a phone or a browser | A standing employee |
+| A small whole task, done quickly | A turnkey team |
+| Must be checked by someone else | A route of stages |
+| Many like pieces with no talk between them | One-shot calls |
+| Spread out, then brought together | A pipeline of calls |
+| Your own errands, from your chat | Your personal assistant |
+| A program stuck on a question on its screen | The program operator, by itself |
 
 ## For your home
 
@@ -144,10 +171,23 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 ## You decide, they do
 
 - **One list for everything that needs you.** Questions, design choices and approvals wait in one place, and you answer from any device, your phone too.
+- **You are asked only about what cannot be undone.** By default only an irreversible deletion waits for the CEO. A department can add its own rules, as the home departments do for devices and money.
 - **Work in turns.** A goal becomes a turn of tasks, and each turn ends in a numbered release.
-- **Nothing ships without you.** Work reaches your main branch only after the review of the turn, the final test run and your approval.
+- **Releases can go out by themselves.** With autonomous release on, a department's release reaches your main branch once its whole test run is green and every change in it was checked. With it off, the release waits for your yes on the exact commit.
 
-![Tasks and turns](.github/assets/tasks.gif)
+## A task tracker
+
+*Goals, owners and dates, as a list, a board or a graph.*
+
+- **Your work first.** "My tasks", "Waits for me" and "Working now", with search and filters over every task.
+- **One person answers for each task and goal**, with a why and a date. A goal can carry a number, like "500 testers by December".
+- **Kept by the agents.** Cards move on the board as the work moves, by status or by the stages of a pipeline, and each department's product manager keeps titles and goals tidy. On a phone too.
+
+![The task tracker: a list, a task's card and the board](.github/assets/tasks.gif)
+
+![A board by the stages of a pipeline](.github/assets/board.gif)
+
+![Goals as a graph](.github/assets/goals.gif)
 
 ## It gets better by itself
 
@@ -156,8 +196,14 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 - **A task watchdog** wakes every 10 minutes while there is work, nudges an agent that is stuck, and tells its head when that did not help.
 - **A weak point collector** reads every three hours what failed and where agents stumbled, and writes each finding up with its facts and a fix.
 - **Improvements** collect those fixes. You take one with a click, and the orchestrator does it or turns it into a task.
-- **A program operator** looks after the AI programs themselves: it passes harmless screens, refuses what a program may not do, and brings you sign-ins and payments.
+- **A program operator** keeps the AI programs moving. It passes their service windows on its own, such as an offer to compact a full context or a sign-in from the vault, and asks a person only for their own password or account and for what costs money.
 - **A reliability engineer** restores broken machines, tools and integrations, finds the cause, and writes down how to handle it next time.
+
+## Your own look
+
+Pick a skin, Cyberpunk, Light, Matrix or Pixel, or make your own from any idea: download one as a sample, ask any AI to change it, and add the file.
+
+![From Cyberpunk to Matrix, then a skin of your own](.github/assets/skins.gif)
 
 ## Next to the alternatives
 
@@ -175,13 +221,17 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 | Several people, each with their own plans and departments | ❌ | ❌ | ✅ |
 | Departments beyond code, and the home | ❌ | ❌ | ✅ |
 
+### Claude Cowork and the Codex app
+
+Claude Cowork gives one person a lead Claude with sub-agents that return summaries. The Codex app gives one developer agents in git worktrees to merge by hand. Hornhoof is a company that stays, on any program, where review, tests and releases bring the work together.
+
 ## Hornhoof builds itself
 
 Hornhoof is developed inside Hornhoof. Its own company of agents on Claude, ChatGPT, Kimi and Google plans takes the tasks, writes the code, reviews it across makers, tests it and ships every turn as a release, the way large companies run on their own products.
 
 ## Let's build it together
 
-I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 54 roles and over 150 skills that every company starts with.
+I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 64 roles and over 150 skills that every company starts with.
 
 Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an open issue.
 
@@ -190,14 +240,14 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 ## Good to know
 
 - **Each agent is a real program on your machine.** More agents need more memory. Spare computers help.
-- **Themes.** Pick one of four looks, Cyberpunk, Light, Matrix or Pixel, in the account menu or in Settings, or load a theme file of your own.
 - **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell me about them.
 
 ## Your company stays yours
 
 - It runs on your machines. No Hornhoof cloud, no account with us.
 - Its data sits only on machines of the CEO and of people who see the whole company, and backups are encrypted.
-- Every agent works in a locked box: a container with no folder of your computer in it, as a user of its own, unable to read the machine's keys or other plans.
+- Every employee works in a locked box: a container with no folder of your computer in it, as a user of its own, unable to read the machine's keys or other plans.
+- The orchestrator acts as the owner, with a shell in the server and Hornhoof's own rights over its database.
 - Root on a machine opens only when that machine's owner allows it, for a day at most.
 - Keys and tokens show as `[hidden]` in every terminal and output.
 - The hornhoof.org link is optional, and it passes your traffic on encrypted, unable to read it.
@@ -211,7 +261,6 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 | Direct links between machines in different homes | Machines connect to each other directly, without going through the public link |
 | More machines holding the company's data | The company's data lives on five machines out of ten instead of three |
 | Phones and tablets as workers | One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests and checks on a real device |
-| Checkpoints for every department | Marketing, content and sales get stages and checks between them, the way development has them |
 | Schemes to share | Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working |
 
 Want to add something? [Write to us](https://github.com/Invariant0x/hornhoof/issues) and let's build it.
