@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PROGRAM_OPERATOR_ROLE, ProgramKey, type OperatorQuestion, type ProgramInputResult } from '@hornhoof/protocol/program-operator';
+import { PROGRAM_OPERATOR_ROLE, ProgramKey, type OperatorQuestion, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
@@ -10,6 +10,7 @@ import { agentParty } from '../events/parties.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import type { OperatorCaller } from './authorization.js';
+import { settleAnsweredQuestions, syncOperatorCases } from './cases.js';
 import { operatorNotification } from './notifications.js';
 import { pictureSecrets, renderPicture, storeCasePicture } from './pictures.js';
 import { requestProgramInput, requestProgramView, type ProgramAt } from './rpc.js';
@@ -87,7 +88,7 @@ export async function readProgramView(ctx: Ctx, caller: OperatorCaller, input: V
   if (!view || view.result !== 'ok' || !view.snapshot) throw unavailable(view?.reason ?? 'node_unavailable');
   const secrets = await pictureSecrets(ctx, me.companyId);
   const { rendered } = await renderPicture(view, secrets);
-  await keepForCase(ctx, caller, program, rendered.png);
+  await keepForCase(ctx, caller, program, view, rendered.png);
   return {
     employee: program.agentId, name: program.name, job: view.jobId, instance: view.instance, snapshot: view.snapshot, state: view.state,
     tool: view.tool && masked(view.tool, secrets), question: maskedQuestion(view.question, secrets), input: view.input, undelivered: view.undelivered, png: rendered.png, text: rendered.text,
@@ -125,13 +126,17 @@ function typedOf(input: KeysInput): Typed {
 const outcomeOf = (action: string, reply: ProgramInputResult | null): Outcome =>
   reply ? { action, result: reply.result, reason: reply.reason } : { action, result: 'unknown', reason: 'action_unknown' };
 
-/* The program operator's look at the case it was given is the picture its report carries. */
-async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, png: Buffer): Promise<void> {
-  await operatorTransaction(ctx, async tx => {
+/* The program operator's look at the case it was given is the picture its report carries. Anyone's look at the program at
+   work asking nothing closes its question cases. */
+async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, view: ProgramView, png: Buffer): Promise<void> {
+  const settled = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
+    const closed = await settleAnsweredQuestions(inside, program.agentId, view, png);
     const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
     if (row) await storeCasePicture(tx, row, png);
+    return closed;
   });
+  if (settled.length) await syncOperatorCases(ctx, program.agentId);
 }
 
 /* Who, why, which keys and what text with its secrets masked, and what came of it, in the employee's conversation. */

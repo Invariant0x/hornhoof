@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - `message_employee` counts an employee's recent messages through an index instead of reading every one of them.
 - No false "assignment words not recorded" case while a program runs a tool with those words in it.
+- A program operator case whose question went away by itself closes on its own and reaches nobody; the operator reports `cleared` for a program back at work, and a report on a case already closed says how it closed.
 
 ### Added
 
