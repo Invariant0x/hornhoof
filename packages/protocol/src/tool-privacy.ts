@@ -36,6 +36,7 @@ export function privateToolCall(name: string, input: unknown, resolve = toolPriv
    reference or turn an event's kind into a different protocol message. */
 const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider|wait)$|(?:Id|Ids|Sha|Commit|Kind|Class|Type|State|Status)$/;
 const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql', 'caption', 'comment']);
+const opaqueMedia = (value: unknown): boolean => Boolean(value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio'));
 
 /* Values live only in the current turn's memory, for text that must still reach people. Short passwords and OTPs count
    too. JSON-escaped forms cover text nested in tool replies without putting a value in a persistent redactor. */
@@ -46,14 +47,15 @@ export class PrivateValues {
   get retainedBytes(): number { return Math.max(0, ...[...this.values].map(value => value.length * 4)); }
 
   remember(value: unknown, fields?: readonly string[]): void {
-    if (fields) {
-      if (value && typeof value === 'object') for (const field of fields) this.remember((value as Record<string, unknown>)[field]);
-      return;
-    }
+    if (fields) return this.rememberFields(value, fields);
     if (typeof value === 'string' && value) {
       this.rememberText(value);
     } else if (Array.isArray(value)) for (const item of value) this.remember(item);
     else if (value && typeof value === 'object') for (const item of Object.values(value)) this.remember(item);
+  }
+
+  private rememberFields(value: unknown, fields: readonly string[]): void {
+    if (value && typeof value === 'object') for (const field of fields) this.remember((value as Record<string, unknown>)[field]);
   }
 
   private rememberText(value: string): void {
@@ -77,7 +79,7 @@ export class PrivateValues {
   hide<T>(value: T): T {
     /* Media is an opaque payload for the authorized caller, not text to rewrite. Its tool's privacy policy decides
        whether it may be persisted. A password fragment may coincidentally occur in base64. */
-    if (value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio')) return value;
+    if (opaqueMedia(value)) return value;
     if (typeof value === 'string') return this.hiddenString(value) as T;
     if (Array.isArray(value)) return value.map(item => this.hide(item)) as T;
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, IDENTITY.test(key) ? item : this.hide(item)])) as T;
@@ -159,10 +161,12 @@ export class ToolPrivacy {
   }
 
   private observe(event: AgentEvent, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): void {
-    if (event.kind === 'tool') {
-      const call = privateToolCall(event.name, parsed(event.input), name => name === event.name && policy ? policy : resolve(name));
-      if (event.sensitive || call.policy?.sensitive) this.input(call.name, call.input, { ...call.policy, sensitive: true });
-    }
+    if (event.kind === 'tool') this.observeTool(event, policy, resolve);
     if (this.sensitive && event.kind === 'tool_result') this.result(parsed(event.summary), { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
+  }
+
+  private observeTool(event: Extract<AgentEvent, { kind: 'tool' }>, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): void {
+    const call = privateToolCall(event.name, parsed(event.input), name => name === event.name && policy ? policy : resolve(name));
+    if (event.sensitive || call.policy?.sensitive) this.input(call.name, call.input, { ...call.policy, sensitive: true });
   }
 }
