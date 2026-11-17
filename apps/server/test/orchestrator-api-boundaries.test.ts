@@ -47,6 +47,8 @@ it('refuses forged internal headers, including a same-character-length value wit
 it('keeps owner API and delegation off other agents and confines a foreign orchestrator to its own company', async () => {
   const c = await company();
   const localOwner = (await c.app.inject({ url: '/api/me', ...as(c.ceo) })).json().person.id as string;
+  const localPerson = (await c.app.inject({ url: '/api/me', ...as(c.ann) })).json().person.id as string;
+  expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${localPerson}`, payload: { title: 'Original title' }, ...as(c.ceo) })).statusCode).toBe(200);
   const clientFor = async (agent: typeof agents.$inferSelect, subscription: string) => {
     const token = `boundary-${randomUUID()}`;
     await c.db.insert(jobs).values({ companyId: agent.companyId, agentId: agent.id, subscriptionId: subscription, kind: 'conversation', prompt: 'recorded boundary check', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
@@ -62,7 +64,7 @@ it('keeps owner API and delegation off other agents and confines a foreign orche
       expect((error as Error).message).toMatch(/not found|unknown tool|not available/i);
     }
   };
-  const payload = { method: 'PUT', path: `/api/people/${localOwner}/ceo-delegate`, body: { isCeoDelegate: true }, via: 'orchestrator', agentKind: 'orchestrator' };
+  const payload = { method: 'PATCH', path: `/api/people/${localPerson}`, body: { title: 'Forged title' }, via: 'orchestrator', agentKind: 'orchestrator' };
   for (const agent of [c.bruno, c.head]) {
     const client = await clientFor(agent, agent.subscriptionId!);
     expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('api');
@@ -82,5 +84,6 @@ it('keeps owner API and delegation off other agents and confines a foreign orche
   expect(listed.map(person => person.id)).not.toContain(localOwner);
   const denied = await client.callTool({ name: 'api', arguments: payload });
   expect(denied.isError).toBe(true);
-  expect((await c.db.select().from(people).where(eq(people.id, localOwner)))[0]!.isCeoDelegate).toBe(false);
+  expect((denied.content as { text: string }[])[0]!.text).toContain('This person does not exist');
+  expect((await c.db.select().from(people).where(eq(people.id, localPerson)))[0]!.title).toBe('Original title');
 });
