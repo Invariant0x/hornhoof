@@ -1,0 +1,32 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+
+ ✓ test/read-tools.test.ts (6 tests) 6817ms
+   ✓ the tools of an agent on a machine that only reads (6)
+     ✓ lists the same tools in every mode, and answers the ones that read 1287ms
+     ✓ tells an agent on a machine that is cut off to wrap up, and asks one whose machine still has the internet to wait 1295ms
+     ✓ writes nothing in read, with or without the id of a call 1234ms
+     ✓ lets the orchestrator read the database, and nothing more 1837ms
+     ✓ keeps maintenance shut 1094ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 3727ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 1837ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 499ms
+     ✓ is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key 492ms
+ ✓ test/tool-calls.test.ts (16 tests) 2765ms
+   ✓ a tool call with an invocation id (8)
+     ✓ answers a retried call from what it kept, and runs it once 427ms
+     ✓ takes an invocation id from the keeper alone with {} 325ms
+   ✓ the database tool with an invocation id (1)
+     ✓ keeps its answer in the change's own commit, and answers a retry from it 534ms
+ ✓ test/vault-tools.test.ts (19 tests) 3633ms
+   ✓ the vault for agents (19)
+     ✓ keeps no secret answer in replay storage or the journal 302ms
+     ✓ checks the entry again when the same invocation is repeated after deletion 338ms
+     ✓ gives the agent that asks the login, the password and the code of this moment as text, and never the code secret 330ms
+
+ Test Files  4 passed (4)
+      Tests  49 passed (49)
+   Start at  04:11:39
+   Duration  29.33s (tests 69%, import 28%, transform 3%)
+

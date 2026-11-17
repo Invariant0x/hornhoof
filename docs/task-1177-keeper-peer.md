@@ -1,7 +1,7 @@
 # Task 1177: direct keeper-peer scenarios
 
-Current integration base: `c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6`.
-The incoming merge did not change the task's five test/helper files or the lockfile.
+Current integration base: `359c2efaa27e9afb8842d0113dd5d6804aca467c`.
+The incoming task-1178 merge contributed the same prepareSharedDatabase body. Its only overlap was the explanatory comment, retained from task 1178. The other four task files, freshPglite, ownDatabases and the lockfile were unchanged.
 The hand-in names the exact checked candidate. Run receipts, raw timing/load data and the 28-case before/after table are retained on `task-1177-evidence` and attached to task 1177, preserving the checked source SHA.
 
 ## Cause and repair

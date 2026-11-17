@@ -307,8 +307,8 @@ async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>
 let shared: Shared | undefined;
 let held = false;
 
-/* The embedded database is test infrastructure. Files can prepare the first copy before application scenarios start,
-   keeping a cold WASM/database open out of the scenario's deadline. Shared-row and schema checks stay in place. */
+/* The embedded database is test infrastructure. A file may prepare its first copy during collection, before any
+   application scenario starts; a cold WASM/database open must not consume that scenario's deadline. */
 export async function prepareSharedDatabase(): Promise<void> {
   shared ??= await openShared();
 }

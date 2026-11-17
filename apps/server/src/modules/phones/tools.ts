@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { PhoneOperation } from '@hornhoof/protocol';
+import { PhoneOperation, PRIVATE_TOOLS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -42,7 +42,8 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent):
     await finishPhoneSession(ctx, input.session, 'completed');
     return { value: await sessionView(ctx, await sessionFor(ctx, me, input.session)) };
   }));
-  server.registerTool('phone_action', {
+  server.registerTool(PRIVATE_TOOLS.phone.name, {
+    _meta: PRIVATE_TOOLS.phone._meta,
     description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as a picture and its element tree; tap and swipe use coordinates on that picture; key presses back or home; text types any text into the field you tapped, Russian and emoji too, a login and password you hold as well; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {

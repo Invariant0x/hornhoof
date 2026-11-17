@@ -1,0 +1,38 @@
+{
+  "base": "a27bc368b1e027af70883d06d1da9ba2b07985ab",
+  "codeCommit": "792ca47fb44b2d26155b26574181efd9551c2b07",
+  "rule": "CRAP >= 10 blocks a new function or one whose complexity grew",
+  "areas": [
+    {
+      "area": "node",
+      "failures": [],
+      "unchangedHighScores": 113
+    },
+    {
+      "area": "server",
+      "failures": [],
+      "unchangedHighScores": 105
+    },
+    {
+      "area": "completion",
+      "failures": [],
+      "unchangedHighScores": 17
+    },
+    {
+      "area": "protocol",
+      "failures": [],
+      "unchangedHighScores": 0
+    }
+  ],
+  "finalCodeCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+  "finalIntegrationBase": "c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6",
+  "comparisonReuse": "The two base commits have identical contents for every production path changed by this repair. Node and server functions are identical to the recorded coverage run. Final protocol coverage and metric were regenerated; max CRAP 9.0.",
+  "mutation": {
+    "sampled": 6,
+    "killed": 6,
+    "survived": 0,
+    "uncovered": 0,
+    "compileError": 0,
+    "timeout": 0
+  }
+}

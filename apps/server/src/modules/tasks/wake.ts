@@ -1,6 +1,7 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
@@ -702,6 +703,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
+  forgetEndedTurn(ctx, jobId, job);
   await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
@@ -781,4 +783,8 @@ export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, t
   if (!opened) await turnRefused(ctx, node, agentId, text, queuedFrom);
   else if (opened.typedBy) await wakeAll(ctx, await answerDirectly(ctx, opened.typedBy, agentId, text));
   return opened;
+}
+
+function forgetEndedTurn(ctx: Ctx, jobId: string, job: { status: string } | undefined): void {
+  if (job && (job.status === 'done' || job.status === 'failed')) forgetPrivateTurn(ctx.db, jobId);
 }

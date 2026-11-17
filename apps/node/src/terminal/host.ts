@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
+import { PRIVATE_TOOL_NOTE, ToolPrivacy, toolPrivacy, privateToolEvent, type PrivateValues, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { toldPlace } from '../program-folder.js';
@@ -73,6 +74,9 @@ function exitError(output: string | null, signedOut: RegExp | null, fallback: Jo
 /* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
+  privacy?: ToolPrivacy;
+  lostPrivacy?: boolean;
+  privateOutput?: boolean;
   jobId: string | null;
   onEvent(e: AgentEvent): void;
   typed: boolean;
@@ -98,6 +102,8 @@ type LiveWords = { turn: Turn; program: TermProgram; text: string; deadline: num
 type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
 type Agent = {
+  privateOutput?: boolean;
+  privateJobId?: string | null;
   key: string;
   name: string;
   program: TermProgram | null;
@@ -429,6 +435,7 @@ export class TerminalHost {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
+      sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };
@@ -446,6 +453,37 @@ export class TerminalHost {
     this.rows = set.rows;
     this.operator = this.operatorFor(opts);
     this.operatorTimer = this.operatorTicks();
+  }
+
+  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): Promise<void> {
+    const agent = this.agents.get(key);
+    if (!agent) return;
+    const turn = activeTurn(agent);
+    const privacy = turn ? (turn.privacy ??= new ToolPrivacy()) : null;
+    privacy?.input(name, input, policy);
+    await this.keepOutputPrivate(agent);
+    if (privacy) this.rememberSensitiveReply(privacy, answer, policy);
+  }
+
+  private rememberSensitiveReply(privacy: ToolPrivacy, answer: unknown, policy: ToolPrivacyPolicy | undefined): void {
+    if (!answer || typeof answer !== 'object') return;
+    const content = (answer as { result?: { content?: { text?: string }[] } }).result?.content ?? [];
+    for (const block of content) {
+      if (typeof block.text !== 'string') continue;
+      let value: unknown = block.text;
+      try { value = JSON.parse(block.text); } catch { /* Plain sensitive replies are values too. */ }
+      privacy.result(value, policy);
+    }
+  }
+
+  private keepOutputPrivate(agent: Agent): Promise<void> {
+    agent.privateOutput = true;
+    agent.privateJobId = activeTurn(agent)?.jobId ?? agent.privateJobId ?? null;
+    return this.opts.tmux.protectOutput(agent.name, agent.privateJobId);
+  }
+
+  private hideOutput(agent: Agent): void {
+    void this.keepOutputPrivate(agent).catch(() => this.log('Sensitive terminal output could not be cleared.'));
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
@@ -505,7 +543,11 @@ export class TerminalHost {
     const [size, cells] = await Promise.all([this.opts.tmux.run(['display-message', '-p', '-t', a.name, '#{pane_width} #{pane_height}']), this.opts.tmux.screen(a.name, 0, true)]);
     const [cols, rows] = size.trim().split(/\s+/).map(Number);
     if (!cols || !rows) throw new Error('The existing pane size is unknown.');
-    return { cols, rows, cells };
+    return { cols, rows, cells: this.terminalText(a, cells) };
+  }
+
+  private terminalText(agent: Agent, text: string): string {
+    return agent.privateOutput ? PRIVATE_TOOL_NOTE : text;
   }
 
   private operatorInputLine(key: string, cells: string): OperatorInputLine {
@@ -570,15 +612,17 @@ export class TerminalHost {
     return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 
-  screen(key: string): Promise<string> {
-    return this.opts.tmux.screen(this.agent(key).name);
+  async screen(key: string): Promise<string> {
+    const agent = this.agent(key);
+    return this.terminalText(agent, await this.opts.tmux.screen(agent.name));
   }
 
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { privateOutput: this.opts.tmux.outputPrivate(`a-${key}`), privateJobId: this.opts.tmux.privateJob(`a-${key}`), key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
+      if (a.privateOutput) this.hideOutput(a);
     }
     return a;
   }
@@ -660,7 +704,7 @@ export class TerminalHost {
       if (failed) return failed;
       const done = await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
       if (!goesOn && !tools && done.ok) await this.toolsConnected(a, job);
-      return done;
+      return this.privateResult(a, turn, done);
     } finally {
       this.closesTurn(a, job, turn, starting);
     }
@@ -678,6 +722,25 @@ export class TerminalHost {
     }
   }
 
+  private privateResult(agent: Agent, turn: Turn, result: RunResult): RunResult {
+    if (turn.lostPrivacy) return this.privateLostResult(result);
+    return { ...result, sensitive: agent.privateOutput || turn.privacy?.sensitive, privateValues: this.turnValues(turn) };
+  }
+
+  private privateLostResult(result: RunResult): RunResult {
+    return { ...result, sensitive: true, result: PRIVATE_TOOL_NOTE, output: PRIVATE_TOOL_NOTE, privateValues: undefined,
+      ...(result.failure ? { failure: { ...result.failure, text: PRIVATE_TOOL_NOTE } } : {}),
+      ...(result.programOutput ? { programOutput: { ...result.programOutput, text: PRIVATE_TOOL_NOTE } } : {}) };
+  }
+
+  private turnValues(turn: Turn): PrivateValues | undefined {
+    return turn.lostPrivacy ? undefined : turn.privacy?.values;
+  }
+
+  private lostPrivacy(agent: Agent, jobId: string | null): boolean {
+    return agent.privateOutput === true && jobId !== null && agent.privateJobId === jobId;
+  }
+
   private opensTurn(a: Agent, job: TermJob, goesOn: boolean, tools: Promise<unknown> | null): { turn: Turn; starting: Promise<unknown> | null } {
     const { input } = job;
     /* What is left in the log from before belongs to no turn. */
@@ -689,6 +752,9 @@ export class TerminalHost {
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn = requestedTurn(job, this.requestedWords(a, job), starting !== null);
+    turn.privateOutput = a.privateOutput;
+    turn.privacy = new ToolPrivacy();
+    turn.lostPrivacy = this.lostPrivacy(a, turn.jobId);
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -2235,9 +2301,17 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
+    event = this.privateEvent(a, turn, event);
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
+  }
+
+  private privateEvent(agent: Agent, turn: Turn, event: AgentEvent): AgentEvent {
+    const privacy = (turn.privacy ??= new ToolPrivacy());
+    event = privacy.event(event, undefined, name => this.bridge.toolPolicy(agent.key, name));
+    if (privacy.sensitive && !agent.privateOutput) this.hideOutput(agent);
+    return privateToolEvent(event, turn.lostPrivacy === true, turn.lostPrivacy === true);
   }
 
   private typedEvent(turn: Turn, event: AgentEvent): void {
@@ -2477,7 +2551,7 @@ export class TerminalHost {
     this.beginTurn(a);
     a.ends.started(id);
     a.programTurnId = id;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
+    const turn: Turn = { privacy: new ToolPrivacy(), privateOutput: a.privateOutput, jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
     turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
@@ -2560,6 +2634,7 @@ export class TerminalHost {
   private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
+      this.bindPrivacy(a, turn);
       a.sinceRun.add(m.jobId);
       this.bindOperatorTurn(a, turn, m.jobId);
       turn.words.bind(m.jobId);
@@ -2568,6 +2643,11 @@ export class TerminalHost {
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
+  }
+
+  private bindPrivacy(agent: Agent, turn: Turn): void {
+    turn.lostPrivacy = this.lostPrivacy(agent, turn.jobId);
+    if (turn.privacy?.sensitive) this.hideOutput(agent);
   }
 
   private bindOperatorTurn(a: Agent, turn: Turn, jobId: string): void {
@@ -2596,7 +2676,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure, tokens: TurnTokens | null = null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, sensitive: turn.privateOutput || turn.privacy?.sensitive, privateValues: this.turnValues(turn), ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */
@@ -2997,7 +3077,7 @@ export class TerminalHost {
     if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
-    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, fresh: false, started: null });
+    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, fresh: false, started: null, privateOutput: false });
     return RETIRED;
   }
 
@@ -3119,7 +3199,7 @@ export class TerminalHost {
        A watcher of an agent with no program sees the waiting screen; anyone else, a loader until the program is up. */
     if (a.asleep && !a.turn) this.opts.send({ type: 'term.program', termId: m.termId, running: false, asleep: true });
     else if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
-    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), text);
+    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), this.terminalText(a, text));
     child.on('exit', () => {
       view.history?.stop();
       if (view.quiet) clearTimeout(view.quiet);
