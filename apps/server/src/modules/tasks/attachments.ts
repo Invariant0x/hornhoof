@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { privateTurn } from '../tools/private-turns.js';
 import { privateFilename, privateUpload } from '../tools/private-upload.js';
-import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
+import { PRIVATE_TURN_LOST, type PrivateValues } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
@@ -151,18 +151,39 @@ async function dropOldDisk(dir: string | undefined, cutoff: Date): Promise<void>
 /* A file as a request brings it: in memory up to FILE_BYTES, and a bigger one onto this machine's disk as it comes, never
    whole in memory. With no folder for files a bigger one is turned away. */
 export type Taken = { bytes: Buffer; size: number; disk?: string };
-export async function received(dir: string | undefined, body: unknown): Promise<Taken> {
+export type UploadRoom = { bytes: number; full: () => ApiError };
+const smallerRoom = (a: UploadRoom, b: UploadRoom): UploadRoom => a.bytes <= b.bytes ? a : b;
+const fileRoom: UploadRoom = { bytes: FILE_BYTES, full: () => new ApiError(413, 'validation', `A file is at most ${FILE_BYTES / 1024 / 1024} MB here.`, 'file_too_big') };
+const pictureRoom: UploadRoom = { bytes: PICTURE_BYTES, full: () => new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid') };
+
+function checkUploadRoom(room: UploadRoom, size: number): void {
+  if (size > room.bytes) throw room.full();
+}
+
+/* The crossing chunk is inspected, never retained or written; closing the iterator leaves the tail unread. */
+async function* boundedUpload(body: unknown, room: UploadRoom): AsyncGenerator<Buffer> {
+  let size = 0;
+  for await (const chunk of body instanceof Readable ? (body as AsyncIterable<Buffer>) : []) {
+    size += chunk.length;
+    checkUploadRoom(room, size);
+    yield chunk;
+  }
+}
+export async function received(dir: string | undefined, body: unknown, room: UploadRoom, values?: PrivateValues): Promise<Taken> {
   const chunks: Buffer[] = [];
+  const limit = dir ? room : smallerRoom(room, fileRoom);
   let size = 0;
   let disk: { id: string; file: FileHandle } | undefined;
+  /* Bound the raw input before the secret scanner retains a possible prefix or reads ahead. */
+  const input = Readable.from(boundedUpload(body, limit), { highWaterMark: 0 });
+  const safe = privateUpload(input, values) as AsyncIterable<Buffer>;
   try {
-    for await (const chunk of body instanceof Readable ? (body as AsyncIterable<Buffer>) : []) {
+    for await (const chunk of safe) {
       size += chunk.length;
       if (!disk && size > FILE_BYTES) {
-        if (!dir) throw new ApiError(413, 'validation', `A file is at most ${FILE_BYTES / 1024 / 1024} MB here.`, 'file_too_big');
-        await mkdir(dir, { recursive: true });
+        await mkdir(dir!, { recursive: true });
         const id = randomUUID();
-        disk = { id, file: await open(join(dir, id), 'wx', 0o600) };
+        disk = { id, file: await open(join(dir!, id), 'wx', 0o600) };
         await disk.file.writeFile(Buffer.concat(chunks));
         chunks.length = 0;
       }
@@ -203,15 +224,19 @@ const kept = (companyId: string) => and(eq(attachments.companyId, companyId), or
 const companyFull = (inCompany: number, limit: number) =>
   new ApiError(413, 'validation', `The company's task files take ${sizeText(inCompany)} of the ${sizeText(limit)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`, 'attachment_invalid');
 
-/* Refuses a person's picture of this size when the company has no room left for it. */
-export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<void> {
+const companyRoom = (used: number, limit: number): UploadRoom => ({ bytes: limit - used, full: () => companyFull(used, limit) });
+
+/* Refuses a person's picture of this size when the company has no room left for it, and returns the room left. */
+export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<UploadRoom> {
   const [used] = await ctx.db.select({ company: sql<string>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(kept(companyId));
   const inCompany = Number(used!.company);
-  if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
+  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
+  checkUploadRoom(room, size);
+  return room;
 }
 
 /* Refuses a new file of this size on the task when the task or the company has no room left for it. */
-export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
+export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<UploadRoom> {
   const [used] = await ctx.db
     .select({
       task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
@@ -220,10 +245,11 @@ export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pi
     .from(attachments)
     .where(kept(companyId));
   const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
-  if (onTask + size > TASK_FILES_BYTES) {
-    throw new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid');
-  }
-  if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
+  const taskRoom: UploadRoom = { bytes: TASK_FILES_BYTES - onTask, full: () => new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid') };
+  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
+  checkUploadRoom(taskRoom, size);
+  checkUploadRoom(room, size);
+  return smallerRoom(taskRoom, room);
 }
 
 function personDownloadType(found: { name: string | null; mediaType?: string }): string {
@@ -420,7 +446,7 @@ function uploadName(asFile: boolean, rawName: string | undefined): string | null
 function checkUploadSize(size: number, asFile: boolean): void {
   if (!size) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
   if (!asFile && size > PICTURE_BYTES) {
-    throw new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid');
+    throw pictureRoom.full();
   }
 }
 
@@ -440,8 +466,9 @@ function checkedUploadMeta(taken: Taken, asFile: boolean, hasTask: boolean, rawN
 }
 
 async function checkAttachmentSpace(ctx: Ctx, companyId: string, task: Task | null, toChat: boolean, size: number) {
-  if (task) await checkRoom(ctx, companyId, task, size);
-  else if (toChat) await checkPictureRoom(ctx, companyId, size);
+  if (task) return checkRoom(ctx, companyId, task, size);
+  if (toChat) return checkPictureRoom(ctx, companyId, size);
+  return pictureRoom;
 }
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -463,8 +490,8 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
-      await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
-      const taken = await received(ctx.config.filesDir, privateUpload(req.body, values));
+      const room = await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
+      const taken = await received(ctx.config.filesDir, req.body, room, values);
       const row = await keepTaken(ctx.config.filesDir, taken, async () => {
         const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, privateFilename(values, raw));
         await checkAttachmentSpace(ctx, job.companyId, task, toChat, taken.size);
