@@ -30,12 +30,12 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       if (duplicate) return;
       const [amount] = await tx.select({ count: sql<string>`count(*)` }).from(phoneFrames).where(eq(phoneFrames.sessionId, frame.sessionId));
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
-      const bytes = frame.capture.png ? Buffer.from(frame.capture.png, 'base64') : null;
-      if (bytes && pictureType(bytes) !== 'image/png') return;
+      const bytes = frame.capture.jpeg ? Buffer.from(frame.capture.jpeg, 'base64') : null;
+      if (bytes && pictureType(bytes) !== 'image/jpeg') return;
       let attachmentId: string | null = null;
       if (bytes) {
         await checkRoom({ db: tx, config: ctx.config }, phone.companyId, held.task, bytes.length);
-        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/png' }).returning({ id: attachments.id });
+        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/jpeg' }).returning({ id: attachments.id });
         attachmentId = attachment!.id;
       }
       await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId });

@@ -1,8 +1,7 @@
 import { z } from 'zod';
 
 export const PHONE_LEASE_MS = 30_000;
-/* A screen's picture in base64: a whole 1080x2400 screen of a photo is at most 10.4 MB as a PNG, 14 MB in base64. */
-export const PHONE_FRAME_MAX = 16 * 1024 * 1024;
+export const PHONE_FRAME_MAX = 3 * 1024 * 1024;
 export const PhoneSerial = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/);
 /* The address Wireless debugging shows, an IP address on the network and a port. Never a name or an address of the node's
    own machine, where its agents' tools listen (#1140). */
@@ -42,7 +41,7 @@ export const PhoneElement = z.strictObject({
 });
 export type PhoneElement = z.infer<typeof PhoneElement>;
 export const PhoneCapture = z.strictObject({
-  png: z.string().max(PHONE_FRAME_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/).nullable(), width: coordinate, height: coordinate,
+  jpeg: z.string().max(PHONE_FRAME_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/).nullable(), width: coordinate, height: coordinate,
   elements: z.array(PhoneElement).max(5000),
 });
 export type PhoneCapture = z.infer<typeof PhoneCapture>;
