@@ -155,3 +155,195 @@ Compared with merge base `73d4a6e9521059384503aa8f2d9a4942635d1568`, every liste
 - `docs/tasks/1077-secret-redaction.md`
 - `packages/protocol/src/redaction.ts`
 - `packages/protocol/test/redaction.test.ts`
+
+## Security repair, 17 November 2026
+
+Input candidate: `be983c08bfe10d5f4885f7c703ee4afe1a364520`; task base: `73d4a6e9521059384503aa8f2d9a4942635d1568`. Repair: `8beef61d08464df2ebbee0be4e2aac0ed807a9a2`.
+
+Confirmed regression: replacing the conversation join-code guard with the narrow prose mask restored machine join codes in stored and returned events. The existing `events.test.ts` regression failed on the input candidate. The repair restores this guard for incoming events, job events and outgoing conversation copies. Its pattern lives in protocol; ordinary stored prose still keeps command examples as before.
+
+A new stored-secrets case records both outer and transaction SQL calls, requires that the actual row-replacement query was captured, and asserts that neither SQL text/parameters nor the API response contains the synthetic selected value. This is not a measurement of a live PostgreSQL logging configuration.
+
+Changed files: `packages/protocol/src/redaction.ts`, `apps/server/src/modules/events/store.ts`, `apps/server/test/stored-secrets.test.ts`. The change is authored by Security; it is not an independent Security PASS on this repair. Tests must verify the submitted final candidate before any authorized integration. No live data, shared branch or deployment was touched.
+
+Final affected evidence: 46 distinct tests (events 10, left-input 18, stored-secrets 10, protocol redaction 8), exit 0. The earlier 37-test receipt includes the nine existing stored-secrets cases; the final ten-case receipt supersedes that file. No whole suite or run_tests was used. Builds/types/lint below also exited 0, with no diagnostics.
+
+Reused evidence: the Review archive `t1077-redesign-checks.tar.gz` has SHA-256 `54de6ec91ca7d9d5ed0e9e672e3354ba2ad98326e656ebadd799cafffd1815f8`. Its e7be0034 executable inputs match be983c08 (the latter changes only this task documentation); secret-redaction scan 13, merge 4, migration 2 and rights 1 passed. Their code is unchanged by this repair. Repeated author checks were not run for appearances. Historical author/browser evidence and its limits remain above.
+
+Limits: native `codex review --base review-1077-base` failed before reading code because bwrap could not create a namespace; shell exit 0 is not a native review PASS. Manual Security inspection was performed. The historical merge checks exceeded the file budget and one initial merge-task attempt timed out; its later successful run does not erase that failure. The 100000-row benchmark produced measurements but failed its cleanup hook, so it is not a passing test. The probe for deleted attachment bytes did not reproduce a leak: the journal keeps content hashes rather than those old bytes. It is not a reported finding. Real PostgreSQL, live replication and ArSpatially were not accessed.
+
+Current full logs for the Review claim of TaskPanel 45 and node redaction 9 on 82b84774 were requested from the reviewer; old author receipts are not relabelled as a current UI run. Resource measurements remain PGlite observations, not release guarantees.
+
+
+### events-red.log
+
+Command: `apps/server: npx --no-install vitest run test/events.test.ts --maxWorkers=1 --no-file-parallelism -t 'keeps no machine command'`. Exit: `1`. SHA-256: `dd399ec336b21c8b192fa8ff6a3418d7a7fb03fa059ee354c2a4b3a494134713`.
+
+```text
+
+ RUN  v5.0.5 /data/work/agents/36a65f87-bacf-484b-b619-f7ab7189393e/hornhoof-task-1077-security/apps/server
+
+ ❯ test/events.test.ts (10 tests | 1 failed | 9 skipped) 853ms
+   ❯ GET /api/stream (10)
+     ↓ refuses a signed-out request
+     ↓ sends the orchestrator's conversation to people who see the whole company
+     × keeps no machine command in a conversation, only the command with its code hidden 852ms
+     ↓ keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream
+     ↓ keeps the conversation from a department head but tells them the org changed
+     ↓ ends open streams first when the server shuts down, so it does not wait for them
+     ↓ ends the stream of a person who was disabled, at the next ping
+     ↓ ends the stream of a person who was disabled at once, without waiting for the ping
+     ↓ stops sending a department's news to a person at once when they no longer reach it
+     ↓ counts an agent with a running conversation as working, on the map and in the stream
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/events.test.ts > GET /api/stream > keeps no machine command in a conversation, only the command with its code hidden
+AssertionError: expected { …(2) } to deeply equal { …(2) }
+
+- Expected
++ Received
+
+  {
+    "nested": [
+      {
+-       "line": "curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]",
++       "line": "curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join Ab3_x-9Zq",
+      },
+    ],
+-   "text": "Run: curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]",
++   "text": "Run: curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join Ab3_x-9Zq",
+  }
+
+ ❯ test/events.test.ts:47:24
+     45|     const event = await appendEvent(app.ctx, { companyId, agentId: orc…
+     46|     const hidden = 'curl -fsSL https://hq.acme.com/install.sh | bash -…
+     47|     expect(event.data).toEqual({ text: `Run: ${hidden}`, nested: [{ li…
+       |                        ^
+     48|     expect(JSON.stringify((await db.select(only(agentEvents, 'data')).…
+     49|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  07:13:13
+   Duration  8.42s (transform 58%, tests 24%, import 18%)
+```
+
+
+### events-green.log
+
+Command: `apps/server: npx --no-install vitest run test/events.test.ts test/left-input.test.ts test/stored-secrets.test.ts --maxWorkers=1 --no-file-parallelism`. Exit: `0`. SHA-256: `55de3367a0095434e8b09697ad4e733b78a98bda2b01e7bfe033ea69c4302ef9`.
+
+```text
+
+ RUN  v5.0.5 /data/work/agents/36a65f87-bacf-484b-b619-f7ab7189393e/hornhoof-task-1077-security/apps/server
+
+ ✓ test/stored-secrets.test.ts (9 tests) 9777ms
+   ✓ secrets in stored prose (9)
+     ✓ masks tasks and comments before storing their copies 6628ms
+     ✓ hides an existing selection from tasks, nested copies, journals and API responses 399ms
+     ✓ checks department authority on the server and rejects ordinary readers 1406ms
+ ✓ test/left-input.test.ts (18 tests) 10416ms
+   ✓ words left unsent in a program's input (16)
+     ✓ are kept, and only then the node hears that it may clear them 7543ms
+     ✓ are kept once however many times the node asks, and it hears each time 723ms
+     ✓ name who typed in the terminal last, not the author of the new assignment 449ms
+ ✓ test/events.test.ts (10 tests) 13526ms
+   ✓ GET /api/stream (10)
+     ✓ refuses a signed-out request 6666ms
+     ✓ sends the orchestrator's conversation to people who see the whole company 1256ms
+     ✓ keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream 1194ms
+     ✓ keeps the conversation from a department head but tells them the org changed 1384ms
+     ✓ stops sending a department's news to a person at once when they no longer reach it 1087ms
+     ✓ counts an agent with a running conversation as working, on the map and in the stream 1148ms
+
+ Test Files  3 passed (3)
+      Tests  37 passed (37)
+   Start at  07:17:38
+   Duration  17.37s (tests 91%, import 6%, transform 3%)
+```
+
+
+### stored-final.log
+
+Command: `apps/server: npx --no-install vitest run test/stored-secrets.test.ts --maxWorkers=1 --no-file-parallelism`. Exit: `0`. SHA-256: `ef2357380e8d0d757cec053be742ba02d5f8b91cae2e6c6a7c4db8b66a658af4`.
+
+```text
+
+ RUN  v5.0.5 /data/work/agents/36a65f87-bacf-484b-b619-f7ab7189393e/hornhoof-task-1077-security/apps/server
+
+ ✓ test/stored-secrets.test.ts (10 tests) 2922ms
+   ✓ secrets in stored prose (10)
+     ✓ masks tasks and comments before storing their copies 1605ms
+     ✓ checks department authority on the server and rejects ordinary readers 391ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  07:22:41
+   Duration  16.89s (tests 65%, transform 20%, import 15%)
+```
+
+
+### protocol-green.log
+
+Command: `packages/protocol: npx --no-install vitest run test/redaction.test.ts --maxWorkers=1`. Exit: `0`. SHA-256: `b696138ad55a7bf2334cc96290c47ef4d95db8b1b64d7085d2f8c00f2496b4b0`.
+
+```text
+
+ RUN  v5.0.5 /data/work/agents/36a65f87-bacf-484b-b619-f7ab7189393e/hornhoof-task-1077-security/packages/protocol
+
+ ✓ test/redaction.test.ts (8 tests) 12ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  07:19:27
+   Duration  197ms (transform 68%, tests 16%, import 14%, worker 3%)
+```
+
+
+### protocol-build.log
+
+Command: `root: npx --no-install tsc -p packages/protocol/tsconfig.json`. Exit: `0`. SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```text
+
+```
+
+
+### server-build.log
+
+Command: `root: NODE_OPTIONS=--max-old-space-size=2048 npm run -s build -w @hornhoof/server`. Exit: `0`. SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```text
+
+```
+
+
+### server-test-types-final.log
+
+Command: `root: NODE_OPTIONS=--max-old-space-size=2048 npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit`. Exit: `0`. SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```text
+
+```
+
+
+### lint.log
+
+Command: `root: NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/server/src/modules/events/store.ts apps/server/test/stored-secrets.test.ts packages/protocol/src/redaction.ts`. Exit: `0`. SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```text
+
+```
+
+
+### lint-final.log
+
+Command: `root: NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/server/test/stored-secrets.test.ts`. Exit: `0`. SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```text
+
+```
