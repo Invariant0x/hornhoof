@@ -37,9 +37,9 @@ describe('Tests verifies the final candidate without changing it', () => {
     await expect(report(f.ctx, f.tester.id, f.task.id, { ...f.verified(), verification: named }).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons.phase).toBe('active');
   });
-  it('refuses code of its own from Tests, which may take in only the main line', async () => {
+  it('refuses a hand-in from Tests that holds nothing beyond the candidate it received', async () => {
     const f = await testsFixture();
-    await expect(submit(f.ctx, f.tester.id, f.task.id, { summary: 'Tests must not edit code.', evidence: 'None.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 409 });
+    await expect(submit(f.ctx, f.tester.id, f.task.id, { summary: 'Nothing new.', evidence: 'None.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('still at the candidate you received') as unknown });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active', candidateId: f.snapshot.candidateId });
   });
 });

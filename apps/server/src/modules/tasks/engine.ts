@@ -9,7 +9,7 @@ import { producedCandidate, currentCandidate, currentHanded, requireRepairHistor
 import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
-import { takeMainAtTests } from './echelons-main.js';
+import { handInAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
 import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
@@ -624,7 +624,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
-  if (route.state.stage === 'tests') return takeMainAtTests(ctx, agentId, task, route, r, operation);
+  if (route.state.stage === 'tests') return handInAtTests(ctx, agentId, task, route, r, operation);
   const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
