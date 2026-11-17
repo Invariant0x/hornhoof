@@ -50,10 +50,11 @@ export type TaskLine = {
   createdAt: string;
   updatedAt: string;
 };
-/* for: the person the orchestrator acted for, as in a request it answered for them. */
-export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
+/* for: the person the orchestrator acted for, as in a request it answered for them. byOrchestrator: the person's answer, which
+   the orchestrator gave of its own. */
+export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
 /* images: the pictures the agent showed, commitUrl: where its commit can be seen, proof: what test runs say of that very
-   commit, picked: the way a person took in a choice. */
+   commit, picked: the way a person took in a choice, byOrchestrator: the orchestrator gave the answer. */
 export type RequestView = {
   id: string;
   kind: (typeof requests.$inferSelect)['kind'];
@@ -67,6 +68,7 @@ export type RequestView = {
   picked: number | null;
   status: string;
   answer: string | null;
+  byOrchestrator: boolean;
   agent: AgentRef | null;
   at: string;
 };
@@ -192,7 +194,7 @@ async function forWhom(db: Ctx['db'], data: Record<string, unknown>[]): Promise<
 /* Who wrote a line of the log: a person, or an agent with the person it acted for. */
 function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
   return (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
-    if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
+    if (personId) return { kind: 'person', id: personId, name: personName ?? '', ...(data.byOrchestrator === true ? { byOrchestrator: true as const } : {}) };
     if (!agentId) return null;
     const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
     return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
@@ -261,6 +263,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
       picked: r.picked,
       status: r.status,
       answer: r.answer,
+      byOrchestrator: r.answeredByAgentId !== null,
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),

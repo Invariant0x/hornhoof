@@ -94,16 +94,19 @@ describe('private repository credential revision', () => {
     expect((await c.db.select().from(departments).where(eq(departments.id, c.id)))[0]!.repoTokenEnc).toBeNull();
   });
 
-  it('refuses agent and reader SQL access to the private revision', async () => {
+  it('shows the revision to the orchestrator alone, and keeps the token and any change of either from both SQL roles', async () => {
     const { $client: client } = await createTestDb();
     expect((await client.query<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'departments' and column_name = 'repo_token_revision'")).rows).toEqual([{ column_name: 'repo_token_revision' }]);
-    const roles = [agentRole('postgres'), readerRole('postgres')];
-    await client.exec(`${grantsFor(roles[0]!)};\n${readerGrantsFor(roles[1]!)}`);
-    for (const role of roles) for (const statement of ['select repo_token_revision from departments', 'update departments set repo_token_revision = 999']) {
-      await expect(client.transaction(async tx => {
-        await tx.exec(`SET LOCAL ROLE "${role}"`);
-        return tx.exec(statement);
-      })).rejects.toThrow(/permission denied|read-only/);
+    const [orchestrator, operations] = [agentRole('postgres'), readerRole('postgres')];
+    await client.exec(`${grantsFor(orchestrator)};\n${readerGrantsFor(operations)}`);
+    const run = (role: string, statement: string) => client.transaction(async tx => {
+      await tx.exec(`SET LOCAL ROLE "${role}"`);
+      return tx.exec(statement);
+    });
+    expect((await run(orchestrator, 'select repo_token_revision from departments'))[0]!.rows).toEqual([]);
+    await expect(run(operations, 'select repo_token_revision from departments')).rejects.toThrow(/permission denied/);
+    for (const role of [orchestrator, operations]) for (const statement of ['select repo_token_enc from departments', 'update departments set repo_token_revision = 999']) {
+      await expect(run(role, statement), `${role}: ${statement}`).rejects.toThrow(/permission denied|read-only/);
     }
   });
 

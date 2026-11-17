@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { NotConfirmed } from '../src/db/confirm.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, recoveryKeys, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -481,19 +481,38 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toMatch(/permission denied/);
   });
 
-  it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
+  it('is refused the keys, a change of what only Hornhoof writes, and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
     /* The tool refuses every statement here, so none changes the database this file shares. */
     // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The agent's statements are refused, and the file's end check would find one that was not.
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM authority', 'SELECT * FROM certificates', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM machine_online', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', "UPDATE machine_access SET until = now() + interval '1 day'", 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT * FROM net.backups', "UPDATE machines SET role = 'data'", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', "UPDATE machine_access SET until = now() + interval '1 day'", "DELETE FROM computer_runs", 'SELECT * FROM net.backups', "UPDATE machines SET role = 'data'", 'SELECT password_hash FROM people', 'SELECT password_enc FROM vault_entries', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner|Hornhoof did not run this SQL/);
     }
-    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain("Sign-ins, invites, install codes, sealed plan sign-ins, the public link, Hornhoof's records of where changes came from, the company's certificate authority, its machines' certificates and the peer secrets, the machines' join tickets and online time, people's keys, the machines' computer access and the commands run there, and the recovery keys are closed to this tool.");
+    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('name the other columns');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT cause FROM node_connections' })))[0].rows).toEqual([]);
+  });
+
+  it('reads every table and column but the keys', async () => {
+    const { app, db, ceoId } = await company();
+    const client = await mcp(app, TOKEN);
+    /* A table that shows its rows to no role of its own shows them to the orchestrator. */
+    const [acme] = await db.select().from(companies);
+    await db.insert(recoveryKeys).values({ companyId: acme!.id, recipient: 'age1recipientofthistest', madeBy: ceoId });
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT recipient FROM recovery_keys' })))[0].rows).toEqual([{ recipient: 'age1recipientofthistest' }]);
+    for (const sql of ['SELECT person_id, expires_at FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT name, site, login FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT account FROM nodes', 'SELECT text, answer FROM requests', 'SELECT url, hidden FROM public_links']) {
+      const res = await call(client, 'database', { sql });
+      expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
+    }
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT count(*)::int AS n FROM sessions' })))[0].rows).toEqual([{ n: expect.any(Number) }]);
+    /* Every table of Hornhoof, none left out. */
+    const [{ rows: tables }] = JSON.parse(text(await call(client, 'database', { sql: "SELECT tablename FROM pg_tables WHERE schemaname = 'public'" }))) as [{ rows: { tablename: string }[] }];
+    expect(tables.length).toBeGreaterThan(100);
+    const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT count(*) FROM "${tablename}"`).join('; ') });
+    expect([every.isError ?? false, text(every)]).toEqual([false, expect.stringContaining('"rows"')]);
   });
 
   it('refuses SQL that would get past a fence', async () => {

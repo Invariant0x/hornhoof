@@ -35,8 +35,9 @@ const OUTBOUND = [
   'support_tickets', 'support_classifications',
 ];
 export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
-/* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
-   every join from it, so it is one too. The account a node is signed in to names a person's email. */
+/* Columns that hold a password, a token or a key, or private words: neither role writes them and Operations reads none of
+   them; the orchestrator reads those that are no key. A machine's key goes with every join from it, so it is one too. The
+   account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
   jobs: ['tool_token_hash'],
@@ -128,7 +129,7 @@ const readVisible = (tables: string[], name: string) =>
    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
    A call may not sit in an open transaction, and how long it may take is the role's own setting. */
 const role = (settings: string[], rights: (name: string) => string) => (name: string) => `DO $grants$
-DECLARE t text;
+DECLARE t text; c text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
 ${settings.map(setting => `  ALTER ROLE "${name}" ${setting};`).join('\n')}
@@ -144,10 +145,29 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
     EXECUTE format('${grant}', t);
   END LOOP;`;
 
-/* The orchestrator's role reads and changes the rows of every table but the hidden ones and the secrets, with these
-   exceptions. People, their access, subscriptions, machines and repositories only change through the tools the CEO alone
-   may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
-   subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
+/* The keys: what opens a sign-in, a machine, a plan, a link or a secret, sealed, hashed or as it is. Besides these, every
+   column whose name ends in _enc or _hash. */
+export const KEY_NAMES = ['sealed', 'wrapped', 'salt', 'iv', 'grant', 'machine_key', 'capability', 'bytes'];
+const KEY_END = '(_enc|_hash)$';
+export const isKey = (column: string) => new RegExp(KEY_END).test(column) || KEY_NAMES.includes(column);
+const KEY_COLUMN = `column_name ~ '${KEY_END}' OR column_name = ANY (ARRAY[${KEY_NAMES.map(name => `'${name}'`).join(', ')}])`;
+
+/* The orchestrator knows everything of the system (Ivan's word of 16 November 2026): its role reads every table and
+   column but the keys, the rows of a table that shows them to no role of its own too. Those rows show to its columns
+   alone: a right on the whole table, as a build from before these tables gave it, sees none of them. */
+const readAllButKeys = (name: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    SELECT string_agg(quote_ident(column_name), ', ') INTO c FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND NOT (${KEY_COLUMN});
+    IF c IS NOT NULL THEN EXECUTE format('GRANT SELECT (%s) ON %I TO "${name}"', c, t); END IF;
+  END LOOP;
+  FOR t IN SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relrowsecurity AND relname <> 'agents' LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', '${name}_reads', t);
+    EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO "${name}" USING (NOT has_table_privilege(current_user, %L, ''SELECT''))', '${name}_reads', t, 'public.' || t);
+  END LOOP;`;
+
+/* The orchestrator's role reads every table and column but the keys, and changes the rows of every table but the hidden
+   ones and the secrets, with these exceptions. People, their access, subscriptions, machines and repositories only
+   change through the tools the CEO alone may ask for, which make the CEO's checks. An employee is added by hiring, keeps
+   its kind, role, skills and subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
    forged or swapped. An assistant and its own agent are their owner's: neither changes here, nor what the assistant reads,
    so no key is forged and no answer goes elsewhere. A call may take 5 seconds before its commit, and the only thing of
    the fence it reaches is the check right before that commit. */
@@ -164,6 +184,7 @@ ${readVisible(READ_ONLY, name)}
   GRANT USAGE ON SCHEMA net TO "${name}";
   GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid) TO "${name}";
   GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid, uuid, jsonb) TO "${name}";
+${readAllButKeys(name)}
   EXECUTE $trigger$
     CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
     BEGIN

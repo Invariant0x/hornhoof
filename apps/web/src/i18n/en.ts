@@ -1777,6 +1777,8 @@ export const en = {
     decidedByDepartment: (department: string) => `Decided by the people of ${department}, the CEO or the CEO delegate.`,
     decidedByOwner: (department: string) => `Decided by the owner of ${department}, the CEO or the CEO delegate.`,
     actedFor: (agent: string, person: string) => `${agent} for ${person}`,
+    /* A person's answer the orchestrator gave of its own. */
+    byOrchestrator: 'decided by the orchestrator',
     note: 'Note, if any',
     choiceNote: 'Comment or feedback',
     choiceHint: 'Pick an option above, or send feedback without picking one.',
