@@ -1706,7 +1706,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
-/* The tracker, PROPOSAL items "Tracker" of the style book: the left panel, then the main area with where the person is,
+/* The tracker, as shown in "Tracker" in the style book: the left panel, then the main area with where the person is,
    the view and its filters and the work, and the card at the end side. On a phone the left panel is a drawer over the page,
    the board's columns stand one under another and the card takes the whole width. */
 .tracker { display: grid; grid-template-columns: clamp(220px, 17vw, 280px) minmax(0, 1fr); gap: 20px; align-items: start; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
@@ -1762,10 +1762,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-search .field > label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
 .tr-view-as { max-inline-size: 100%; min-inline-size: 0; }
 .tr-view-as .field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.tr-view-as .field-control { flex: 0 1 180px; max-inline-size: 100%; }
+.tr-view-as .field-control { flex: 0 1 auto; max-inline-size: 100%; min-inline-size: 0; }
 .tr-top .task-search input { padding-inline: 12px 44px; }
 .tr-top .task-search .zbtn { inset-inline: auto 0; inset-block-start: 0; }
-[dir="rtl"] .tr-top select { background-position: 10px 50%, 15px 50%; }
 .tr-make { justify-content: flex-start; }
 .tr-bar { display: grid; gap: 8px; min-inline-size: 0; }
 .tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 4px; min-inline-size: 0; margin: 0; padding: 0; border: 0; border-block-end: 1px solid var(--line); }
@@ -1778,7 +1777,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 32px; margin: 0; padding: 4px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 13px; color: var(--muted); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .tr-chip:hover { color: var(--ink); }
 .tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
-.tr-chip select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
+.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: min(100%, 180px); min-block-size: 40px; padding: 6px 10px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
+.tr-person-picker .ic { transform: rotate(90deg); }
+.tr-person-picker:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.tr-chip select, .tr-person-picker select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
 :root[data-scheme="light"] .tr-node.goal { border-color: var(--cyan-ink); }
 .tr-goals { display: grid; gap: 8px; min-width: 0; }
 .tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
@@ -1802,11 +1804,11 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   --tracker-palette-blue: var(--p-kimi);
   --tracker-palette-violet: var(--p-glm);
   --tracker-program-claude: var(--p-claude);
-  --tracker-program-codex: var(--muted);
+  --tracker-program-codex: color-mix(in srgb, var(--muted), var(--ink) 45%);
   --tracker-program-kimi: var(--p-kimi);
   --tracker-program-glm: var(--p-glm);
   --tracker-program-antigravity: var(--p-antigravity);
-  --tracker-program-other: var(--line2);
+  --tracker-program-other: var(--muted);
   --tracker-priority-urgent: var(--pink-ink);
   --tracker-priority-high: var(--amber-ink);
   --tracker-priority-normal: var(--cyan-ink);
@@ -1898,14 +1900,20 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tr-v { color: var(--muted); }
+.tr-id-name { display: none; }
 @container tr-list (max-width: 640px) {
   .tr-head { display: none; }
-  .tr-cells { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .tr-cell { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 12.5px; }
+  .tr-row-line { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 8px 12px; }
+  .tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 8px), 12%); }
+  .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; font-size: 13px; }
   .tr-cell:has(.tr-v:empty) { display: none; }
-  .tr-k { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
+  .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
-  .tr-v { color: var(--ink); }
+  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; color: var(--ink); }
+  .tr-id-name { display: inline; min-inline-size: 0; overflow-wrap: anywhere; }
+  .tr-title, .tr-name { font-size: 16px; }
+  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: 44px; }
+  .tr-goal-link { display: inline-flex; align-items: center; }
 }
 
 /* The board: as many columns side by side as the width holds, each with its name and count, cards one under another. */
@@ -1973,9 +1981,14 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tr-stage { display: grid; gap: 8px; padding-block-end: 12px; border-block-end: 1px solid var(--line); }
 
 @media (max-width: 760px) {
-  .tracker { grid-template-columns: minmax(0, 1fr); }
+  .tracker { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-inline: 12px; }
+  .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
+  .tr-where { flex: 1 1 200px; }
+  .tr-view-as { flex: 1 1 100%; }
+  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: 44px; }
+  .tr-row-caret { inline-size: 44px; }
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
-  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-height: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
+  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-block-size: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
   .tr-side.open { display: grid; }
   .tr-side .tr-side-close { display: inline-grid; }
   .tr-menu { display: inline-flex; justify-self: start; min-height: 44px; }

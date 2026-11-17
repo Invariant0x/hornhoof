@@ -507,10 +507,14 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
             <div className="tr-view-as">
               <Field label={t.tracker.viewAs}>
                 {p => (
-                  <select {...p} value={other ? who : ''} onChange={e => onPlace({ ...place, personId: e.target.value || undefined })}>
-                    <option value="">{t.tracker.viewAsSelf(me.person.name)}</option>
-                    {people.filter(p => p.id !== me.person.id && !p.assistant && p.status === 'active').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  <span className="tr-person-picker">
+                    <span aria-hidden="true" dir="auto">{other ? whoName : t.tracker.viewAsSelf(me.person.name)}</span>
+                    <TrackerIcon name="chevron" />
+                    <select {...p} value={other ? who : ''} onChange={e => onPlace({ ...place, personId: e.target.value || undefined })}>
+                      <option value="">{t.tracker.viewAsSelf(me.person.name)}</option>
+                      {people.filter(p => p.id !== me.person.id && !p.assistant && p.status === 'active').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </span>
                 )}
               </Field>
             </div>

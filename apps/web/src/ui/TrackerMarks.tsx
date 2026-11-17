@@ -27,14 +27,22 @@ export function DepartmentMark({ id, name, template }: { id: string; name: strin
 
 export function PersonMark({ person, decorative = false }: { person: PersonRef; decorative?: boolean }) {
   return (
-    <span className="tr-mark tr-avatar" data-tone={toneOf(person.id)} role={decorative ? undefined : 'img'} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : person.name} title={person.name}>
-      {initials(person.name, 1)}
-    </span>
+    <>
+      <span className="tr-mark tr-avatar" data-tone={toneOf(person.id)} role={decorative ? undefined : 'img'} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : person.name} title={person.name}>
+        {initials(person.name, 1)}
+      </span>
+      {!decorative && <span className="tr-id-name" aria-hidden="true" dir="auto">{person.name}</span>}
+    </>
   );
 }
 
 export function ExecutorMark({ agent, program }: { agent: AgentRef; program?: Program | null }) {
-  return <span className="tr-mark tr-executor" data-program={program ?? 'other'} role="img" aria-label={agent.name} title={agent.name}>{initials(agent.name, 2)}</span>;
+  return (
+    <>
+      <span className="tr-mark tr-executor" data-program={program ?? 'other'} role="img" aria-label={agent.name} title={agent.name}>{initials(agent.name, 2)}</span>
+      <span className="tr-id-name" aria-hidden="true" dir="auto">{agent.name}</span>
+    </>
+  );
 }
 
 export function PriorityWord({ task }: { task: TaskLine }) {

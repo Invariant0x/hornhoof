@@ -111,3 +111,14 @@ it('expands under the parent title and keeps child facts in their columns', asyn
   rerender(view(true));
   expect(within(parent).getByRole('listitem', { name: '#268 Pick the recipients' })).toBeInTheDocument();
 });
+
+it('keeps complete names and labels with long task text in the stacked row', () => {
+  const longTitle = 'UnbrokenTitle'.repeat(9);
+  list([task({ title: longTitle, dueAt: '2020-01-01T00:00:00.000Z' })]);
+  const row = screen.getByRole('listitem', { name: `#267 ${longTitle}` });
+  expect(within(row).getByRole('button', { name: longTitle })).toBeInTheDocument();
+  expect(within(row).getByText('Luisa Rivera')).toHaveClass('tr-id-name');
+  expect(within(row).getByText('Max')).toHaveClass('tr-id-name');
+  expect([...row.querySelectorAll('.tr-k')].map(label => label.textContent)).toEqual(['Executor', 'Responsible', 'Priority', 'Goal', 'Due']);
+  expect(within(row).getByRole('link', { name: goal.title })).toBeInTheDocument();
+});

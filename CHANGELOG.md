@@ -30,6 +30,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Expand a task from the arrow next to its title to see its subtasks in the same list columns.
 
+- On narrow screens, tracker rows stack their facts and show the full names behind the initials.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

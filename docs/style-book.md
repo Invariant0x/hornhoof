@@ -330,7 +330,7 @@ The tracker uses the approved list reference and the existing skin roles. Tracke
 | Tokens | Skin roles and use |
 |---|---|
 | `--tracker-palette-accent`, `--tracker-palette-warning`, `--tracker-palette-attention`, `--tracker-palette-success`, `--tracker-palette-blue`, `--tracker-palette-violet` | Accent, warning, attention, success, Kimi and GLM roles for department and person marks |
-| `--tracker-program-claude`, `--tracker-program-codex`, `--tracker-program-kimi`, `--tracker-program-glm`, `--tracker-program-antigravity`, `--tracker-program-other` | The provider role for each program, muted for Codex and the strong line for an unknown program |
+| `--tracker-program-claude`, `--tracker-program-codex`, `--tracker-program-kimi`, `--tracker-program-glm`, `--tracker-program-antigravity`, `--tracker-program-other` | The provider role for each program, muted mixed with ink for Codex, and muted for an unknown program |
 | `--tracker-priority-urgent`, `--tracker-priority-high`, `--tracker-priority-normal`, `--tracker-priority-low` | Attention text, warning text, accent text and muted text |
 | `--tracker-mark-ink`, `--tracker-mark-strength` | Dark uses the page background as text on a full-strength fill. Light uses ink on a fill mixed at 30 percent over the panel surface |
 | `--tracker-working-ring`, `--tracker-waiting-ring` | Accent and warning on dark, their text variants on light |
@@ -338,15 +338,15 @@ The tracker uses the approved list reference and the existing skin roles. Tracke
 
 | Class | What it is | Source |
 |---|---|---|
-| `.tracker`, `.tr-main`, `.tr-top`, `.tr-menu`, `.tr-where`, `.tr-tools`, `.tr-write` | Page grid: the left panel from 220 to 280 px and the main area, one column at 760 px and under; the head with where the person is, View as and the search, the button to the orchestrator beside the heading at a desk; at 760 px and under `.tr-menu` opens the left panel | `screens/Tasks.tsx` |
-| `.tr-side`, `.tr-item`, `.tr-count`, `.tr-dept-head`, `.tr-dept-body`, `.tr-people`, `.tr-turns` | Left panel: items 44 px high, the chosen one with a 3 px `--cyan` start line on `--glow`; a department unfolds to its goals, pipelines, products and employees; at 760 px and under a drawer over the page down to the bottom of the screen, with its close button | `ui/TrackerSide.tsx` |
-| `.tr-bar`, `.tr-views` with `.segments.board-views`, `.tr-chips`, `.tr-chip` | Three equal view tabs, then filter chips 44 px high that wrap; a chip in use has a `--cyan` frame | `screens/Tasks.tsx` |
-| `.tr-list`, `.tr-group`, `.tr-rows`, `.tr-row`, `.tr-cells`, `.tr-head`, `.tr-k`, `.tr-v` | List grouped by status in words; columns above it where the list is wider than 640 px, under that each value under its task with its name | `ui/TrackerViews.tsx` |
+| `.tracker`, `.tr-main`, `.tr-top`, `.tr-menu`, `.tr-where`, `.tr-view-as`, `.tr-search` | A left panel from 220 to 280 px and a main area with the breadcrumb, View as and search. At 760 px and under the page has one column and the Lists button opens the left panel | `screens/Tasks.tsx` |
+| `.tr-side`, `.tr-item`, `.tr-badge`, `.tr-dept-head`, `.tr-dept-body` | Left panel with company people, attention badges for waits, and a department's goals, pipelines and work outside pipelines. Department products and employees expand on demand. The panel reserves room for the scrollbar | `ui/TrackerSide.tsx` |
+| `.tr-bar`, `.tr-views`, `.tr-chips`, `.tr-chip` | Icon tabs followed by wrapping filter chips. A choice in use has an accent border. Controls grow to at least 44 px on phones | `screens/Tasks.tsx` |
+| `.tr-list`, `.tr-group`, `.tr-row`, `.tr-cells`, `.tr-head`, `.tr-k`, `.tr-v` | Compact columns with status badges and inline subtasks. At 640 px or less of list width each detail is labeled below the title and the people are named in full | `ui/TrackerViews.tsx` |
 | `.tr-columns`, `.tr-col`, `.tr-card`, `.tr-card-facts` | Board: as many columns of at least 220 px as fit; a card with a 3 px status strip at its start edge and the status in words | `ui/TrackerViews.tsx` |
 | `.tr-graph`, `.tr-crumbs`, `.tr-modes`, `.tr-canvas`, `.tr-map`, `.tr-wires`, `.tr-node` | Graph on the map's dotted canvas with the map's zoom bar: the way back up, nodes 290 px wide that grow to hold their words, a 4 px status strip with the status in words, solid lines for parts, dashed `--amber-ink` lines with words for waits. A tree bigger than the canvas opens at 60 % on its first goal | `ui/TrackerViews.tsx` |
 | `.acard.at-end` | The card at the end side over the tracker from 761 px, the tracker leaving 432 px for it from 1100 px | `ui/SidePanels.tsx`, `screens/Shell.tsx` |
 | `.tp-path`, `.tp-type`, `.tp-state`, `.tp-why`, `.tp-leads`, `.tp-materials`, `.tr-form`, `.tr-stages`, `.tr-stage` | The card's path, kind, state, why, ways on, materials and edit forms | `ui/TaskPanel.tsx`, `ui/GoalPanel.tsx`, `ui/TrackerForms.tsx` |
-| `.tp-late`, `.tr-wait` | A due day passed, and what a task waits for, in `--amber-ink` and in words | `ui/TrackerViews.tsx`, `ui/TaskPanel.tsx` |
+| `.tp-late`, `.tr-wait`, `.tr-relation` | Late dates and wait details use attention text in list rows and warning text on cards. Related tasks use outlined labels | `ui/TrackerViews.tsx`, `ui/TaskPanel.tsx` |
 
 ## 5. Languages
 
