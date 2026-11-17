@@ -76,12 +76,14 @@ describe('reading a part that waits for a machine check slot', () => {
     const s = await stand();
     await s.release(0); await s.release(1); await s.release(2);
     await s.c.db.update(jobs).set({ nodeId: s.node!.id }).where(eq(jobs.id, s.turn.job.id));
-    const label = labelKind === 'part label' ? `Run part ${s.parts[0]!.id}` : 'eslint\ncheck';
+    const label = labelKind === 'part label' ? `Run part ${s.parts[2]!.id}` : 'eslint\ncheck';
     const local = { type: 'check.acquire' as const, id: randomUUID(), jobId: s.turn.job.id, agentId: s.c.bruno.id, label };
     await receiveCheckRequest(s.c.app.ctx, s.id, local, eq(jobs.id, s.turn.job.id));
+    expect((await s.read()).parts[0].checkSlot).toMatchObject({ state: 'not_recorded', position: null });
     await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
     await new Promise<void>(resolve => setImmediate(resolve));
     const part = (await s.read()).parts[0];
+    expect(part.checkSlot).toMatchObject({ state: 'queued', position: 1 });
     expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', task: s.c.task.number, agent: 'Bruno', label: label.replace('\n', ' '), since: expect.any(String) }]);
     expect(part.waiting).not.toMatch(/[\r\n]/);
     const head = await s.c.turn(s.c.head, null);

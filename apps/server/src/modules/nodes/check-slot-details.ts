@@ -83,7 +83,7 @@ function waitingLine(slot: Slot, recorded: boolean): string {
 function partClaims(ctx: Ctx, part: Part) {
   const node = partNode(ctx, part);
   const snapshot = node ? checkQueueSnapshot(ctx, node) : null;
-  const mine = (claim: CheckClaim) => claim.node === (node && keyOf(node)) && claim.request.label === `Run part ${part.id}`;
+  const mine = (claim: CheckClaim) => !claim.request.jobId && claim.node === (node && keyOf(node)) && claim.request.label === `Run part ${part.id}`;
   return { snapshot, waiting: snapshot?.queue.find(mine), running: snapshot?.holders.find(mine) };
 }
 
