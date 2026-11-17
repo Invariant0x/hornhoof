@@ -42,6 +42,8 @@ import { registerProgramAccessTools } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { GRANTS } from '../templates/load.js';
 import { actingFor, Shelf } from './shelf.js';
+import { registerSourceTool } from './source.js';
+import { registerLogsTool } from './logs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -190,6 +192,8 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
   registerReleaseTool(server, ctx, job);
   /* On a machine that only reads, the orchestrator reads the database as a head does. */
   registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
+  registerSourceTool(server, ctx);
+  registerLogsTool(server, ctx, job);
   registerOrchestratorImprovementTools(server, ctx, job);
   registerMergeTools(server, ctx, job);
 }

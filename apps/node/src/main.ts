@@ -447,6 +447,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
+    if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
     if (m.type === 'phone.probe' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();

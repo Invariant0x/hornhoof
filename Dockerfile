@@ -39,25 +39,16 @@ WORKDIR /app
 COPY --from=deps /app /app
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
-COPY apps/server/drizzle apps/server/drizzle
-COPY scripts/install.sh scripts/install.sh
-COPY scripts/install.ps1 scripts/install.ps1
-COPY templates templates
-# The updater takes the installer and the compose file of the build it moves to from this image.
-COPY compose.yaml compose.yaml
-# A worker's updater takes the overlay that leaves the data services out as well.
-COPY compose.worker.yaml compose.worker.yaml
 COPY --from=build /app/apps/web/dist apps/web/dist
 # The keeper runs frpc as its child, and frpc carries the company's public link from hornhoof.org to the keeper.
 # It is the client the relay is built for, taken from its own image.
 COPY --from=fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e /usr/bin/frpc /usr/local/bin/frpc
-# Our package files as they are, over those the install took: without HORNHOOF_VERSION the server reads its version
-# from package.json.
-COPY package.json package-lock.json ./
-COPY packages/protocol/package.json packages/protocol/
-COPY apps/server/package.json apps/server/
-COPY apps/node/package.json apps/node/
-COPY apps/web/package.json apps/web/
+# Our files as they are, but what .dockerignore leaves out (what was installed or built, and the tests) and the README's
+# animations: the migrations and the templates the server runs with; the installer and the compose files, the worker's
+# overlay that leaves the data services out too, which the updater takes of the build it moves to; our package files over
+# those the install took, as without HORNHOOF_VERSION the server reads its version from package.json; and the source of
+# this very build, which the orchestrator reads to see how Hornhoof is made.
+COPY --exclude=.github/assets . .
 # The build this image is: CI passes the product version and the commit, and the node build the server's nodes should
 # be, which the node image of this commit carries too.
 ARG HORNHOOF_VERSION=
