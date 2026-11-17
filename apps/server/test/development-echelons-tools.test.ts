@@ -6,21 +6,43 @@ import { loadTask, submit } from '../src/modules/tasks/engine.js';
 import { listen, mcp } from './helpers.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
-async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author) {
+async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author, taskId = f.task.id) {
   if (!f.app.server.listening) await listen(f.app);
   const token = `echelon-tools-${actor.id}-0123456789abcdef`;
-  await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Use the assigned stage', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
+  await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId, kind: 'conversation', prompt: 'Use the assigned stage', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
   const api = await mcp(f.app, token);
   return { call: (name: string, args: Record<string, unknown>) => api.callTool({ name, arguments: args }) as Promise<{ isError?: boolean; content: { text: string }[] }> }; 
 }
 
 describe('the echelon public tools', () => {
+  it('accepts architectAgentId through create_task and names the actual Architecture owner', async () => {
+    const f = await fixture();
+    const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    const tools = await client(f, f.head);
+    const result = await tools.call('create_task', {
+      title: 'Plan totals separately', brief: 'Keep totals', body: 'Plan before implementation',
+      executor: f.author.id, architectAgentId: architect.id, resultKind: 'code', small: false, paths: ['logic/totals.ts'],
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]!.text).toContain('for Architect.');
+    const rows = JSON.parse((await tools.call('tasks', {})).content[0]!.text);
+    const task = rows.find((row: { title: string }) => row.title === 'Plan totals separately');
+    expect(task.echelons).toMatchObject({
+      stage: 'architecture', ownerAgentId: architect.id,
+      stages: expect.arrayContaining([
+        expect.objectContaining({ stage: 'architecture', status: 'active', ownerAgentId: architect.id }),
+        expect.objectContaining({ stage: 'development', status: 'pending', ownerAgentId: f.author.id }),
+      ]),
+    });
+  });
   it('lets the assigned worker hand Architecture forward through report', async () => {
     const f = await fixture({ small: false });
-    const tools = await client(f);
-    const result = await tools.call('report', { task: f.task.number, done: true, summary: 'Change logic/totals.ts and prove the boundary.' });
+    const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    const { task } = await f.create({ small: false, architectAgentId: architect.id, assigneeAgentId: f.author.id });
+    const tools = await client(f, architect, task.id);
+    const result = await tools.call('report', { task: task.number, done: true, summary: 'Change logic/totals.ts and prove the boundary.' });
     expect(result.isError).not.toBe(true);
-    expect((await f.detail()).echelons.stage).toBe('development');
+    expect((await f.detail(task.id)).echelons.stage).toBe('development');
   });
   it('carries the reviewer risk addition through verdict', async () => {
     const f = await fixture();

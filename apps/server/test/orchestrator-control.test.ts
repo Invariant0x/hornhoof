@@ -368,7 +368,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(handed).toMatchObject({ kind: 'updated', text: 'Bruno left the assignment.', agentId: orchestrator.id, personId: null, data: { fields: ['owner'] } });
     const [current] = await db.select().from(tasks).where(eq(tasks.id, task.id));
     expect(current).toMatchObject({ status: 'waiting', assigneeAgentId: null, executorAgentId: bruno.id });
-    expect(routeSnapshot(await routeOf(db, current!), current!.assigneeAgentId)).toMatchObject({ stage: 'architecture', phase: 'waiting', ownerAgentId: null });
+    expect(routeSnapshot(await routeOf(db, current!), current!.assigneeAgentId)).toMatchObject({ stage: 'development', phase: 'waiting', ownerAgentId: null });
   });
 
   it('creates, renames and deletes a sub-unit and moves an employee into it and back, from the screen and with its tools', async () => {
