@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PRIVATE_TOOL_NOTE } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -191,8 +192,14 @@ describe('jobs of the machine the server was taken from', () => {
     /* The merge brought the row, open, on the node that listed it. */
     await s.job({ id });
     expect(await applyParkedMessages(s.ctx)).toBe(3);
-    expect(await s.jobNow(id)).toMatchObject({ status: 'done', result: 'Done over there.', sessionId: 'session-1' });
-    expect((await s.db.select().from(agentEvents).where(eq(agentEvents.jobId, id))).some(row => JSON.stringify(row.data).includes('Working over there.'))).toBe(true);
+    /* Kept while this server had no row of the turn, its words come masked: whether the turn used a vault value, and
+       which, came only with its database, so nothing raw of it was kept (7645605b, "Keep vault values out of replay and
+       turn records"). The job still ends, with its session and its events. */
+    expect(await s.jobNow(id)).toMatchObject({ status: 'done', result: PRIVATE_TOOL_NOTE, sessionId: 'session-1' });
+    const events = await s.db.select().from(agentEvents).where(eq(agentEvents.jobId, id));
+    expect(events.some(row => JSON.stringify(row.data).includes(PRIVATE_TOOL_NOTE))).toBe(true);
+    const kept = JSON.stringify([await s.jobNow(id), events, await s.parked()]);
+    for (const raw of ['Working over there.', 'Done over there.', 'the end']) expect(kept).not.toContain(raw);
     expect((await s.parked()).every(row => row.applied_at !== null)).toBe(true);
     expect(await applyParkedMessages(s.ctx)).toBe(0);
   });
