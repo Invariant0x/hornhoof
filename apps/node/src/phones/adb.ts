@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
@@ -52,7 +52,9 @@ export function privateAdbEnvironment(keyDir: string): NodeJS.ProcessEnv {
   return { ...process.env, ANDROID_USER_HOME: keyDir, ADB_SERVER_SOCKET: `localfilesystem:${socketDir}/server`, ADB_TRACE: '', ADB_VENDOR_KEYS: '' };
 }
 
-/* The adb server itself must not expose an unrestricted TCP port to the node's agent users. */
+/* The adb server itself must not expose an unrestricted TCP port to the node's agent users. On the machine a phone is
+   plugged into by cable, its administrator may put a socket to that machine's own adb server into keyDir as host.sock;
+   while it is there, the node uses that server, the only one that sees the phone. */
 export function privateAdb(executable: string, keyDir: string): AdbRun {
   const env = privateAdbEnvironment(keyDir);
   for (const directory of [keyDir, dirname(env.ADB_SERVER_SOCKET!.slice('localfilesystem:'.length))]) {
@@ -61,7 +63,9 @@ export function privateAdb(executable: string, keyDir: string): AdbRun {
     if (!stat.isDirectory() || stat.uid !== process.getuid?.()) throw new Error('phone_adb_directory_invalid');
     chmodSync(directory, 0o700);
   }
-  return adbRunner(executable, env);
+  const host = join(keyDir, 'host.sock');
+  const own = adbRunner(executable, env), shared = adbRunner(executable, { ...env, ADB_SERVER_SOCKET: `localfilesystem:${host}` });
+  return call => (existsSync(host) ? shared : own)(call);
 }
 
 /* The keyboard app that types any text adb gives it, for what Android's input text cannot type: Russian, emoji, new lines. */
