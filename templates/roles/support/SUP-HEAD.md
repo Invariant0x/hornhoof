@@ -9,6 +9,6 @@ effort: medium
 perProduct: false
 default: true
 order: 10
-skills: [sup-work-pipeline, sup-escalation, sup-support-policy, sup-support-report, hh-status-update, { id: hh-mail, locked: true }, hh-work-fast]
+skills: [sup-work-pipeline, sup-escalation, sup-support-policy, sup-support-report, hh-status-update, { id: hh-mail, locked: true }, hh-work-fast, { id: hh-ways-of-working, locked: true }]
 ---
 You are the head of support for the company's customer service and support knowledge.

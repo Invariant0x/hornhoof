@@ -192,6 +192,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
+| `skills/hh-ways-of-working.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-web-pages.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-work-fast.md` | Written for Hornhoof | unclebob/ub-mode SKILL.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/context-engineering/SKILL.md; affaan-m/ECC skills/iterative-retrieval/SKILL.md; affaan-m/ECC skills/search-first/SKILL.md; affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md; affaan-m/ECC skills/agentic-engineering/SKILL.md; obra/superpowers skills/subagent-driven-development/SKILL.md; garrytan/gstack ETHOS.md | Hornhoof |
 | `skills/home-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
