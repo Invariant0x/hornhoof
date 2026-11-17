@@ -967,6 +967,13 @@
       "when": 1794920125072,
       "tag": "0139_update_waits",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794922068981,
+      "tag": "0140_people_removed",
+      "breakpoints": true
     }
   ]
 }

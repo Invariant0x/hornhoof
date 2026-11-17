@@ -57,7 +57,8 @@ describe('personal assistants migration', () => {
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner, password_hash) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true, 'hash')`);
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'invited', 'listed')`);
-    const older = async () => (await db.execute(sql`select to_jsonb(p) - 'is_agent' - 'assistant_of' as row from people p order by id`)).rows;
+    /* The deletion of people, later, adds an empty removed_at. */
+    const older = async () => (await db.execute(sql`select to_jsonb(p) - 'is_agent' - 'assistant_of' - 'removed_at' as row from people p order by id`)).rows;
     const before = await older();
 
     await migrate(db, { migrationsFolder: MIGRATIONS });

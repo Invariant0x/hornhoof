@@ -1,0 +1,3 @@
+ALTER TABLE "people" DROP CONSTRAINT "people_assistant";--> statement-breakpoint
+ALTER TABLE "people" ADD COLUMN "removed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "people" ADD CONSTRAINT "people_assistant" CHECK (("people"."is_agent" AND "people"."assistant_of" IS NOT NULL AND "people"."password_hash" IS NULL) OR (NOT "people"."is_agent" AND "people"."assistant_of" IS NULL AND ("people"."email" IS NOT NULL OR "people"."removed_at" IS NOT NULL)));
