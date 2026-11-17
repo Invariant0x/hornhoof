@@ -1,28 +1,8 @@
 import { inflateSync } from 'node:zlib';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { Resvg } from '@resvg/resvg-js';
+import { describe, expect, it } from 'vitest';
 import { pictureType } from '../src/modules/tasks/attachments.js';
-import { renderOperatorScreen, renderOperatorScreenSvg } from '../src/modules/program-operator/screen.js';
-
-/* How big a PNG a pane makes is resvg's own business, and laying out tens of thousands of glyphs only measures the machine. A test
-   that needs a PNG of a given size sets it here and gets one without drawing; every other test draws with resvg itself. */
-const sized = vi.hoisted(() => ({ bytes: null as number | null, svgs: [] as string[] }));
-vi.mock('@resvg/resvg-js', async importOriginal => {
-  const real = await importOriginal<typeof import('@resvg/resvg-js')>();
-  function Resvg(svg: string, options?: ConstructorParameters<typeof real.Resvg>[1]) {
-    if (sized.bytes === null) return new real.Resvg(svg, options);
-    sized.svgs.push(svg);
-    const png = new Uint8Array(sized.bytes);
-    return { render: () => ({ asPng: () => png }) };
-  }
-  return { ...real, Resvg };
-});
-
-function pngsOf(bytes: number): string[] {
-  sized.bytes = bytes;
-  sized.svgs = [];
-  onTestFinished(() => { sized.bytes = null; });
-  return sized.svgs;
-}
+import { PAINT_OPTIONS, renderOperatorScreen, renderOperatorScreenSvg } from '../src/modules/program-operator/screen.js';
 
 type DecodedPng = {
   width: number;
@@ -108,8 +88,8 @@ function decodePng(buf: Buffer): DecodedPng {
 }
 
 function measureGrid() {
-  const a = renderOperatorScreen({ cells: '', cols: 10, rows: 2, secrets: [] });
-  const b = renderOperatorScreen({ cells: '', cols: 20, rows: 4, secrets: [] });
+  const a = renderOperatorScreenSvg({ cells: '', cols: 10, rows: 2, secrets: [] });
+  const b = renderOperatorScreenSvg({ cells: '', cols: 20, rows: 4, secrets: [] });
   const cellWidth = (b.width - a.width) / 10;
   const cellHeight = (b.height - a.height) / 2;
   const padX = (a.width - 10 * cellWidth) / 2;
@@ -150,9 +130,9 @@ function countDifferentFrom(
 }
 
 describe('renderOperatorScreen', () => {
-  it('renders a valid non-empty PNG whose pixel dimensions scale with cols and rows', () => {
-    const small = renderOperatorScreen({ cells: 'Choose a theme.\n> Dark\n  Light\n', cols: 40, rows: 12, secrets: [] });
-    const large = renderOperatorScreen({ cells: 'Choose a theme.\n> Dark\n  Light\n', cols: 80, rows: 24, secrets: [] });
+  it('renders a valid non-empty PNG whose pixel dimensions scale with cols and rows', async () => {
+    const small = await renderOperatorScreen({ cells: 'Choose a theme.\n> Dark\n  Light\n', cols: 40, rows: 12, secrets: [] });
+    const large = await renderOperatorScreen({ cells: 'Choose a theme.\n> Dark\n  Light\n', cols: 80, rows: 24, secrets: [] });
 
     expect(pictureType(small.png)).toBe('image/png');
     expect(small.png.byteLength).toBeGreaterThan(200);
@@ -168,9 +148,9 @@ describe('renderOperatorScreen', () => {
     expect(large.height).toBeGreaterThan(small.height);
   });
 
-  it('draws distinct Latin and Cyrillic glyphs rather than blank space or missing-glyph boxes', () => {
+  it('draws distinct Latin and Cyrillic glyphs rather than blank space or missing-glyph boxes', async () => {
     const geom = measureGrid();
-    const out = renderOperatorScreen({
+    const out = await renderOperatorScreen({
       cells: 'AZ09\nЖШфЁ№',
       cols: 12,
       rows: 3,
@@ -197,16 +177,16 @@ describe('renderOperatorScreen', () => {
     /* Missing glyphs all share one .notdef box; distinct Cyrillic letters must produce distinct bitmaps. */
     const cyrSigs = new Set([0, 1, 2, 3, 4].map(col => cellSignature(img, col, 1, geom)));
     expect(cyrSigs.size).toBe(5);
-    const missing = decodePng(renderOperatorScreen({ cells: '\u0378', cols: 4, rows: 1, secrets: [] }).png);
+    const missing = decodePng((await renderOperatorScreen({ cells: '\u0378', cols: 4, rows: 1, secrets: [] })).png);
     const missingSig = cellSignature(missing, 0, 0, geom);
     for (let col = 0; col < 5; col++) {
       expect(cellSignature(img, col, 1, geom)).not.toBe(missingSig);
     }
   });
 
-  it('renders inverse video (SGR 7 / 27), bold (SGR 1 / 22), and ANSI / 256 / truecolor SGR styles in pixels', () => {
+  it('renders inverse video (SGR 7 / 27), bold (SGR 1 / 22), and ANSI / 256 / truecolor SGR styles in pixels', async () => {
     const geom = measureGrid();
-    const out = renderOperatorScreen({
+    const out = await renderOperatorScreen({
       cells: [
         ' A ',
         '\x1b[7m A \x1b[27m ',
@@ -272,7 +252,7 @@ describe('renderOperatorScreen', () => {
     expect(extra.text).toBe('XYZWQR  T');
   });
 
-  it('re-masks whole secrets, encoded forms, NFD forms, line-wrapped secrets, and ANSI-split secrets', () => {
+  it('re-masks whole secrets, encoded forms, NFD forms, line-wrapped secrets, and ANSI-split secrets', async () => {
     const secret = 'sk-live-secret-998877';
     const b64 = Buffer.from(secret).toString('base64');
     const shortSecret = 'pin731';
@@ -289,7 +269,7 @@ describe('renderOperatorScreen', () => {
     ].join('\n');
 
     const pre = renderOperatorScreenSvg({ cells, cols: 60, rows: 10, secrets: [secret, shortSecret, cyrSecret, ''] });
-    const out = renderOperatorScreen({ cells, cols: 60, rows: 10, secrets: [secret, shortSecret, cyrSecret, ''] });
+    const out = await renderOperatorScreen({ cells, cols: 60, rows: 10, secrets: [secret, shortSecret, cyrSecret, ''] });
 
     for (const leaked of [secret, 'live-secret', '998877', 'ret-998877', b64, b64.replace(/=+$/, ''), shortSecret, 'ёжик', 'е\u0308жик']) {
       expect(out.text).not.toContain(leaked);
@@ -307,13 +287,13 @@ describe('renderOperatorScreen', () => {
     ].join('\n'));
 
     /* The rendered PNG of a masked split secret matches a clean [hidden] line byte-for-byte. */
-    const fromSplit = renderOperatorScreen({
+    const fromSplit = await renderOperatorScreen({
       cells: 'Key: sk-\x1b[31mlive\x1b[0m-secret-998877',
       cols: 40,
       rows: 3,
       secrets: [secret],
     });
-    const fromLiteral = renderOperatorScreen({
+    const fromLiteral = await renderOperatorScreen({
       cells: 'Key: [hidden]',
       cols: 40,
       rows: 3,
@@ -322,7 +302,7 @@ describe('renderOperatorScreen', () => {
     expect(fromSplit.png.equals(fromLiteral.png)).toBe(true);
   });
 
-  it('strips OSC links, OSC 52 clipboard payloads, non-SGR CSI/DCS sequences, and terminal control characters', () => {
+  it('strips OSC links, OSC 52 clipboard payloads, non-SGR CSI/DCS sequences, and terminal control characters', async () => {
     const cells = [
       '\x1b]0;Window Title\x07\x1b]52;c;c2VjcmV0LWNsaXBib2FyZA==\x07Header',
       '\x1b]8;;https://evil.example/phish?x=1\x07Visible link\x1b]8;;\x07',
@@ -331,7 +311,7 @@ describe('renderOperatorScreen', () => {
     ].join('\r\n');
 
     const pre = renderOperatorScreenSvg({ cells, cols: 50, rows: 6, secrets: [] });
-    const out = renderOperatorScreen({ cells, cols: 50, rows: 6, secrets: [] });
+    const out = await renderOperatorScreen({ cells, cols: 50, rows: 6, secrets: [] });
 
     expect(out.text).toBe('Header\nVisible link\nMenu item\nTail');
     for (const forbidden of ['Window Title', 'c2VjcmV0', 'evil.example', 'nested.invalid', 'unterminated.invalid', '\x1b']) {
@@ -340,10 +320,10 @@ describe('renderOperatorScreen', () => {
     }
   });
 
-  it('escapes screen markup (<, &, >, quotes, ]]>) as literal text without breaking or injecting SVG', () => {
+  it('escapes screen markup (<, &, >, quotes, ]]>) as literal text without breaking or injecting SVG', async () => {
     const tricky = '<svg onload="alert(1)"> & </text><rect id="injected" width="9999"/> ]]> "dq" \'sq\' \uffff';
     const pre = renderOperatorScreenSvg({ cells: tricky, cols: 100, rows: 4, secrets: [] });
-    const out = renderOperatorScreen({ cells: tricky, cols: 100, rows: 4, secrets: [] });
+    const out = await renderOperatorScreen({ cells: tricky, cols: 100, rows: 4, secrets: [] });
 
     expect(out.text).toBe('<svg onload="alert(1)"> & </text><rect id="injected" width="9999"/> ]]> "dq" \'sq\' \ufffd');
     expect(pre.svg).not.toContain('id="injected"');
@@ -354,8 +334,8 @@ describe('renderOperatorScreen', () => {
     expect(pictureType(out.png)).toBe('image/png');
   });
 
-  it('wraps joined lines across pane columns so soft-wrapped tmux lines stay visible on screen', () => {
-    const out = renderOperatorScreen({
+  it('wraps joined lines across pane columns so soft-wrapped tmux lines stay visible on screen', async () => {
+    const out = await renderOperatorScreen({
       cells: 'ABCDEFGHIJ12345',
       cols: 10,
       rows: 3,
@@ -368,22 +348,22 @@ describe('renderOperatorScreen', () => {
     expect(countDifferentFrom(img, 0, 1, geom, [bgR, bgG, bgB])).toBeGreaterThan(8);
   });
 
-  it('accepts 64 KiB of cells and rejects oversize cells, invalid dimensions, or PNGs above 1 MiB', () => {
+  it('accepts 64 KiB of cells and rejects oversize cells, invalid dimensions, or PNGs above 1 MiB', async () => {
     /* Exact 65536-byte boundary passes. */
     const exact64k = `${'a'.repeat(79)}\n`.repeat(819) + 'b'.repeat(16);
     expect(Buffer.byteLength(exact64k, 'utf8')).toBe(65_536);
-    const ok = renderOperatorScreen({ cells: exact64k, cols: 80, rows: 24, secrets: [] });
+    const ok = await renderOperatorScreen({ cells: exact64k, cols: 80, rows: 24, secrets: [] });
     expect(pictureType(ok.png)).toBe('image/png');
 
     /* 65537 bytes (ASCII and multi-byte UTF-8 Cyrillic) fails. */
-    expect(() => renderOperatorScreen({ cells: `${exact64k}x`, cols: 80, rows: 24, secrets: [] })).toThrow(/64 KiB/i);
+    await expect(renderOperatorScreen({ cells: `${exact64k}x`, cols: 80, rows: 24, secrets: [] })).rejects.toThrow(/64 KiB/i);
     const cyrOver = 'Ж'.repeat(32_769);
     expect(Buffer.byteLength(cyrOver, 'utf8')).toBe(65_538);
-    expect(() => renderOperatorScreen({ cells: cyrOver, cols: 80, rows: 24, secrets: [] })).toThrow(/64 KiB/i);
+    await expect(renderOperatorScreen({ cells: cyrOver, cols: 80, rows: 24, secrets: [] })).rejects.toThrow(/64 KiB/i);
 
     /* Invalid cols / rows fail. */
     for (const [cols, rows] of [[0, 24], [-1, 24], [513, 24], [80, 0], [80, 257], [1.5, 24], [80, Number.NaN]] as const) {
-      expect(() => renderOperatorScreen({ cells: 'ok', cols, rows, secrets: [] })).toThrow();
+      await expect(renderOperatorScreen({ cells: 'ok', cols, rows, secrets: [] })).rejects.toThrow();
     }
 
     /* Dense colorful 512x256 pane under 64 KiB whose rasterized PNG exceeds 1 MiB throws instead of clipping. */
@@ -400,15 +380,23 @@ describe('renderOperatorScreen', () => {
     expect(Buffer.byteLength(noisy, 'utf8')).toBeLessThanOrEqual(65_536);
     const pane = { cells: noisy, cols: 512, rows: 256, secrets: [] };
     const whole = renderOperatorScreenSvg(pane).svg;
-    /* One byte above 1 MiB throws; exactly 1 MiB goes. Either way the rasterizer got the whole pane, not a clipped one. */
-    const drawn = pngsOf(1_048_577);
-    expect(() => renderOperatorScreen(pane)).toThrow(/1 MiB/i);
-    sized.bytes = 1_048_576;
-    expect(renderOperatorScreen(pane).png.byteLength).toBe(1_048_576);
+    /* How big a PNG a pane makes is resvg's own business, and laying out tens of thousands of glyphs only measures the machine:
+       the drawing hands back a PNG of the size each side of the limit. One byte above 1 MiB throws; exactly 1 MiB goes. Either
+       way the drawing got the whole pane, not a clipped one. */
+    const drawn: string[] = [];
+    const sized = (bytes: number) => (svg: string) => (drawn.push(svg), Promise.resolve(new Uint8Array(bytes)));
+    await expect(renderOperatorScreen(pane, sized(1_048_577))).rejects.toThrow(/1 MiB/i);
+    expect((await renderOperatorScreen(pane, sized(1_048_576))).png.byteLength).toBe(1_048_576);
     expect(drawn).toEqual([whole, whole]);
   });
 
-  it('does not join short secrets across a hard line break', () => {
+  it('draws in its own thread the very PNG resvg draws of the same SVG', async () => {
+    const input = { cells: '\x1b[1mBold\x1b[0m and \x1b[31mred\x1b[0m, Привет\n> 1. Yes', cols: 30, rows: 3, secrets: [] };
+    const here = Buffer.from(new Resvg(renderOperatorScreenSvg(input).svg, PAINT_OPTIONS).render().asPng());
+    expect((await renderOperatorScreen(input)).png.equals(here)).toBe(true);
+  });
+
+  it('does not join short secrets across a hard line break', async () => {
     const out = renderOperatorScreenSvg({ cells: 'go to\npage', cols: 20, rows: 3, secrets: ['top'] });
     expect(out.text).toBe('go to\npage');
   });

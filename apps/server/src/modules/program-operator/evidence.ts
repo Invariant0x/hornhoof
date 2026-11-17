@@ -38,7 +38,7 @@ async function drawnCheck(ctx: Ctx, nodeId: string, frame: OperatorEvidence): Pr
   const [job] = await ctx.db.select(only(jobs, 'companyId')).from(jobs).where(and(eq(jobs.id, frame.jobId!), eq(jobs.agentId, frame.agentKey), eq(jobs.nodeId, nodeId)));
   if (!job) return { fact, png: null };
   try {
-    return { fact, png: renderPicture(frame.check.screen, await pictureSecrets(ctx, job.companyId)).rendered.png };
+    return { fact, png: (await renderPicture(frame.check.screen, await pictureSecrets(ctx, job.companyId))).rendered.png };
   } catch (error) {
     ctx.log.error({ error: loggable(error) }, 'Drawing the screen a node saw failed.');
     return { fact, png: null };

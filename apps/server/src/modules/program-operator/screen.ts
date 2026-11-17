@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { Resvg } from '@resvg/resvg-js';
+import type { ResvgRenderOptions } from '@resvg/resvg-js';
+import { PAINTER_DEADLINE_MS, ScreenPainter, startPainterWorker } from './painter.js';
 
 type OperatorScreenInput = {
   cells: string;
@@ -57,6 +58,14 @@ const FONT_FILES = [
   fileURLToPath(new URL('./fonts/DejaVuSansMono.ttf', import.meta.url)),
   fileURLToPath(new URL('./fonts/DejaVuSansMono-Bold.ttf', import.meta.url)),
 ];
+/* How resvg draws a screen's SVG: only with the fonts that come with the server, wherever it runs. */
+export const PAINT_OPTIONS: ResvgRenderOptions = {
+  font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: FONT_FAMILY, monospaceFamily: FONT_FAMILY },
+};
+/* Draws an SVG into a PNG. */
+export type Paint = (svg: string) => Promise<Uint8Array>;
+const painter = new ScreenPainter(() => startPainterWorker(PAINT_OPTIONS), PAINTER_DEADLINE_MS);
+const paintInWorker: Paint = svg => painter.paint(svg);
 
 const PLAIN_STYLE: Style = {
   fg: null,
@@ -373,17 +382,12 @@ export function renderOperatorScreenSvg(input: OperatorScreenInput): OperatorScr
   return { svg, text, width, height };
 }
 
-export function renderOperatorScreen(input: OperatorScreenInput): OperatorScreenResult {
+/* The SVG is made here; the PNG is drawn in the painter's thread, as a dense pane takes resvg seconds. A failed or stuck drawing
+   rejects with a PainterError. */
+export async function renderOperatorScreen(input: OperatorScreenInput, paint: Paint = paintInWorker): Promise<OperatorScreenResult> {
   const { svg, text, width, height } = renderOperatorScreenSvg(input);
-  const resvg = new Resvg(svg, {
-    font: {
-      fontFiles: FONT_FILES,
-      loadSystemFonts: false,
-      defaultFontFamily: FONT_FAMILY,
-      monospaceFamily: FONT_FAMILY,
-    },
-  });
-  const png = Buffer.from(resvg.render().asPng());
+  const drawn = await paint(svg);
+  const png = Buffer.from(drawn.buffer, drawn.byteOffset, drawn.byteLength);
   if (png.byteLength > MAX_PNG_BYTES) {
     throw new RangeError('Operator screen PNG exceeds 1 MiB.');
   }

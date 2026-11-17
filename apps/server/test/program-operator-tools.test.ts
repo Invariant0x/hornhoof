@@ -12,6 +12,7 @@ import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import * as programRpc from '../src/modules/program-operator/rpc.js';
 import * as turnLog from '../src/modules/tasks/turn-log.js';
 import { readProgramView, reportOperatorCase, sendProgramInput } from '../src/modules/program-operator/tools.js';
+import { PainterError } from '../src/modules/program-operator/painter.js';
 import * as screenRenderer from '../src/modules/program-operator/screen.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { operatorCompany } from './program-operator-company.js';
@@ -297,11 +298,19 @@ it('leaves an input the node did not answer unknown and sends it once', async ()
 
 it('rejects a rendered picture above the protocol limit and accepts the exact boundary', async () => {
   const c = await fixture();
-  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockReturnValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES + 1), text: 'Screen', width: 80, height: 24 });
+  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockResolvedValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES + 1), text: 'Screen', width: 80, height: 24 });
   onTestFinished(() => render.mockRestore());
   await expect(readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).rejects.toMatchObject({ status: 413, code: 'validation', message: 'The program picture is too large.' });
-  render.mockReturnValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES), text: 'Screen', width: 80, height: 24 });
+  render.mockResolvedValue({ png: Buffer.alloc(OPERATOR_PICTURE_BYTES), text: 'Screen', width: 80, height: 24 });
   expect((await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).png.length).toBe(OPERATOR_PICTURE_BYTES);
+});
+
+it('says the picture could not be drawn when its drawing failed, and the next look draws it', async () => {
+  const c = await fixture();
+  const render = vi.spyOn(screenRenderer, 'renderOperatorScreen').mockRejectedValueOnce(new PainterError('out of time'));
+  onTestFinished(() => render.mockRestore());
+  await expect(readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).rejects.toMatchObject({ status: 409, code: 'unavailable', reason: 'programs_unavailable', message: 'The program picture could not be drawn (out of time). Look again.' });
+  expect((await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).text).toContain('Choose a theme.');
 });
 
 /* A case the program operator was given, for its report. */
