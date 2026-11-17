@@ -45,8 +45,8 @@ const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .
     fonts: { name: font('.mn, b'), task: font('.r2'), state: font('.r3') },
     clipped: [plate, ...parts].filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
     /* The halo of a framed button shows its glow only while the card is busy or waits, and its ring only on keyboard focus:
-       those two layers draw no part of the plate, so their display none hides nothing of it. */
-    hidden: parts.filter(el => !el.closest('.halo') && getComputedStyle(el).display === 'none').map(el => el.className),
+       those two layers draw no part of the plate, so their display none hides nothing of it. Every other part is checked. */
+    hidden: parts.filter(el => !el.matches('.halo > .halo-glow, .halo > .halo-ring') && getComputedStyle(el).display === 'none').map(el => el.className),
     rows: [...plate.querySelectorAll<HTMLElement>('.mn, .r2, .r3')].map(el => ({ className: el.className, whiteSpace: getComputedStyle(el).whiteSpace, textOverflow: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflow })),
   };
 }));
