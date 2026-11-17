@@ -25,3 +25,18 @@ it('keeps the session recording on the task and shows the owner its live frame',
   expect((await c.app.inject({ url: `/api/phones/${phone.id}/live`, ...as(c.samSession) })).statusCode).toBe(403);
   expect((await c.app.inject({ url: `/api/phone-sessions/${session.id}/frames/1/image`, ...as(c.olafSession) })).statusCode).toBe(403);
 });
+
+it('records a whole 1080x2400 screen of a photo, about 10 MB as a PNG, as the phone sent it', async () => {
+  const c = await phoneCompany();
+  const phone = (await c.addPhone()).json();
+  const tools = await mcp(c.app, (await c.startTurn(c.nora.id, c.task.id)).token);
+  const reply = await tools.callTool({ name: 'phone_acquire', arguments: { phone: phone.id } }) as { content: { text: string }[] };
+  const session = JSON.parse(reply.content[0]!.text) as { id: string };
+  const open = c.calls.find(m => m.type === 'phone.open');
+  if (open?.type !== 'phone.open') throw new Error('The phone did not receive its session grant.');
+  const photo = Buffer.concat([Buffer.from(PNG, 'base64'), Buffer.alloc(10 * 1024 * 1024, 7)]);
+  c.node.send({ type: 'phone.frame', sessionId: session.id, generation: open.grant.generation, sequence: 1, at: '2026-11-16T12:00:00Z', capture: { png: photo.toString('base64'), width: 1080, height: 2400, elements: [] } });
+  await until(async () => (await c.app.inject({ url: `/api/tasks/${c.task.id}/phone-recordings`, ...as(c.ceoSession) })).json().recordings[0]?.frames.length === 1);
+  const image = await c.app.inject({ url: `/api/phone-sessions/${session.id}/frames/1/image`, ...as(c.ceoSession) });
+  expect(image.rawPayload.equals(photo)).toBe(true);
+});

@@ -71,8 +71,17 @@ describe('phone messages on the execution node', () => {
     p.phones.close();
   });
 
-  it('gives the agent the screen\'s elements when its picture is too large to send, as a photo on the home screen', async () => {
-    const p = phone(Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]));
+  it('shows the agent a whole 1080x2400 screen of a photo, which is about 10 MB as a PNG', async () => {
+    const photo = Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024)]);
+    const p = phone(photo);
+    await p.open();
+    await p.act(6, { kind: 'capture' });
+    expect(p.reply(6)?.capture?.png).toBe(photo.toString('base64'));
+    p.phones.close();
+  });
+
+  it('gives the agent the screen\'s elements when its picture is larger than a whole screen can be', async () => {
+    const p = phone(Buffer.concat([PNG, Buffer.alloc(13 * 1024 * 1024)]));
     await p.open();
     await p.act(6, { kind: 'capture' });
     const capture = p.reply(6)?.capture;
