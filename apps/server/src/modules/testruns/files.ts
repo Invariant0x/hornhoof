@@ -1,5 +1,5 @@
 import { MAX_RUN_FILES, RunFile } from '@hornhoof/protocol';
-import { and, desc, eq, like, sql } from 'drizzle-orm';
+import { and, desc, eq, like } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -29,14 +29,14 @@ export function partFileRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { run, task, name } = await partOf(req);
     const [file] = run.files.includes(name)
       ? await db
-          .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+          .select({ id: attachments.id, name: attachments.name, length: attachments.size })
           .from(attachments)
           .where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
     if (!file) throw new ApiError(404, 'not_found', `Task ${task.number} gives this run no file ${name}.`, 'attachment_unknown');
-    return sendFile(db, reply, file);
+    return sendFile(ctx, reply, file);
   });
 
   void app.register(async scope => {
