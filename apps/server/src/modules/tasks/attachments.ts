@@ -375,6 +375,12 @@ export async function attachmentBytesForPerson(
   };
 }
 
+/* Reads a delivery's bytes only when both its sending agent and its recipient may read the file. */
+export async function attachmentBytesForDelivery(ctx: Pick<Ctx, 'db'>, job: ToolJob, person: Person, id: string) {
+  if (!(await agentCanReadAttachment(ctx, job, id))) return null;
+  return attachmentBytesForPerson(ctx.db, person, id);
+}
+
 const PICTURE_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
 const defaultPictureName = (id: string, mediaType: string): string => `${id}${PICTURE_EXT[mediaType] ?? ''}`;
 
