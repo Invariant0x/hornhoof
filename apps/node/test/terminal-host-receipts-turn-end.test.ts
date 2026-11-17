@@ -143,6 +143,14 @@ describe('program receipts for live words', () => {
     await c.on(c.running);
   });
 
+  it('reports and fails an actual Kimi process exit without a hook or wire end', async () => {
+    const c = await atWork('kimi', 'taken');
+    c.alive.mockResolvedValue(false);
+    expect(await c.on(c.running)).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'crash', text: 'The program exited during the turn.' } });
+    expect(c.sent).toContainEqual(expect.objectContaining({ type: 'job.program', jobId: 'job-receipt', state: 'gone' }));
+    expect(c.sent.filter(m => m.type === 'job.done')).toEqual([expect.objectContaining({ jobId: 'job-receipt', ok: false, error: 'agent_failed' })]);
+  });
+
   it('bounds the Kimi Stop wait when its wire end is missing', async () => {
     const c = await atWork('kimi', 'taken');
     c.record({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'Answer.' } } });

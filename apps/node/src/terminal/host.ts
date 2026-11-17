@@ -1,5 +1,5 @@
 import { execFile, type ChildProcess } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -25,7 +25,7 @@ import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type
 import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
-import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
+import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
@@ -203,6 +203,8 @@ type Agent = {
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
   agyCursor: RecordingCursor | null;
+  /* Recording position before this turn: an older completion must never answer a new prompt. */
+  completionStart: Promise<RecordingCursor | null> | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
   interruptions: number;
   /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
@@ -398,6 +400,9 @@ const stopped = (signal?: AbortSignal): Promise<false> =>
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
 export class TerminalHost {
+  /* A plain screen hash would let a viewer guess masked values. Bind the keyed proof to this agent and program too,
+     so another program's chosen output cannot serve as a verifier. The key never leaves this host. */
+  private readonly completionKey = randomBytes(32);
   private readonly operator: OperatorRuntime | null;
   private readonly operatorTimer: NodeJS.Timeout | null;
   private readonly agents = new Map<string, Agent>();
@@ -422,6 +427,8 @@ export class TerminalHost {
   private readonly viewsClosed = new Set<string>();
   /* Windows opening one agent wait for the same session to be created. */
   private readonly sessionsOpening = new Map<string, Promise<void>>();
+  /* The last launch into each agent's session, which the next one waits for. */
+  private readonly launches = new Map<string, Promise<unknown>>();
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
@@ -524,8 +531,37 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
     this.drain(a);
-    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
-    return { ...this.programIdentity(key, a), working: a.busy, ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+    const turn = a.turn, instance = a.instance;
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    const input = inputOf(a.program.kind, screen);
+    const completion = await this.screenCompleted(a, screen);
+    if (a.turn !== turn || a.instance !== instance) return null;
+    return this.observedFacts(key, a, input, completion);
+  }
+
+  private observedFacts(key: string, a: Agent, input: string | null, completion: string | null): ProgramFacts {
+    return { ...this.programIdentity(key, a), working: a.busy && !completion, ...(completion ? { completion } : {}), ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+  }
+
+  private async screenCompleted(a: Agent, screen: string): Promise<string | null> {
+    const program = a.program;
+    if (!program || this.completionBlocked(a)) return null;
+    const output = await this.completionOutput(a, program.kind);
+    if (a.program !== program || this.completionBlocked(a)) return null;
+    if (output === null) return null;
+    const text = completionText(program.kind, screen, output);
+    return text ? createHmac('sha256', this.completionKey).update(JSON.stringify([a.key, a.instance, text])).digest('hex') : null;
+  }
+
+  private async completionOutput(a: Agent, kind: TermProgram['kind']): Promise<string | null> {
+    if (kind !== 'kimi') return '';
+    const start = a.completionStart, cursor = await start;
+    if (!cursor || a.completionStart !== start) return null;
+    return this.opts.tmux.programOutput(a.name, cursor);
+  }
+
+  private completionBlocked(a: Agent): boolean {
+    return !a.took || a.typing != null || Boolean(a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting);
   }
 
   /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
@@ -558,6 +594,15 @@ export class TerminalHost {
   }
 
   private inputLane<T>(a: Agent, run: () => Promise<T>): Promise<T> { return this.operator?.serial(a.key, run) ?? run(); }
+
+  /* What an agent's session runs changes one launch at a time. A window that opened the waiting screen as a turn started the
+     program found no session, then replaced the program that had started meanwhile: the program went on outside its pane,
+     where no hook of its own could prove it was the agent's any more. */
+  private launching<T>(a: Agent, launch: () => Promise<T>): Promise<T> {
+    const next = (this.launches.get(a.key) ?? Promise.resolve()).then(launch);
+    this.launches.set(a.key, next.catch(() => {}));
+    return next;
+  }
 
   private intentional(a: Agent, why: Parameters<OperatorRuntime['intentional']>[1]): void { this.operator?.intentional(a.key, why); }
 
@@ -608,7 +653,8 @@ export class TerminalHost {
 
   /* The processes an agent's session starts its program in. */
   private async panes(key: string): Promise<number[]> {
-    const out = await this.opts.tmux.run(['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}']).catch(() => '');
+    const command = ['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}'];
+    const out = await this.opts.tmux.run(command).catch(() => this.opts.tmux.run(command));
     return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 
@@ -620,7 +666,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { privateOutput: this.opts.tmux.outputPrivate(`a-${key}`), privateJobId: this.opts.tmux.privateJob(`a-${key}`), key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { privateOutput: this.opts.tmux.outputPrivate(`a-${key}`), privateJobId: this.opts.tmux.privateJob(`a-${key}`), key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
       if (a.privateOutput) this.hideOutput(a);
     }
@@ -814,7 +860,10 @@ export class TerminalHost {
   private async runRequested(a: Agent, job: TermJob, turn: Turn, tools: Promise<unknown> | null, goesOn: boolean, ended: Deferred<string>): Promise<RunResult> {
     /* Nothing to type: the turn only starts the program for the person who opened its window. */
     if (!job.input.prompt) return this.started(a, turn, tools, goesOn ? null : job.input.sessionId === null);
-    return (await this.toolsMissing(a, job)) ?? (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+    const missing = await this.toolsMissing(a, job);
+    if (missing) return missing;
+    if (job.program.kind === 'kimi') a.completionStart = this.opts.tmux.programCursor(a.name).catch(() => null);
+    return (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
   }
 
   /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, and
@@ -1000,7 +1049,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.operator?.launch(a.key, 'attempt');
     try {
-      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+      await this.inputLane(a, () => this.launching(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch })));
       this.operator?.launch(a.key, 'started');
     } catch (error) {
       this.operator?.launch(a.key, 'failed');
@@ -1758,6 +1807,7 @@ export class TerminalHost {
   }
 
   private beginTurn(a: Agent): void {
+    a.completionStart = a.program?.kind === 'kimi' ? this.opts.tmux.programCursor(a.name).catch(() => null) : null;
     this.clearQuestion(a);
     a.tally.begin();
     a.personWords = false;
@@ -2888,7 +2938,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.beginProgramRestart(a, jobId);
     const env = { ...(await this.testShare(a)), ...lasting(job.input.env), ...spec.env };
-    await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+    await this.inputLane(a, () => this.launching(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch })));
     this.operator?.launch(a.key, 'started');
     if (!(await this.ready(a, { ...job, operatorDelivery: undefined }))) throw new Error('The restarted program did not become ready.');
     this.programIs(a, true);
@@ -3167,7 +3217,12 @@ export class TerminalHost {
     return created;
   }
 
-  private async createSession(a: Agent, starts: boolean): Promise<void> {
+  /* Only a session that is not there yet gets the waiting screen: one a program started in meanwhile keeps its program. */
+  private createSession(a: Agent, starts: boolean): Promise<void> {
+    return this.launching(a, () => this.waitingScreen(a, starts));
+  }
+
+  private async waitingScreen(a: Agent, starts: boolean): Promise<void> {
     if (await this.opts.tmux.has(a.name)) return;
     /* The window shows a loader over the empty session while the program starts. */
     const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;

@@ -10,7 +10,6 @@ import http2 from 'node:http2';
 import type { ClientHttp2Session, ClientHttp2Stream, Http2SecureServer } from 'node:http2';
 import net, { type AddressInfo } from 'node:net';
 import { PassThrough, Readable, type Duplex } from 'node:stream';
-import { setTimeout as sleep } from 'node:timers/promises';
 import tls from 'node:tls';
 import * as peculiar from '@peculiar/x509';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -223,18 +222,6 @@ async function textOf(stream: Readable): Promise<string> {
   let text = '';
   for await (const chunk of stream) text += String(chunk);
   return text;
-}
-
-async function within<T>(ms: number, waited: Promise<T>): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Nothing came within ${ms} ms.`)), ms);
-  });
-  try {
-    return await Promise.race([waited, late]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /* Not events.once, which rejects on an error, and a refused client's socket may well have one on its way out. */
@@ -471,7 +458,7 @@ describe('PeerServer', () => {
         const session = clientOf(stand, door.port, client);
         const answers = [HELLO, CONNECT_APP, CONNECT_DB].map(headers => statusOf(session.request(headers)));
         expect(await Promise.all(answers)).toEqual([null, null, null]);
-        await vi.waitFor(() => expect(seen.refused()).toBe(index + 1));
+        await until(() => seen.refused() === index + 1);
       }
       expect(seen.secure()).toBe(0);
       expect(seen.sessions()).toBe(0);
@@ -641,15 +628,15 @@ describe('PeerServer', () => {
     /* From another machine than the one asked: refused. */
     const stranger = clientOf(stand, door.port, stand.data).request({ ':method': 'PUT', ':path': `${PEER_PATHS.backups}${wanted.id}` });
     stranger.end(wanted.travels());
-    expect(await within(3000, statusOf(stranger))).toBe(403);
+    expect(await statusOf(stranger)).toBe(403);
     const sent = put(wanted.id);
     sent.end(wanted.travels());
-    expect(await within(3000, statusOf(sent))).toBe(201);
+    expect(await statusOf(sent)).toBe(201);
     expect(backups.keeper.held()).toEqual([wanted.id]);
     /* Held already: taken as done, without reading it again. */
     const again = put(wanted.id);
     again.end(Buffer.alloc(16));
-    expect(await within(3000, statusOf(again))).toBe(201);
+    expect(await statusOf(again)).toBe(201);
 
     /* Longer than its head says: refused once it passes the signed size, long before its end. */
     const MIB = 1024 * 1024;
@@ -663,14 +650,14 @@ describe('PeerServer', () => {
     for (let sentBytes = 0; sentBytes < 32 * MIB && !tooLong.destroyed && !tooLong.closed; sentBytes += chunk.length) {
       if (!tooLong.write(chunk, err => (accepted += err ? 0 : chunk.length))) await Promise.race([new Promise(resolve => tooLong.once('drain', resolve)), gone]);
     }
-    expect(await within(5000, answered)).toBe(400);
-    await within(5000, gone);
+    expect(await answered).toBe(400);
+    await gone;
     expect(accepted).toBeLessThan(3 * MIB);
     expect(backups.keeper.held()).toEqual([wanted.id]);
     /* Under another bundle's name: refused as well. */
     const misnamed = put(long.id);
     misnamed.end(wanted.travels());
-    expect(await within(3000, statusOf(misnamed))).toBe(400);
+    expect(await statusOf(misnamed)).toBe(400);
   });
 
   /* A stand whose keeper takes uploads from the worker's machine, into a control folder of the test's. */
@@ -694,7 +681,7 @@ describe('PeerServer', () => {
     const bytes = randomBytes(300 * 1024);
     const sent = u.put(id, bytes.length);
     sent.end(bytes);
-    expect(await within(5000, statusOf(sent))).toBe(201);
+    expect(await statusOf(sent)).toBe(201);
     const name = `${u.networkId}-${id}.tar.gz`;
     expect(u.files()).toEqual([name]);
     const file = join(u.controlDir, UPLOADS_DIR, name);
@@ -711,24 +698,24 @@ describe('PeerServer', () => {
     const u = await standWithUploads();
     const stranger = u.put(randomUUID(), 1024, u.stand.data);
     stranger.end(Buffer.alloc(1024));
-    expect(await within(5000, statusOf(stranger))).toBe(403);
+    expect(await statusOf(stranger)).toBe(403);
     /* One that is still sending is told so too: the answer leaves before its stream is cut. */
     const sending = u.put(randomUUID(), 2048, u.stand.data);
     sending.write(Buffer.alloc(1024));
-    expect(await within(5000, statusOf(sending))).toBe(403);
+    expect(await statusOf(sending)).toBe(403);
     expect(u.files()).toEqual([]);
     expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
     /* The machine owes nothing any more. */
     u.allowed.length = 0;
     const late = u.put(randomUUID(), 1024);
     late.end(Buffer.alloc(1024));
-    expect(await within(5000, statusOf(late))).toBe(403);
+    expect(await statusOf(late)).toBe(403);
     /* A keeper with nothing that takes uploads knows no such path. */
     const plain = await standUp();
     const door = await plain.open('peer');
     const none = clientOf(plain, door.port, plain.worker).request({ ':method': 'PUT', ':path': `${PEER_PATHS.upload}${randomUUID()}` });
     none.end(Buffer.alloc(16));
-    expect(await within(5000, statusOf(none))).toBe(404);
+    expect(await statusOf(none)).toBe(404);
   });
 
   it('keeps no part of an upload that is too large or was cut', async () => {
@@ -740,7 +727,7 @@ describe('PeerServer', () => {
       refused.on('error', ignore);
       refused.resume();
       refused.end(randomBytes(512 * 1024));
-      expect(await within(5000, answered)).toBe(status);
+      expect(await answered).toBe(status);
       expect(u.files()).toEqual([]);
       expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
     }
@@ -748,14 +735,14 @@ describe('PeerServer', () => {
     const cut = u.put(randomUUID(), 48 * 1024);
     cut.on('error', ignore);
     cut.write(randomBytes(16 * 1024));
-    await vi.waitFor(() => expect(u.files().some(name => name.endsWith('.part'))).toBe(true), { timeout: 5000 });
+    await until(() => u.files().some(name => name.endsWith('.part')));
     cut.close(http2.constants.NGHTTP2_CANCEL);
-    await vi.waitFor(() => expect(u.files()).toEqual([]), { timeout: 5000 });
+    await until(() => u.files().length === 0);
     expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
     const id = randomUUID();
     const next = u.put(id, 1024);
     next.end(randomBytes(1024));
-    expect(await within(5000, statusOf(next))).toBe(201);
+    expect(await statusOf(next)).toBe(201);
     /* A part an earlier keeper left is no upload, and goes when the keeper starts; an upload whose load is asked stays. */
     writeFileSync(join(u.controlDir, UPLOADS_DIR, 'left-over.tar.gz.part'), 'half');
     u.taker.start();
@@ -772,18 +759,18 @@ describe('PeerServer', () => {
     const one = u.put(first, 2048);
     one.on('error', ignore);
     one.write(randomBytes(1024));
-    await vi.waitFor(() => expect(u.files().some(name => name.endsWith('.part'))).toBe(true), { timeout: 5000 });
+    await until(() => u.files().some(name => name.endsWith('.part')));
     /* A second one while the first still comes. */
     const two = u.put(randomUUID(), 1024);
     two.end(randomBytes(1024));
-    expect(await within(5000, statusOf(two))).toBe(409);
+    expect(await statusOf(two)).toBe(409);
     one.end(randomBytes(1024));
-    expect(await within(5000, statusOf(one))).toBe(201);
+    expect(await statusOf(one)).toBe(201);
     /* And while the updater still loads the first, also for the first itself. */
     for (const id of [randomUUID(), first]) {
       const three = u.put(id, 1024);
       three.end(randomBytes(1024));
-      expect(await within(5000, statusOf(three))).toBe(409);
+      expect(await statusOf(three)).toBe(409);
     }
     /* The load failed: the same upload is taken again. */
     const place = join(u.controlDir, UPLOADS_DIR, `${u.networkId}-${first}`);
@@ -792,7 +779,7 @@ describe('PeerServer', () => {
     writeFileSync(`${place}.failed`, 'The upload could not be loaded.\n');
     const four = u.put(first, 1024);
     four.end(randomBytes(1024));
-    expect(await within(5000, statusOf(four))).toBe(201);
+    expect(await statusOf(four)).toBe(201);
     expect(u.files()).toEqual([`${u.networkId}-${first}.tar.gz`]);
     /* The load went through: offered again, it is answered as taken, and nothing is taken or loaded twice. */
     rmSync(join(u.controlDir, LOAD_FILE));
@@ -801,13 +788,13 @@ describe('PeerServer', () => {
     const five = u.put(first, 1024);
     five.on('error', ignore);
     five.end(randomBytes(1024));
-    expect(await within(5000, statusOf(five))).toBe(201);
+    expect(await statusOf(five)).toBe(201);
     expect([u.files(), existsSync(join(u.controlDir, LOAD_FILE))]).toEqual([[`${u.networkId}-${first}.done`], false]);
     /* What was said of a machine that owes nothing any more goes when the next one comes. */
     u.allowed[0] = { ...u.allowed[0]!, machine: DATA_ID, networkId: 'ab'.repeat(32) };
     const six = u.put(randomUUID(), 1024, u.stand.data);
     six.end(randomBytes(1024));
-    expect(await within(5000, statusOf(six))).toBe(201);
+    expect(await statusOf(six)).toBe(201);
     expect(u.files().filter(name => name.endsWith('.done'))).toEqual([]);
   });
 
@@ -827,7 +814,7 @@ describe('PeerServer', () => {
     const post = async (path: string, body: string) => {
       const stream = session.request({ ':method': 'POST', ':path': path, 'content-type': 'application/json' });
       stream.end(body);
-      const status = await within(5000, statusOf(stream));
+      const status = await statusOf(stream);
       return [status, status === null ? '' : await textOf(stream)];
     };
     expect(await post('/peer/switch/offer', JSON.stringify({ switch: INVOCATION }))).toEqual([409, JSON.stringify({ ok: false, why: 'not_ready' })]);
@@ -837,7 +824,7 @@ describe('PeerServer', () => {
     await until(() => done.length === 1);
     const state = session.request({ ':method': 'GET', ':path': `/peer/switch/state?switch=${INVOCATION}` });
     state.end();
-    expect(await within(5000, statusOf(state))).toBe(409);
+    expect(await statusOf(state)).toBe(409);
     expect(asked).toEqual([
       [DATA_ID, 'POST', '/peer/switch/offer', { switch: INVOCATION }],
       [DATA_ID, 'POST', '/peer/switch/go', { switch: INVOCATION, w: '0/1', copies: [] }],
@@ -850,12 +837,12 @@ describe('PeerServer', () => {
     /* A worker is refused, and a keeper that takes part in no switch knows no such path. */
     const worker = clientOf(stand, door.port, stand.worker).request({ ':method': 'POST', ':path': '/peer/switch/offer' });
     worker.end('{}');
-    expect(await within(5000, statusOf(worker))).toBe(403);
+    expect(await statusOf(worker)).toBe(403);
     const plain = await standUp();
     const other = await plain.open('peer');
     const none = clientOf(plain, other.port, plain.data).request({ ':method': 'POST', ':path': '/peer/switch/offer' });
     none.end('{}');
-    expect(await within(5000, statusOf(none))).toBe(404);
+    expect(await statusOf(none)).toBe(404);
   });
 
   it('answers anything else with 404, and a door that cannot connect with 502', async () => {
@@ -876,7 +863,7 @@ describe('PeerServer', () => {
     let back = 0;
     toDb.on('data', (chunk: Buffer) => (back += chunk.length));
     toDb.write(sent);
-    await vi.waitFor(() => expect(back).toBe(sent.length), { timeout: 10_000 });
+    await until(() => back === sent.length);
     expect(stand.server.dbBytes(DATA_ID)).toBeGreaterThanOrEqual(sent.length);
     expect(stand.server.dbBytes(WORKER_ID)).toBe(0);
     /* What its other streams carry counts with it. */
@@ -898,7 +885,7 @@ describe('PeerServer', () => {
     let back = 0;
     toDb.on('data', (chunk: Buffer) => (back += chunk.length));
     toDb.write(sent);
-    await vi.waitFor(() => expect(back).toBe(sent.length), { timeout: 10_000 });
+    await until(() => back === sent.length);
     const hello = clientOf(stand, door.port, stand.worker).request(HELLO);
     hello.end();
     let said = 0;
@@ -923,17 +910,17 @@ describe('PeerServer', () => {
 
     const cancelled = session.request(CONNECT_DB);
     expect(await statusOf(cancelled)).toBe(200);
-    await vi.waitFor(() => expect(stand.db.connections()).toBe(1));
+    await until(() => stand.db.connections() === 1);
     const farGone = closeOf(stand.db.sockets[0]!);
     cancelled.close(http2.constants.NGHTTP2_CANCEL);
-    await within(1000, farGone);
+    await farGone;
 
     const answered = session.request(CONNECT_DB);
     expect(await statusOf(answered)).toBe(200);
     answered.write('last words');
-    await vi.waitFor(() => expect(stand.db.sockets[1]?.bytesWritten).toBe('last words'.length));
+    await until(() => stand.db.sockets[1]?.bytesWritten === 'last words'.length);
     stand.db.sockets[1]!.end();
-    expect(await within(1000, textOf(answered))).toBe('last words');
+    expect(await textOf(answered)).toBe('last words');
   });
 
   it('delivers what the far side said last, however slowly the peer reads', async () => {
@@ -950,8 +937,8 @@ describe('PeerServer', () => {
     const stream = session.request(CONNECT_DB);
     expect(await statusOf(stream)).toBe(200);
     // Only the first kilobyte may travel until the peer reads, and the far side says its last and leaves meanwhile.
-    await vi.waitFor(() => expect(talker.connections()).toBe(1));
-    await Promise.race([closeOf(talker.sockets[0]!), sleep(200)]);
+    await until(() => talker.connections() === 1);
+    await until(() => talker.sockets[0]!.writableFinished);
     expect((await textOf(stream)).length).toBe(last.length);
   });
 
@@ -962,7 +949,7 @@ describe('PeerServer', () => {
     const stream = clientOf(stand, door.port, stand.worker).request(CONNECT_APP);
     expect(await statusOf(stream)).toBe(200);
     stream.close(http2.constants.NGHTTP2_CANCEL);
-    await vi.waitFor(() => expect(far.destroyed).toBe(true));
+    await until(() => far.destroyed);
   });
 
   it('tells a broken far side from one that has finished', async () => {
@@ -971,9 +958,9 @@ describe('PeerServer', () => {
     const stream = clientOf(stand, door.port, stand.data).request(CONNECT_DB);
     const gone = closeOf(stream);
     expect(await statusOf(stream)).toBe(200);
-    await vi.waitFor(() => expect(stand.db.connections()).toBe(1));
+    await until(() => stand.db.connections() === 1);
     stand.db.sockets[0]!.resetAndDestroy();
-    await within(1000, gone);
+    await gone;
     expect(stream.rstCode).toBe(http2.constants.NGHTTP2_CONNECT_ERROR);
   });
 
@@ -986,11 +973,11 @@ describe('PeerServer', () => {
     const [served] = (await heard) as [Duplex];
     const gone = closeOf(served);
     expect(await statusOf(stream)).toBe(200);
-    await vi.waitFor(() => expect(leaving.connections()).toBe(1));
+    await until(() => leaving.connections() === 1);
     await closeOf(leaving.sockets[0]!);
     stream.resume();
     stream.end('late bytes');
-    await within(1000, gone);
+    await gone;
   });
 
   it('drops a connection that arrives for a stream already gone', async () => {
@@ -1006,7 +993,7 @@ describe('PeerServer', () => {
     await closed;
     const far = new PassThrough();
     arriving.resolve(far);
-    await vi.waitFor(() => expect(far.destroyed).toBe(true));
+    await until(() => far.destroyed);
   });
 
   it('closes a session once its certificate is revoked', async () => {
@@ -1018,19 +1005,19 @@ describe('PeerServer', () => {
     const closed = closeOf(session);
     const toDb = clientOf(stand, door.port, stand.data).request(CONNECT_DB);
     expect(await statusOf(toDb)).toBe(200);
-    await vi.waitFor(() => expect(stand.db.connections()).toBe(1));
+    await until(() => stand.db.connections() === 1);
     const farGone = closeOf(stand.db.sockets[0]!);
 
     const revoked = [stand.listed.serial, stand.worker.serial, stand.data.serial];
     stand.state.revoked = new Set(revoked);
     stand.state.crl = await makeCrl(stand.authority, revoked);
     stand.server.refresh();
-    await within(1000, closed);
-    await within(1000, farGone);
+    await closed;
+    await farGone;
 
     const seen = watched(door.tls);
     expect(await statusOf(clientOf(stand, door.port, stand.worker).request(HELLO))).toBeNull();
-    await vi.waitFor(() => expect(seen.refused()).toBe(1));
+    await until(() => seen.refused() === 1);
     expect(seen.secure()).toBe(0);
   });
 
@@ -1046,7 +1033,7 @@ describe('PeerServer', () => {
 
     stand.state.now = new Date(stand.worker.until.getTime() + 1);
     const late = statusOf(asking.request(HELLO));
-    await within(500, closed);
+    await closed;
     expect(await late).toBeNull();
   });
 
@@ -1074,7 +1061,7 @@ describe('PeerServer', () => {
     stand.state.revoked = new Set([stand.worker.serial]);
     const closed = closeOf(session);
     expect(await statusOf(session.request(CONNECT_APP))).toBeNull();
-    await within(1000, closed);
+    await closed;
     expect(stand.app.connections()).toBe(0);
   });
 
@@ -1084,7 +1071,7 @@ describe('PeerServer', () => {
     const socket = tlsClientOf(stand, door.port, stand.worker, { ALPNProtocols: [] });
     const closed = closeOf(socket);
     const text = textOf(socket).catch(() => '');
-    await within(1000, closed);
+    await closed;
     expect(await text).toBe('');
   });
 
@@ -1093,7 +1080,7 @@ describe('PeerServer', () => {
     const door = await stand.open('peer');
     const seen = watched(door.tls);
     const socket = tlsClientOf(stand, door.port, stand.worker, { maxVersion: 'TLSv1.2' });
-    await within(1000, closeOf(socket));
+    await closeOf(socket);
     expect(seen.refused()).toBe(1);
     expect(seen.secure()).toBe(0);
   });
@@ -1167,9 +1154,9 @@ describe('PeerServer', () => {
     stand.state.held = null;
     const gaveUp = expect(stand.server.listen(0, 'app', '127.0.0.1')).rejects.toThrow('The peer link closed before it could listen.');
 
-    await within(1000, stand.server.close());
+    await stand.server.close();
 
-    await within(1000, closed);
+    await closed;
     await gaveUp;
     expect(await connectFails(door.port)).toBe(true);
   });
@@ -1187,7 +1174,7 @@ describe('PeerDoor', () => {
     stranger.on('error', ignore);
     const text = textOf(stranger).catch(() => '');
     stranger.write('GET /echo HTTP/1.1\r\nHost: app.hornhoof.test\r\n\r\n');
-    expect(await within(1000, text)).toBe('');
+    expect(await text).toBe('');
     expect(app.connections()).toBe(0);
   });
 });

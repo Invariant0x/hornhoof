@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { PROGRAM_SCREEN_MAX, type NodeMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { READY, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { READY, idleScreen, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { real } from './real-screens.js';
+import { atEmptyPrompt } from '../src/terminal/input.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`, import.meta.url), 'utf8');
 const agy = (name: string) => readFileSync(new URL(`./fixtures/agy-tui/screen-${name}`, import.meta.url), 'utf8');
@@ -130,4 +132,74 @@ describe("the node's word on what a turn's program does", () => {
     watch.look(0, waiting, null, false);
     expect(sent).toEqual([]);
   });
+});
+
+
+describe('independent completion after a lost end', () => {
+  it('recognizes the current completed response of recorded Codex', () => {
+    expect(idleScreen('codex', real('codex-0.166.0-long-session'))).toBe(true);
+  });
+
+  it.each(['first', 'idle', 'busy', 'retrying', 'draft', 'empty-rows-draft', 'paragraphs-draft'])('keeps recorded Codex %s uncertain or working', name => {
+    expect(idleScreen('codex', real(`codex-0.166.0-${name}`))).toBe(false);
+  });
+
+  it('does not reuse an older Codex completion before new work or a question', () => {
+    const done = real('codex-0.166.0-long-session');
+    expect(idleScreen('codex', done + real('codex-0.166.0-busy'))).toBe(false);
+    expect(idleScreen('codex', done + real('codex-0.167.0-rate-limits-question'))).toBe(false);
+    expect(idleScreen('codex', done.replaceAll('Worked for 6s', 'Still working for 6s'))).toBe(false);
+  });
+
+  it('recognizes the completed recorded Antigravity response at its idle footer', () => {
+    expect(idleScreen('antigravity', agy('done.ansi'))).toBe(true);
+  });
+
+  it.each(['idle.ansi', 'busy.ansi', 'queued.txt', 'interrupted.txt', 'trust.ansi'])('keeps recorded Antigravity %s working or waiting for someone', name => {
+    expect(idleScreen('antigravity', agy(name))).toBe(false);
+  });
+
+  it('rejects Antigravity drafts and an old idle footer before new work', () => {
+    const done = agy('done.ansi');
+    expect(idleScreen('antigravity', done.replace(/>\x1b\[39m\n/, '>draft\x1b[39m\n'))).toBe(false);
+    expect(idleScreen('antigravity', done + agy('busy.ansi'))).toBe(false);
+    expect(idleScreen('antigravity', done + agy('trust.ansi'))).toBe(false);
+    expect(idleScreen('antigravity', done + '\nUnknown dialog')).toBe(false);
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('rejects an unknown %s layout', kind => {
+    expect(idleScreen(kind, 'Done.\n> ')).toBe(false);
+  });
+
+  it('does not infer Kimi completion from a bare empty prompt or a failed login', () => {
+    expect(idleScreen('kimi', fixture('kimi-empty-screen'))).toBe(false);
+    expect(idleScreen('kimi', real('kimi-2.5.1-after'))).toBe(false);
+  });
+});
+
+it('recognizes a Claude completion starting in the first captured column', () => {
+  expect(idleScreen('claude', '✻ Worked for 4s · done 10:47 AM\n────────────────────\n❯ \n────────────────────')).toBe(true);
+});
+
+it('uses the latest Antigravity response after older empty input and interruption history', () => {
+  expect(idleScreen('antigravity', agy('idle.ansi') + agy('done.ansi'))).toBe(true);
+  expect(idleScreen('antigravity', agy('interrupted.txt') + '\n' + agy('done.ansi'))).toBe(true);
+  const done = agy('done.ansi');
+  expect(idleScreen('antigravity', done.slice(done.indexOf('> Also say BANANA.')))).toBe(true);
+});
+
+it('keeps an unanswered Antigravity prompt and an unfamiliar placeholder open', () => {
+  const done = agy('done.ansi');
+  const prompt = done.lastIndexOf('\x1b[94m>');
+  const footer = done.slice(done.lastIndexOf('\x1b[90m', prompt));
+  const unanswered = '> A new unanswered prompt.\n\n' + footer;
+  expect(atEmptyPrompt('antigravity', unanswered)).toBe(true);
+  expect(idleScreen('antigravity', unanswered)).toBe(false);
+  expect(idleScreen('antigravity', done.replace(/>\x1b\[39m\n/, '>\x1b[2mType here\x1b[22m\n'))).toBe(false);
+});
+
+it('keeps a completed-looking Claude screen with an unfamiliar dim prefix before its input open', () => {
+  const screen = '✻ Worked for 4s · done 10:47 AM\n────────────────────\n\x1b[2mUnexpected prefix \x1b[22m❯ \n────────────────────';
+  expect(atEmptyPrompt('claude', screen)).toBe(true);
+  expect(idleScreen('claude', screen)).toBe(false);
 });

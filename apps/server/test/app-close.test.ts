@@ -1,7 +1,8 @@
 import { once } from 'node:events';
 import net, { type AddressInfo } from 'node:net';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { testApp } from './helpers.js';
+import { until } from './helpers-basic.js';
 
 describe('closing the app', () => {
   it('does not wait for a connection that has asked nothing yet', async () => {
@@ -43,7 +44,7 @@ describe('closing the app', () => {
     let answer = '';
     asking.on('data', chunk => void (answer += String(chunk)));
     asking.write('GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
-    await vi.waitFor(() => expect(inApp.bytesRead).toBeGreaterThan(0));
+    await until(() => inApp.bytesRead > 0);
     await app.close();
     await gone;
     /* Answered or told that the app is closing, and not cut off. */

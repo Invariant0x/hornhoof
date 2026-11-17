@@ -334,6 +334,67 @@ describe('Subscriptions', () => {
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
+  it("sets apart only the percent sign of a plan's used share in its meter, with its unit beside the figure", async () => {
+    const limits = {
+      status: 'allowed' as const,
+      windows: [{ name: 'five_hour', utilization: null, resetsAt: null }, { name: 'seven_day', utilization: 0.4, resetsAt: '2099-11-04T00:00:00.000Z' }],
+      complete: true,
+    };
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const [five, seven] = meterRows(rowOf('Claude'));
+    expect(seven!.querySelector('.g-f > b')?.textContent).toBe('40%');
+    expect([...seven!.querySelectorAll('.g-f > b .pct')].map(n => n.textContent)).toEqual(['%']);
+    expect([...seven!.querySelectorAll('.g-f > span')].map(n => n.textContent)).toEqual(['used']);
+    expect(five!.querySelector('.pct')).toBeNull();
+  });
+
+  /* Trinity, #1048: a page laid out right to left read «часов 5», «дней 7» and «до сброса 3 дня ,70%». Each number with its
+     unit is one piece that reads left to right. Design, #1058: each phrase around such pieces stays whole, in one piece of
+     its own direction, as its dictionary writes it, so on a page laid out right to left it still reads «до сброса 3 дня»
+     and «70%, до сброса 3 дня», and a model's week «7 дней, Opus». A column's name is text an attribute also holds for a
+     narrow table, so its piece stands between the marks that isolate it left to right, as a bdi dir="ltr" does on a page. */
+  it.each([
+    ['en', ['5 hours', '7 days', '7 days, Opus'], ['40%', '70%', '20%'], ['2 h 59 min', '3 days', '3 days'], 'resets in '],
+    ['ru', ['5 часов', '7 дней', '7 дней, Opus'], ['40%', '70%', '20%'], ['2 ч 59 мин', '3 дня', '3 дня'], 'до сброса '],
+  ])('in %s holds each number of a plan\'s limits with its unit in one piece and each phrase whole in its own direction', async (language, windows, shares, durations, resets) => {
+    localStorage.setItem('hh-lang', language);
+    const now = Date.now();
+    const week = new Date(now + 3 * 24 * 3600_000 + 30_000).toISOString();
+    const limits = {
+      status: 'allowed' as const,
+      windows: [
+        { name: 'five_hour', utilization: 0.4, resetsAt: new Date(now + (2 * 60 + 59) * 60_000 + 30_000).toISOString() },
+        { name: 'seven_day', utilization: 0.7, resetsAt: week },
+        { name: 'seven_day_opus', utilization: 0.2, resetsAt: week },
+      ],
+      complete: true,
+    };
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    const table = await screen.findByRole('table');
+    /* Each isolated piece in document order, with its direction: null is a phrase's own, found from its words. */
+    const pieces = (el: Element) => [...el.querySelectorAll('bdi')].map(b => `${b.getAttribute('dir')} ${b.textContent}`);
+    const isolated = (text: string) => `⁦${text}⁩`;
+    const columns = windows.slice(0, 2);
+    const limitHeads = [...table.querySelectorAll('th .sorth')].map(b => b.textContent ?? '').filter(text => columns.includes(text.replace(/[\u2066\u2069]/g, '')));
+    expect(limitHeads).toEqual(columns.map(isolated));
+    const row = table.querySelector('tr.rm')!;
+    expect([...row.querySelectorAll('td')].filter(td => td.querySelector('.cell-lim')).map(td => td.getAttribute('data-label'))).toEqual(columns.map(isolated));
+    const cells = [...row.querySelectorAll('.cell-lim')];
+    expect(cells.map(pieces)).toEqual(columns.map((_, i) => [`null ${shares[i]}, ${resets}${durations[i]}`, `ltr ${shares[i]}`, `ltr ${durations[i]}`]));
+    expect(cells.map(cell => cell.textContent)).toEqual(columns.map((_, i) => `${shares[i]}, ${resets}${durations[i]}`));
+    openCards();
+    const meters = meterRows(rowOf('Claude')).slice(0, 3);
+    const number = (name: string) => name.split(',')[0];
+    expect(meters.map(m => pieces(m.querySelector('.g-l')!))).toEqual(windows.map(w => [`null ${w}`, `ltr ${number(w)}`]));
+    expect(meters.map(m => pieces(m.querySelector('.g-f > b')!))).toEqual(shares.map(s => [`ltr ${s}`]));
+    expect(meters.map(m => [...m.querySelectorAll('.g-f > b .pct')].map(n => n.textContent))).toEqual([['%'], ['%'], ['%']]);
+    expect(meters.map(m => pieces(m.querySelector('.g-s')!))).toEqual(durations.map(d => [`null ${resets}${d}`, `ltr ${d}`]));
+    expect(meters.map(m => m.querySelector('.g-s')!.textContent)).toEqual(durations.map(d => `${resets}${d}`));
+  });
+
   it('still says a plan reached its limit when a window without a share stops it, though another full one started over', async () => {
     const limits = {
       status: 'rejected' as const,

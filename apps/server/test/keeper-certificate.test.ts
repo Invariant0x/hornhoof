@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CERT_FILE, CertificateKeeper, readHeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { machineKey } from '../src/modules/keeper/machine-keys.js';
@@ -9,6 +9,7 @@ import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { certFacts, issueCertificate, makeAuthority } from '../src/modules/network/authority.js';
 import type { MachineRole } from '../src/db/schema.js';
 import type { Authority } from '../src/modules/network/authority.js';
+import { until } from './helpers-basic.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -16,8 +17,6 @@ const ISSUED_AT = new Date('2026-06-15T12:00:00.000Z');
 const COMPANY = '0f0f0f0f-0000-4000-8000-00000000000a';
 const MACHINE = 'aaaaaaaa-0000-4000-8000-00000000000a';
 const OTHER_MACHINE = 'bbbbbbbb-0000-4000-8000-00000000000b';
-// Real timers under a busy machine: what must come is given time, and a correct run ends as soon as it comes.
-const SOON = { timeout: 10_000 };
 
 let authority: Authority;
 let otherAuthority: Authority;
@@ -29,7 +28,14 @@ beforeAll(async () => {
   otherAuthority = await makeAuthority(COMPANY, ISSUED_AT);
 });
 
+/* The keeper's clock is virtual: its looks and retries wait for the test to move it, and what they wait between, the disk
+   and the signing of a key, is real and comes in a turn of the event loop. */
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   for (const keeper of keepers.splice(0)) keeper.stop();
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
@@ -80,7 +86,11 @@ function announced(keeper: CertificateKeeper): Promise<HeldCertificate> {
   return new Promise((resolve) => keeper.onChange(resolve));
 }
 
-const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/* What is under way ends, then the keeper's clock moves on by ms. */
+async function after(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await vi.advanceTimersByTimeAsync(ms);
+}
 
 function writeHeld(dir: string, held: unknown): void {
   writeFileSync(join(dir, CERT_FILE), JSON.stringify(held));
@@ -109,7 +119,7 @@ describe('CertificateKeeper', () => {
     const again = issuing();
     const next = keeperOn(dir, key, again.ask);
     next.start();
-    await pause(10);
+    await after(10);
     expect(again.calls()).toBe(0);
     expect(sameCertificate(next.current(), held)).toBe(true);
   });
@@ -134,7 +144,7 @@ describe('CertificateKeeper', () => {
     const renewed = announced(keeper);
     keeper.start();
     await renewed;
-    await pause(20);
+    await after(20);
     expect(calls()).toBe(1);
   });
 
@@ -144,7 +154,7 @@ describe('CertificateKeeper', () => {
     writeHeld(dir, await issued(key.publicPem));
     const { ask, calls } = issuing();
     keeperOn(dir, key, ask, { now: () => new Date(ISSUED_AT.getTime() + 7 * DAY_MS - HOUR_MS) }).start();
-    await pause(10);
+    await after(10);
     expect(calls()).toBe(0);
   });
 
@@ -155,10 +165,11 @@ describe('CertificateKeeper', () => {
     let today = ISSUED_AT;
     const { ask, calls } = issuing();
     keeperOn(dir, key, ask, { now: () => today, everyMs: 5 }).start();
-    await pause(20);
+    await after(20);
     expect(calls()).toBe(0);
     today = new Date(ISSUED_AT.getTime() + 8 * DAY_MS);
-    await vi.waitFor(() => expect(calls()).toBeGreaterThan(0), SOON);
+    await after(5);
+    expect(calls()).toBe(1);
   });
 
   it('tries again after a failed ask, and says so once', async () => {
@@ -174,6 +185,10 @@ describe('CertificateKeeper', () => {
     keeper.onChange(heard);
     const got = announced(keeper);
     keeper.start();
+    await after(49);
+    expect(ask).toHaveBeenCalledTimes(1);
+    await after(1);
+    await after(50);
     await got;
     expect(ask).toHaveBeenCalledTimes(3);
     expect(heard).toHaveBeenCalledTimes(1);
@@ -188,13 +203,14 @@ describe('CertificateKeeper', () => {
     const keeper = keeperOn(dir, key, ask, { retryMs: 1, lines });
     keeper.start();
     asked[0]!.reject(new Error('no answer'));
-    await vi.waitFor(() => expect(asked.length).toBe(2), SOON);
+    await after(1);
+    expect(asked.length).toBe(2);
     const got = announced(keeper);
     asked[1]!.resolve(await issued(key.publicPem));
     await got;
     keeper.renewNow();
     asked[2]!.reject(new Error('no answer'));
-    await vi.waitFor(() => expect(lines.length).toBe(2), SOON);
+    await until(() => lines.length === 2);
   });
 
   it('does not take a certificate for another key', async () => {
@@ -222,6 +238,7 @@ describe('CertificateKeeper', () => {
     keeper.onChange((held) => heard.push(held));
     const got = announced(keeper);
     keeper.start();
+    await after(5);
     const held = await got;
     expect(ask).toHaveBeenCalledTimes(2);
     expect(heard.length).toBe(1);
@@ -244,7 +261,7 @@ describe('CertificateKeeper', () => {
     expect(sameCertificate(keeper.current(), old)).toBe(true);
 
     asked[0]!.reject(new Error('no answer'));
-    await pause(5);
+    await after(5);
     expect(sameCertificate(keeper.current(), old)).toBe(true);
 
     keeper.renewNow();
@@ -266,6 +283,7 @@ describe('CertificateKeeper', () => {
     keeper.start();
     const got = announced(keeper);
     keeper.renewNow();
+    await after(5);
     await got;
     expect(ask).toHaveBeenCalledTimes(2);
   });
@@ -279,7 +297,8 @@ describe('CertificateKeeper', () => {
     keeper.renewNow();
     expect(asked.length).toBe(1);
     asked[0]!.resolve(await issued(key.publicPem));
-    await vi.waitFor(() => expect(asked.length).toBe(2), SOON);
+    await after(0);
+    expect(asked.length).toBe(2);
   });
 
   it('takes nothing once it has stopped', async () => {
@@ -292,7 +311,7 @@ describe('CertificateKeeper', () => {
     keeper.start();
     keeper.stop();
     asked[0]!.resolve(await issued(key.publicPem));
-    await pause(5);
+    await after(5);
     expect(keeper.current()).toBeNull();
     expect(heard).not.toHaveBeenCalled();
     expect(existsSync(join(dir, CERT_FILE))).toBe(false);
@@ -312,7 +331,7 @@ describe('CertificateKeeper', () => {
     const answer = await issued(key.publicPem);
     asked[0]!.resolve(answer);
     await got;
-    await pause(20);
+    await after(20);
     expect(asked.length).toBe(1);
     expect(sameCertificate(keeper.current(), answer)).toBe(true);
     expect(lines.length).toBe(1);
@@ -331,7 +350,7 @@ describe('CertificateKeeper', () => {
     const got = announced(keeper);
     keeper.start();
     await got;
-    await pause(20);
+    await after(20);
     expect(calls()).toBe(1);
     expect(lines).toEqual(['A listener of the certificate failed: the listener broke']);
   });

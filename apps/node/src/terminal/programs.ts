@@ -144,7 +144,7 @@ export const kimiProgram: TermProgram = {
     /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. Kimi
        has no flag for effort; it reads this setting over its own. */
     const thinking: Record<string, string> = effort ? { KIMI_MODEL_THINKING_EFFORT: effort } : {};
-    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', PI_PROGRAM_STATUS: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls) }, sessionId };
   },
   limits: kimiPlanLimits,
 };

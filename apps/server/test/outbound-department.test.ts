@@ -132,7 +132,7 @@ describe('Marketing runs its own messages, without the orchestrator or the CEO',
     expect(dispatched.map(d => d.kind === 'reserved' ? 'reserved' : d.reasonCodes)).toEqual(['reserved', 'reserved', ['daily_limit_exceeded']]);
     const orchestratorJobs = await m.c.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.agentId, m.c.orchestrator.id));
     expect(orchestratorJobs).toEqual([]);
-  }, 60_000);
+  });
 
   it('keeps in the department\'s log who did each step and on whose word, which its owner reads, and which revisions its head published', async () => {
     const m = await marketing();
