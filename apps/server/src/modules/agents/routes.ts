@@ -24,6 +24,7 @@ import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import { modelOnPlan, tierIn } from './role-model.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
+import { companySkill } from '../tools/staff.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
@@ -404,8 +405,7 @@ function patchEffort(agent: AgentRow, next: AgentRow, body: PatchBody, before: P
 }
 
 const lockedOff = (role: Role | undefined, id: string, on: boolean) => !on && role?.skills.some(s => s.id === id && s.locked);
-/* A head never turns one on, for itself or another, on anyone's word: it reaches past its department. */
-const companyOnlySkill = (me: Person, next: AgentRow, skill: Skill, id: string, on: boolean) => on && skill.grants.length && !next.skills.includes(id) && (me.scopeKind !== 'company' || me.viaHead === true);
+const companyOnlySkill = (me: Person, next: AgentRow, skill: Skill, id: string, on: boolean) => on && companySkill(skill) && !next.skills.includes(id) && (me.scopeKind !== 'company' || me.viaHead === true);
 
 function patchSkill(ctx: Ctx, me: Person, next: AgentRow, role: Role | undefined, id: string, on: boolean): void {
   const skill = ctx.templates.skills.get(id);

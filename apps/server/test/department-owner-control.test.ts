@@ -98,6 +98,15 @@ describe('hiring with a skill that shows the whole company', () => {
     expect((await c.db.select(only(agents, 'name')).from(agents).where(and(eq(agents.departmentId, c.sales.id), isNull(agents.removedAt)))).map(a => a.name).sort()).toEqual(['Ola', 'Pia', 'Sid', 'Sue']);
   });
 
+  it('lets a head enable department tracker work for its own employee', async () => {
+    const c = await company();
+    const head = await c.tools(c.salesHead, c.ids.ceo);
+    const tracker = 'hh-keep-tracker';
+    const changed = await call(head, 'change_employee', { employee: c.seller.id, skills: { [tracker]: true } });
+    expect(changed.isError, changed.content[0]!.text).toBeFalsy();
+    expect((await c.db.select(only(agents, 'skills')).from(agents).where(eq(agents.id, c.seller.id)))[0]!.skills).toContain(tracker);
+  });
+
   it('is never done by a head, even on the CEO\'s word, for a new employee or one there is', async () => {
     const c = await company();
     const head = await c.tools(c.salesHead, c.ids.ceo);
