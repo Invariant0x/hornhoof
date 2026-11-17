@@ -47,6 +47,17 @@ type Revision = {
   publishedVia: Named;
 };
 type Entry = { entryId: string; kind: string; locale: string | null; channel: Named; current: number | null; revisions: Revision[] };
+type Consent = {
+  permissionId: string;
+  channelId: string;
+  address: string;
+  purpose: string;
+  source: string;
+  status: 'granted' | 'revoked';
+  grantedAt: string;
+  doNotContact: boolean;
+  addedBy: { person: Named; agent: Named } | null;
+};
 type LogEntry = { id: string; kind: keyof Messages['outboundSetup']['log']; channel: Named; detail: Record<string, unknown>; person: Named; agent: Named; at: string };
 
 export type RunDepartment = { id: string; name: string | null; templateKey: keyof Messages['templates'] | null };
@@ -88,7 +99,7 @@ function FormFoot({ children }: { children: ReactNode }) {
 }
 
 /* A status in a frame of its own: its word says it, its colour only repeats it. */
-const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active', published: 'active', new: 'invited', proposed: 'invited', invalid: 'invited', stopped: 'offline', revoked: 'offline' };
+const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active', published: 'active', granted: 'active', new: 'invited', proposed: 'invited', invalid: 'invited', stopped: 'offline', revoked: 'offline', refused: 'offline' };
 
 function Status({ of, children }: { of: string; children: ReactNode }) {
   return <span className={`status ${TONE[of] ?? 'offline'}`}>{children}</span>;
@@ -244,10 +255,41 @@ function AccountLine({ account }: { account: SetupAccount }) {
   );
 }
 
+/* The addresses on a channel, newest first: each with its consent, its purpose and where they agreed, and when and by whom
+   it was added. A consent in force is taken back here, through the consent the server keeps. */
+function ContactList({ contacts, onChanged }: { contacts: readonly Consent[]; onChanged(): void }) {
+  const c = useT().outboundSetup.contact;
+  if (!contacts.length) return <p className="muted" dir="auto">{c.none}</p>;
+  return <ul className="outbound-list" aria-label={c.listTitle}>{contacts.map(one => <ContactLine key={one.permissionId} contact={one} onChanged={onChanged} />)}</ul>;
+}
+
+function ContactLine({ contact, onChanged }: { contact: Consent; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const { language } = useLanguage();
+  const { busy, failure, run } = useMove(onChanged);
+  const state = contact.doNotContact ? 'refused' : contact.status;
+  const by = contact.addedBy && byWhom(s, contact.addedBy.person, contact.addedBy.agent);
+  return (
+    <li className="outbound-entry">
+      <span className="outbound-title">
+        <bdi className="outbound-address">{contact.address}</bdi>
+        <Status of={state}>{s.contact.statuses[state]}</Status>
+      </span>
+      <small dir="auto">{joined([s.contact.purpose(contact.purpose), contact.source, whenOf(language, contact.grantedAt), by])}</small>
+      {state === 'granted' && (
+        <EntryActions>
+          <button className="btn ghost danger" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/permissions/${contact.permissionId}/revoke`, {}))}>{s.contact.revoke}</button>
+        </EntryActions>
+      )}
+      <Failure failure={failure} />
+    </li>
+  );
+}
+
 type Open = 'account' | 'policy' | 'contact' | null;
 
 /* One channel: what it goes by and who sends from it, and the moves of the people who run it. */
-function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(): void }) {
+function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; contacts: readonly Consent[]; onChanged(): void }) {
   const t = useT();
   const s = t.outboundSetup;
   const [open, setOpen] = useState<Open>(null);
@@ -271,9 +313,10 @@ function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(
       </header>
       {channel.accounts.length ? <ul className="outbound-list">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
       {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
+      {channel.audience === 'direct' && <ContactList contacts={contacts} onChanged={onChanged} />}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
-      {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); }} onCancel={() => setOpen(null)} />}
+      {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); onChanged(); }} onCancel={() => setOpen(null)} />}
       {added && <p className="muted outbound-added" role="status" dir="auto">{added}</p>}
       {open === null && <ChannelActions channel={channel} onOpen={form => { setAdded(null); setOpen(form); }} onChanged={onChanged} />}
     </div>
@@ -545,15 +588,19 @@ function LogLine({ entry }: { entry: LogEntry }) {
   );
 }
 
-type Loaded = { runs: false } | { runs: true; channels: SetupChannel[]; entries: Entry[]; log: LogEntry[] };
+type Loaded = { runs: false } | { runs: true; channels: SetupChannel[]; entries: Entry[]; log: LogEntry[]; contacts: Consent[] };
 
 /* The department's channels, and its catalog and log once the server says this person runs its messages. */
 async function loaded(departmentId: string): Promise<Loaded> {
   const q = `department=${encodeURIComponent(departmentId)}`;
   const overview = await api.get<{ channels: SetupChannel[]; departments?: RunDepartment[] }>(`/api/outbound?${q}`);
   if (!overview.departments?.some(d => d.id === departmentId)) return { runs: false };
-  const [catalog, log] = await Promise.all([api.get<{ entries: Entry[] }>(`/api/outbound/catalog?${q}`), api.get<{ entries: LogEntry[] }>(`/api/outbound/setup-log?${q}`)]);
-  return { runs: true, channels: overview.channels.filter(c => c.departmentId === departmentId), entries: catalog.entries, log: log.entries };
+  const [catalog, log, contacts] = await Promise.all([
+    api.get<{ entries: Entry[] }>(`/api/outbound/catalog?${q}`),
+    api.get<{ entries: LogEntry[] }>(`/api/outbound/setup-log?${q}`),
+    api.get<{ contacts: Consent[] }>(`/api/outbound/contacts?${q}`),
+  ]);
+  return { runs: true, channels: overview.channels.filter(c => c.departmentId === departmentId), entries: catalog.entries, log: log.entries, contacts: contacts.contacts };
 }
 
 function useDepartmentMessaging(departmentId: string) {
@@ -609,7 +656,7 @@ function SetupBody({ data, departmentId, onChanged: load }: { data: Extract<Load
       <p className="muted" dir="auto">{s.intro}</p>
       <Part title={s.channelsTitle}>
         {data.channels.length === 0 && <p className="muted" dir="auto">{s.noChannels}</p>}
-        <div className="imps">{data.channels.map(c => <ChannelCard key={c.id} channel={c} onChanged={load} />)}</div>
+        <div className="imps">{data.channels.map(c => <ChannelCard key={c.id} channel={c} contacts={data.contacts.filter(one => one.channelId === c.id)} onChanged={load} />)}</div>
         <NewChannel departmentId={departmentId} onChanged={load} />
       </Part>
       <Part title={s.catalogTitle}>

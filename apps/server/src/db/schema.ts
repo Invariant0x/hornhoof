@@ -2527,7 +2527,7 @@ export const outboundEvents = pgTable('outbound_events', {
 
 /* What was set up for a department's messages, and by whom: a person, or the department's head carrying out that person's
    word. The owner reads it; it holds no setting, address or secret, only what changed and the ids it changed. */
-export const OUTBOUND_SETUP_KINDS = ['channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released'] as const;
+export const OUTBOUND_SETUP_KINDS = ['channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released', 'contact_added', 'consent_revoked'] as const;
 export type OutboundSetupKind = (typeof OUTBOUND_SETUP_KINDS)[number];
 export const outboundSetupEvents = pgTable('outbound_setup_events', {
   id: id(),
