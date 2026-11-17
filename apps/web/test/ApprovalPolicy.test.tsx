@@ -85,7 +85,7 @@ describe('ApprovalPolicy', () => {
   });
 
   it('shows someone with access the rules in words, with nothing to change', async () => {
-    mockApi({ [POLICY]: [200, view({ rules: [{ channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' }, { channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }] })] });
+    mockApi({ [POLICY]: [200, view({ rules: [{ channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' }, { channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'none' }] })] });
     render(<ApprovalPolicy departmentId="d1" />);
     expect(await screen.findByText(t.ownerNone)).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
@@ -93,6 +93,7 @@ describe('ApprovalPolicy', () => {
     expect(rowOf('spend').getByText(t.limitIs(100, 'USD'))).toBeInTheDocument();
     expect(rowOf('message').getByText(t.readModes.new_kinds)).toBeInTheDocument();
     expect(rowOf('price').getByText(t.readModes.every)).toBeInTheDocument();
+    expect(rowOf('publication').getByText(t.readModes.none)).toBeInTheDocument();
     /* "To me" would be wrong here: the approval does not go to the person reading. */
     expect(screen.queryByText(t.modes.every)).not.toBeInTheDocument();
   });
@@ -120,6 +121,15 @@ describe('ApprovalPolicy', () => {
     await screen.findByRole('combobox', { name: t.owner });
     fireEvent.change(rowOf('message').getByRole('combobox', { name: t.mode }), { target: { value: 'new_kinds' } });
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'new_kinds' }));
+  });
+
+  it('offers no approval at all as one of the ways, saved at once', async () => {
+    const calls = mockApi({ [POLICY]: [200, ceoView()], 'PUT /api/departments/d1/approval-policy/spend': [200, ceoView()] });
+    render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByRole('combobox', { name: t.owner });
+    expect(within(rowOf('spend').getByRole('combobox', { name: t.mode })).getByRole('option', { name: t.modes.none })).toBeInTheDocument();
+    fireEvent.change(rowOf('spend').getByRole('combobox', { name: t.mode }), { target: { value: 'none' } });
+    await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ mode: 'none' }));
   });
 
   it('asks for a limit before it saves the mode of limits, and sends a number', async () => {
@@ -237,9 +247,9 @@ describe('the words', () => {
   it('has every channel and mode in both languages, in plain Russian with no letter yo and no long dash', () => {
     const r = ru.dept.approvals;
     expect(Object.keys(r.channels).sort()).toEqual([...CHANNELS].sort());
-    expect(Object.keys(r.modes).sort()).toEqual(['every', 'new_kinds', 'within_limits']);
-    expect(Object.keys(r.readModes).sort()).toEqual(['every', 'new_kinds']);
-    expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов' });
+    expect(Object.keys(r.modes).sort()).toEqual(['every', 'new_kinds', 'none', 'within_limits']);
+    expect(Object.keys(r.readModes).sort()).toEqual(['every', 'new_kinds', 'none']);
+    expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов', none: 'Без одобрения' });
     const words = JSON.stringify(r, (_k, v: unknown) => (typeof v === 'function' ? String((v as (a: string, b: string) => string)('a', 'b')) : v));
     expect(words).not.toMatch(/[\u0451\u0401\u2014]/);
     expect(en.dept.approvals).toHaveProperty('autonomousRelease');

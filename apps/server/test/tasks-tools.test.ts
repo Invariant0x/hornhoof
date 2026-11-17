@@ -398,7 +398,7 @@ describe('dates through the tools', () => {
     expect(plain.isError, text(plain)).toBeFalsy();
     const asked = await call(client, 'ask_person', { task: work.number, question: 'And which?', topic: 'task', plan: promise(c) });
     expect(asked.isError, text(asked)).toBeFalsy();
-    const approval = await call(client, 'request_approval', { task: work.number, channel: 'message', kind: 'welcome email', text: 'Send it?', plan: promise(c) });
+    const approval = await call(client, 'request_approval', { task: work.number, channel: 'spend', kind: 'ads', text: 'Buy ads?', plan: promise(c) });
     expect(approval.isError, text(approval)).toBeFalsy();
     expect(await c.db.select().from(requests).where(eq(requests.taskId, work.id))).toHaveLength(3);
     expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id))).map(w => w.kind)).toEqual(['person', 'person', 'person']);
