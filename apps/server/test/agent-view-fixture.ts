@@ -61,7 +61,7 @@ async function companyRows(app: FastifyInstance, db: Db) {
 /* The browser worker owns the app and database itself; appFixture leaves that lifecycle alone. */
 export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
   const rows = await appFixture(app, 'agent visibility company', () => companyRows(app, db));
-  const { companyId, crew, dev, product } = rows;
+  const { crew, dev, product } = rows;
   /* Work of one agent, given by the head of Development. */
   const work = async (title: string, agent: { id: string }, departmentId = dev.id) =>
     (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, productId: departmentId === dev.id ? product.id : null, assigneeAgentId: agent.id, executor: true })).task;
