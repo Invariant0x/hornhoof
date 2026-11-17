@@ -12,25 +12,31 @@ const Frame = z.discriminatedUnion('type', [
   z.object({ type: z.enum(['stdout', 'stderr']), data: z.string().max(2 * 1024 * 1024) }),
   z.object({ type: z.literal('exit'), code: z.number().int().min(0).max(255).nullable() }),
   z.object({ type: z.literal('error'), message: z.string() }),
+  /* The node's word that the slot or the turn of a waiting command ended. */
+  z.object({ type: z.literal('stop'), message: z.string() }),
 ]);
+type Frame = z.infer<typeof Frame>;
+
+/* How long a command told to stop with TERM has before its group is killed, as on the node. */
+const KILL_AFTER_MS = 5000;
 
 async function write(stream: Writable, bytes: string | Buffer): Promise<void> {
   if (!stream.write(bytes)) await once(stream, 'drain');
 }
 
-async function show(frame: z.infer<typeof Frame>): Promise<number | null> {
+async function show(frame: Frame): Promise<number | null> {
   switch (frame.type) {
     case 'queued': await write(process.stderr, `Waiting for a machine check slot. Position ${frame.position}.\n`); return null;
     case 'slot': return null;
     case 'stdout': await write(process.stdout, Buffer.from(frame.data, 'base64')); return null;
     case 'stderr': await write(process.stderr, Buffer.from(frame.data, 'base64')); return null;
-    case 'error': throw new Error(frame.message);
+    case 'error': case 'stop': throw new Error(frame.message);
     case 'exit': return frame.code ?? 1;
   }
 }
 
 /* The bridge's frames as they come. */
-async function* frames(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<z.infer<typeof Frame>> {
+async function* frames(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Frame> {
   const decoder = new TextDecoder();
   let pending = '';
   for (;;) {
@@ -57,29 +63,62 @@ function ask(env: NodeJS.ProcessEnv, body: object, signal: AbortSignal): Promise
   return fetch(url, { method: 'POST', headers: { 'x-hh-pid': String(process.pid) }, signal, body: JSON.stringify(body) });
 }
 
-/* The lease of the slot the machine gave, which stays this command's while the request stays open. */
-async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | undefined> {
+type Held = { lease: string; rest: AsyncGenerator<Frame> };
+
+/* The lease of the slot the machine gave, which stays this command's while the request stays open, and the rest of the
+   request's stream. */
+async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<Held | undefined> {
   if (!env.HH_BRIDGE) return undefined;
   const response = await ask(env, { command, cwd: process.cwd(), env: {}, wait: true, ...(env.HH_CHECK_SLOT ? { lease: env.HH_CHECK_SLOT } : {}) }, signal);
   if (!response.ok || !response.body) return undefined;
-  for await (const frame of frames(response.body.getReader())) {
-    if (frame.type === 'slot') return frame.lease;
-    await show(frame);
+  const rest = frames(response.body.getReader());
+  for (;;) {
+    const next = await rest.next();
+    if (next.done) return undefined;
+    if (next.value.type === 'slot') return { lease: next.value.lease, rest };
+    await show(next.value);
   }
-  return undefined;
+}
+
+/* The slot goes as the rest of its stream ends, fails, or brings the node's word that the slot or the turn ended: why. */
+async function lapsed(rest: AsyncGenerator<Frame>): Promise<string> {
+  try {
+    for (;;) {
+      const next = await rest.next();
+      if (next.done) return 'The machine check slot ended.';
+      await show(next.value);
+    }
+  } catch (error) { return error instanceof Error && error.message ? error.message : 'The machine check slot ended.'; }
 }
 
 /* hh-check --wait -- COMMAND: the command runs here, in the agent's own shell, once the machine gives it a check slot, and
    holds the slot until it ends, like a lock; what runs inside it holds the same slot. With no slot to be had, as with no
-   turn or with the node away from Hornhoof, it runs at once, as it would with no queue. */
+   turn or with the node away from Hornhoof, it runs at once, as it would with no queue.
+   Under a slot the command leads a process group of its own, so that what it starts stops with it: as the slot goes first,
+   the group gets TERM, and KILL after a grace; such a check never passes, it ends with 128 and the signal, as a shell says.
+   As the command ends, what it left in its group is killed before the slot goes. */
 async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number> {
   const stop = new AbortController();
   try {
-    const lease = await slot(command, env, stop.signal).catch(() => undefined);
-    const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', env: lease ? { ...env, HH_CHECK_SLOT: lease } : env });
-    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => child.kill(signal));
-    const [code, signal] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
-    return code ?? (signal ? 128 + constants.signals[signal] : 1);
+    const held = await slot(command, env, stop.signal).catch(() => undefined);
+    const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', detached: Boolean(held), env: held ? { ...env, HH_CHECK_SLOT: held.lease } : env });
+    const signal = (value: NodeJS.Signals) => {
+      if (!held || !child.pid) { child.kill(value); return; }
+      try { process.kill(-child.pid, value); } catch { /* The group is gone already. */ }
+    };
+    for (const value of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(value, () => signal(value));
+    let ended = false, stopped = null as NodeJS.Signals | null, killing: NodeJS.Timeout | undefined;
+    if (held) void lapsed(held.rest).then(async why => {
+      if (ended) return;
+      stopped = 'SIGTERM'; signal('SIGTERM');
+      killing = setTimeout(() => { stopped = 'SIGKILL'; signal('SIGKILL'); }, KILL_AFTER_MS);
+      await write(process.stderr, `${why} The command stops.\n`);
+    });
+    const [code, by] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
+    ended = true; clearTimeout(killing);
+    if (held) signal('SIGKILL');
+    const ending = stopped ?? (code === null ? by : null);
+    return ending ? 128 + constants.signals[ending] : code ?? 1;
   } finally { stop.abort(); }
 }
 

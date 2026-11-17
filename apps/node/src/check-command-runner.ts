@@ -67,10 +67,18 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
   if (!verdict.allow) throw new Error(refusalText(verdict));
 }
 
-/* A command that runs in the agent's own shell: the slot stays its own until the shell lets the request go. */
+const STOP = 'The machine check slot ended.';
+
+/* A command that runs in the agent's own shell: the slot stays its own until the shell lets the request go. As the lease or
+   the turn ends first, the shell is told to stop the command and its group, and the slot goes only once the shell let go:
+   no check runs on past its slot. A node gone away loses the slot by the server's own lease time. */
 const held = (res: ServerResponse) => (signal: AbortSignal) => new Promise<boolean>(resolve => {
+  if (res.destroyed) { resolve(true); return; }
+  const stop = () => { send(res, { type: 'stop', message: STOP }); };
+  res.once('close', () => { signal.removeEventListener('abort', stop); resolve(true); });
   send(res, { type: 'slot', lease: currentCheckLease() });
-  signal.addEventListener('abort', () => resolve(true), { once: true });
+  if (signal.aborted) stop();
+  else signal.addEventListener('abort', stop, { once: true });
 });
 
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
