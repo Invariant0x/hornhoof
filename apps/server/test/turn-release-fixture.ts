@@ -1,4 +1,3 @@
-import { EnvironmentSnapshot, hashTestEnvironment, parseTestEnvironment, type RepositoryScope, type TestEnvironmentReceipt } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
@@ -7,6 +6,7 @@ import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { BASE } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
+import { PRODUCT_FILES, partReceipt, partSelection, productSnapshot } from './product-run.js';
 
 /* What a repository says in these tests: where each branch and tag is, and which commit holds which. A commit holds itself
    and whatever holds names for it; the commits between two are what between names. made lists the branches the server made,
@@ -77,31 +77,6 @@ export async function readyInTurn() {
   const openTurn = async () => (await f.db.select().from(turns).where(and(eq(turns.companyId, f.task.companyId), eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open'))))[0]!;
   return { ...f, turn: turn!, branch, repo, acceptance, accept, openTurn };
 }
-
-const PRODUCT_FILES = ['test/a.test.ts', 'test/b.test.ts'];
-const RUNTIMES = [{ id: 'node', version: '22.0.0', fingerprint: 'e'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'f'.repeat(64) }];
-/* What the machine that described a commit said of the product: its manifest, whose full run is the profile full, and its test files. */
-async function productSnapshot(repositoryScope: RepositoryScope, commitSha: string): Promise<EnvironmentSnapshot> {
-  const manifest = parseTestEnvironment({
-    version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
-    profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
-    dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-    suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' } }],
-    impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
-    mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
-    execution: { version: 2, fullRun: { replaces: 'fast', profile: 'full' } },
-  });
-  const manifestSource = JSON.stringify(manifest);
-  return EnvironmentSnapshot.parse({ profile: 'full', description: { version: 1, repositoryScope, commitSha, manifestSource, manifest, manifestHash: await hashTestEnvironment(manifestSource),
-    inputDigests: [], inventory: PRODUCT_FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: RUNTIMES } });
-}
-const partSelection = (commit: string, file: string) => ({ kind: 'batch' as const, version: 2 as const, expectedCommitSha: commit, selections: [{ kind: 'suite' as const, suiteId: 'unit', files: [file], shard: { index: 1, count: 1 } }] });
-/* What the node that ran a part sent with its end. */
-const partReceipt = (snapshot: EnvironmentSnapshot, selection: ReturnType<typeof partSelection>, passed: boolean): TestEnvironmentReceipt => ({
-  version: 2, profile: snapshot.profile, selection, commitSha: snapshot.description.commitSha, manifestHash: snapshot.description.manifestHash, runtimes: RUNTIMES,
-  outcomes: [passed ? { index: 0, status: 'passed', exitCode: 0 } : { index: 0, status: 'failed', exitCode: 1 }],
-  dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 },
-});
 
 type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
 
