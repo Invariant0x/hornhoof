@@ -64,11 +64,11 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
    and does whatever the CEO can do in the screens. */
 async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null): Promise<McpServer> {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
-  /* Before any tool is registered, so that every one of them is covered. */
-  guardTools(server, ctx, job, invocation, await turnProtection(ctx, job.id));
   /* On a machine that only reads, no tool that changes something runs, however the call came: cut off, it tells the
      agent to wrap up; else, that the call did not run. */
   if (reading) cutOff(server, { text: reading.cut ? CUT_OFF : PAUSED });
+  /* The mode guard owns the registration first, so a refused sensitive call never starts its audit or value masks. */
+  guardTools(server, ctx, job, invocation, await turnProtection(ctx, job.id));
   server.registerTool(
     'company',
     { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
