@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
-import { as, testApp } from './helpers.js';
+import { appFixture, as, testApp } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
@@ -257,24 +257,27 @@ const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => 
 /* A company with work in every corner: tasks, a turn, requests, notes, ideas and running parts of every agent. */
 async function busy() {
   const c = await aclCompany();
-  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
-  const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
-  const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
-  let number = 0;
-  for (const key of Object.keys(c.crew) as Crew[]) {
-    const agent = c.crew[key];
-    const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
-    work[key] = task;
-    await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
-    await ask(c.app.ctx, agent.id, task.id, { text: wordsOf(key), kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
-    await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
-    await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
-    await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
-    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
-    const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, number: ++number, kind: 'tests', departmentId: agent.departmentId!, taskId: task.id, agentId: agent.id, jobId: job!.id, branch: 'main', command: 'echo ok', parts: 1, timeoutMs: 60_000, status: 'running' }).returning();
-    await c.db.insert(testParts).values({ runId: run!.id, companyId: c.companyId, part: 1, status: 'running', machineId: box!.id, startedAt: new Date() });
-  }
-  return { ...c, tasksOf: work as Record<Crew, typeof tasks.$inferSelect> };
+  const work = await appFixture(c.app, 'agent visibility company with work', async () => {
+    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
+    const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
+    const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
+    let number = 0;
+    for (const key of Object.keys(c.crew) as Crew[]) {
+      const agent = c.crew[key];
+      const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
+      work[key] = task;
+      await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
+      await ask(c.app.ctx, agent.id, task.id, { text: wordsOf(key), kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+      await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
+      await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+      await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+      const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
+      const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, number: ++number, kind: 'tests', departmentId: agent.departmentId!, taskId: task.id, agentId: agent.id, jobId: job!.id, branch: 'main', command: 'echo ok', parts: 1, timeoutMs: 60_000, status: 'running' }).returning();
+      await c.db.insert(testParts).values({ runId: run!.id, companyId: c.companyId, part: 1, status: 'running', machineId: box!.id, startedAt: new Date() });
+    }
+    return work as Record<Crew, typeof tasks.$inferSelect>;
+  });
+  return { ...c, tasksOf: work };
 }
 
 /* What each person may open of the crew. */

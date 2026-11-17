@@ -62,9 +62,11 @@ after executing both checks. Its other cases were excluded by the name selector.
 An earlier broad baseline run was stopped without a result. The original-base
 server build passed. Final checks must use the merged candidate.
 
-## Checked result
+## First checks before fixture optimization
 
 Status: BLOCKED on the required green result of the whole agent-view table file.
+This records the first checked version. The head subsequently expanded task 1196
+to diagnose and reduce fixture cost while preserving every access case.
 Checked code: `8e77035fe905f9860440bcbb91059b53d707e5ea`.
 The change remains on `task-1196`; it has not been pushed to `turn-31`.
 
@@ -143,3 +145,36 @@ check invocation had a mistyped SHA and was refused before executing checks;
 the corrected invocation above checked the actual candidate. `codex review`
 could not read the diff because bwrap could not create a namespace. Manual diff
 and access review were completed; there is no automated review PASS.
+
+## Fixture profile and implementation plan
+
+The existing JSON test metadata attributed 33.565 of 37.360 seconds and 23.580 of
+25.649 seconds to database/application setup in two selected slow cases. A
+temporary diagnostic split of that existing setup timer measured a cold case at
+4.394 seconds: database opening 3.553 seconds, application construction 0.755
+seconds. The next case used 0.071 seconds for database reset/opening and 0.147
+seconds for application construction; its remaining 2.302 seconds included the
+ACL company setup and twelve access requests. The diagnostic fields were removed
+after the profile; no test asserted on elapsed time.
+
+The database is already shared within a file and starts from the run's migrated
+dump. Migrations do not run for every test. A timeout discards the shared database,
+so later cases can pay the cold opening cost again. The ACL company additionally
+repeats five invitation/password operations and its department, plan and crew rows
+in every case. Each list repeats the tasks, approvals, notes, jobs and runs of all
+eight crew members. The existing row-fixture mechanism currently caches only the
+initial company setup underneath these repeated operations.
+
+Keep the current per-test app, database cleanup, fencing, schema checks and late
+write protection. Separate the ACL company's serializable rows from functions
+bound to the current app; restore those rows through the existing `appFixture`
+mechanism. Cache the busy company's serializable task map by that same mechanism.
+Rebind `work` and `get` to each fresh app. This reuses no app, connection, function
+or mutable descriptor across tests, and it changes no production handler, access
+assertion, actor combination or timeout. Shared `helpers-db.ts` stays unchanged.
+
+Verification required by the head: each of agent-view-table and route-access
+alone three consecutive times, with a shuffled table run proving case isolation;
+record load 1m, build, server/test types and ESLint. The original protected checks
+stay in place. If shared database helpers need a further change, also execute the
+three named neighboring test files and repair only failures with the same cause.
