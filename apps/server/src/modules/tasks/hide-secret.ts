@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { HIDDEN, MIN_SECRET_LENGTH } from '@hornhoof/protocol/redaction';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { writeGate } from '../../db/gate.js';
@@ -8,14 +9,15 @@ import { runsDepartment } from '../../auth/departments.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, note, taskSpot, type Task } from './engine.js';
 
-const invalid = () => new ApiError(400, 'validation', 'Select a secret in this task or its log.');
+const invalid = () => new ApiError(400, 'validation', `Select a secret of at least ${MIN_SECRET_LENGTH} characters in this task or its log.`);
 
 /* Only validation and hashing see the value. No SQL parameter or audit entry carries it. */
 export async function hideTaskSecret(ctx: Pick<Ctx, 'db' | 'bus'>, person: Person, task: Task, value: string): Promise<Task> {
   if (task.companyId !== person.companyId || person.via || person.assistant || !(await runsDepartment(ctx.db, person, task.departmentId))) {
     throw new ApiError(403, 'forbidden', 'Only the CEO, the CEO delegate and people running this department may hide a secret.');
   }
-  if (!value.trim() || value.includes('[hidden]')) throw invalid();
+  /* A short or common value would be hidden in every text of the company, now and from then on. */
+  if (!value.trim() || [...value].length < MIN_SECRET_LENGTH || value.includes(HIDDEN)) throw invalid();
   const fingerprint = createHash('sha256').update(value).digest('hex');
   await writeGate.exclusive(() => ctx.db.transaction(async tx => {
     /* Other database writers wait too: sweep and suppression must commit together. */

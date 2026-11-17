@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agentInbox, agents, attachments, departments, jobs, people, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agentInbox, agents, attachments, companies, departments, jobs, people, secretRedactions, subscriptions, taskEvents, tasks, toolCalls } from '../src/db/schema.js';
 import { createTask, comment } from '../src/modules/tasks/engine.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { keepMail } from '../src/modules/conversation/inbox.js';
@@ -22,6 +22,17 @@ describe('secrets in stored prose', () => {
     const records = JSON.stringify([await db.select().from(tasks), await db.select().from(taskEvents), await db.execute(sql`select * from net.journal`)]);
     for (const secret of ['taskValue123!', 'taskBody987!', 'commentValue123!']) expect(records).not.toContain(secret);
     expect((await db.select().from(tasks))[0]!.body).toBe('пароль: [hidden]');
+  });
+
+  it('keeps code and ordinary words of a task, a comment and a chat as they were written', async () => {
+    const { app, db, agent, companyId } = await company();
+    const prose = 'Review checks basic security. Authorization: Bearer header stays. const token = getToken(req); ?code=XYZ; password #267';
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Plain', brief: prose, body: prose, departmentId: null, assigneeAgentId: agent.id });
+    await comment(app.ctx, { agentId: agent.id }, task.id, prose);
+    const event = await appendEvent(app.ctx, { companyId, agentId: agent.id, kind: 'text', data: { text: prose } });
+    expect(event.data).toEqual({ text: prose });
+    expect((await db.select().from(tasks))[0]).toMatchObject({ brief: prose, body: prose });
+    expect((await db.select().from(taskEvents)).filter(e => e.kind === 'comment').map(e => e.text)).toEqual([prose]);
   });
 
   it('masks nested chat events, letters and queued prompts', async () => {
@@ -71,6 +82,10 @@ describe('secrets in stored prose', () => {
     await db.update(people).set({ isCeoDelegate: true }).where(eq(people.email, 'deputy@acme.test'));
     const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: 'departmentSecret1077! deputySecret1077!', departmentId: dev!.id, assigneeAgentId: agent.id });
     const hide = (token: string, value: string) => app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(token), payload: { value } });
+    /* Seven characters of the task's text would be hidden in every text of the company. */
+    const short = await hide(ceo, 'Secret1');
+    expect([short.statusCode, short.json().error.message]).toEqual([400, 'Select a secret of at least 8 characters in this task or its log.']);
+    expect(await db.select().from(secretRedactions)).toEqual([]);
     expect((await hide(reader, 'departmentSecret1077!')).statusCode).toBe(403);
     expect((await hide(other, 'departmentSecret1077!')).statusCode).toBe(403);
     expect((await hide(owner, 'departmentSecret1077!')).statusCode).toBe(200);
@@ -116,17 +131,21 @@ describe('secrets in stored prose', () => {
   });
 
   it('never changes service state when the selected secret is a common word', async () => {
-    const { app, db, agent, ceo } = await company();
-    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: 'active', departmentId: null, assigneeAgentId: agent.id });
-    const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: 'active' } });
+    const { app, db, agent, ceo, companyId } = await company();
+    const [job] = await db.insert(jobs).values({ companyId, agentId: agent.id, kind: 'conversation', prompt: '', subscriptionId: agent.subscriptionId!, timeoutMs: 1000 }).returning();
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: 'active conversation', departmentId: null, assigneeAgentId: agent.id });
+    const hide = (value: string) => app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value } });
+    expect((await hide('active')).statusCode).toBe(400);
+    const response = await hide('conversation');
     expect(response.statusCode, response.body).toBe(200);
     expect((await db.select().from(people)).every(person => person.status === 'active')).toBe(true);
+    expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.kind).toBe('conversation');
   });
 
   it('keeps the mask stable even when the selection occurs within its spelling', async () => {
     const { app, db, agent, ceo } = await company();
-    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: 'hid', departmentId: null, assigneeAgentId: agent.id });
-    const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: 'hid' } });
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: 'hiddenWord1', departmentId: null, assigneeAgentId: agent.id });
+    const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: 'hiddenWord1' } });
     expect(response.statusCode, response.body).toBe(200);
     await db.update(tasks).set({ body: '[hidden]' }).where(eq(tasks.id, task.id));
     expect((await db.select().from(tasks))[0]!.body).toBe('[hidden]');

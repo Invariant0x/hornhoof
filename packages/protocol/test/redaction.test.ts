@@ -1,5 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { CREDENTIALS, cleanDiagnostic, HIDDEN, hiddenBy, PRIVATE_PATHS } from '../src/redaction.js';
+import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS } from '../src/redaction.js';
+
+describe('stored prose, masked as it is written', () => {
+  it('hides labelled passwords and credentials of a known format', () => {
+    const cases: [string, string][] = [
+      ['пароль: taskBody987! и Password qwerty123!', `пароль: ${HIDDEN} и Password ${HIDDEN}`],
+      ['password = "two words" then', `password = ${HIDDEN} then`],
+      ['token ghp_abcDEF0123456789abcdef0123 refused', `token ${HIDDEN} refused`],
+      ['https://bruno:pa55word@github.com/acme/app.git', `https://${HIDDEN}@github.com/acme/app.git`],
+      ['-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY----- done', `${HIDDEN} done`],
+    ];
+    for (const [text, clean] of cases) expect(hideCredentials(text), text).toBe(clean);
+  });
+
+  it('keeps code, headers, flags, links and ordinary words as they are written', () => {
+    for (const plain of [
+      'const token = getToken(req);',
+      'Pass { key: c.ids.dana } to the helper.',
+      'secret: z.string().min(1),',
+      'Authorization: Bearer header is checked in auth/session.ts',
+      'Review checks correctness, simplicity and basic security.',
+      'Run hh-node --join CODE on the machine',
+      'OAuth returns to /callback?code=XYZ&state=1',
+      'Reset the password 2 times before release',
+      'In the password #267 task, hide it',
+      'The primary key: id, unique per company',
+      'Сменить пароль завтра, задача #267',
+    ]) expect(hideCredentials(plain), plain).toBe(plain);
+  });
+
+  it('hides an exact value only from eight characters on', () => {
+    expect(MIN_SECRET_LENGTH).toBe(8);
+  });
+});
 
 describe('a diagnostic cleaned for a reader who may not read where it comes from', () => {
   it('hides labelled Russian passwords and keeps ordinary prose and identifiers', () => {

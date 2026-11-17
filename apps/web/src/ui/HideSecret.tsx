@@ -1,3 +1,4 @@
+import { MIN_SECRET_LENGTH } from '@hornhoof/protocol/redaction';
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
@@ -12,10 +13,11 @@ export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: (
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const close = () => { setOpen(false); setValue(''); setFailed(false); };
+  const ready = !!value.trim() && [...value].length >= MIN_SECRET_LENGTH;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!value.trim() || busy) return;
+    if (!ready || busy) return;
     setBusy(true);
     setFailed(false);
     try {
@@ -42,7 +44,7 @@ export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: (
     </Field>
     {failed && <p className="bad" role="alert">{words.failed}</p>}
     <div className="entry-actions" role="group" aria-label={words.action}>
-      <button type="submit" className="btn" disabled={busy || !value.trim()}>{busy ? words.hiding : words.confirm}</button>
+      <button type="submit" className="btn" disabled={busy || !ready}>{busy ? words.hiding : words.confirm}</button>
       <button type="button" className="btn ghost" disabled={busy} onClick={close}>{t.common.cancel}</button>
     </div>
   </form>;
