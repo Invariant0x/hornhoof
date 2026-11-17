@@ -206,27 +206,35 @@ async function madeAll(): Promise<void> {
    returned, which holds no function. So one set of rows can stand on another made the same way. On other rows they are
    made again, as on any database, and so they are while the clock is not real: kept ones would hold the time of the real
    one. Under one key, make builds the same rows each time. */
-export function fixture<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
-  if (vi.isFakeTimers()) return make();
+export function fixture<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
+  if (vi.isFakeTimers() && !clock) return make();
   /* A test can end while rows are still being made, as when its time runs out on a busy machine. Its end waits for them
-     then, with its database and app still open, so they are kept: made again, they would cost the next test the same
-     time. Its hooks run last first, and those that close the database and the app came before this one. */
+     then, with its database and app still open, so they are kept for the next test. */
   if (TestRunner.getCurrentTest()) onTestFinished(madeAll);
-  const call = keptOrMade(client, key, make);
+  const call = keptOrMade(client, key, make, clock);
   making.add(call);
   call.then(() => making.delete(call), () => making.delete(call));
   return call;
 }
 
-async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
-  const on = `${key}\n${await digestOf(await rowsOf(client))}`;
+async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
+  /* An explicit frozen wall time has its own cache. Ordinary fake-clock callers still make fresh rows. */
+  const checkClock = () => {
+    if (clock && (!vi.isFakeTimers() || Date.now() !== clock.at)) throw new Error('The fixture clock must stay frozen at its declared time.');
+  };
+  checkClock();
+  const on = `${clock ? `at ${clock.at}` : 'real'}\n${key}\n${await digestOf(await rowsOf(client))}`;
   const kept = made.get(on);
   if (kept) {
     await putBack(client, kept);
+    checkClock();
     return structuredClone(kept.value) as T;
   }
   const value = await make();
-  made.set(on, { ...(await rowsOf(client)), value: structuredClone(value) });
+  checkClock();
+  const rows = await rowsOf(client);
+  checkClock();
+  made.set(on, { ...rows, value: structuredClone(value) });
   return value;
 }
 

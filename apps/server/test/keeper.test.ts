@@ -10,7 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { clientAddress } from '../src/auth/tunnel.js';
 import { loadConfig } from '../src/config.js';
@@ -37,6 +37,19 @@ function statusSays(dir: string, state: string, step: string): void {
 }
 
 const wordIn = (dir: string) => readKeeperState(dir)?.mode;
+
+/* The keeper's looks and the time it writes in its word run on the test's clock from here on. */
+function looksOnTheTestsClock(): void {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  onTestFinished(() => void vi.useRealTimers());
+}
+
+/* The test's clock moves by ms, and the look that came due in it has written its word. */
+async function nextWord(dir: string, ms: number): Promise<void> {
+  const before = readKeeperState(dir)?.at;
+  await vi.advanceTimersByTimeAsync(ms);
+  await until(() => readKeeperState(dir)?.at !== before);
+}
 
 async function listening(server: http.Server): Promise<Target> {
   onTestFinished(() => {
@@ -158,33 +171,41 @@ describe('updaterBusy', () => {
 
 describe('the keeper', () => {
   it('writes its mode every second, maintenance while the updater installs', async () => {
+    looksOnTheTestsClock();
     const { keeper, dir } = await keeperOn(await echoHeaders());
     /* What the app's own reader takes, so the two sides of the file cannot drift apart. */
     expect(freshState(dir, Date.now(), 2000)).toMatchObject({ mode: 'lead', link: null });
     const first = readKeeperState(dir)?.at;
-    await until(() => readKeeperState(dir)?.at !== first);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(readKeeperState(dir)?.at).toBe(first);
+    await nextWord(dir, 1);
     statusSays(dir, 'running', 'install');
-    await until(() => wordIn(dir) === 'maintenance');
+    await nextWord(dir, 1000);
+    expect(wordIn(dir)).toBe('maintenance');
     expect(keeper.mode()).toBe('maintenance');
     expect(freshState(dir, Date.now(), 2000)?.mode).toBe('maintenance');
     statusSays(dir, 'done', 'finished');
-    await until(() => wordIn(dir) === 'lead');
+    await nextWord(dir, 1000);
+    expect(wordIn(dir)).toBe('lead');
     expect(keeper.mode()).toBe('lead');
   });
 
   it('keeps maintenance through a status file it cannot read', async () => {
+    looksOnTheTestsClock();
     const { keeper, dir } = await keeperOn(await echoHeaders(), FAST);
     statusSays(dir, 'running', 'install');
-    await until(() => wordIn(dir) === 'maintenance');
+    await nextWord(dir, FAST.everyMs);
+    expect(wordIn(dir)).toBe('maintenance');
     writeFileSync(join(dir, 'status.json'), '{');
-    const end = Date.now() + 3000;
-    while (Date.now() < end) {
+    /* As many looks as three seconds hold. */
+    for (let look = 0; look < 3000 / FAST.everyMs; look++) {
+      await nextWord(dir, FAST.everyMs);
       expect(wordIn(dir)).toBe('maintenance');
       expect(keeper.mode()).toBe('maintenance');
-      await sleep(100);
     }
     statusSays(dir, 'failed', 'install');
-    await until(() => wordIn(dir) === 'lead');
+    await nextWord(dir, FAST.everyMs);
+    expect(wordIn(dir)).toBe('lead');
   });
 
   it('takes its first word from the status file, and leads when it cannot read it', async () => {
@@ -539,6 +560,40 @@ describe('the keeper', () => {
     await sleep(100);
     expect(readKeeperState(dir)?.at).toBe(last);
   });
+
+  it('keeps a socket that stays open through the grace when it stops, and ends the stop once the grace is over', async () => {
+    /* The keeper's grace for what is still open when it stops: half of the 10 s Docker waits after its signal. */
+    const STOP_GRACE_MS = 5000;
+    const app = http.createServer();
+    const sockets = new WebSocketServer({ server: app });
+    const { keeper, front } = await keeperOn(await listening(app));
+    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
+    client.on('error', () => {});
+    onTestFinished(() => client.terminate());
+    const arrived = once(sockets, 'connection') as Promise<[WebSocket]>;
+    await once(client, 'open');
+    const [atApp] = await arrived;
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+    let stopped = false;
+    const stopping = keeper.stop().then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(STOP_GRACE_MS - 1);
+    expect(stopped).toBe(false);
+    const up = once(atApp, 'message');
+    client.send('still here');
+    expect(String((await up)[0])).toBe('still here');
+    const down = once(client, 'message');
+    atApp.send('so am I');
+    expect(String((await down)[0])).toBe('so am I');
+    expect(stopped).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    await expect(send(front)).rejects.toThrow('ECONNREFUSED');
+  });
 });
 
 describe('the keeper container', () => {
@@ -608,20 +663,5 @@ describe('the keeper container', () => {
     expect(wordIn(dir)).toBe('read');
     child.kill(signal);
     expect(await exit).toEqual([0, null]);
-  });
-
-  it('exits 0 in about 5 seconds with a socket that stays open', async () => {
-    const app = http.createServer();
-    new WebSocketServer({ server: app });
-    const { child, exit, front } = await container(await listening(app));
-    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
-    client.on('error', () => {});
-    onTestFinished(() => client.terminate());
-    await once(client, 'open');
-    const started = Date.now();
-    child.kill('SIGTERM');
-    expect(await exit).toEqual([0, null]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4500);
-    expect(Date.now() - started).toBeLessThan(7000);
   });
 });
