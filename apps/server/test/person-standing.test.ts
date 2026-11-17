@@ -95,8 +95,13 @@ describe('the rules', () => {
   });
 
   it('have a head run its department for the people who run it, with no word of the orchestrator or the CEO', () => {
-    expect(skill('hh-head')).toMatch(/Your department runs itself: what a person who runs it decides about[^.]*you do yourself, in that turn or a later one, without the orchestrator or the CEO\./);
-    expect(skill('hh-head')).not.toMatch(/ask the authorized coordinator to enable/);
+    const head = skill('hh-head');
+    expect(head).toMatch(/Your department runs itself\./);
+    expect(head).toMatch(/In any turn you act inside your department with the rights of its named owner, or the CEO when it has none, without waiting for a new message from a person\./);
+    expect(head).toMatch(/Follow its rules and notebook\./);
+    expect(head).toMatch(/Another department stays outside your authority\./);
+    expect(head).toMatch(/What a person who runs it decides about[^.]*you do yourself, in that turn or a later one, without the orchestrator or the CEO\./);
+    expect(head).not.toMatch(/ask the authorized coordinator to enable/);
     expect(skill('orch-staff')).toMatch(/A department head changes the employees of its own department with its own tools/);
   });
 
