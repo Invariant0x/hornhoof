@@ -53,6 +53,23 @@ describe('contact values for outbound templates', () => {
     for (const value of Object.values(VALUES)) expect(text).not.toContain(value);
   });
 
+  it('requires the departments person authority and hides other departments channels over MCP', async () => {
+    const w = await world();
+    const input = { channel: w.channel.id, kind: 'email', address: 'private@shop.example', source: 'signup', evidence: 'Consent', fields: VALUES };
+    for (const principal of [null, w.c.ids.sam]) {
+      const tools = await w.c.tools(w.c.head, principal);
+      const reply = await tools.callTool({ name: 'outbound_contact_add', arguments: input });
+      expect(reply.isError).toBe(true);
+      expect(JSON.stringify(reply.content)).not.toContain(VALUES.organization);
+    }
+    const other = await w.c.tools(w.c.salesHead, w.c.ids.ceo);
+    const theirs = await other.callTool({ name: 'outbound_contact_add', arguments: input });
+    const unknown = await other.callTool({ name: 'outbound_contact_add', arguments: { ...input, channel: randomUUID() } });
+    expect(theirs.isError).toBe(true);
+    expect(theirs.content).toEqual(unknown.content);
+    expect(await w.c.db.select().from(outboundContactFields)).toEqual([]);
+  });
+
   it('refuses a queued message when its contact values change before dispatch', async () => {
     const w = await world();
     const field = await published(w.c, { kind: 'variable', field: 'name' });

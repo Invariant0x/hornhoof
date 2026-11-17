@@ -1,0 +1,4 @@
+address,consent,name,organization,personal_line
+ann@shop.example,yes,Ann,Example shop,Thank you for visiting.
+missing-consent@shop.example,,No consent,Example shop,This row is skipped.
+,yes,No address,Example shop,This row is skipped.
