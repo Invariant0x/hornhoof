@@ -206,6 +206,22 @@ function withLookupThatNeverAnswers(): (times: number) => Promise<void> {
   return times => until(asked, 'asked', () => count >= times);
 }
 
+/* The requests this hop sends to the target, each one counted as it is sent. */
+function sentTo(target: Target): http.ClientRequest[] {
+  const sent: http.ClientRequest[] = [];
+  const request = http.request as (...args: unknown[]) => http.ClientRequest;
+  const spy = vi.spyOn(http, 'request').mockImplementation((...args: unknown[]) => {
+    const out = request(...args);
+    if ((args[0] as http.RequestOptions).port === target.port) sent.push(out);
+    return out;
+  });
+  onTestFinished(() => spy.mockRestore());
+  return sent;
+}
+
+/* One turn of the event loop: whatever was already due, promises included, has run by then. */
+const aTurn = () => new Promise<void>(resolve => setImmediate(resolve));
+
 function failOnUncaught(): void {
   const caught: unknown[] = [];
   const onCaught = (error: unknown) => caught.push(error);
@@ -253,12 +269,12 @@ describe('requests', () => {
     expect(answer.raw.slice(0, 6)).toEqual(['X-Own-Header', 'kept', 'Set-Cookie', 'a=1', 'Set-Cookie', 'b=2']);
   });
 
+  /* The target writes its second chunk only once the client has the first: a hop that held the answer back never gives it. */
   it('streams an answer as it comes', async () => {
-    let secondWritten = false;
+    const second = deferred();
     const target = await answering(async (_, res) => {
       res.write('data: 1\n\n');
-      await sleep(300);
-      secondWritten = true;
+      await second.promise;
       res.end('data: 2\n\n');
     });
     const out = http.request({ ...(await through(target)), agent: false });
@@ -266,25 +282,27 @@ describe('requests', () => {
     const [res] = (await once(out, 'response')) as [http.IncomingMessage];
     const [first] = (await once(res, 'data')) as [Buffer];
     expect(first.toString()).toBe('data: 1\n\n');
-    expect(secondWritten).toBe(false);
-    expect(await bodyOf(res)).toBe('data: 2\n\n');
+    const rest = bodyOf(res);
+    second.resolve();
+    expect(await rest).toBe('data: 2\n\n');
   });
 
+  /* The target writes its first chunk only once the client has the head: a hop that held the head back never gives it. */
   it('gives the head of an answer before its first chunk', async () => {
-    let chunkWritten = false;
+    const chunk = deferred();
     const target = await answering(async (_, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.flushHeaders();
-      await sleep(300);
-      chunkWritten = true;
+      await chunk.promise;
       res.end('data: 1\n\n');
     });
     const out = http.request({ ...(await through(target)), agent: false });
     out.end();
     const [res] = (await once(out, 'response')) as [http.IncomingMessage];
-    expect(chunkWritten).toBe(false);
     expect(res.headers['content-type']).toBe('text/event-stream');
-    expect(await bodyOf(res)).toBe('data: 1\n\n');
+    const body = bodyOf(res);
+    chunk.resolve();
+    expect(await body).toBe('data: 1\n\n');
   });
 
   it.each([
@@ -417,9 +435,13 @@ describe('neither dropped nor doubled', () => {
       hits++;
       req.socket.destroy();
     });
-    const answer = await send(await through(target), { method, path: '/api/x' }, method === 'POST' ? 'body' : undefined);
+    const sent = sentTo(target);
+    const proxy = await through(target);
+    virtualTime();
+    const answer = await send(proxy, { method, path: '/api/x' }, method === 'POST' ? 'body' : undefined);
     expect(answer.status).toBe(502);
-    await sleep(300);
+    await vi.advanceTimersByTimeAsync(PAST_EVERY_LIMIT);
+    expect(sent).toHaveLength(1);
     expect(hits).toBe(1);
   });
 
@@ -864,20 +886,25 @@ describe('headers', () => {
 
   it('sends nothing for a client that left while headers() waited', async () => {
     const { target, seen } = await recording();
+    const sent = sentTo(target);
     failOnUncaught();
     const asked = deferred<void>();
-    const proxy = await through(target, {
-      headers: async () => {
+    const added = deferred<Record<string, string>>();
+    const { server, proxy } = await servedThrough(target, {
+      headers: () => {
         asked.resolve();
-        await sleep(200);
-        return {};
+        return added.promise;
       },
     });
+    const left = new Promise<void>(resolve => server.once('request', (_: http.IncomingMessage, atHop: http.ServerResponse) => atHop.once('close', resolve)));
     const socket = await connected(proxy);
     socket.write('GET / HTTP/1.1\r\nHost: h\r\n\r\n');
     await asked.promise;
     socket.destroy();
-    await sleep(400);
+    await left;
+    added.resolve({});
+    await aTurn();
+    expect(sent).toEqual([]);
     expect(seen).toEqual([]);
   });
 
@@ -1338,22 +1365,32 @@ describe('upgrades', () => {
       hits++;
       socket.destroy();
     });
+    const sent = sentTo(target);
     const asked = deferred();
+    const added = deferred<Record<string, string>>();
     failOnUncaught();
     const { server, proxy } = await servedThrough(target, {
-      headers: async () => {
+      headers: () => {
         asked.resolve();
-        await sleep(200);
-        return {};
+        return added.promise;
       },
     });
+    const atHop = new Promise<Duplex>(resolve => server.once('upgrade', (_: http.IncomingMessage, socket: Duplex) => resolve(socket)));
     const raw = await connected(proxy);
     raw.write(UPGRADE);
     await asked.promise;
+    const hop = await atHop;
+    let early = '';
+    hop.on('data', (chunk: Buffer) => (early += chunk.toString()));
     if (bytes) raw.write(bytes);
-    await sleep(50);
+    await until(hop, 'data', () => early.length >= bytes.length);
+    expect(early).toBe(bytes);
+    const left = new Promise<void>(resolve => hop.once('close', () => resolve()));
     leave(raw);
-    await sleep(400);
+    await left;
+    added.resolve({});
+    await aTurn();
+    expect(sent).toEqual([]);
     expect(hits).toBe(0);
     await holdsNoSocket(server);
   });
@@ -1388,19 +1425,27 @@ describe('upgrades', () => {
     expect((await readToEnd(raw, 'latin1')).length).toBe(bytes);
   });
 
+  /* The target answers 101 only once the hop has seen the client go, and the test goes on once the target is let go of. */
   it('outlives a client that resets during an upgrade, before the 101', async () => {
-    const arrived = deferred<void>();
+    const arrived = deferred<Duplex>();
+    const answer = deferred();
     const target = await takingUpgrades(socket => {
-      arrived.resolve();
-      void sleep(200).then(() => socket.destroyed || socket.write(SWITCHED));
+      arrived.resolve(socket);
+      void answer.promise.then(() => socket.destroyed || socket.write(SWITCHED));
     });
     failOnUncaught();
-    const proxy = await through(target);
+    const { server, proxy } = await servedThrough(target);
+    const atHop = new Promise<Duplex>(resolve => server.once('upgrade', (_: http.IncomingMessage, socket: Duplex) => resolve(socket)));
     const raw = await connected(proxy);
     raw.write(UPGRADE);
-    await arrived.promise;
+    const atTarget = await arrived.promise;
+    const targetLetGo = new Promise<void>(resolve => atTarget.once('close', () => resolve()));
+    const hop = await atHop;
+    const left = new Promise<void>(resolve => hop.once('close', () => resolve()));
     raw.resetAndDestroy();
-    await sleep(400);
+    await left;
+    answer.resolve();
+    await targetLetGo;
     expect((await send(proxy)).status).toBe(200);
   });
 
