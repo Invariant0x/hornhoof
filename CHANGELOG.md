@@ -28,6 +28,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The orchestrator and the heads get onto a node whose updater went away before stopping it, within 3 minutes.
 - `program_screen` shows a busy employee's program from its running turn, without a false `no_program`.
 - The reason `outbound_changed` reads in plain words, in English and Russian, like the server's other reasons.
+- A test run whose parts have all ended closes after a server restart, and the minute check closes runs left open.
 
 ### Added
 
