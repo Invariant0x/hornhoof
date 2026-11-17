@@ -104,6 +104,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The earliest open turn by its short name, for readers older than the departments' own turns. */
     const turn = open[0] && { id: open[0].id, number: open[0].number, goal: open[0].title || open[0].goal };
     const allTeams = await db.select().from(teams).where(eq(teams.companyId, me.companyId)).orderBy(asc(teams.stage), asc(teams.createdAt));
+    const turnkeyTeams = new Set(allTeams.filter(t => t.turnkey).map(t => t.id));
     const topDepts = depts.filter(d => !d.parentId);
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
     const topOf = (deptId: string | undefined) => {
@@ -151,6 +152,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             name: a.name,
             roleId: a.roleKey,
             ...teamField(a.teamId),
+            turnkey: a.teamId !== null && turnkeyTeams.has(a.teamId),
             title: role?.title ?? null,
             kind: a.kind,
             model: a.model,
@@ -263,6 +265,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
+          oneShotStages: templates.stagesOf(d.templateKey).stages.flatMap(({ stage, oneShot }) =>
+            oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
+          ),
           calls: callsOf(d.id),
         }))),
     };

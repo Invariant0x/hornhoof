@@ -1,7 +1,10 @@
 import { COMPANY_TEMPLATE_KEYS, COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentChanges, agents, departments, subscriptions, teams } from '../src/db/schema.js';
 import { modelOnPlan } from '../src/modules/agents/role-model.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
@@ -29,6 +32,32 @@ const addKey = (app: FastifyInstance, ceo: string, target: object, apiKey = 'sk-
   app.inject({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', provider: 'anthropic_api', label: 'Company key', apiKey, target }, ...as(ceo) });
 
 describe('POST /api/setup staffs the template', () => {
+  it('shows ordinary staff, turnkey members and declared one-shot stages before a template company has plans', async () => {
+    const templates = mkdtempSync(join(tmpdir(), 'hornhoof-worker-kinds-'));
+    onTestFinished(() => rmSync(templates, { recursive: true, force: true }));
+    cpSync(new URL('../../../templates', import.meta.url), templates, { recursive: true });
+    const route = join(templates, 'echelons', 'marketing.md');
+    writeFileSync(route, readFileSync(route, 'utf8').replace('stage: review, ability: hh-check-work', 'stage: review, ability: hh-check-work, oneShot: { fanOut: 3, judge: Private judge brief }'));
+    const { app, db } = await testApp({ TEMPLATES_DIR: templates });
+    const { ceo } = await setUp(app, { ...LATER, template: 'corporation' });
+
+    expect(await plans(app)).toEqual([]);
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('Private judge brief');
+    const { departments: org } = res.json();
+    const marketing = org.find((d: { templateKey: string }) => d.templateKey === 'marketing');
+    expect(marketing).toMatchObject({ oneShotStages: [{ stage: 'review', fanOut: 3, judge: true }], calls: [] });
+    const [generalist, ordinary] = [true, false].map(turnkey => marketing.employees.find((e: { teamId?: string }) => Boolean(e.teamId) === turnkey));
+    expect(generalist).toMatchObject({ turnkey: true, state: 'needs_subscription' });
+    expect(ordinary).toMatchObject({ turnkey: false, state: 'needs_subscription' });
+
+    const nonTurnkey = await db.update(teams).set({ turnkey: false }).where(eq(teams.id, generalist.teamId)).returning({ id: teams.id });
+    expect(nonTurnkey).toHaveLength(1);
+    const next = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(next.departments.flatMap((d: typeof marketing) => d.employees)).toContainEqual(expect.objectContaining({ id: generalist.id, turnkey: false }));
+  });
+
   it('hires every employee of the template, with its role, skills and the model its tier asks for on the key', async () => {
     const { app, db } = await testApp();
     await setUp(app, { ...SETUP, template: 'project' });
