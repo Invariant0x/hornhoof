@@ -1,7 +1,7 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
@@ -22,6 +22,7 @@ import { afterFailure } from './failures.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
+import { releaseJobPhones } from '../phones/queue.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -236,7 +237,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
   let text: string;
   if (request.kind === 'stuck' && request.audience === 'internal') {
     if (request.triageAgentId !== w.agentId) return null;
-    const [recipient] = await ctx.db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, w.agentId));
+    const [recipient] = await ctx.db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, w.agentId));
     const action = recipient?.kind === 'orchestrator'
       ? `Read the task, then close this request yourself with "answer_request" and request ${request.id}, with answer or retry true. Do not ask a person.`
       : `Read the task, then answer it with "comment" on #${task.number}. Do not ask a person.`;
@@ -624,7 +625,7 @@ function planHandoffText(name: string | undefined, other: PlanStandIn, until: st
 }
 
 async function handOverAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string, other: PlanStandIn): Promise<Moved | null> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   return handOver(ctx, task, other.id, planHandoffText(me?.name, other, until)).catch(changedWhileResuming);
 }
 
@@ -669,7 +670,7 @@ async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boole
 }
 
 async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, quick: boolean): Promise<string> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId));
   return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task, quick);
 }
 
@@ -701,6 +702,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
+  await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
@@ -751,6 +753,7 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
+  await releaseJobPhones(ctx, jobId);
   const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db

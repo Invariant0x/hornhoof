@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { departments, tasks, testRuns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { startRun } from '../src/modules/testruns/runs.js';
 import { company } from './test-runs-company.js';
 
@@ -41,7 +42,7 @@ describe('where a test run may go', () => {
       expect(started.text).not.toContain('no release branch');
       await call('stop_tests', { run: index + 1 });
     }
-    expect((await c.db.select({ branch: testRuns.branch }).from(testRuns)).map(run => run.branch).sort()).toEqual(['main', 'network-1', 'release-0.30.0', 'release-network', 'turn-31']);
+    expect((await c.db.select(only(testRuns, 'branch')).from(testRuns)).map(run => run.branch).sort()).toEqual(['main', 'network-1', 'release-0.30.0', 'release-network', 'turn-31']);
   });
 
   it('leaves other work free to clone a task branch', async () => {

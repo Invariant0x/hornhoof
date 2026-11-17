@@ -1,4 +1,4 @@
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { createCoordinationRoute } from './echelons-store.js';
 import { lastTaskNumber } from './numbers.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
@@ -83,7 +83,7 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
 /* The person whose message this orchestrator run answers, not a name supplied to a tool. */
 async function decidingPerson(tx: Tx, by: By): Promise<string | null> {
   const [message] = await tx
-    .select({ personId: agentEvents.personId })
+    .select(only(agentEvents, 'personId'))
     .from(agentEvents)
     .where(and(eq(agentEvents.companyId, by.companyId), eq(agentEvents.agentId, by.agentId), eq(agentEvents.jobId, by.jobId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId)))
     .orderBy(desc(agentEvents.seq))

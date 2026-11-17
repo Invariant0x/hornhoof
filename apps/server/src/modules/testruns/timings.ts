@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import { basename, posix } from 'node:path';
 import type { Db } from '../../db/client.js';
 import { attachments, testPartTimings, testParts, testRuns } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import type { Tx } from '../tasks/engine.js';
 import { logName } from './runs.js';
 
@@ -68,7 +69,7 @@ export async function keepTimings(db: Db | Tx, companyId: string, taskIds: strin
     .leftJoin(testPartTimings, eq(testPartTimings.partId, testParts.id))
     .where(and(inArray(testRuns.taskId, taskIds), eq(testRuns.kind, 'tests'), isNull(testPartTimings.partId), notInArray(testParts.status, ['queued', 'running'])));
   for (const part of waiting) {
-    const [log] = await db.select({ bytes: attachments.bytes }).from(attachments).where(and(eq(attachments.taskId, part.taskId), eq(attachments.name, logName(part, part.part)))).limit(1);
+    const [log] = await db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.taskId, part.taskId), eq(attachments.name, logName(part, part.part)))).limit(1);
     if (!log) continue;
     const said = timingsOfLog(Buffer.from(log.bytes).toString('utf8'));
     await db.insert(testPartTimings).values({ partId: part.id, companyId, runId: part.runId, ...said }).onConflictDoNothing();

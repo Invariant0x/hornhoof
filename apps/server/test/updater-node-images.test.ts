@@ -30,12 +30,6 @@ describe('updater', () => {
       expect(asked(r.calls, 'DELETE')).toEqual([]);
     });
 
-    it('changes nothing either when the wait ran out, and asks on, so the update repeats by itself', async () => {
-      const s = behind();
-      expect(installs((await runOnce(s, null, { ...running041, STUB_NODES: 'postponed' })).calls)).toEqual([]);
-      expect(installs((await runOnce(s, null, { ...running041, STUB_NODES: 'ready' })).calls)).toHaveLength(1);
-    });
-
     it('finishes the step from 0.6.1: the new updater replaces them through that build\'s installer once they are free, and lets go of them', async () => {
       const s = behind();
       const r = await runOnce(s, null, { ...running041, STUB_NODES: 'ready' });

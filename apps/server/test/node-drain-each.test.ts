@@ -6,10 +6,11 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
-import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
-import { nodeDrain, nodeHeldFrom, nodeHeldLong } from '../src/modules/updates/node-drain.js';
-import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { idOnly, only } from '../src/db/selections.js';
+import { enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
+import type { NodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeDrain, nodeHeldFrom } from '../src/modules/updates/node-drain.js';
+import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until, type FakeNode } from './helpers.js';
 import { gets } from './test-runs-company.js';
 import { BUILTIN } from './builtin.js';
 
@@ -98,33 +99,18 @@ describe('each node on the server computer is replaced on its own', () => {
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toBeNull();
   });
 
-  it('lets go only of the nodes it names, and the node that waits keeps its deadline', async () => {
+  it('lets go only of the nodes it names, and the node that waits keeps waiting since it began', async () => {
     const f = await computer();
     const claude = await f.plan('claude');
     const google = await f.plan('antigravity');
     await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    const before = (await f.server('POST')).json().drain.until;
+    const before = (await f.server('POST')).json().drain.since;
 
     expect((await f.server('DELETE', ['builtin', claude.plan])).statusCode).toBe(204);
 
     expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toBeNull();
-    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', until: before });
-  });
-
-  it('says that a node still waits rather than that another one was put off', async () => {
-    const f = await computer({ NODE_DRAIN_MS: '300', NODE_UPDATE_RETRY_MS: '60000' });
-    const late = await f.plan('antigravity');
-    const busy = await f.plan('claude');
-    await f.longTurn(await f.hire('Dev', 'worker', late.plan, late.nodeId), late.nodeId);
-    await f.server('POST', [late.plan]);
-    await vi.advanceTimersByTimeAsync(300);
-    expect((await f.server('POST', [late.plan])).json().drain.state).toBe('postponed');
-    await f.longTurn(await f.hire('Bob', 'worker', busy.plan, busy.nodeId), busy.nodeId);
-
-    const answer = (await f.server('POST', [late.plan, busy.plan])).json();
-
-    expect(answer).toMatchObject({ ready: false, free: [], drain: { state: 'waiting' } });
+    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', since: before });
   });
 
   it('starts the orchestrator on its free node as soon as that one is back, while another node still waits', async () => {
@@ -191,187 +177,167 @@ describe('each node on the server computer is replaced on its own', () => {
   });
 });
 
-describe('the orchestrator and the heads while their node waits', () => {
-  const HOLD = 400;
+describe('a node that waits for an update takes no new turn', () => {
+  /* However long it waits: past an hour and a half, and within the time running work counts as live while its node is
+     heard from. */
+  const LONG_MS = 95 * 60_000;
+  type Fixture = Awaited<ReturnType<typeof computer>>;
+  const askFor = (f: Fixture, key: string) => () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
 
-  it('sets the limit in the open: three minutes, unless set otherwise', () => {
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET })).toMatchObject({ nodeLeaderHoldMs: 180_000 });
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_LEADER_HOLD_MS: '60000' })).toMatchObject({ nodeLeaderHoldMs: 60_000 });
-  });
+  /* The clock goes on with no round of the server between, as over a long turn; the node is heard from, and the updater,
+     which asks every few seconds, asks again. */
+  async function longAfter(f: Fixture, node: FakeNode, id: NodeIdentity, ask: () => Promise<unknown>): Promise<void> {
+    vi.setSystemTime(Date.now() + LONG_MS);
+    node.send({ type: 'status', loggedIn: true, limits: null });
+    await until(() => f.app.ctx.hub.lastSeenAt(id) === Date.now());
+    await ask();
+    await vi.advanceTimersByTimeAsync(ROUND);
+  }
 
-  it('holds a head on the only node of its plan up to the limit and no longer, and leaves the long turn and the workers as they are', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+  it("keeps new turns off the only node of a plan however long it waits, the orchestrator's and a head's too, and sends them there once it is updated", async () => {
+    const f = await computer();
     const google = await f.plan('antigravity');
+    const id = { kind: 'node' as const, nodeId: google.nodeId };
     const node = await f.online(google.key);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
-    const dev = await f.hire('Dev', 'worker', google.plan, google.nodeId);
+    await until(() => f.app.ctx.hub.isReady(id));
     const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
     const worker = await f.hire('Bob', 'worker', google.plan, google.nodeId);
-    const long = await f.longTurn(dev, google.nodeId);
-    await f.server('POST');
-
-    const waiting = await f.turnFor(worker.id, 'A worker turn');
-    const led = await f.turnFor(head.id, 'A head turn');
-    expect((await f.statusOf(led)).status).toBe('queued');
-    /* Just short of the limit, the head still waits. */
-    await vi.advanceTimersByTimeAsync(HOLD - 1);
-    expect(await f.gotTurnOf(head.id, node)).toBe(false);
-    expect((await f.statusOf(led)).status).toBe('queued');
-
-    /* The server's next look past the limit lets it in. */
-    await vi.advanceTimersByTimeAsync(ROUND - HOLD + 1);
-    const run = await nextOf(node, 'job.run');
-
-    expect(run).toMatchObject({ jobId: led });
-    expect(await f.statusOf(long.id)).toMatchObject({ status: 'running', error: null });
-    expect(await f.gotTurnOf(worker.id, node)).toBe(false);
-    expect((await f.statusOf(waiting)).status).toBe('queued');
-    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })?.state).toBe('waiting');
-    /* The watchdog goes on seeing that the worker waits for the update, and that the head does not. */
-    expect((await agentState(f.app.ctx, worker.id)).machineDrain).toMatchObject({ state: 'waiting' });
-    expect((await agentState(f.app.ctx, head.id)).machineDrain).toBeNull();
-  });
-
-  it('lets the orchestrator in the same way', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
-    const google = await f.plan('antigravity');
-    const node = await f.online(google.key);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
     const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
     await f.db.update(agents).set({ subscriptionId: google.plan, nodeId: google.nodeId }).where(eq(agents.id, orchestrator.id));
+    const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    const ask = askFor(f, google.key);
+    expect((await ask()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+    const turns = [await f.turnFor(worker.id, 'A worker turn'), await f.turnFor(head.id, 'A head turn'), await f.turnFor(orchestrator.id, 'An orchestrator turn')];
+
+    await longAfter(f, node, id, ask);
+
+    expect(nodeDrain(f.app.ctx, id)).toMatchObject({ state: 'waiting', turnsLeft: 1 });
+    for (const agent of [worker, head, orchestrator]) expect(await f.gotTurnOf(agent.id, node)).toBe(false);
+    expect((await Promise.all(turns.map(f.statusOf))).map(turn => turn.status)).toEqual(['queued', 'queued', 'queued']);
+    expect(await f.statusOf(long.id)).toMatchObject({ status: 'running', error: null });
+
+    /* Its last turn ends, the updater hears that the node is free, and the node comes back from its update. */
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
+    expect((await ask()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], boot: NEW_BOOT });
+    const sent = [await nextOf(node, 'job.run'), await nextOf(node, 'job.run'), await nextOf(node, 'job.run')];
+    expect(sent.map(run => run.jobId).sort()).toEqual([...turns].sort());
+  });
+
+  it("says in the node's record and on the Machines screen since when it waits, until it is back from its update", async () => {
+    const f = await computer();
+    const google = await f.plan('antigravity');
+    const id = { kind: 'node' as const, nodeId: google.nodeId };
+    const node = await f.online(google.key);
+    await until(() => f.app.ctx.hub.isReady(id));
+    const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    const ask = askFor(f, google.key);
+    const record = async () => (await f.db.select(only(nodes, 'updateWaitSince')).from(nodes).where(eq(nodes.id, google.nodeId)))[0]!.updateWaitSince?.toISOString() ?? null;
+    const shown = async () => (await f.app.inject({ url: '/api/machines', ...as(f.ceo) })).json().machines.find((m: { id: string }) => m.id === f.host.id).drain ?? null;
+    expect([await record(), await shown()]).toEqual([null, null]);
+
+    const since = new Date().toISOString();
+    await ask();
+
+    await until(async () => (await record()) === since);
+    expect(await shown()).toEqual({ state: 'waiting', turnsLeft: 1, partsLeft: 0, since });
+    await longAfter(f, node, id, ask);
+    expect([await record(), await shown()]).toEqual([since, { state: 'waiting', turnsLeft: 1, partsLeft: 0, since }]);
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
+    expect((await ask()).json().drain.state).toBe('restarting');
+    expect(await record()).toBe(since);
+    node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], boot: NEW_BOOT });
+    await until(async () => (await record()) === null);
+    expect(await shown()).toBeNull();
+  });
+
+  it('sends a new turn to another ready machine of its plan, a head\'s too, and keeps one whose agent holds a task in progress for its own machine', async () => {
+    const f = await computer();
+    const [away] = await f.db.insert(machines).values({ companyId: f.company.id, personId: f.person.id, machineKey: 'another-machine', hostname: 'away' }).returning();
+    const google = await f.plan('antigravity');
+    const other = await f.nodeOf(google.plan, away!.id);
+    const id = { kind: 'node' as const, nodeId: google.nodeId };
+    const here = await f.online(google.key);
+    const there = await f.online(other.key);
+    await until(() => f.app.ctx.hub.isReady(id) && f.app.ctx.hub.isReady({ kind: 'node', nodeId: other.nodeId }));
+    const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
+    const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
+    await f.db.update(agents).set({ subscriptionId: google.plan, nodeId: google.nodeId }).where(eq(agents.id, orchestrator.id));
+    await f.db.insert(tasks).values({ companyId: f.company.id, number: 7, title: 'Held', body: '', status: 'working', assigneeAgentId: orchestrator.id, createdByAgentId: orchestrator.id });
     await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    await f.server('POST');
+    const ask = askFor(f, google.key);
+    await ask();
 
-    const job = await f.turnFor(orchestrator.id);
+    const free = await f.turnFor(head.id);
+    const held = await f.turnFor(orchestrator.id);
+    await longAfter(f, here, id, ask);
 
+    expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: free });
+    expect(await f.statusOf(free)).toMatchObject({ nodeId: other.nodeId });
+    expect(await f.gotTurnOf(orchestrator.id, here)).toBe(false);
+    expect(await f.gotTurnOf(orchestrator.id, there)).toBe(false);
+    expect(await f.statusOf(held)).toMatchObject({ status: 'queued' });
+  });
+
+  it('keeps a head off the built-in node however long it waits, when the company key runs it', async () => {
+    const f = await computer();
+    const builtin = await f.online(NODE_KEY);
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
+    const head = await f.hire('Hana', 'head', f.apiKey.id);
+    await f.longTurn(await f.hire('Dev', 'worker', f.apiKey.id), null);
+    const ask = () => f.server('POST');
+    await ask();
+
+    const job = await f.turnFor(head.id);
+    await longAfter(f, builtin, BUILTIN, ask);
+
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toMatchObject({ state: 'waiting', turnsLeft: 1 });
+    expect(await f.gotTurnOf(head.id, builtin)).toBe(false);
     expect((await f.statusOf(job)).status).toBe('queued');
-    await vi.advanceTimersByTimeAsync(ROUND);
-    expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
   });
 
   /* As on 16.11: the updater asked, took a moment's 404 for a server from before and went, and then the long turn ended. */
-  it('lets the orchestrator in past the limit when the work on its node ended but no updater came back to hear it is free', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+  it('lets the orchestrator in once an updater that went away no longer holds the node', async () => {
+    const f = await computer();
     const google = await f.plan('antigravity');
     const node = await f.online(google.key);
     await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
     const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
     await f.db.update(agents).set({ subscriptionId: google.plan, nodeId: google.nodeId }).where(eq(agents.id, orchestrator.id));
     const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    await askFor(f, google.key)();
     await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
     await vi.advanceTimersByTimeAsync(ROUND);
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', turnsLeft: 0, partsLeft: 0 });
 
     const job = await f.turnFor(orchestrator.id);
     await vi.advanceTimersByTimeAsync(ROUND);
+    expect(await f.gotTurnOf(orchestrator.id, node)).toBe(false);
+    /* Two minutes with nobody asking end the hold. */
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
 
+    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toBeNull();
     expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
   });
 
   it('tells the updater that comes back that the node is free, once its work ended while nobody asked', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const f = await computer();
     const google = await f.plan('antigravity');
     const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    const ask = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    const ask = askFor(f, google.key);
     expect((await ask()).json()).toMatchObject({ ready: false, drain: { state: 'waiting' } });
     await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
     await vi.advanceTimersByTimeAsync(ROUND);
     expect((await ask()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
   });
+});
 
-  it("keeps an assistant's own agent off the node past the limit, as a worker: the company does not wait for it", async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
-    const google = await f.plan('antigravity');
-    const node = await f.online(google.key);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
-    const [own] = await f.db.insert(agents).values({ companyId: f.company.id, subscriptionId: google.plan, nodeId: google.nodeId, kind: 'assistant', model: '', name: 'Ava' }).returning();
-    await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    await f.server('POST');
-    const job = await f.turnFor(own!.id);
-    await vi.advanceTimersByTimeAsync(ROUND);
-    expect(await f.gotTurnOf(own!.id, node)).toBe(false);
-    expect((await f.statusOf(job)).status).toBe('queued');
-  });
+describe('the orchestrator and the heads while their node restarts', () => {
+  const HOLD = 400;
 
-  it('holds a head on the built-in node up to the limit too, when the company key runs it', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
-    const builtin = await f.online(NODE_KEY);
-    await until(() => f.app.ctx.hub.isReady(BUILTIN));
-    const head = await f.hire('Hana', 'head', f.apiKey.id);
-    await f.longTurn(await f.hire('Dev', 'worker', f.apiKey.id), null);
-    await f.server('POST');
-    const job = await f.turnFor(head.id);
-    expect((await f.statusOf(job)).status).toBe('queued');
-    await vi.advanceTimersByTimeAsync(ROUND);
-    expect(await nextOf(builtin, 'job.run')).toMatchObject({ jobId: job });
-  });
-
-  it('sends a head that holds a task to another machine of its plan past the limit, not onto the node that waits', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
-    const [away] = await f.db.insert(machines).values({ companyId: f.company.id, personId: f.person.id, machineKey: 'another-machine', hostname: 'away' }).returning();
-    const google = await f.plan('antigravity');
-    const other = await f.nodeOf(google.plan, away!.id);
-    const here = await f.online(google.key);
-    const there = await f.online(other.key);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }) && f.app.ctx.hub.isReady({ kind: 'node', nodeId: other.nodeId }));
-    const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
-    await f.db.insert(tasks).values({ companyId: f.company.id, number: 7, title: 'Held', body: '', status: 'working', assigneeAgentId: head.id, createdByAgentId: head.id });
-    await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
-
-    const job = await f.turnFor(head.id);
-    expect((await f.statusOf(job)).status).toBe('queued');
-    await vi.advanceTimersByTimeAsync(ROUND);
-
-    expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: job });
-    expect(await f.statusOf(job)).toMatchObject({ nodeId: other.nodeId });
-    expect(await f.gotTurnOf(head.id, here)).toBe(false);
-    expect((await f.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
-  });
-
-  it('stays on its own node past the limit when every machine of its plan waits, and starts on that one', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
-    const [away] = await f.db.insert(machines).values({ companyId: f.company.id, personId: f.person.id, machineKey: 'another-machine', hostname: 'away' }).returning();
-    const google = await f.plan('antigravity');
-    const other = await f.nodeOf(google.plan, away!.id);
-    const first = await f.online(google.key);
-    const own = await f.online(other.key);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }) && f.app.ctx.hub.isReady({ kind: 'node', nodeId: other.nodeId }));
-    const dev = await f.hire('Dev', 'worker', google.plan, google.nodeId);
-    await f.longTurn(dev, google.nodeId);
-    await f.longTurn(await f.hire('Bob', 'worker', google.plan, other.nodeId), other.nodeId);
-    const head = await f.hire('Hana', 'head', google.plan, other.nodeId);
-    for (const key of [google.key, other.key]) await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
-
-    const job = await f.turnFor(head.id);
-    await vi.advanceTimersByTimeAsync(ROUND);
-
-    expect(await nextOf(own, 'job.run')).toMatchObject({ jobId: job });
-    expect(await f.gotTurnOf(head.id, first)).toBe(false);
-  });
-
-  it('starts the limit over when the node waits again after its update was put off', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: '300', NODE_DRAIN_MS: '600', NODE_UPDATE_RETRY_MS: '100' });
-    const google = await f.plan('antigravity');
-    await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
-    const node = { kind: 'node' as const, nodeId: google.nodeId };
-    const ask = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
-    await ask();
-    await vi.advanceTimersByTimeAsync(299);
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(true);
-    await vi.advanceTimersByTimeAsync(300);
-    expect((await ask()).json().drain.state).toBe('postponed');
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await vi.advanceTimersByTimeAsync(100);
-    expect((await ask()).json().drain.state).toBe('waiting');
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await vi.advanceTimersByTimeAsync(299);
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(nodeHeldLong(f.app.ctx, node)).toBe(true);
+  it('sets the limit in the open: three minutes, unless set otherwise', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET })).toMatchObject({ nodeLeaderHoldMs: 180_000 });
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_LEADER_HOLD_MS: '60000' })).toMatchObject({ nodeLeaderHoldMs: 60_000 });
   });
 
   it('sends a head to another machine of its plan while its node restarts, not onto that node', async () => {
@@ -469,7 +435,7 @@ describe('the orchestrator and the heads while their node waits', () => {
 describe('the update screen', () => {
   const screen = async (f: Awaited<ReturnType<typeof computer>>) => (await f.app.inject({ url: '/api/updates', ...as(f.ceo) })).json().nodeWaits;
 
-  it('says of each node what it waits for and until when', async () => {
+  it('says of each node what it waits for and since when', async () => {
     const f = await computer();
     const claude = await f.plan('claude');
     const google = await f.plan('antigravity');
@@ -477,7 +443,7 @@ describe('the update screen', () => {
     const [task] = await f.db.insert(tasks).values({ companyId: f.company.id, number: 251, title: 'A long one', body: '', createdByAgentId: dev.id }).returning();
     const turn = await f.longTurn(dev, google.nodeId);
     await f.db.update(jobs).set({ taskId: task!.id }).where(eq(jobs.id, turn.id));
-    const until = (await f.server('POST')).json().drain.until;
+    const since = (await f.server('POST')).json().drain.since;
 
     const waits = await screen(f);
 
@@ -487,7 +453,7 @@ describe('the update screen', () => {
     expect(waits.find((w: { node: string }) => w.node === google.nodeId)).toMatchObject({
       provider: 'antigravity',
       hostname: 'host-a',
-      drain: { state: 'waiting', turnsLeft: 1, until },
+      drain: { state: 'waiting', turnsLeft: 1, since },
       work: [{ agent: 'Dev', task: 251 }],
     });
   });

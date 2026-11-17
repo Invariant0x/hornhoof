@@ -607,6 +607,8 @@ export const nodes = pgTable(
     account: jsonb('account').$type<Account>(),
     /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
     boot: jsonb('boot').$type<Boot & { stopped?: NodeExit }>(),
+    /* Since when it waits for an update: it takes no new turn until it is back from it. Empty when it does not wait. */
+    updateWaitSince: timestamp('update_wait_since', { withTimezone: true }),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
@@ -1365,6 +1367,37 @@ export const attachments = pgTable(
   },
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
 );
+
+/* A phone is lent independently of its host computer's root access and compute pool. */
+export const companyPhones = pgTable('company_phones', {
+  id: id(), companyId: companyId(), personId: uuid('person_id').notNull().references(() => people.id),
+  machineId: uuid('machine_id').notNull().references(() => machines.id), nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  /* The phone's address on the network, as adb names it. */
+  serial: text('serial').notNull(), hardwareKey: text('hardware_key').notNull(),
+  name: text('name').notNull(), lending: boolean('lending').notNull().default(true), generation: integer('generation').notNull().default(0),
+  createdAt: createdAt(), removedAt: timestamp('removed_at', { withTimezone: true }),
+}, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), uniqueIndex('company_phones_hardware').on(t.hardwareKey).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
+
+export const phoneSessions = pgTable('phone_sessions', {
+  id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),
+  order: bigserial('queue_order', { mode: 'number' }).notNull(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id), jobId: uuid('job_id').notNull().references(() => jobs.id),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  status: text('status', { enum: ['queued', 'starting', 'active', 'revoking', 'ended', 'cancelled'] }).notNull().default('queued'),
+  generation: integer('generation'), leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), endedAt: timestamp('ended_at', { withTimezone: true }),
+  reason: text('reason', { enum: ['completed', 'cancelled', 'lost', 'stopped', 'offline', 'recording_limit', 'failed'] }),
+}, t => [
+  index('phone_sessions_task').on(t.taskId), index('phone_sessions_job').on(t.jobId), index('phone_sessions_queue').on(t.phoneId, t.order),
+  uniqueIndex('phone_sessions_active').on(t.phoneId).where(sql`${t.status} in ('starting', 'active', 'revoking')`),
+  uniqueIndex('phone_sessions_borrower').on(t.phoneId, t.jobId).where(sql`${t.status} in ('queued', 'starting', 'active', 'revoking')`),
+]);
+
+/* A session's screens, in order, each picture an attachment of its task. */
+export const phoneFrames = pgTable('phone_frames', {
+  id: id(), companyId: companyId(), sessionId: uuid('session_id').notNull().references(() => phoneSessions.id), sequence: integer('sequence').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull(), attachmentId: uuid('attachment_id').references(() => attachments.id, { onDelete: 'cascade' }),
+}, t => [unique('phone_frames_sequence').on(t.sessionId, t.sequence), index('phone_frames_session').on(t.sessionId)]);
 
 /* A physical agent program, distinct from the provider session it resumes. */
 export const programInstances = pgTable('program_instances', {
