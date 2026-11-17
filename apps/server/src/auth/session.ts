@@ -260,6 +260,12 @@ export const viaOrchestrator = (me: Pick<Person, 'via' | 'viaHead'>): boolean =>
    the person its turn answers, so it is that person's. */
 export const changedBy = (me: Person) => (viaOrchestrator(me) ? { personId: null, byOrchestrator: true } : { personId: me.id, byOrchestrator: false });
 
+/* Employee history names the acting head as well as the person whose rights it used. */
+export const employeeChangedBy = (me: Person): { personId: string | null; byOrchestrator: boolean; actingAgentId: string | null } => ({
+  ...changedBy(me),
+  actingAgentId: me.viaHead ? me.via ?? null : null,
+});
+
 /* Who acts on a task: the person, or the orchestrator when it acts for the owner. */
 export const actorOf = (me: Person): { personId: string } | { agentId: string } => (me.via ? { agentId: me.via } : { personId: me.id });
 
