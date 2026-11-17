@@ -257,40 +257,52 @@ function AccountLine({ account }: { account: SetupAccount }) {
 
 /* The addresses on a channel, newest first: each with its consent, its purpose and where they agreed, and when and by whom
    it was added. A consent in force is taken back here, through the consent the server keeps. */
-/* What adding an address said, and the address it was about, to say it under that address's entry. */
-type Added = { said: string; permissionId: string | null; address: string };
+/* What the last move on a channel's addresses said, and the address it was about, to say it under that address's entry:
+   that it was added, or that its consent was taken back. */
+type Said = { said: string; permissionId: string | null; address: string };
 
 /* The entry an address added just now stands in: its permission, or, where it was there already, its address as the server
    spells it. */
-const entryOf = (contacts: readonly Consent[], added: Added | null) =>
-  added && (contacts.find(one => one.permissionId === added.permissionId) ?? contacts.find(one => one.address === added.address.toLowerCase()));
+const entryOf = (contacts: readonly Consent[], said: Said | null) =>
+  said && (contacts.find(one => one.permissionId === said.permissionId) ?? contacts.find(one => one.address === said.address.toLowerCase()));
 
-function ContactList({ contacts, added, onChanged }: { contacts: readonly Consent[]; added: Added | null; onChanged(): void }) {
+const stateOf = (contact: Consent) => (contact.doNotContact ? 'refused' : contact.status);
+
+/* The channel's addresses under a heading that counts those whose consent is in force; one taken back stays, marked so. */
+function ContactList({ contacts, said, onSaid, onChanged }: { contacts: readonly Consent[]; said: Said | null; onSaid(said: Said): void; onChanged(): void }) {
   const c = useT().outboundSetup.contact;
   const id = useId();
-  const at = entryOf(contacts, added);
+  const at = entryOf(contacts, said);
+  const agreed = contacts.filter(one => stateOf(one) === 'granted').length;
   return (
     <div className="outbound-contacts">
-      <h4 id={id} dir="auto">{c.listTitle(contacts.length)}</h4>
+      <h4 id={id} dir="auto">{c.listTitle(agreed)}</h4>
       {contacts.length ? (
         <ul className="outbound-list outbound-entries" aria-labelledby={id}>
-          {contacts.map(one => <ContactLine key={one.permissionId} contact={one} said={one === at ? added!.said : null} onChanged={onChanged} />)}
+          {contacts.map(one => (
+            <ContactLine key={one.permissionId} contact={one} said={one === at ? said!.said : null}
+              onTakenBack={() => onSaid({ said: c.takenBack(one.address), permissionId: one.permissionId, address: one.address })} onChanged={onChanged} />
+          ))}
         </ul>
       ) : (
         <p className="muted" dir="auto">{c.none}</p>
       )}
-      {added && !at && <AddedLine said={added.said} />}
+      {said && !at && <SaidLine said={said.said} />}
     </div>
   );
 }
 
-const AddedLine = ({ said }: { said: string }) => <p className="muted outbound-added" role="status" dir="auto">{said}</p>;
+const SaidLine = ({ said }: { said: string }) => <p className="muted outbound-added" role="status" dir="auto">{said}</p>;
 
-function ContactLine({ contact, said, onChanged }: { contact: Consent; said: string | null; onChanged(): void }) {
+function ContactLine({ contact, said, onTakenBack, onChanged }: { contact: Consent; said: string | null; onTakenBack(): void; onChanged(): void }) {
   const s = useT().outboundSetup;
   const { language } = useLanguage();
   const { busy, failure, run } = useMove(onChanged);
-  const state = contact.doNotContact ? 'refused' : contact.status;
+  const state = stateOf(contact);
+  const takeBack = async () => {
+    await api.post(`/api/outbound/permissions/${contact.permissionId}/revoke`, {});
+    onTakenBack();
+  };
   const by = contact.addedBy && byWhom(s, contact.addedBy.person, contact.addedBy.agent);
   return (
     <li className="outbound-entry">
@@ -301,11 +313,11 @@ function ContactLine({ contact, said, onChanged }: { contact: Consent; said: str
       <small dir="auto">{joined([s.contact.purpose(contact.purpose), contact.source, whenOf(language, contact.grantedAt), by])}</small>
       {state === 'granted' && (
         <EntryActions>
-          <button className="btn ghost danger" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/permissions/${contact.permissionId}/revoke`, {}))}>{s.contact.revoke}</button>
+          <button className="btn ghost danger" type="button" disabled={busy} onClick={() => void run(takeBack)}>{s.contact.revoke}</button>
         </EntryActions>
       )}
       <Failure failure={failure} />
-      {said && <AddedLine said={said} />}
+      {said && <SaidLine said={said} />}
     </li>
   );
 }
@@ -317,7 +329,7 @@ function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; 
   const t = useT();
   const s = t.outboundSetup;
   const [open, setOpen] = useState<Open>(null);
-  const [added, setAdded] = useState<Added | null>(null);
+  const [said, setSaid] = useState<Said | null>(null);
   const done = () => {
     setOpen(null);
     onChanged();
@@ -339,9 +351,9 @@ function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; 
       {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
-      {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); onChanged(); }} onCancel={() => setOpen(null)} />}
-      {open === null && <ChannelActions channel={channel} onOpen={form => { setAdded(null); setOpen(form); }} onChanged={onChanged} />}
-      {channel.audience === 'direct' && <ContactList contacts={contacts} added={added} onChanged={onChanged} />}
+      {open === 'contact' && <ContactForm channel={channel} onDone={added => { setOpen(null); setSaid(added); onChanged(); }} onCancel={() => setOpen(null)} />}
+      {open === null && <ChannelActions channel={channel} onOpen={form => { setSaid(null); setOpen(form); }} onChanged={onChanged} />}
+      {channel.audience === 'direct' && <ContactList contacts={contacts} said={said} onSaid={setSaid} onChanged={onChanged} />}
     </div>
   );
 }
@@ -397,7 +409,7 @@ function contactRefusal(t: Messages, email: boolean, err: unknown): { problems: 
 
 /* The address form's state and its sending: each problem at its field with the focus on the first of them, the
    server's refusal where it belongs, and what was added once it was. */
-function useContactForm(channel: SetupChannel, onDone: (added: Added) => void) {
+function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
   const t = useT();
   const c = t.outboundSetup.contact;
   const email = channel.adapter === 'smtp';
@@ -437,7 +449,7 @@ function useContactForm(channel: SetupChannel, onDone: (added: Added) => void) {
 /* An address that agreed to the channel's purpose, a test address of the team among them. It goes through the server's
    own consent: the server keeps where they agreed and a fingerprint of the proof, under the channel's purpose, and looks
    for that before every message. The tick is the word of the person adding it that the consent was given. */
-function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(added: Added): void; onCancel(): void }) {
+function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(added: Said): void; onCancel(): void }) {
   const t = useT();
   const c = t.outboundSetup.contact;
   const id = useId();

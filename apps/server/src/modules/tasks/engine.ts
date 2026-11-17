@@ -1366,10 +1366,11 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
-/* How an answer came: inline in words the window already delivered, or from the person's assistant, which is recorded with it. */
-type AnswerWay = { inlineText?: true; assistant?: string };
+/* How an answer came: inline in words the window already delivered, from the person's assistant, or from the orchestrator
+   of its own as the owner's, each recorded with it. */
+type AnswerWay = { inlineText?: true; assistant?: string; orchestrator?: string };
 
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant, orchestrator }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1399,14 +1400,14 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await endRequest(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}) }, inlineText }, ctx.config);
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}), ...(orchestrator ? { byOrchestrator: true } : {}) }, inlineText }, ctx.config);
     const back = await statusAfterWait(tx, task, current?.status);
     if (back) {
       await tx
