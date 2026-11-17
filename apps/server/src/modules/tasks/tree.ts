@@ -81,7 +81,7 @@ export type DepartmentTree = {
   idle: IdleStretch[];
 };
 
-export type FactAgent = { id: string; name: string; createdAt: Date };
+type FactAgent = { id: string; name: string; createdAt: Date };
 export type FactTask = {
   ownerSince: Date;
   echelons: EchelonsSnapshot;
@@ -102,7 +102,7 @@ export type FactTask = {
   visible?: boolean;
   externalWait?: ExternalWait | null;
 };
-export type FactRelatedTask = { id: string; number: number; title: string; status: TaskStatus; visible: boolean };
+type FactRelatedTask = { id: string; number: number; title: string; status: TaskStatus; visible: boolean };
 export type FactTaskEvent = {
   taskId: string;
   agentId: string | null;
@@ -216,7 +216,7 @@ function activeSegments(fromMs: number, endAt: Date | null, nowMs: number, asks:
   return out;
 }
 
-export function lineSegments(input: {
+function lineSegments(input: {
   createdAt: Date;
   cutAt: Date | null;
   endAt: Date | null;
@@ -324,7 +324,7 @@ function compareIdle(a: IdleStretch, b: IdleStretch, nowMs: number): number {
   return stretchMs(b, nowMs) - stretchMs(a, nowMs);
 }
 
-export function idleStretches(sources: IdleSource[], now: Date): IdleStretch[] {
+function idleStretches(sources: IdleSource[], now: Date): IdleStretch[] {
   const nowMs = now.getTime();
   return sources
     .flatMap(src => src.segments.flatMap(seg => {

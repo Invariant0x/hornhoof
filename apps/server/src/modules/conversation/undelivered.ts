@@ -12,7 +12,7 @@ export const NOT_DELIVERED = 'message_not_delivered';
 
 /* An employee's message that neither went into a turn nor waits in its recipient's line: why, as a code a failure collector
    groups by, to whom, and the task the sender named. */
-export type Undelivered = { reason: string; recipient: string; task: number | string | null };
+type Undelivered = { reason: string; recipient: string; task: number | string | null };
 
 /* What Hornhoof keeps of it with the sender's turn, as the result of the call that sent it. */
 export const UndeliveredRecord = z.object({

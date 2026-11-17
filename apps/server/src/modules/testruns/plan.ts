@@ -17,10 +17,10 @@ export type TestPartPlanInput = {
   spread?: PartSpread;
 };
 export type PartSpread = { min: number; max: number; ceilingMs: number };
-export type MachinePace = { key: string; pace: number };
+type MachinePace = { key: string; pace: number };
 /* machine: the machine a part is laid out for and how long it should take there, when the machines go at different paces. */
-export type PlannedTestPart = { units: TestUnit[]; testMs: number; machine?: { key: string; ms: number } };
-export type PartEstimate = { parts: number; estimatedWallMs: number; costAdjustedMs: number };
+type PlannedTestPart = { units: TestUnit[]; testMs: number; machine?: { key: string; ms: number } };
+type PartEstimate = { parts: number; estimatedWallMs: number; costAdjustedMs: number };
 export type TestPartPlan = {
   parts: PlannedTestPart[];
   oneMachineMs: number;
