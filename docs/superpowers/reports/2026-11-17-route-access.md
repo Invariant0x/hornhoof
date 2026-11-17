@@ -1,8 +1,9 @@
 # Task 1196: route declarations and agent views
 
 Base: `9fe737f21ee6f4caf2c0cad80c086cfe791fdb79` on `turn-31`.
-Integration base: `734fe6637056b022d506c8049a7d1c6e07dd8afe`, merged cleanly.
-Bug fix, small task, access risk. No handler or production access policy changes.
+Final integration base: `359c2efaa27e9afb8842d0113dd5d6804aca467c`, merged cleanly.
+Checked implementation: `3b51c49fdc0f7a29580de6ffe87550511a886a63`.
+Bug fix with fixture optimization authorized by the head, access risk. No handler or production access policy changes.
 
 The route audit must recognize `attachmentJobOf` on the upload route instead of
 requiring the older `jobOf` call. The attachment permission remains tied to the
@@ -64,11 +65,11 @@ server build passed. Final checks must use the merged candidate.
 
 ## First checks before fixture optimization
 
-Status: BLOCKED on the required green result of the whole agent-view table file.
+Historical status: the first candidate was blocked on the required green result of the whole agent-view table file.
 This records the first checked version. The head subsequently expanded task 1196
 to diagnose and reduce fixture cost while preserving every access case.
 Checked code: `8e77035fe905f9860440bcbb91059b53d707e5ea`.
-The change remains on `task-1196`; it has not been pushed to `turn-31`.
+That first candidate stayed on `task-1196`; it was not pushed to `turn-31`.
 
 Executed checks on that code:
 
@@ -127,24 +128,20 @@ The first request-media case also had a 10-second `onTestFinished` hook timeout
 in `helpers-db.ts`, line 280. That file is a fixture helper, not another test
 file. None of these fourteen base failures is caused by this change.
 
-## Limits and next step
+## Historical check limits
 
-The head authorized fast-forward only after all three changed test files are
-green, accepting the neighboring timeout report because its code is unchanged.
-That condition remains unmet after the single-file table check. No limits were
-raised and no access checks were removed or weakened. A decision from the head
-is needed before further work or integration. The requested one-at-a-time checks
-of task-files, program-operator-attachments and request-media remain after the
-fast-forward; they have not been run yet.
+The head accepted the fourteen baseline timeouts with the unchanged runtime and
+neighbor tests on `8e77035fe905f9860440bcbb91059b53d707e5ea`, but the table's
+single-file failures prevented integration. The head expanded this task to fix
+fixture cost; the following sections describe that authorized work. No limits
+were raised and no access checks were removed or weakened.
 
-The selector reported an unavailable import graph and left its remaining
-inventory to the release owner's full run; no full suite or `run_tests` was
-started here. Format was unavailable because the repository has no formatter;
-CRAP was not applicable because no production source changed. The first author
-check invocation had a mistyped SHA and was refused before executing checks;
-the corrected invocation above checked the actual candidate. `codex review`
-could not read the diff because bwrap could not create a namespace. Manual diff
-and access review were completed; there is no automated review PASS.
+The original selector had no import graph. The final selector keeps named near
+readers and leaves the remaining inventory to the release owner's full run. No
+full suite or `run_tests` is started by this task. There is no configured formatter;
+CRAP and mutation of production code do not apply because none changed.
+`codex review` could not run because bwrap could not create a namespace. Manual
+diff and security review are performed; there is no automated review PASS.
 
 ## Fixture profile and implementation plan
 
@@ -218,3 +215,92 @@ extraction was caught by these checks and fixed before the candidate was sent.
 Because this change touches shared `helpers-db.ts`, the final checks also include
 task-files, program-operator-attachments and request-media by name, as required by
 the expanded brief. The full release suite remains with the release owner.
+
+## Final verification
+
+The required final six runs executed on the checked implementation, with one
+worker and no other own checks running. All 58 table cases and all assertion
+bodies are unchanged; only the fixture setup and the eleven route placements
+changed. All six JSON reports have `success: true` and zero failed tests. Full
+outputs, start times, commit and machine load are attached as `six-runs.log`.
+
+- `agent-view-table.test.ts`: 58 passed, runner 24.23s, start 2026-11-17T04:16:39.329006+00:00, load 1m 9.61, shuffled seed 1196.
+- `agent-view-table.test.ts`: 58 passed, runner 21.99s, start 2026-11-17T04:17:21.634255+00:00, load 1m 9.12, shuffled seed 1197.
+- `agent-view-table.test.ts`: 58 passed, runner 22.17s, start 2026-11-17T04:17:52.869140+00:00, load 1m 8.57, shuffled seed 1198.
+- `route-access.test.ts`: 4 passed, runner 9.58s, start 2026-11-17T04:18:24.978024+00:00, load 1m 8.50.
+- `route-access.test.ts`: 4 passed, runner 8.66s, start 2026-11-17T04:18:39.862924+00:00, load 1m 8.11.
+- `route-access.test.ts`: 4 passed, runner 7.71s, start 2026-11-17T04:18:57.855256+00:00, load 1m 7.73.
+
+Commands: `npx --no-install vitest run test/agent-view-table.test.ts --maxWorkers=1
+--sequence.shuffle --sequence.seed=1196` (then seeds 1197 and 1198, separate runs),
+and `npx --no-install vitest run test/route-access.test.ts --maxWorkers=1` three
+separate times. Default and JSON reporters were recorded for every run.
+
+Author command: `HH_VITEST_MAX_WORKERS=1 npm run -s check:author -- --sha
+3b51c49fdc0f7a29580de6ffe87550511a886a63 --base
+359c2efaa27e9afb8842d0113dd5d6804aca467c`. Actual exit: 1. Lint, server and
+node types including tests, and dryer passed; dryer found no duplicate candidates.
+The selected inventory was one named node file and 49 named server files, not a
+whole suite. The remaining 664 reached files were explicitly left to the release
+owner. Node passed 59 of 59. Server passed 481 cases plus its two existing expected
+failures, and failed one case. The author's aggregate is 542 passed / 1 failed;
+it is not an overall PASS. Full output and selection are attached in
+`author-final.log`.
+
+The only assertion failure is `migrations-0050-0062.test.ts`, migration 0059,
+`starts empty on the previous release's database, keeps its nodes, and grants no
+one anything`, line 386. Its old whole-row comparison omits the later migration
+0135's `update_wait_since: null`. The exact same named case was executed on a
+clean detached `359c2efaa27e9afb8842d0113dd5d6804aca467c` and failed with the same
+extra field, exit 1, 1 failed and 16 excluded by the name selector. This comparison
+is not a full pass of that file. Its full stack is attached as
+`migration-baseline.log`. The baseline shares the same lockfile dependencies and
+built protocol inputs; production and migration/test files are unchanged by this
+task. No fixture cost or timeouts cause this assertion. A question to the head
+asks whether to accept the baseline failure or assign its repair; integration
+waits for that answer.
+
+Further named checks on the checked implementation:
+
+- `npx --no-install vitest run test/machine-away.test.ts test/agent-view.test.ts test/assistants-rights.test.ts test/agent-view-stream.test.ts test/agent-view-company.test.ts test/agent-view-waits.test.ts test/assistants-files.test.ts test/assistants-people.test.ts test/wait-views.test.ts test/agent-view-lists.test.ts test/wait-policy-routes.test.ts test/phones.test.ts test/phone-recording.test.ts test/outbound-department-access.test.ts test/outbound-department.test.ts --maxWorkers=1`:
+  exit 0, 15 files and 176 cases passed, runner 63.25 seconds. These include all
+  eleven other ACL consumers and four dedicated phone/contacts files.
+- `npx --no-install vitest run test/program-operator-attachments.test.ts --maxWorkers=1`:
+  exit 0, 16 passed, runner 12.04 seconds. Run separately with no other own check.
+- `npx --no-install vitest run test/request-media.test.ts --maxWorkers=1`:
+  exit 0, 8 passed, runner 7.51 seconds. Run separately with no other own check.
+- `task-files.test.ts` executed by name in the author's sequential one-worker run:
+  11 passed, including the several-megabyte download. It includes the upstream
+  `prepareSharedDatabase` preparation from the final base. These three neighbors
+  still have the head's requested one-at-a-time repeat after fast-forward.
+- `npm run build -w @hornhoof/protocol`, `npm run build -w @hornhoof/node`, and
+  `npm run build -w @hornhoof/server`: exit 0. Dependencies were prepared from the
+  lockfile when it changed; the final merge keeps that lockfile unchanged.
+- `git diff --check`: exit 0. The production server, protocol and three neighboring
+  test files match the final integration base exactly. Only the declared task's
+  test declarations, fixture setup, helper metadata and their boundary tests
+  differ from it.
+
+The shuffled table files finish in 21.99 to 24.23 seconds. The slowest individual
+case in the required final runs is GET task at 2.672 seconds; the two first list
+fixture cases take 2.018 and 2.151 seconds. These still exceed the preferred
+one-second case budget, but all keep the original 20-second limit. This is timing
+evidence under the recorded load, not a guarantee about another machine.
+
+Manual diff and security review found no access expansion. `attachmentJobOf`
+is recognized only at `/api/attachments`; no exemption or handler change was
+added. The new foreign-company test retains every existing rejection and checks
+that rejected requests store no attachment. Contacts remains behind
+`manageDepartment` / `requireRunner`; the table grants agents no wider address
+access. Row fixtures cache serializable rows only and bind each function to the
+current app. All reset, rights/schema/statistics checks and closed-handle/late
+write protections remain in place and pass their existing 42 tests. Metadata
+is created from the exact run dump, is versioned and hash-bound to it, and its
+failure publishes neither artifact path. The three codec tests pass.
+
+No test case, protected access assertion, test/hook limit or production handler
+was removed or weakened. No full suite or `run_tests` was executed. The release
+owner retains final combined-candidate validation. There is no release to main.
+
+Status before integration: NEEDS_CONTEXT only for the independently reproduced
+baseline migration assertion; all required checks of this change are green.
