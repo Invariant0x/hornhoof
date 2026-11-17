@@ -25,6 +25,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A node installs an agent program again, at most twice, when it does not start after an install or an update, and the machine says so or shows the last line the program said.
 - An update that comes while a node still checks a program waits for that check and then installs.
 - A plan's sign-in note says why a sign-in ended early, with the program's exit code and last line.
+- A check whose machine check slot ends stops with all of its processes before the slot goes to the next check, and fails with 128 plus the signal instead of passing.
+- Letters taken into an agent's turn that failed go back to its inbox unread, unless its program had already worked in that turn.
 
 ### Added
 
@@ -49,6 +51,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A head can set the owner of a later stage of a task in advance with `echelonStage` in `update_task`; when an employee is removed, its later stages pass to another eligible employee, and the head hears of any stage left with nobody.
 - A test or work run that waits for a machine says which run holds the machine's check slot and which runs are ahead of it.
 - The program operator is called to a thinking program whose screen stood still for three minutes, and passes the program's own windows, such as a poll, a folder's trust, an update, a full context or a sign-in from the vault, as the agent's owner would.
+- On a Linux machine, an agent's TypeScript, Vitest, ESLint, Jest and Playwright runs wait their turn for the machine's check slot and then run in the agent's own shell; with no slot to be had they run at once.
+- Machines shows "Checks paused" with the reason while a stopped check's processes do not end, and new checks wait until they are gone.
 
 ### Changed
 
@@ -68,6 +72,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Agents write a path they delete as "${VAR:?}" or literally, so Claude Code's own check does not stop the command for a person's approval.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
 - A company or department notebook takes any number of notes and characters; each note is still 300 characters at most, and an agent's instructions carry as much of the notebook as its program reads and say where they cut it.
+- An agent's waiting messages and its unread inbox come to it in one turn, and turns that waited for a busy machine go as soon as it has room for them.
+- A new program counts half a gigabyte of a machine's memory instead of a gigabyte, as agents' heavy checks now run one after another.
 - Migration 0138 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
 - Migrations 0137 and 0139 to 0144 come with this release and convert nothing old: an index for counting messages, and the tables and columns of kept update waits, removed people, one-shot calls, machine access for all agents, hidden secrets and who changed an employee.
 
