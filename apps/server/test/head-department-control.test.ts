@@ -108,7 +108,7 @@ describe('a department head for a person who runs its department', () => {
     const applied = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
     expect(applied).toHaveLength(2);
     for (const event of applied) expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids.ceo, sourceSeq: null } });
-    expect(applied.some(event => event.data.kind === 'staff')).toBe(true);
+    expect(applied).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ kind: 'staff' }) }));
     expect(await teamNames(c)).toEqual(['Mobile']);
   });
 
