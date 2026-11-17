@@ -21,7 +21,8 @@ type InternalCall = { personId: string; agentId: string; decision?: { jobId: str
 /* The person and the orchestrator a call of Hornhoof's own comes for, or null for any other request. */
 export function internalCall(req: FastifyRequest): InternalCall | null {
   const given = req.headers[HEADERS.secret];
-  if (typeof given !== 'string' || given.length !== SECRET.length || !timingSafeEqual(Buffer.from(given), Buffer.from(SECRET))) return null;
+  const bytes = typeof given === 'string' ? Buffer.from(given) : null;
+  if (!bytes || bytes.length !== SECRET.length || !timingSafeEqual(bytes, Buffer.from(SECRET))) return null;
   const personId = req.headers[HEADERS.person];
   const agentId = req.headers[HEADERS.agent];
   if (typeof personId !== 'string' || typeof agentId !== 'string') return null;
