@@ -197,3 +197,9 @@ it('keeps an unanswered Antigravity prompt and an unfamiliar placeholder open', 
   expect(idleScreen('antigravity', unanswered)).toBe(false);
   expect(idleScreen('antigravity', done.replace(/>\x1b\[39m\n/, '>\x1b[2mType here\x1b[22m\n'))).toBe(false);
 });
+
+it('keeps a completed-looking Claude screen with an unfamiliar dim prefix before its input open', () => {
+  const screen = '✻ Worked for 4s · done 10:47 AM\n────────────────────\n\x1b[2mUnexpected prefix \x1b[22m❯ \n────────────────────';
+  expect(atEmptyPrompt('claude', screen)).toBe(true);
+  expect(idleScreen('claude', screen)).toBe(false);
+});
