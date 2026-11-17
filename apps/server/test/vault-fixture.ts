@@ -1,41 +1,57 @@
 import { eq } from 'drizzle-orm';
-import { agents, companies, departments, jobs, people, sessions, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, sessions, subscriptions } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
+import { appFixture, as, listen, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 /* A company with an employee, an assistant, the orchestrator, a person who sees one department only and a person and an
    agent of another company, for the vault's people API and its tools. */
 export async function vaultCompany() {
   const { app, db, config } = await testApp();
   await listen(app);
-  const ceoSession = await setUpCompany(app);
-  const [acme] = await db.select().from(companies);
-  const companyId = acme!.id;
-  const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
-  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const [sub] = await db.select().from(subscriptions);
-  const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
-  const [nora, aide] = await db
-    .insert(agents)
-    .values([
-      { companyId, kind: 'worker', name: 'Nora', roleKey: 'SAL-AE', departmentId: sales!.id, model: '', subscriptionId: sub!.id },
-      { companyId, kind: 'assistant', name: 'Aide', model: '', subscriptionId: sub!.id },
-    ])
-    .returning();
-  const samSession = await invitePerson(app, ceoSession, { name: 'Sam', email: 'sam@acme.test', access: { departments: [sales!.id] } });
-  const [sam] = await db.select().from(people).where(eq(people.email, 'sam@acme.test'));
+  const ready = await appFixture(app, 'vaultCompany', async () => {
+    /* These tests exercise Vault, not onboarding or invitations. Seed the same access and session records directly;
+       their real API flows are checked in setup/people tests and cost hundreds of unrelated queries on a cold VM. */
+    const [acme] = await db.insert(companies).values({ name: 'Acme', inboxMode: 'direct' }).returning();
+    const companyId = acme!.id;
+    const [ceo, sam] = await db.insert(people).values([
+      { companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true },
+      { companyId, name: 'Sam', email: 'sam@acme.test', status: 'active', scopeKind: 'listed' },
+    ]).returning();
+    const [sub] = await db.insert(subscriptions).values({ companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Test plan', ownerPersonId: ceo!.id, status: 'ready', targetKind: 'any', secretEnc: encryptSecret('sk-test-vault-fixture', config.secret) }).returning();
+    const [orchestrator] = await db.insert(agents).values({ companyId, kind: 'orchestrator', name: 'Orchestrator', model: '', subscriptionId: sub!.id }).returning();
+    const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
+    const [nora, aide] = await db
+      .insert(agents)
+      .values([
+        { companyId, kind: 'worker', name: 'Nora', roleKey: 'SAL-AE', departmentId: sales!.id, model: '', subscriptionId: sub!.id },
+        { companyId, kind: 'assistant', name: 'Aide', model: '', subscriptionId: sub!.id },
+      ])
+      .returning();
+    await db.insert(personAccess).values({ companyId, personId: sam!.id, departmentId: sales!.id });
+    const ceoSession = 'vault-ceo-session-0123456789abcdef', samSession = 'vault-sam-session-0123456789abcdef';
+    await db.insert(sessions).values([
+      { tokenHash: hashToken(ceoSession), personId: ceo!.id, expiresAt: new Date(Date.now() + 3_600_000) },
+      { tokenHash: hashToken(samSession), personId: sam!.id, expiresAt: new Date(Date.now() + 3_600_000) },
+    ]);
 
-  const [other] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
-  const [olaf] = await db.insert(people).values({ companyId: other!.id, name: 'Olaf', email: 'olaf@other.test', status: 'active', scopeKind: 'company', isOwner: false }).returning();
-  const olafSession = 'olaf-session-token-0123456789abcdef';
-  await db.insert(sessions).values({ tokenHash: hashToken(olafSession), personId: olaf!.id, expiresAt: new Date(Date.now() + 3_600_000) });
-  const [otto] = await db.insert(agents).values({ companyId: other!.id, kind: 'worker', name: 'Otto', roleKey: 'OPS-X', model: '', subscriptionId: sub!.id }).returning();
+    const [other] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [olaf] = await db.insert(people).values({ companyId: other!.id, name: 'Olaf', email: 'olaf@other.test', status: 'active', scopeKind: 'company', isOwner: false }).returning();
+    const olafSession = 'olaf-session-token-0123456789abcdef';
+    await db.insert(sessions).values({ tokenHash: hashToken(olafSession), personId: olaf!.id, expiresAt: new Date(Date.now() + 3_600_000) });
+    const [otto] = await db.insert(agents).values({ companyId: other!.id, kind: 'worker', name: 'Otto', roleKey: 'OPS-X', model: '', subscriptionId: sub!.id }).returning();
 
-  const task = (
-    await createTask(app.ctx, { agentId: nora!.id }, { title: 'Sign in to the partner site', brief: 'Sign in', body: 'Sign in with the vault.', departmentId: sales!.id, assigneeAgentId: nora!.id, executor: true })
-  ).task;
+    const task = (
+      await createTask(app.ctx, { agentId: nora!.id }, { title: 'Sign in to the partner site', brief: 'Sign in', body: 'Sign in with the vault.', departmentId: sales!.id, assigneeAgentId: nora!.id, executor: true })
+    ).task;
+    return { companyId, ceo: ceo!, ceoSession, sam: sam!, samSession, olaf: olaf!, olafSession, other: other!, otto: otto!, orchestrator: orchestrator!, nora: nora!, aide: aide!, task, sub: sub! };
+  });
+  const { sub } = ready;
 
   let seq = 0;
   /* A running turn of the agent and the token its program calls the tools with. */
@@ -51,5 +67,5 @@ export async function vaultCompany() {
 
   const add = async (session: string, body: Record<string, unknown>) => app.inject({ method: 'POST', url: '/api/vault', payload: body, ...as(session) });
 
-  return { app, db, config, companyId, ceo: ceo!, ceoSession, sam: sam!, samSession, olaf: olaf!, olafSession, other: other!, otto: otto!, orchestrator: orchestrator!, nora: nora!, aide: aide!, task, startTurn, add };
+  return { app, db, config, ...ready, startTurn, add };
 }
