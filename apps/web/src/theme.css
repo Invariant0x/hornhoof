@@ -1731,6 +1731,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
    the board's columns stand one under another and the card takes the whole width. */
 .tracker { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; max-width: 1440px; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
 @media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
+/* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
+   stays where the person scrolled it. */
+.body.tracker-page { overflow-anchor: none; }
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
 }
