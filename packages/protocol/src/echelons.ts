@@ -3,7 +3,7 @@ import { z } from 'zod';
 /* One ordered route and one current owner for executable work. */
 export const ECHELON_STAGES = ['architecture', 'development', 'review', 'cleanup', 'security', 'tests'] as const;
 export type EchelonStage = (typeof ECHELON_STAGES)[number];
-export type EchelonPhase = 'active' | 'waiting' | 'escalated' | 'ready' | 'done' | 'cancelled';
+type EchelonPhase = 'active' | 'waiting' | 'escalated' | 'ready' | 'done' | 'cancelled';
 export type EchelonStep = {
   stage: EchelonStage;
   status: 'pending' | 'active' | 'complete' | 'skipped';
@@ -48,7 +48,7 @@ export type DocumentCandidate = z.infer<typeof DocumentCandidate>;
 export type HandedCandidate = Pick<EchelonCandidate, 'id' | 'parentId' | 'revision' | 'producedBy'>;
 export const isStaged = (kind: EchelonsSnapshot['resultKind']): boolean => kind === 'code' || kind === 'document';
 
-export type EchelonFindingView = {
+type EchelonFindingView = {
   findingId: string; revision: string; candidateId: string; stage: 'review' | 'security' | 'cleanup';
   authorId: string; reviewerId: string; reviewerVendor: string; reviewedCommit: string;
   category: 'security' | 'data' | 'spec' | 'other' | 'mechanical'; blocking: boolean; path: string; line: number; harm: string; confirmed: boolean;

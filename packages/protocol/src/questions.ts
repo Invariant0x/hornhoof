@@ -32,7 +32,7 @@ export const HumanActionBinding = z.strictObject({
 });
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
 
-export const QUESTION_LIMITS = { payloadBytes: 32768, textBytes: 2048, labelBytes: 256, options: 16, recipients: 256, images: 24 } as const;
+const QUESTION_LIMITS = { payloadBytes: 32768, textBytes: 2048, labelBytes: 256, options: 16, recipients: 256, images: 24 } as const;
 const UTF8 = new TextEncoder();
 const Digest = z.string().regex(/^[0-9a-f]{64}$/);
 const Identifier = z.string().min(1).max(80).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/);
