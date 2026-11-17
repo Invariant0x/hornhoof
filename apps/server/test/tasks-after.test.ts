@@ -53,8 +53,10 @@ async function company() {
     return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in turn-17.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };
   const complete = async (id: string, executor = bruno.id) => {
-    if ((await snapshot(id)).stage === 'architecture') {
+    if (!(await routeOf(db, await read(id))).paths.length) {
       await updateTask(ctx, head.id, id, { paths: ['logic/totals.ts'] });
+    }
+    if ((await snapshot(id)).stage === 'architecture') {
       await report(ctx, executor, id, { done: true, summary: 'Change logic/totals.ts and check its changed totals.' });
     }
     await submit(ctx, executor, id, code);
@@ -432,7 +434,7 @@ describe('an independent part of a dependent task', () => {
     const children = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
     expect(children).toHaveLength(1);
     expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id });
-    expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'architecture', phase: 'active', ownerAgentId: bruno.id });
+    expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'development', phase: 'active', ownerAgentId: bruno.id });
     expect((await routeOf(db, children[0]!)).paths).toEqual(['apps/checkout/**']);
     const detail = await taskDetail(ctx, moved.task, () => true);
     expect(detail.independentPart).toMatchObject({

@@ -11,6 +11,9 @@ import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
 import { dropOldFiles, FILE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { setUpCompany, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp(env);

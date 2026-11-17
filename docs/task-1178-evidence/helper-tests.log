@@ -1,0 +1,36 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+
+ ✓ test/shared-test-database.test.ts (42 tests) 12492ms
+   ✓ the tests of one file (6)
+     ✓ have a database of their own to write in 2133ms
+     ✓ find in it the same rows as in a new copy of the migrated database 1147ms
+     ✓ can ask for a second database in one test, and it is another one 545ms
+   ✓ agent SQL in a test (2)
+     ✓ finds its roles and rights in the database already, so it changes nothing beyond rows 547ms
+     ✓ leaves the rights and roles of a new copy to the next test 409ms
+   ✓ what a test changes beyond rows (7)
+     ✓ leaves the next test a new copy once its file was told 561ms
+     ✓ fails its file as a right taken away 342ms
+     ✓ fails its file when a schema change prevents emptying the database 766ms
+     ✓ does not hide a schema change by replacing a database that cannot be emptied 900ms
+     ✓ does not fail its file when it gave the same rights again, in another order 789ms
+   ✓ a setting of the connection (4)
+     ✓ does not reach the next test as that setting 594ms
+   ✓ what a test leaves for the planner (5)
+     ✓ is gone for the next test, as on a new copy 756ms
+     ✓ does not reach the next test as statistics 732ms
+   ✓ after a test fails (2)
+     ✓ so the next test gets a new one 750ms
+   ✓ rows a test was still making when it ended (3)
+     ✓ are kept for the next test whole, with those it went on to, and it does not make them again 664ms
+ ✓ test/test-database-parsers.test.ts (3 tests) 2520ms
+   ✓ a test database (3)
+     ✓ reads values of Postgres's own types back as PGlite reads them with all its parsers 1657ms
+     ✓ reads an array of a type of its schema back as PGlite does 773ms
+
+ Test Files  2 passed (2)
+      Tests  43 passed | 2 expected fail (45)
+   Start at  03:47:08
+   Duration  40.38s (tests 49%, transform 40%, import 11%)
+

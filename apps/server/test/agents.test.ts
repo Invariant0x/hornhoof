@@ -478,7 +478,7 @@ describe('the employee card', () => {
     expect((await patch(app, ceo, rita!.id, { team: team!.id })).statusCode).toBe(200);
     expect(await snapshot(task.id)).toMatchObject({ stage: 'review', ownerAgentId: rob!.id, candidateId });
     for (const request of [first.request, ownQuestion.request, ...(second ? [second.request] : [])]) expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
-    expect(await snapshot(work.id)).toMatchObject({ stage: 'architecture', phase: 'waiting', ownerAgentId: null });
+    expect(await snapshot(work.id)).toMatchObject({ stage: 'development', phase: 'waiting', ownerAgentId: null });
     expect((await snapshot(independent.id)).ownerAgentId).toBe(rob!.id);
     expect((await db.select().from(requests).where(eq(requests.id, history!.id)))[0]).toMatchObject({ status: 'answered', answer: 'Checkout only' });
     await expect(verdict(app.ctx, rob!.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked.' })).rejects.toMatchObject({ reason: 'task_invalid' });
@@ -500,7 +500,7 @@ describe('the employee card', () => {
     expect((await patch(app, ceo, brunoId, { team: team!.id })).statusCode).toBe(200);
 
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'waiting', assigneeAgentId: null, executorAgentId: brunoId });
-    expect(await snapshot(task.id)).toMatchObject({ stage: 'architecture', phase: 'waiting', ownerAgentId: null, candidateId: null });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'development', phase: 'waiting', ownerAgentId: null, candidateId: null });
     expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
   });
 });
