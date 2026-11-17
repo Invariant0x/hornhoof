@@ -1785,6 +1785,7 @@ export const ru: Messages = {
     decidedByDepartment: department => `Принимают люди отдела ${department}, CEO или его заместитель.`,
     decidedByOwner: department => `Принимает хозяин отдела ${department}, CEO или его заместитель.`,
     actedFor: (agent, person) => `${agent} за ${person}`,
+    byOrchestrator: 'решил оркестратор',
     note: 'Комментарий, если нужен',
     choiceNote: 'Комментарий или замечания',
     choiceHint: 'Выберите вариант выше или отправьте замечания без выбора.',
