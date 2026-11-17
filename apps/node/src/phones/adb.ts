@@ -62,8 +62,13 @@ export function privateAdb(executable: string, keyDir: string): AdbRun {
   return adbRunner(executable, env);
 }
 
+/* The keyboard app that types any text adb gives it, for what Android's input text cannot type: Russian, emoji, new lines. */
+const KEYBOARD_APP = 'com.android.adbkeyboard';
+const KEYBOARD_IME = `${KEYBOARD_APP}/.AdbIME`;
+
 export class PhoneAdb {
-  constructor(private readonly run: AdbRun) {}
+  /* keyboard: the local path of the keyboard app, put on a phone the first time it types such a text. */
+  constructor(private readonly run: AdbRun, private readonly keyboard?: () => Promise<string>) {}
 
   async pair(endpoint: string, code: string, signal: AbortSignal): Promise<'paired' | 'needs_person'> {
     if (!networkEndpoint(endpoint) || !/^[0-9]{6}$/.test(code)) throw new Error('phone_pairing_invalid');
@@ -136,7 +141,7 @@ export class PhoneAdb {
     switch (op.kind) {
       case 'tap': return `input tap ${op.x} ${op.y}\n`;
       case 'swipe': return `input swipe ${op.x} ${op.y} ${op.toX} ${op.toY} ${op.ms}\n`;
-      case 'text': return textScript(op.text);
+      case 'text': return /^[\x20-\x7e]+$/.test(op.text) ? textScript(op.text) : this.keyboardScript(serial, op.text, signal);
       case 'url': return `am start -a android.intent.action.VIEW -d ${shellWord(op.url)} -p com.android.chrome\n`;
       case 'app': {
         const out = await this.call(serial, ['shell', 'cmd', 'package', 'resolve-activity', '--brief', '-c', 'android.intent.category.LAUNCHER', op.package], signal);
@@ -145,5 +150,22 @@ export class PhoneAdb {
         return `am start -n ${shellWord(component)}\n`;
       }
     }
+  }
+
+  /* Switches to the keyboard app for one text, as a person picks another keyboard, and back to the phone's own one. */
+  private async keyboardScript(serial: string, text: string, signal: AbortSignal): Promise<string> {
+    if (!(await this.call(serial, ['shell', 'pm', 'path', KEYBOARD_APP], signal)).toString().startsWith('package:')) {
+      const apk = await this.keyboard?.();
+      if (!apk || !(await this.call(serial, ['install', '-r', apk], signal)).toString().includes('Success')) throw new Error('phone_keyboard_unavailable');
+    }
+    return [
+      'p=$(settings get secure default_input_method)',
+      `ime enable ${KEYBOARD_IME} >/dev/null`,
+      `ime set ${KEYBOARD_IME} >/dev/null`,
+      'sleep 1',
+      `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(text).toString('base64')}' >/dev/null`,
+      'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null',
+      '',
+    ].join('\n');
   }
 }
