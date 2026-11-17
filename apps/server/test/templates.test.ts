@@ -2079,9 +2079,13 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
     for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[^.]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
   });
 
-  it('gives the proof of checks in the report, never as files committed for it', () => {
-    expect(skill('hh-task-flow')).toMatch(/Logs and other proof of checks are no result/);
-    expect(skill('hh-task-flow')).toMatch(/never commit them, and make no commit only to record proof or a note/);
+  /* One rule on proof, beside the rule that everything made goes into the repository: an agent reads no exception into
+     either. A task may ask for its proof in the repository; raw output never goes there. */
+  it('gives the proof of checks in the report, and commits it only where the task asks, never raw output', () => {
+    expect(skill('hh-task-flow')).toMatch(/Everything you make[^.]*as files in a commit, so that every version is kept\. Proof of checks is not something you make: give the proof a reviewer needs, logs included, in submit or report/);
+    expect(skill('hh-task-flow')).toMatch(/Commit proof only when the task asks for it, in `docs\/evidence\/task-<number>` with the work it proves/);
+    expect(skill('hh-task-flow')).toMatch(/never commit raw run logs, profiles or build output, and make no commit only to record proof or a note/);
+    expect(skill('hh-task-flow')).not.toMatch(/never commit them/);
   });
 
   it('writes the release notes once per release, with no note committed per task', () => {
