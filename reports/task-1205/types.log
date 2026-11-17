@@ -1,0 +1,8 @@
+COMMAND NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p packages/protocol/tsconfig.json --noEmit
+EXIT 0
+COMMAND NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/node/tsconfig.json --noEmit
+EXIT 0
+COMMAND NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/server/tsconfig.json --noEmit
+EXIT 0
+COMMAND NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/web/tsconfig.json --noEmit
+EXIT 0

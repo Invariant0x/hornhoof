@@ -1,0 +1,30 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/web
+
+ ✓ test/Phones.test.tsx (4 tests) 3787ms
+   ✓ shows only the owner controls and hides the live picture as soon as Stop returns 1087ms
+   ✓ uses a pairing code only for the probe and removes it before saving 629ms
+   ✓ keeps Stop when an older list request finishes afterwards 640ms
+   ✓ adds a network phone through labelled fields and returns control with Stop 1424ms
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+ ✓ test/AgentWindowCurrentTask.test.tsx (5 tests) 15127ms
+   ✓ opens the running orchestrator task instead of a newer assigned task 5103ms
+   ✓ opens a product employee task without a map employee 5313ms
+   ✓ refreshes the task after task changes without a map refresh 1578ms
+   ✓ refreshes the task after working changes without a map refresh 1422ms
+   ✓ refreshes the task after reconnected changes without a map refresh 1692ms
+ ✓ test/PhoneRecordings.test.tsx (1 test) 5834ms
+   ✓ opens recorded frames, advances on virtual time and stops at the last frame 5794ms
+ ✓ test/BigFiles.test.tsx (1 test) 1262ms
+   ✓ a file over 50 MB (1)
+     ✓ says by its name, on the task and in the chat, that it lives 30 days on one machine and is lost if that machine goes 1254ms
+
+ Test Files  4 passed (4)
+      Tests  11 passed (11)
+   Start at  03:30:54
+   Duration  158.43s (environment 34%, transform 30%, tests 17%, setup 15%, import 5%)
+
+Environment  jsdom was created 4 times · 50.81s total, 34% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

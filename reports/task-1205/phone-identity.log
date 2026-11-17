@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/node
+
+ ✓ test/phone-identity.test.ts (3 tests) 29ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  03:30:39
+   Duration  757ms (import 49%, transform 42%, tests 7%, worker 2%)
+

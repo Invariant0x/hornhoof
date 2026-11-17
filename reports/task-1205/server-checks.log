@@ -1,0 +1,235 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/spreadsheet-delivery.test.ts (14 tests) 19034ms
+   ✓ 1a. task and chat .xlsx/.csv attachments and strict download boundaries (1)
+     ✓ attaches .xlsx and .csv to a task and to chat, records chat file events, serves 1-click downloads, and blocks unauthorized viewers 3182ms
+   ✓ 1b. Telegram sendDocument delivery and recipient access boundaries (3)
+     ✓ delivers chat-attached files via Telegram sendDocument only to the turn author and drops delivery if access is revoked 1843ms
+     ✓ lets a Marketing worker without its own bot send a task .xlsx via send_telegram_file only to people allowed to see it 1301ms
+   ✓ 1b. a file to a person who connected Telegram through another bot (2)
+     ✓ goes through the next bot the person may see when they never started the department bot 1343ms
+     ✓ names the bot the person has to write to once when no bot they may see can write to them 1970ms
+   ✓ 1c. Google Sheets integration and clear .xlsx fallback when Google is not connected (1)
+     ✓ saves Google Sheets credentials only for whole-company admins, hides google_sheets from agent SQL, creates sheets, and instructs .xlsx fallback when disconnected 1280ms
+   ✓ 1c. a Google key whose spreadsheets a person can open (1)
+     ✓ takes a service account key only with the Google account its spreadsheets are shared with, and an OAuth key without one 973ms
+   ✓ the edges of a table delivered to a person (6)
+     ✓ refuses a Google key it cannot use, says so in plain words, and keeps none of it 735ms
+     ✓ creates a spreadsheet with an OAuth key, and on Google refusing tells the agent to attach the .xlsx 686ms
+     ✓ finds the person by their exact name and sends nothing a person may not see or cannot get 912ms
+     ✓ takes as the addressee only an active person of this company, never a Telegram number, a username or anyone else 512ms
+     ✓ gives a file over 50 MB on Telegram as its link, saying it lives 30 days on one machine, and goes on with the chat 2365ms
+     ✓ shows a picture an agent attached to its chat as a picture, and gives every other chat file to save 1608ms
+ ✓ test/assistants-events.test.ts (14 tests) 12398ms
+   ✓ an assistant's events (9)
+     ✓ carry the agent's answer to its message, word by word and then its end, to a long poll that waits 3061ms
+     ✓ carry the files the agent attached to its answer, which the assistant downloads for its owner 439ms
+     ✓ mark a file over 50 MB as big, and its link downloads it from the disk of the machine that took it 822ms
+     ✓ end with a failed turn as failed, and a long poll that hears nothing ends empty 863ms
+     ✓ tell of a request that waits for the owner, from before the key too, and of its end once the assistant answers it 678ms
+     ✓ show a request about administering the company, which the assistant answers as its owner would 553ms
+     ✓ go to their own assistant alone, and a request only to the assistant of the person it waits for 922ms
+     ✓ answer only what the owner may answer: a request of a department the owner does not reach is refused 1438ms
+     ✓ older than thirty days go 953ms
+   ✓ a wake at the events address (4)
+     ✓ is signed with the secret over its exact body, and tried again after a growing pause until it gets through 429ms
+     ✓ goes to OpenClaw's wake hook with the signing secret as its token, once an answer is over, from before its first word 443ms
+     ✓ goes to a Hermes webhook signed as Hermes checks it, and a request that waits no more joins the next wake 557ms
+     ✓ holds up nothing while it waits to be tried again 505ms
+   ✓ the work for assistants, stopped and started again as a server gets and loses the lead (1)
+     ✓ lets its long polls go at a stop, sends nothing while stopped, and carries events and wakes again after a new start 572ms
+ ✓ test/task-files.test.ts (11 tests) 14523ms
+   ✓ a task file (5)
+     ✓ is attached by an agent on the task and downloaded by any agent of the company by its name or id 2891ms
+     ✓ keeps the newest of two files with one name, and only the name, never a folder 422ms
+     ✓ is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there 325ms
+     ✓ still takes only pictures, up to 3 MB, without a task 360ms
+     ✓ downloads a file of several megabytes whole 3113ms
+   ✓ the room for task files (3)
+     ✓ holds 500 MB on one task and says so plainly past it 333ms
+     ✓ holds the company's setting across its tasks, 2 GB unless TASK_FILES_MB says otherwise 3713ms
+     ✓ lets go of the files of a turn closed 30 days ago, and keeps the rest 411ms
+   ✓ a task file over 50 MB (1)
+     ✓ lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open 1180ms
+   ✓ cross-department hh-fetch and attachment boundaries (2)
+     ✓ lets Development and Design employees read each other task files, full-text reviews and request pictures via hh-fetch 528ms
+     ✓ refuses another company, personal assistants, private secrets, message pictures, cross-department writes and deletes, and empty uploads 880ms
+ ❯ test/message-pictures.test.ts (20 tests | 1 failed) 51703ms
+   ❯ a picture a person sends an agent (7)
+     ✓ is kept for that agent by whoever may write to it 4933ms
+     ✓ takes its name from what it is when it comes without one 1368ms
+     ✓ is judged by what it holds, not by its name or the type it says, and any other file is kept as bytes of no type 906ms
+     ✓ is turned away when it holds nothing, as a folder does 702ms
+     × is turned away above 10 MB, far above it too, and fits at the limit, a picture and any other file alike 27002ms
+     ✓ is turned away for someone who may not write to that agent, before its bytes are stored 6821ms
+     ✓ leaves room for what the company keeps 1084ms
+   ✓ a message with pictures (8)
+     ✓ tells the agent each file and the command that downloads it, and the agent gets its bytes 820ms
+     ✓ tells the agent of a file of any kind the same way, and the agent gets its bytes 853ms
+     ✓ names files, not pictures, when a picture comes with a file 494ms
+     ✓ goes into the turn the agent runs with the same command 684ms
+     ✓ shows in the conversation as words and pictures, with file names when nothing was written 527ms
+     ✓ needs words or a picture, and takes at most 10 pictures 406ms
+     ✓ takes only the person's own pictures for this agent 628ms
+     ✓ is turned away for someone who may not write to the agent, whose picture it may be 670ms
+   ✓ getting a message's picture (5)
+     ✓ is for the agent it was sent to: another agent's turn does not get it 673ms
+     ✓ is for no agent as a file of a task, and a task file stays where it was 569ms
+     ✓ shows to people who see the agent, and no one else 679ms
+     ✓ downloads as a file under its name for people who see the agent, when it is no picture 858ms
+     ✓ goes after 30 days, with what was never sent 616ms
+ ✓ test/outbound-views.test.ts (2 tests) 6207ms
+   ✓ safe outbound & bound approval read views (2)
+     ✓ returns exact frozen content, catalog revisions, unknown recovery guidance, and escalations to the department owner with zero credential or PII leaks 5586ms
+     ✓ distinguishes read-only whole-company viewers from decision owners and denies cross-department or unauthenticated callers 482ms
+ ✓ test/assistants-messages.test.ts (8 tests) 8433ms
+   ✓ an assistant's message (4)
+     ✓ reaches the orchestrator as the CEO's own words, marked as the assistant's, with administration left to the CEO 3368ms
+     ✓ tells a head that the person responsible for its department wrote through their assistant 740ms
+     ✓ answers the questions its owner takes, one about administering the company too, recorded as the assistant's 838ms
+     ✓ is refused while the agent cannot answer, and for no words 431ms
+   ✓ files an assistant sends (4)
+     ✓ says in its owner's words why a file did not come, and keeps nothing of it 431ms
+     ✓ keeps a file over 50 MB on the disk of the machine that took it and out of the database, for the agent and the owner alike, and says plainly when it is not there 1880ms
+ ✓ test/assistants-files.test.ts (10 tests) 6870ms
+   ✓ files an assistant downloads for its owner (6)
+     ✓ downloads report.xlsx from another agent on a task its owner sees, with its bytes, type and name 2868ms
+     ✓ downloads report.pdf from another agent on a task its owner sees, with its bytes, type and name 605ms
+     ✓ uses the same visibility for files in an agent chat, a person message and a request 559ms
+     ✓ checks current owner rights on each download with the same key 595ms
+     ✓ hides a task of another person's assistant, an unreadable author, another company and missing ids with the same 404 525ms
+     ✓ tells its owner in their language, as one person to another, that a file is not there for them, the same for any file it may not have 396ms
+   ✓ a link to one file, for its owner to open on a phone (2)
+     ✓ downloads that file for 7 days with no key and no sign-in, and then says in the phone's language that the link is over 376ms
+     ✓ opens nothing for a link changed by one character, of another file, signed for something else, or of a file that is gone 394ms
+   ✓ makes a refused file delivery explicit to the agent, with its reason and no success claim 442ms
+ ❯ test/route-access.test.ts (4 tests | 1 failed) 5301ms
+   ❯ route access declarations (3)
+     × requires an explicit access rule for every registered HTTP and WS route, including static assets 2891ms
+     ✓ rejects a real newly registered route without a declaration 2298ms
+     ✓ does not mistake comments, strings, callbacks or conditional guards for an access declaration 2ms
+   ✓ audits every method of a real method-array registration 5ms
+ ✓ test/attachment-token.test.ts (9 tests) 7308ms
+   ✓ attachment authorization over the node link (9)
+     ✓ attaches to the existing conversation without revealing its tool token or opening a new step 4772ms
+     ✓ authorizes Kimi on its personal plan node and refuses the built-in node for that turn 590ms
+ ✓ test/outbound-grants.test.ts (64 tests) 41034ms
+   ✓ the tables of the gateway in the database (58)
+     ✓ are all named, and all hidden: Operations reads none of them and the orchestrator changes none 4832ms
+     ✓ give Operations no right on model_check_certificates, and the orchestrator its columns to read alone 808ms
+     ✓ give Operations no right on model_check_datasets, and the orchestrator its columns to read alone 751ms
+     ✓ give Operations no right on model_check_evaluations, and the orchestrator its columns to read alone 522ms
+     ✓ give Operations no right on model_check_revisions, and the orchestrator its columns to read alone 670ms
+     ✓ give Operations no right on model_checks, and the orchestrator its columns to read alone 721ms
+     ✓ give Operations no right on outbound_accounts, and the orchestrator its columns to read alone 856ms
+     ✓ give Operations no right on outbound_approvals, and the orchestrator its columns to read alone 1012ms
+     ✓ give Operations no right on outbound_attempts, and the orchestrator its columns to read alone 698ms
+     ✓ give Operations no right on outbound_bindings, and the orchestrator its columns to read alone 493ms
+     ✓ give Operations no right on outbound_catalog_revisions, and the orchestrator its columns to read alone 582ms
+     ✓ give Operations no right on outbound_channels, and the orchestrator its columns to read alone 714ms
+     ✓ give Operations no right on outbound_contact_events, and the orchestrator its columns to read alone 493ms
+     ✓ give Operations no right on outbound_contacts, and the orchestrator its columns to read alone 548ms
+     ✓ give Operations no right on outbound_daily_usage, and the orchestrator its columns to read alone 656ms
+     ✓ give Operations no right on outbound_events, and the orchestrator its columns to read alone 507ms
+     ✓ give Operations no right on outbound_message_revisions, and the orchestrator its columns to read alone 468ms
+     ✓ give Operations no right on outbound_messages, and the orchestrator its columns to read alone 830ms
+     ✓ give Operations no right on outbound_permissions, and the orchestrator its columns to read alone 519ms
+     ✓ give Operations no right on outbound_policies, and the orchestrator its columns to read alone 511ms
+     ✓ give Operations no right on outbound_review_receipts, and the orchestrator its columns to read alone 535ms
+     ✓ give Operations no right on outbound_sampling_counters, and the orchestrator its columns to read alone 450ms
+     ✓ give Operations no right on outbound_setup_events, and the orchestrator its columns to read alone 577ms
+     ✓ give Operations no right on support_classifications, and the orchestrator its columns to read alone 645ms
+     ✓ give Operations no right on support_tickets, and the orchestrator its columns to read alone 782ms
+     ✓ refuse every write of both roles and every read of Operations on model_check_certificates, and let the orchestrator read it 536ms
+     ✓ refuse every write of both roles and every read of Operations on model_check_datasets, and let the orchestrator read it 434ms
+     ✓ refuse every write of both roles and every read of Operations on model_check_evaluations, and let the orchestrator read it 343ms
+     ✓ refuse every write of both roles and every read of Operations on model_check_revisions, and let the orchestrator read it 617ms
+     ✓ refuse every write of both roles and every read of Operations on model_checks, and let the orchestrator read it 834ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_accounts, and let the orchestrator read it 752ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_approvals, and let the orchestrator read it 680ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_attempts, and let the orchestrator read it 807ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_bindings, and let the orchestrator read it 964ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_catalog_revisions, and let the orchestrator read it 587ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_channels, and let the orchestrator read it 450ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_contact_events, and let the orchestrator read it 368ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_contacts, and let the orchestrator read it 475ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_daily_usage, and let the orchestrator read it 877ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_events, and let the orchestrator read it 593ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_message_revisions, and let the orchestrator read it 640ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_messages, and let the orchestrator read it 772ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_permissions, and let the orchestrator read it 956ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_policies, and let the orchestrator read it 821ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_review_receipts, and let the orchestrator read it 727ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_sampling_counters, and let the orchestrator read it 719ms
+     ✓ refuse every write of both roles and every read of Operations on outbound_setup_events, and let the orchestrator read it 633ms
+     ✓ refuse every write of both roles and every read of Operations on support_classifications, and let the orchestrator read it 533ms
+     ✓ refuse every write of both roles and every read of Operations on support_tickets, and let the orchestrator read it 614ms
+     ✓ keep what is sealed from the orchestrator too: outbound_accounts.config_enc 464ms
+     ✓ keep what is sealed from the orchestrator too: outbound_contacts.address_enc 461ms
+     ✓ keep what is sealed from the orchestrator too: outbound_message_revisions.sealed_enc 396ms
+     ✓ keep what is sealed from the orchestrator too: support_tickets.text_enc 414ms
+     ✓ are owned by neither role, and no function of the schema runs with its owner's rights 392ms
+   ✓ the rules of approval (2)
+     ✓ can be read by both roles 353ms
+     ✓ cannot be changed by either 376ms
+   ✓ the owner of a department (4)
+     ✓ can be read by both roles 545ms
+     ✓ cannot be set by generic SQL: UPDATE departments SET owner_person_id = owner_person_id WHERE false 513ms
+     ✓ cannot be set by generic SQL: INSERT INTO departments (company_id, role_code, owner_person_id) SELECT company_id, 'X', owner_person_id FROM departments WHERE false 345ms
+     ✓ leaves the rest of a department to the orchestrator, as before 383ms
+stdout | test/review-1205-audit.test.ts > records whether an employee gets a bearer link to a private assistant file through Telegram delivery
+AUDIT private file: employee download 404, delivery tool returned bearer link, anonymous download 200 with exact bytes.
+
+stdout | test/review-1205-audit.test.ts > records disk consumption before a streamed upload ends and cleanup after an interrupted upload
+AUDIT stream: 52428801 bytes were on disk before end-of-body; interruption removed the partial file.
+
+ ✓ test/review-1205-audit.test.ts (2 tests) 5406ms
+   ✓ records whether an employee gets a bearer link to a private assistant file through Telegram delivery 5227ms
+ ✓ test/phone-tools.test.ts (2 tests) 4343ms
+   ✓ gives one agent the phone and queues the next until the first session ends 3739ms
+   ✓ lets the agent type a login and password it holds as text, with no tool that signs in for it 475ms
+ ✓ test/phone-lifecycle.test.ts (2 tests) 4711ms
+   ✓ owner Stop revokes before acknowledgement, cancels the queue and keeps owner control 3283ms
+   ✓ cancellation and a lost lease release the phone and promote the next live job on virtual time 1301ms
+ ✓ test/phone-recording.test.ts (1 test) 4374ms
+   ✓ keeps the session recording on the task and shows the owner its live frame 4170ms
+ ✓ test/crypto.test.ts (8 tests) 202ms
+ ✓ test/phones-migration.test.ts (1 test) 4926ms
+   ✓ adds phones on a fresh database and upgrades existing company data without changing it 4922ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/message-pictures.test.ts > a picture a person sends an agent > is turned away above 10 MB, far above it too, and fits at the limit, a picture and any other file alike
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/message-pictures.test.ts:111:3
+    109|   });
+    110|
+    111|   it('is turned away above 10 MB, far above it too, and fits at the li…
+       |   ^
+    112|     const { app, ceo, bruno } = await company();
+    113|     expect(MESSAGE_FILE_BYTES).toBe(10 * 1024 * 1024);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/route-access.test.ts > route access declarations > requires an explicit access rule for every registered HTTP and WS route, including static assets
+Error: Routes without an access declaration:
+POST /api/attachments
+ ❯ assertDeclared test/route-access.test.ts:113:29
+    111| function assertDeclared(routes: RouteOptions[]): void {
+    112|   const missing = routes.filter(route => !accessRule(route)).map(route…
+    113|   if (missing.length) throw new Error(`Routes without an access declar…
+       |                             ^
+    114| }
+    115|
+ ❯ test/route-access.test.ts:129:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 14 passed (16)
+      Tests  2 failed | 170 passed (172)
+   Start at  03:22:59
+   Duration  253.48s (tests 82%, import 13%, transform 4%)
+

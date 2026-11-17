@@ -1,0 +1,14 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/node
+
+ ✓ test/phone-executor.test.ts (6 tests) 2128ms
+   ✓ phone messages on the execution node (6)
+     ✓ reaches a phone plugged by cable into the machine by its serial number, with no address to connect to 388ms
+     ✓ sends the agent's tap in the phone's own pixels and its text, a login and password too, as the agent gave them 314ms
+     ✓ shows the agent a whole screen of a photo as a JPEG of 1568 px on its long side, elements and taps in its pixels 1407ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  03:19:02
+   Duration  3.42s (tests 66%, import 20%, transform 14%)
+

@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/packages/protocol
+
+ ✓ test/phones.test.ts (5 tests) 15ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  03:27:46
+   Duration  673ms (import 51%, transform 36%, tests 6%, worker 6%)
+

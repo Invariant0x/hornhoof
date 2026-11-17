@@ -1,0 +1,14 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/phones.test.ts (4 tests) 9433ms
+   ✓ lets any person register their network phone on a company machine, with an owner 6638ms
+   ✓ lets a person register a phone plugged by cable into the machine by its serial number 1396ms
+   ✓ never sends the node to an address on its own machine, where its agents' tools listen 539ms
+   ✓ lets the orchestrator, acting for the owner, look for a phone and stop and resume any person's phone 688ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  03:16:09
+   Duration  97.14s (transform 45%, tests 39%, import 16%)
+

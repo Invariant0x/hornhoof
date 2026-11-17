@@ -1,0 +1,228 @@
+{
+  "task": 1205,
+  "status": "DONE_WITH_CONCERNS",
+  "reviewedBranches": {
+    "iv-phone": "b859ecff716c791e09990d2c202e5ed4af89e810",
+    "iv-assistant-files": "879d89d6cb45f9a9f2a81b91395148ebc6a19f80"
+  },
+  "integrationSnapshot": "8d072390a22c5a8b57ec9976de691a4d20aa298c",
+  "repairCommit": "62ffcde48f72a970c04e9a81ac65b8aab2d35ad8",
+  "boundaryTestCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+  "scope": "Named local checks, no run_tests or whole suite. Source modules match the reviewed branch heads, except for the isolated hh-fetch fix. Audit cases were added to the integration tree and preserved as report evidence.",
+  "checks": [
+    {
+      "cwd": ".",
+      "command": "npm run -s deps",
+      "exitCode": 0,
+      "log": "deps.log"
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/phones.test.ts",
+      "exitCode": 0,
+      "passed": 4,
+      "log": "phones.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/phone-adb.test.ts",
+      "exitCode": 0,
+      "passed": 12,
+      "log": "phone-adb.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/phone-executor.test.ts",
+      "exitCode": 0,
+      "passed": 6,
+      "log": "phone-executor.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/phone-session.test.ts test/phone-keyboard.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 5,
+      "log": "phone-session-keyboard.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/fetch-partial.test.ts",
+      "exitCode": 1,
+      "failed": 1,
+      "expected": "RED on original hh-fetch implementation; previous complete file was truncated",
+      "log": "fetch-red.log"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/fetch-partial.test.ts test/attach.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 11,
+      "log": "fetch-green.log"
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/review-1205-audit.test.ts test/phone-tools.test.ts test/phone-lifecycle.test.ts test/phone-recording.test.ts test/phones-migration.test.ts test/assistants-files.test.ts test/task-files.test.ts test/attachment-token.test.ts test/route-access.test.ts test/crypto.test.ts test/outbound-views.test.ts test/outbound-grants.test.ts test/assistants-events.test.ts test/assistants-messages.test.ts test/spreadsheet-delivery.test.ts test/message-pictures.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 1,
+      "passed": 170,
+      "failed": 2,
+      "log": "server-checks.log",
+      "failures": [
+        "message-pictures.test.ts:111 runner timeout 20000 ms; 27002 ms observed",
+        "route-access.test.ts missing POST /api/attachments declaration, owned by 1196"
+      ],
+      "auditSource": "server-audit.test.ts.txt"
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/phone-identity.test.ts test/terminal-bridge.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 25,
+      "log": "node-extra.log",
+      "note": "Identity file then had 2 cases; its final 3-case version is checked below."
+    },
+    {
+      "cwd": "packages/protocol",
+      "command": "npx vitest run test/phones.test.ts",
+      "exitCode": 0,
+      "passed": 5,
+      "log": "protocol.log"
+    },
+    {
+      "cwd": "apps/server",
+      "command": "npx vitest run test/phone-access.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 1,
+      "log": "phone-access.log",
+      "note": "Tests the existing shared-task policy and filters private recording contents."
+    },
+    {
+      "cwd": "apps/node",
+      "command": "npx vitest run test/phone-identity.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 3,
+      "log": "phone-identity.log"
+    },
+    {
+      "cwd": "apps/web",
+      "command": "npx vitest run test/Phones.test.tsx test/PhoneRecordings.test.tsx test/BigFiles.test.tsx test/AgentWindowCurrentTask.test.tsx --maxWorkers=1 --no-file-parallelism",
+      "exitCode": 0,
+      "passed": 11,
+      "log": "web.log",
+      "note": "jsdom canvas warning present; no browser layout proof."
+    },
+    {
+      "cwd": ".",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p packages/protocol/tsconfig.json --noEmit",
+      "exitCode": 0,
+      "checkedCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+      "log": "types.log"
+    },
+    {
+      "cwd": ".",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/node/tsconfig.json --noEmit",
+      "exitCode": 0,
+      "checkedCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+      "log": "types.log"
+    },
+    {
+      "cwd": ".",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/server/tsconfig.json --noEmit",
+      "exitCode": 0,
+      "checkedCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+      "log": "types.log"
+    },
+    {
+      "cwd": ".",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 node node_modules/typescript/bin/tsc -p apps/web/tsconfig.json --noEmit",
+      "exitCode": 0,
+      "checkedCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+      "log": "types.log"
+    },
+    {
+      "cwd": ".",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/node/hh-fetch.cjs apps/node/test/fetch-partial.test.ts apps/node/test/phone-identity.test.ts apps/server/test/phone-access.test.ts",
+      "exitCode": 0,
+      "checkedCommit": "71318e97f04da719641810a7184e9a7c93afd627",
+      "log": "lint.log",
+      "output": "empty"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "output": "empty"
+    }
+  ],
+  "requirements": {
+    "phone company and recording privacy": [
+      "apps/server/test/phones.test.ts",
+      "apps/server/test/phone-recording.test.ts",
+      "apps/server/test/phone-access.test.ts"
+    ],
+    "phone FIFO, revocation, disconnect and identity": [
+      "apps/server/test/phone-tools.test.ts",
+      "apps/server/test/phone-lifecycle.test.ts",
+      "apps/node/test/phone-session.test.ts",
+      "apps/node/test/phone-identity.test.ts"
+    ],
+    "phone USB serial parsing and sampled ADB boundary": [
+      "packages/protocol/test/phones.test.ts",
+      "apps/node/test/phone-adb.test.ts",
+      "apps/node/test/phone-executor.test.ts"
+    ],
+    "link signatures, expiration and deleted file": [
+      "apps/server/test/crypto.test.ts",
+      "apps/server/test/assistants-files.test.ts"
+    ],
+    "large file transport, storage and cleanup": [
+      "apps/node/test/attach.test.ts",
+      "apps/node/test/terminal-bridge.test.ts",
+      "apps/server/test/task-files.test.ts",
+      "apps/server/test/assistants-messages.test.ts"
+    ],
+    "interrupted download preserves complete file": [
+      "apps/node/test/fetch-partial.test.ts"
+    ],
+    "known access declaration": [
+      "apps/server/test/route-access.test.ts",
+      "apps/server/test/attachment-token.test.ts"
+    ],
+    "confirmed security and upload findings": [
+      "reports/task-1205/server-audit.test.ts.txt"
+    ]
+  },
+  "unavailableOrExcluded": {
+    "wholeSuite": "NOT_RUN, prohibited for this assignment",
+    "coverage": "NOT_RUN, not requested",
+    "browserLayout": "NOT_RUN, no styling change made",
+    "physicalPhone": "NOT_RUN, recorded driver responses only",
+    "diskFull": "NOT_RUN, bounded stream sample only",
+    "independentReviewAndSecurity": "PENDING, no shared-branch integration performed",
+    "testSelector": "NOT_RUN, explicit manual file inventory prescribed by this review; no collection counted as execution",
+    "testProjectTypes": "NOT_RUN separately; application/package tsconfig checks passed; full test-project types belong to release checks."
+  },
+  "fileBudgetConcerns": [
+    {
+      "file": "apps/server/test/message-pictures.test.ts",
+      "milliseconds": 51703
+    },
+    {
+      "file": "apps/server/test/outbound-grants.test.ts",
+      "milliseconds": 41034
+    }
+  ],
+  "finalRefCheck": {
+    "turn-31": "a27bc368b1e027af70883d06d1da9ba2b07985ab",
+    "branchesUnchanged": true,
+    "missingCommits": {
+      "iv-phone": [],
+      "iv-assistant-files": []
+    },
+    "commands": [
+      "git fetch -q origin",
+      "git fetch -q origin turn-31:turn-31",
+      "git log --oneline turn-31..origin/iv-phone",
+      "git log --oneline turn-31..origin/iv-assistant-files"
+    ]
+  }
+}

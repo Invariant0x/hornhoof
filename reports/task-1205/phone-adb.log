@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/node
+
+ ✓ test/phone-adb.test.ts (12 tests) 138ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  03:18:40
+   Duration  1.55s (transform 72%, import 17%, tests 10%)
+

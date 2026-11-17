@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/server
+
+ ✓ test/phone-access.test.ts (1 test) 3533ms
+   ✓ refuses another company and hides recordings by an agent the task viewer cannot open 3315ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  03:29:48
+   Duration  23.11s (tests 47%, import 28%, transform 25%)
+

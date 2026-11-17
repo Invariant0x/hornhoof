@@ -1,0 +1,13 @@
+
+ RUN  v5.0.5 /data/work/agents/ce307ff7-6e36-4513-bf78-0fd71e048462/hornhoof/apps/node
+
+ ✓ test/terminal-bridge.test.ts (23 tests) 2537ms
+   ✓ the node's bridge to Hornhoof's tools (16)
+     ✓ hands on a task's files both ways, with their names and of any size, and nothing else under the picture address 2170ms
+ ✓ test/phone-identity.test.ts (2 tests) 23ms
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  03:27:36
+   Duration  4.29s (tests 68%, import 20%, transform 12%)
+
