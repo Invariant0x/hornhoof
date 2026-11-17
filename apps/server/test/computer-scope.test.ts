@@ -174,6 +174,18 @@ describe('machine access scope', () => {
     }
   });
 
+  it('names no person as the opener when the orchestrator opens access itself', async () => {
+    const c = await company();
+    await listen(c.app);
+    const client = await mcp(c.app, (await c.run(c.orchestrator)).token);
+    const called = await client.callTool({ name: 'api', arguments: { method: 'POST', path: `/api/machines/${c.machine}/access/open`, body: { scope: 'all_agents', duration: '24h', confirm: true } } });
+    expect(called.isError).not.toBe(true);
+    expect(await c.app.ctx.computer.view(c.owner, c.machine)).toMatchObject({ scope: 'all_agents', openedBy: null, openedAt: AT.toISOString() });
+    expect((await c.db.select().from(machineAccess))[0]).toMatchObject({ openedBy: null });
+    const lines = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer')));
+    expect(lines.map(line => [line.personId, (line.data as { state?: string; scope?: string }).scope])).toEqual([[null, 'all_agents']]);
+  });
+
   it('offers heads and workers command tools without asking for access', async () => {
     const c = await company();
     await listen(c.app);

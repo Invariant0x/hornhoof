@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import { requirePerson, type Person } from '../../auth/session.js';
+import { personOf, requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription } from '../conversation/queue.js';
 import { computerLine } from './expiry.js';
@@ -51,7 +51,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await served(machineId);
     const { machine, until, asked, scope } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}));
     changed(me.companyId);
-    const orchestrator = await computerLine(ctx, me.companyId, { state: 'opened', until, scope, ...(scope === 'all_agents' ? { confirm: true } : {}), ...onMachine(logName(machine)) }, me.id);
+    const orchestrator = await computerLine(ctx, me.companyId, { state: 'opened', until, scope, ...(scope === 'all_agents' ? { confirm: true } : {}), ...onMachine(logName(machine)) }, personOf(me));
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
       const note = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: { personId: me.id } });
