@@ -9,7 +9,7 @@ it.each([false, true])('restores folded inbox mail only before the carrier typed
   const { app, db } = await testApp();
   const [company] = await db.insert(companies).values({ name: 'Carrier fixture' }).returning();
   const companyId = company!.id;
-  const [owner] = await db.insert(people).values({ companyId, name: 'Owner', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+  const [owner] = await db.insert(people).values({ companyId, name: 'Owner', email: 'owner@carrier.example.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
   const [sub] = await db.insert(subscriptions).values({ companyId, ownerPersonId: owner!.id, provider: 'anthropic_api', kind: 'api_key', label: 'Fixture', status: 'needs_login' }).returning();
   const [agent] = await db.insert(agents).values({ companyId, name: 'Bruno', kind: 'worker', model: '', subscriptionId: sub!.id }).returning();
   const [carrier] = await db.insert(jobs).values({ companyId, agentId: agent!.id, subscriptionId: sub!.id, kind: 'conversation', status: 'failed', error: 'agent_failed', prompt: 'Ordinary words and the inbox summary.', inboxWake: false, timeoutMs: 900000, startedAt: new Date(), finishedAt: new Date() }).returning();
