@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, requestInternal, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
@@ -31,9 +31,9 @@ async function requireResolverJob(ctx: Ctx, job: ToolJob): Promise<void> {
     .select(idOnly(jobs))
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
-    .where(and(eq(jobs.id, job.id), eq(jobs.companyId, job.companyId), eq(jobs.agentId, job.agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(agents.kind, ['head', 'orchestrator'])))
+    .where(and(eq(jobs.id, job.id), eq(jobs.companyId, job.companyId), eq(jobs.agentId, job.agentId), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`, or(eq(jobs.kind, 'conversation'), eq(agents.kind, 'orchestrator')), inArray(agents.kind, ['head', 'orchestrator'])))
     .limit(1);
-  if (!running) throw refuse(403, 'decision_context_missing', 'The current head or orchestrator answers an internal stuck request from its own running turn.');
+  if (!running) throw refuse(403, 'decision_context_missing', 'The current head or orchestrator answers an internal stuck request from its own active job.');
 }
 
 async function answeringJob(ctx: Ctx, job: ToolJob, found: Found): Promise<void> {

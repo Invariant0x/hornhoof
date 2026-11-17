@@ -17,6 +17,7 @@ import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
+import { resolveStuck } from './stuck.js';
 import { answer, cancel, closeTask, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { editTask } from '../tracker/edit.js';
 import { mayPlan, placeOwner } from '../tracker/responsible.js';
@@ -95,6 +96,9 @@ export const AnswerBody = z.union([
   z.object({ pick: z.number().int().min(0).max(9), answer: Text.trim().optional() }).strict(),
 ]);
 
+const requestAnswer = (r: Pick<typeof requests.$inferSelect, 'id' | 'status' | 'picked' | 'answer'>) =>
+  ({ request: { id: r.id, status: r.status, picked: r.picked, answer: r.answer } });
+
 /* A person's answer to an open request, given on their screen, by the orchestrator for them or by their assistant. */
 export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.infer<typeof AnswerBody>) {
   const { db } = ctx;
@@ -102,9 +106,16 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
   if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
-  if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-  /* The orchestrator answers for the person its turn answers, under its input lock, checked again as it is kept; its call
-     of its own is the owner's answer, which says the orchestrator gave it. */
+  if (found.kind === 'stuck' && found.audience === 'internal') {
+    const jobId = me.decision?.jobId;
+    const done = viaOrchestrator(me) && me.via && jobId
+      ? await resolveStuck(ctx, { id: jobId, companyId: me.companyId, agentId: me.via }, id, body)
+      : null;
+    if (!done) throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
+    await wakeAll(ctx, done.wakes);
+    return requestAnswer(done.request);
+  }
+  /* Keep the job and who acted. A head's department principal is checked again when the answer is saved. */
   const on = delegationOf(me);
   requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
   const own = me.via && !on ? me.via : undefined;
@@ -113,7 +124,7 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   await wakeAll(ctx, done.wakes);
   /* An agent switched off while it waited for this answer leaves the work now. */
   await leaveIfOff(ctx, done.request.agentId);
-  return { request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } };
+  return requestAnswer(done.request);
 }
 
 /* The requests among these the orchestrator was asked to put into words, in a turn that waits or runs now. */

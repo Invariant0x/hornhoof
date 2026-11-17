@@ -1,10 +1,10 @@
 import { createHmac } from 'node:crypto';
-import { and, eq, gt, inArray, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { fastifyCookie } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
-import { agents, people, sessions, type ScopeKind } from '../db/schema.js';
+import { agents, jobs, people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { idOnly, only } from '../db/selections.js';
 import { ApiError } from '../errors.js';
@@ -269,14 +269,37 @@ export const employeeChangedBy = (me: Person): { personId: string | null; byOrch
 /* Who acts on a task: the person, or the orchestrator when it acts for the owner. */
 export const actorOf = (me: Person): { personId: string } | { agentId: string } => (me.via ? { agentId: me.via } : { personId: me.id });
 
+async function orchestratorPerson(db: Db, agent: { id: string; companyId: string }, jobId?: string): Promise<Person> {
+  const [owner] = await db.select(personColumns).from(people)
+    .where(and(eq(people.companyId, agent.companyId), eq(people.isOwner, true), eq(people.status, 'active')));
+  if (!owner) throw new ApiError(403, 'forbidden', 'This company has no active owner.', 'not_owner');
+  return { ...owner, scopeKind: 'company', via: agent.id, ...(jobId ? { decision: { jobId, sourceSeq: null } } : {}) };
+}
+
+async function orchestratorBearer(req: FastifyRequest, db: Db): Promise<Person | undefined> {
+  const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+  if (!token || !req.url.startsWith('/api/')) return undefined;
+  const [job] = await db.select({ id: jobs.id, agentId: agents.id, companyId: agents.companyId }).from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
+    .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`,
+      eq(agents.kind, 'orchestrator'), isNull(agents.removedAt), eq(agents.companyId, jobs.companyId)));
+  return job && orchestratorPerson(db, { id: job.agentId, companyId: job.companyId }, job.id);
+}
+
 export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person> {
   const inside = internalCall(req);
   if (inside) {
-    const [owner] = await db.select(personColumns).from(people).where(eq(people.id, inside.personId));
-    if (!owner || owner.status !== 'active') throw notSignedIn();
-    const [agent] = await db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, inside.agentId));
-    return { ...owner, via: inside.agentId, ...(agent?.kind === 'head' ? { viaHead: true as const } : {}), ...(inside.decision ? { decision: inside.decision } : {}) };
+    const [agent] = await db.select({ id: agents.id, kind: agents.kind, companyId: agents.companyId }).from(agents)
+      .where(and(eq(agents.id, inside.agentId), isNull(agents.removedAt)));
+    if (agent?.kind === 'orchestrator') return orchestratorPerson(db, agent, inside.decision?.jobId);
+    if (agent?.kind !== 'head' || !inside.personId) throw notSignedIn();
+    const [owner] = await db.select(personColumns).from(people)
+      .where(and(eq(people.id, inside.personId), eq(people.companyId, agent.companyId), eq(people.status, 'active')));
+    if (!owner) throw notSignedIn();
+    return { ...owner, via: agent.id, viaHead: true, ...(inside.decision ? { decision: inside.decision } : {}) };
   }
+  const agent = await orchestratorBearer(req, db);
+  if (agent) return agent;
   const token = req.cookies[sessionCookieOf(req)];
   const [person] = token
     ? await db

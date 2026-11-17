@@ -5,7 +5,7 @@ import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { orchestratorHeaders } from '../../auth/internal.js';
+import { orchestratorHeaders, orchestratorJobHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
 import { countOnly } from '../../db/selections.js';
@@ -254,17 +254,21 @@ type Change = (url: string, payload: object) => Promise<ReturnType<typeof say>>;
 /* A change calls the screen's route under the input lock with the agent's current principal: a head's department owner,
    otherwise the CEO, and the orchestrator's company principal. */
 function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
+  const send = async (url: string, payload: object, headers: Record<string, string>) => {
+    const res = await app.inject({ method: 'PUT', url, headers, payload });
+    if (res.statusCode < 400) return say(res.body);
+    return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
+  };
+  if (job.agentKind === 'orchestrator') return (url, payload) => send(url, payload, orchestratorJobHeaders(job));
   return (url, payload) =>
     withInputLock(ctx, job.agentId, async () => {
       const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
       if (!personId) return say(NO_PERSON, true);
-      const res = await app.inject({ method: 'PUT', url, headers: orchestratorHeaders(personId, job.agentId), payload });
-      if (res.statusCode < 400) return say(res.body);
-      return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
+      return send(url, payload, orchestratorHeaders(personId, job.agentId));
     });
 }
 
-const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
+const ORCHESTRATOR_WHO = 'In any turn as the company owner.';
 const HEAD_WHO = 'Only for your own department, in any turn with its named owner\'s rights, or the CEO\'s when it has none. No fresh human message is needed. Follow its rules and notebook.';
 
 /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */
@@ -301,7 +305,7 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
   server.registerTool(
     'set_department_owner',
     {
-      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Only in a turn that answers the CEO or the CEO delegate.',
+      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Available in any turn.',
       inputSchema: { department: Department, person: z.uuid().nullable() },
     },
     ({ department, person }) => change(`/api/departments/${department}/owner`, { personId: person }),

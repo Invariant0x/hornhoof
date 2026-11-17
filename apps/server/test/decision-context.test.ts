@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, teams } from '../src/db/schema.js';
-import { ceoPrincipal, checkDelegation, decisionPrincipal, machinePrincipal, standingPrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
+import { ceoPrincipal, checkDelegation, decisionPrincipal, machinePrincipal, standingPrincipal, typedWentIn } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { repeatedTurn } from '../src/modules/conversation/turn-words.js';
@@ -15,15 +15,7 @@ import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/mod
 import { BUILTIN } from './builtin.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
-import { ONLY_CEO_ASKED } from '../src/modules/tools/control.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
-
-/* Whose input lock decisions asked for, in order: a decision the orchestrator takes waits there for words going in. */
-const locks = vi.hoisted(() => [] as string[]);
-vi.mock('../src/modules/conversation/decision-context.js', async importOriginal => {
-  const real = await importOriginal<typeof import('../src/modules/conversation/decision-context.js')>();
-  return { ...real, lockedFor: ((ctx, on, fn) => { if (on) locks.push(on.agentId); return real.lockedFor(ctx, on, fn); }) as typeof real.lockedFor };
-});
 
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
 type Say = Extract<ServerMessage, { type: 'agent.say' }>;
@@ -68,62 +60,62 @@ async function company() {
 const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (r: Result) => r.content[0]!.text;
 
-describe('the person an orchestrator turn answers', () => {
+describe('the owner authority of an orchestrator turn', () => {
   it('keeps the CEO as principal after a visible turn fact on the agent and task', async () => {
     const c = await company();
-    const sourceSeq = await c.wrote(c.ids.ivan, 'Approve it.');
+    await c.wrote(c.ids.ivan, 'Approve it.');
     const text = 'Operations requested a program restart.';
     await c.db.update(jobs).set({ answersCeo: true, taskId: c.task.id }).where(eq(jobs.id, c.job.id));
 
     await logTurnFact(c.ctx, { ...c.job, taskId: c.task.id }, text);
 
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     expect((await listEvents(c.db, c.orchestrator.id, 0)).some(e => e.kind === 'message' && (e.data as { text?: string }).text === text)).toBe(true);
     expect(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'comment', text: `${c.orchestrator.name}: ${text}` })]));
     await c.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, c.job.id));
     expect((await earlierTalk(c.db, c.orchestrator.id)).some(e => (e.data as { text?: string }).text === text)).toBe(false);
   });
 
-  it('is the CEO or the delegate who wrote into it last, unchanged by a letter of an agent or notices of Hornhoof, and the owner otherwise', async () => {
+  it('stays with the owner after messages from the CEO, delegate, other people and agents', async () => {
     const c = await company();
     const owner = { personId: c.ids.ivan, sourceSeq: null };
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
     await c.wrote(null, 'Please approve my commit.', { from: 'agent', name: 'Hana', by: c.hana.id });
     await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
-    const first = await c.wrote(c.ids.ivan, 'Approve it.');
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: first });
+    await c.wrote(c.ids.ivan, 'Approve it.');
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
     await c.wrote(null, 'Please approve my commit.', { from: 'agent', name: 'Hana', by: c.hana.id });
     await c.wrote(null, 'Ivan took an improvement into work: "Logs".');
     await c.wrote(null, 'Ivan took an improvement into work: "Retries".');
     await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: first });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
     /* Zed sees the whole company but is not the delegate: the turn goes as the owner. */
     await c.wrote(c.ids.zed, 'Approve it.');
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
-    const daves = await c.wrote(c.ids.dave, 'Approve it.');
+    await c.wrote(c.ids.dave, 'Approve it.');
     await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.dave, sourceSeq: daves });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual(owner);
   });
 
   it('is not changed by the copy of a letter the orchestrator itself sent', async () => {
     const c = await company();
-    const ceos = await c.wrote(c.ids.ivan);
+    await c.wrote(c.ids.ivan);
     await appendOutgoing(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId: c.job.id, text: 'Please merge #1.', to: await personParty(c.ctx, c.acme.id, c.ids.zed) });
     const kept = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, c.job.id), eq(agentEvents.kind, 'message')));
     expect(kept.length).toBeGreaterThan(1);
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: ceos });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
   });
 
-  it('is whoever started a turn without messages, the owner for one Hornhoof started, and nobody once it ended or while words are on their way', async () => {
+  it('is the owner with or without messages, including during pending input', async () => {
     const c = await company();
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     await c.db.update(jobs).set({ createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.dave, sourceSeq: null });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, c.job.id));
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     await c.db.update(jobs).set({ decisionInputPending: false, status: 'done' }).where(eq(jobs.id, c.job.id));
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     const [workerTurn] = await c.db
       .insert(jobs)
       .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', createdBy: c.ids.ivan })
@@ -156,8 +148,7 @@ describe("the person a department head's turn answers", () => {
   });
 });
 
-describe('tools only the CEO asks for, in a turn', () => {
-  const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+describe('company control tools', () => {
 
   /* The CEO's turn as the window keeps one: the CEO wrote into it. */
   async function ceoTurn() {
@@ -177,19 +168,7 @@ describe('tools only the CEO asks for, in a turn', () => {
     expect((await call(c.client, 'change_person', { person: c.ids.dave, status: 'disabled' })).isError).toBeFalsy();
     expect(await c.person(c.ids.dave)).toMatchObject({ status: 'disabled', isCeoDelegate: false });
     await c.db.update(people).set({ isOwner: false }).where(eq(people.id, c.ids.ivan));
-    expect(text(await call(c.client, 'invite_again', { person: c.ids.dan }))).toBe(ONLY_CEO);
-  });
-
-  it("go as the CEO delegate in a turn that answers the delegate, whose own limits the routes see", async () => {
-    const c = await ceoTurn();
-    await c.wrote(c.ids.dave, 'Give me only Development.');
-    const locked = await call(c.client, 'change_person', { person: c.ids.dave, access: { departments: [c.dev.id] } });
-    expect(locked.isError).toBe(true);
-    expect(text(locked)).toBe('Only the CEO changes the access or status of the CEO delegate.');
-    expect(await c.person(c.ids.dave)).toMatchObject({ scopeKind: 'company', isCeoDelegate: true });
-    /* What the delegate may do on their own screen, the turn does for them. */
-    expect((await call(c.client, 'change_person', { person: c.ids.zed, title: 'Sales' })).isError).toBeFalsy();
-    expect(await c.person(c.ids.zed)).toMatchObject({ title: 'Sales' });
+    expect(text(await call(c.client, 'invite_again', { person: c.ids.dan }))).toBe('This company has no active owner.');
   });
 
   it("change an employee's own subscription after a person without the right wrote, as the owner", async () => {
@@ -199,25 +178,41 @@ describe('tools only the CEO asks for, in a turn', () => {
   });
 });
 
+it('uses the owner across named MCP, generic MCP and HTTP while delegate input is pending', async () => {
+  const c = await company();
+  const client = await mcp(c.app, TOKEN);
+  await c.wrote(c.ids.dave, 'Mark Dan as the delegate.');
+  const path = `/api/people/${c.ids.dan}/ceo-delegate`;
+  const headers = { authorization: `Bearer ${TOKEN}` };
+  expect.soft((await c.app.inject({ url: '/api/people', headers })).statusCode).toBe(200);
+  const called = await call(client, 'change_person', { person: c.ids.dave, access: { departments: [c.dev.id] } });
+  expect.soft(called.isError, text(called)).toBeFalsy();
+  await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, c.job.id));
+  const built = await call(client, 'build_structure', { items: [{ template: 'design', note: 'Screens.' }] });
+  expect(built.isError, text(built)).toBeFalsy();
+  expect((await call(client, 'api', { path: '/api/people' })).isError).toBeFalsy();
+  expect((await c.app.inject({ method: 'PUT', url: path, headers, payload: { isCeoDelegate: false } })).statusCode).toBe(200);
+});
+
 describe('answer_request in a turn', () => {
-  it('takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom', async () => {
+  it('records the agent and owner for answers regardless of the speaker', async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     for (const who of ['ivan', 'dave'] as const) {
       const request = await c.asking({ kind: 'approval', text: 'Merge?', commit: (who === 'ivan' ? 'a' : 'b').repeat(40) });
-      const seq = await c.wrote(c.ids[who], 'Approve the merge.');
+      await c.wrote(c.ids[who], 'Approve the merge.');
       const res = await call(client, 'answer_request', { request: request.id, approve: true });
       expect(res.isError, text(res)).toBeFalsy();
       const [row] = await c.db.select().from(requests).where(eq(requests.id, request.id));
-      expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids[who], answeredByAgentId: c.orchestrator.id, answerJobId: c.job.id, answerSourceSeq: seq });
+      expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answeredByAgentId: c.orchestrator.id, answerJobId: c.job.id, answerSourceSeq: null });
       const noted = (await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'answered')))).find(e => e.data.requestId === request.id);
-      expect(noted).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids[who], jobId: c.job.id, sourceSeq: seq } });
+      expect(noted).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids.ivan, jobId: c.job.id, sourceSeq: null } });
     }
     /* The task's log says whom it acted for. */
     const log = (await c.app.inject({ url: `/api/tasks/${c.task.id}`, ...as(c.tokens.ceo) })).json().task.log as { kind: string; by: { kind: string; name: string; for?: { id: string; name: string } } }[];
     expect(log.filter(l => l.kind === 'answered').map(l => l.by)).toEqual([
       { kind: 'agent', id: c.orchestrator.id, name: 'Orchestrator', for: { id: c.ids.ivan, name: 'Ivan' } },
-      { kind: 'agent', id: c.orchestrator.id, name: 'Orchestrator', for: { id: c.ids.dave, name: 'Dave' } },
+      { kind: 'agent', id: c.orchestrator.id, name: 'Orchestrator', for: { id: c.ids.ivan, name: 'Ivan' } },
     ].map(b => expect.objectContaining(b)));
   });
 
@@ -244,24 +239,24 @@ describe('answer_request in a turn', () => {
     expect((await call(client, 'answer_request', { request: first.id, approve: true })).isError).toBeFalsy();
     expect((await c.db.select().from(requests).where(eq(requests.id, first.id)))[0]).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answerSourceSeq: null });
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'd'.repeat(40) });
-    const seq = await c.wrote(c.ids.ivan, 'Approve it.');
+    await c.wrote(c.ids.ivan, 'Approve it.');
     await c.wrote(null, 'The CEO said to approve.', { from: 'agent', name: 'Hana', by: c.hana.id });
     await c.wrote(null, 'Ivan took an improvement into work: "Logs".');
     await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
     expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
     const [row] = await c.db.select().from(requests).where(eq(requests.id, approval.id));
-    expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answerSourceSeq: seq });
+    expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answerSourceSeq: null });
   });
 
-  it('applies cards in any turn: as the delegate in a turn of theirs, as the owner in one of an employee or another person', async () => {
+  it('applies cards as the owner in employee and delegate turns', async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'QA.', items: [] }).returning();
-    const seq = await c.wrote(c.ids.dave, 'Hire the QA.');
+    await c.wrote(c.ids.dave, 'Hire the QA.');
     expect((await call(client, 'hire', { department: c.dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] })).isError).toBeFalsy();
-    expect((await c.db.select().from(proposals).where(eq(proposals.id, card!.id)))[0]).toMatchObject({ status: 'applied', appliedBy: c.ids.dave });
+    expect((await c.db.select().from(proposals).where(eq(proposals.id, card!.id)))[0]).toMatchObject({ status: 'applied', appliedBy: c.ids.ivan });
     const [applied] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'applied')));
-    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.dave, jobId: c.job.id, sourceSeq: seq });
+    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.ivan, jobId: c.job.id, sourceSeq: null });
     const [second] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'A second QA.', items: [] }).returning();
     await c.wrote(c.ids.zed, 'Hire another one.');
     await c.wrote(null, 'Hire now.', { from: 'agent', name: 'Hana', by: c.hana.id });
@@ -273,25 +268,7 @@ describe('answer_request in a turn', () => {
   });
 });
 
-describe('a decision of the orchestrator as it is kept', () => {
-  it('is refused with 409 when someone wrote into the turn after the orchestrator looked, and with 403 once the turn ended', async () => {
-    const c = await company();
-    const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'e'.repeat(40) });
-    const seq = await c.wrote(c.ids.ivan, 'Approve it.');
-    const post = (sourceSeq: number | null) =>
-      c.app.inject({ method: 'POST', url: `/api/requests/${approval.id}`, payload: { approve: true }, headers: orchestratorDecisionHeaders({ personId: c.ids.ivan, agentId: c.orchestrator.id, jobId: c.job.id, sourceSeq }) });
-    await c.wrote(c.ids.ivan, 'No, wait.');
-    const stale = await post(seq);
-    expect(stale.statusCode).toBe(409);
-    expect(stale.json().error.reason).toBe('decision_context_changed');
-    expect(await c.open(approval.id)).toBe(true);
-    await c.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, c.job.id));
-    const ended = await post(seq + 1);
-    expect(ended.statusCode).toBe(403);
-    expect(ended.json().error.reason).toBe('decision_context_missing');
-    expect(await c.open(approval.id)).toBe(true);
-  });
-
+describe('authentication of an orchestrator decision', () => {
   it('takes the decision headers only from Hornhoof itself', async () => {
     const c = await company();
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'f'.repeat(40) });
@@ -303,26 +280,6 @@ describe('a decision of the orchestrator as it is kept', () => {
     expect(await c.open(approval.id)).toBe(true);
   });
 
-  it('waits for words going into the turn, and goes by them once they are kept', async () => {
-    const c = await company();
-    const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: '1'.repeat(40) });
-    await c.wrote(c.ids.ivan, 'Approve it.');
-    let release!: () => void;
-    const held = withInputLock(c.ctx, c.orchestrator.id, () => new Promise<void>(r => (release = r)));
-    const client = await mcp(c.app, TOKEN);
-    let done = false;
-    const asked = locks.filter(id => id === c.orchestrator.id).length;
-    const answering = call(client, 'answer_request', { request: approval.id, approve: true }).then(r => ((done = true), r));
-    await until(() => locks.filter(id => id === c.orchestrator.id).length > asked);
-    expect(done).toBe(false);
-    /* Zed's words went in meanwhile, kept before the lock goes. */
-    await c.wrote(c.ids.zed, 'Approve it.');
-    release();
-    await held;
-    const res = await answering;
-    expect(res.isError).toBe(true);
-    expect(await c.open(approval.id)).toBe(true);
-  });
 });
 
 describe('words typed into a running orchestrator turn', () => {
@@ -340,28 +297,28 @@ describe('words typed into a running orchestrator turn', () => {
   }
   const pending = async (c: Awaited<ReturnType<typeof company>>) => (await c.db.select().from(jobs).where(eq(jobs.id, c.job.id)))[0]!.decisionInputPending;
 
-  it('leave the turn without a person from before they are typed until their message is kept', async () => {
+  it('records when live input is pending and keeps owner authority', async () => {
     const c = await company();
     const sent = liveTerminal(c);
-    const ivans = await c.wrote(c.ids.ivan, 'Approve it.');
+    await c.wrote(c.ids.ivan, 'Approve it.');
     const going = enqueueTurn(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, prompt: 'Hana wrote: approve it.', createdBy: null, message: { personId: null, text: 'approve it', from: 'agent', name: 'Hana', by: c.hana.id } });
     await until(() => sent.length === 1);
     expect(await pending(c)).toBe(true);
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     said(c.ctx, BUILTIN, sent[0]!.ref, true);
     expect(await going).toBe(c.job.id);
     expect(await pending(c)).toBe(false);
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: ivans });
-    /* Another person's words in the same way give the turn that person, the delegate here. */
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
+    /* The delegate's words follow the same delivery path. */
     const dave = enqueueTurn(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, prompt: 'Dave: approve it.', createdBy: c.ids.dave, message: { personId: c.ids.dave, text: 'approve it' } });
     await until(() => sent.length === 2);
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
     said(c.ctx, BUILTIN, sent[1]!.ref, true);
     await dave;
-    expect(await decisionPrincipal(c.db, c.job.id)).toMatchObject({ personId: c.ids.dave });
+    expect(await decisionPrincipal(c.db, c.job.id)).toMatchObject({ personId: c.ids.ivan });
   });
 
-  it('keep the turn without a person when the node does not say they went in', async () => {
+  it('keeps owner authority when the node does not confirm input', async () => {
     const c = await company();
     const sent = liveTerminal(c);
     await c.wrote(c.ids.ivan, 'Approve it.');
@@ -370,7 +327,7 @@ describe('words typed into a running orchestrator turn', () => {
     said(c.ctx, BUILTIN, sent[0]!.ref, false);
     expect(await going).not.toBe(c.job.id);
     expect(await pending(c)).toBe(true);
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
   });
 });
 
@@ -390,8 +347,6 @@ describe('words of a person to an agent directly', () => {
 });
 
 describe("a turn's mark that it answers the CEO", () => {
-  /* The second is for a machine the CEO owns, as the server's own is. */
-  const principals = async (c: Awaited<ReturnType<typeof company>>) => [await ceoPrincipal(c.db, c.job.id), await machinePrincipal(c.db, c.job.id, c.ids.ivan)];
   const answeredBy = async (c: Awaited<ReturnType<typeof company>>, id: string) => (await c.db.select().from(requests).where(eq(requests.id, id)))[0]!.answeredBy;
 
   it('leaves a release approval and a choice waiting for their own answer when the CEO delegate writes to the agent', async () => {
@@ -406,39 +361,29 @@ describe("a turn's mark that it answers the CEO", () => {
     expect(await answeredBy(c, ceos.id)).toBe(c.ids.dave);
   });
 
-  it.each([true, false])('gives no right to machines by itself, set to %s: they go by the last person who wrote and their own right', async answersCeo => {
+  it.each([true, false])('keeps the owner as principal when the conversation mark is %s', async answersCeo => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     await c.db.update(jobs).set({ answersCeo, createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
-
     await c.wrote(c.ids.zed, 'Approve it.');
-    expect(await principals(c)).toEqual([c.ids.ivan, null]);
-
-    /* A note of Hornhoof changes nobody's right: the turn still answers the last person who wrote. */
+    expect(await ceoPrincipal(c.db, c.job.id)).toBe(c.ids.ivan);
     await c.wrote(c.ids.dave, 'Approve it.');
     await c.wrote(null, 'A note of Hornhoof.', { notification: { source: 'wait_ended', tasks: [] } });
-    expect(await principals(c)).toEqual([c.ids.dave, c.ids.dave]);
+    expect(await ceoPrincipal(c.db, c.job.id)).toBe(c.ids.ivan);
     expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
-    expect(await answeredBy(c, approval.id)).toBe(c.ids.dave);
-  });
-
-  it("does not make a repeated turn of the CEO delegate a click on the computer's access", async () => {
-    const c = await company();
-    await c.db.update(jobs).set({ answersCeo: true, createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
-    await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId: c.job.id, kind: 'typed', data: { text: 'Go on.' }, personId: null });
-    expect(await principals(c)).toEqual([c.ids.ivan, null]);
+    expect(await answeredBy(c, approval.id)).toBe(c.ids.ivan);
   });
 });
 
-describe('who spoke last in a turn, for a command on a machine', () => {
+describe("who spoke last in a head's turn, for a command on a machine", () => {
   const HORNHOOF_PARTY = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
   type Fixture = Awaited<ReturnType<typeof company>>;
-  /* Another running turn of the orchestrator, which nobody wrote into yet. */
+  /* A running turn of the head, which nobody wrote into yet. */
   const turn = async (c: Fixture, more: Partial<typeof jobs.$inferInsert> = {}) =>
-    (await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.orchestrator.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', ...more }).returning())[0]!;
+    (await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', ...more }).returning())[0]!;
   const into = (c: Fixture, jobId: string, data: Record<string, unknown>, kind: 'message' | 'typed' = 'message', personId: string | null = null) =>
-    appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId, kind, data, personId });
+    appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.hana.id, jobId, kind, data, personId });
   const notice = async (c: Fixture, jobId: string, source: string, actor: string | null, more: Record<string, unknown> = {}) =>
     into(c, jobId, { text: `A notice of ${source}.`, notification: { source, tasks: [] }, ...(actor ? { actor: await personParty(c.ctx, c.acme.id, actor) } : {}), ...more });
 
@@ -451,12 +396,13 @@ describe('who spoke last in a turn, for a command on a machine', () => {
     await notice(c, nobodys.id, 'computer_access', c.ids.zed, { computerAccess: { machineId: randomUUID() } });
     expect(await machinePrincipal(c.db, nobodys.id, c.ids.dan)).toBe(c.ids.dan);
     /* Zed took an improvement: his words, though Hornhoof tells them. */
-    await notice(c, c.job.id, 'improvement', c.ids.zed);
-    expect(await machinePrincipal(c.db, c.job.id, c.ids.dan)).toBeNull();
+    const spoken = await turn(c);
+    await notice(c, spoken.id, 'improvement', c.ids.zed);
+    expect(await machinePrincipal(c.db, spoken.id, c.ids.dan)).toBeNull();
     /* The CEO answered after him, and an employee reported since. */
-    await notice(c, c.job.id, 'answered', c.ids.ivan);
-    await into(c, c.job.id, { text: 'Done.', notification: { source: 'reported', tasks: [] }, actor: await agentParty(c.ctx, c.acme.id, c.hana.id) });
-    expect(await machinePrincipal(c.db, c.job.id, c.ids.dan)).toBe(c.ids.ivan);
+    await notice(c, spoken.id, 'answered', c.ids.ivan);
+    await into(c, spoken.id, { text: 'Done.', notification: { source: 'reported', tasks: [] }, actor: await agentParty(c.ctx, c.acme.id, c.hana.id) });
+    expect(await machinePrincipal(c.db, spoken.id, c.ids.dan)).toBe(c.ids.ivan);
     /* A wake a person's comment on a task made names them. */
     const woken = await turn(c);
     await notice(c, woken.id, 'comment', c.ids.zed);
@@ -472,7 +418,7 @@ describe('who spoke last in a turn, for a command on a machine', () => {
     /* Dan owns the machine. Each turn holds one kind of words. */
     const raw = async (data: Record<string, unknown>) => {
       const one = await turn(c);
-      await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.orchestrator.id, jobId: one.id, kind: 'message', data, personId: null });
+      await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.hana.id, jobId: one.id, kind: 'message', data, personId: null });
       return machinePrincipal(c.db, one.id, c.ids.dan);
     };
     const kept = async (data: Record<string, unknown>) => {
@@ -514,7 +460,7 @@ describe('who spoke last in a turn, for a command on a machine', () => {
   it("counts the letters a person sent that woke an inbox turn", async () => {
     const c = await company();
     const letter = (jobId: string, from: { personId?: string; agentId?: string }) =>
-      c.db.insert(agentInbox).values({ companyId: c.acme.id, agentId: c.orchestrator.id, jobId, kind: 'notification', source: 'improvement', text: 'Take it.', ...(from.personId ? { senderKind: 'person' as const, senderPersonId: from.personId, senderName: 'Zed' } : { senderKind: 'agent' as const, senderAgentId: from.agentId!, senderName: 'Hana' }) });
+      c.db.insert(agentInbox).values({ companyId: c.acme.id, agentId: c.hana.id, jobId, kind: 'notification', source: 'improvement', text: 'Take it.', ...(from.personId ? { senderKind: 'person' as const, senderPersonId: from.personId, senderName: 'Zed' } : { senderKind: 'agent' as const, senderAgentId: from.agentId!, senderName: 'Hana' }) });
     const agentsOnly = await turn(c, { inboxWake: true });
     await letter(agentsOnly.id, { agentId: c.hana.id });
     expect(await machinePrincipal(c.db, agentsOnly.id, c.ids.dan)).toBe(c.ids.dan);
@@ -556,7 +502,7 @@ describe('management after the turn that answered a person ended', () => {
 
   it("lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked", async () => {
     const c = await company();
-    const seq = await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Hire a QA into Development once the Codex test answers, and give it a Mobile sub-unit for urgent work.');
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Hire a QA into Development once the Codex test answers, and give it a Mobile sub-unit for urgent work.');
     await notice(c, c.orchestrator.id, c.job.id);
     expect((await c.db.select().from(jobs).where(eq(jobs.id, c.job.id)))[0]!.answersCeo).toBe(false);
     const client = await mcp(c.app, TOKEN);
@@ -564,7 +510,7 @@ describe('management after the turn that answered a person ended', () => {
     expect(hired.isError, text(hired)).toBeFalsy();
     expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD', 'DEV-QA']);
     const [applied] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'applied')));
-    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.ivan, jobId: c.job.id, sourceSeq: seq });
+    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.ivan, jobId: c.job.id, sourceSeq: null });
     const built = await call(client, 'build_structure', { items: [{ department: c.dev.id, checked: true, teams: ['Mobile'] }] });
     expect(built.isError, text(built)).toBeFalsy();
     const [mobile] = await c.db.select().from(teams).where(eq(teams.departmentId, c.dev.id));
@@ -636,7 +582,7 @@ describe('management after the turn that answered a person ended', () => {
     const client = await mcp(c.app, TOKEN);
     expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe('The updater is not running. Run install.sh server again to update.');
     await c.db.update(people).set({ isOwner: false }).where(eq(people.id, c.ids.ivan));
-    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe(ONLY_CEO_ASKED);
+    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe('This company has no active owner.');
   });
 
   it('gives an ordinary employee no management tool, whoever asked it before', async () => {

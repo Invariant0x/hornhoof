@@ -95,6 +95,7 @@ async function requireTakes(ctx: Ctx, me: Person, agent: AgentRow, task: Written
 /* A person's words to an agent, from its window, through its Telegram bot or by the person's assistant, under that person's
    own rights: whoever calls this has checked that they may write to the agent. Returns the turn the words went into. */
 export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input: Written): Promise<string> {
+  if (agent.kind === 'assistant' && me.via) throw new ApiError(403, 'forbidden', 'Only its own person can write to this assistant.', 'assistant_not_allowed');
   if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
   const pictures = await ownPictures(ctx, me, agent.id, input.pictures);
   await requireTakes(ctx, me, agent, input.task);
