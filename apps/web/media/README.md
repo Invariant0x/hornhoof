@@ -31,6 +31,12 @@ Keep intermediate `.webm` videos and `.json` timing marks under `apps/web/media/
 KEEP_MEDIA_RESULTS=1 npm --prefix apps/web run media
 ```
 
+### On GitHub
+
+`.github/workflows/media.yml` renders the scenes for a push to any `media-*` branch and keeps the new GIFs as the `media-gifs` artifact, and the videos, marks, failure shots and log as `media-results`. Where the repository variables `BUILD_RUNS_ON` and `BUILDKIT_ENDPOINT` name our own runner and its BuildKit, the scenes run in a build of `apps/web/media/Dockerfile` there, as that runner has no Docker daemon; otherwise a GitHub machine runs `run.sh` with Docker. Download the GIFs with `gh run download <run> -n media-gifs`, look at their frames, and commit the ones you want into `.github/assets/`.
+
+`run.sh` also runs inside the Playwright image itself with `MEDIA_IN_CONTAINER=1`, and writes the GIFs to `MEDIA_ASSETS_DIR` when it is set. A failed scene no longer stops the others from being converted; the run still fails at the end.
+
 Typecheck all media data files and scene specs against `apps/web/src/types.ts`:
 
 ```sh
@@ -45,7 +51,9 @@ All fixtures are strongly typed against `apps/web/src/types.ts` and `@hornhoof/p
 - `moonfern/plans.ts`: The seven AI subscriptions, utilization windows, and reset timestamps (`subscriptions.gif`).
 - `moonfern/machines.ts`: All ten machines, CPU/memory/disk load, active test-run parts, and connection history (`machines.gif`). A runtime check verifies that the pool totals equal 10 machines, 112 cores, and 296 GB of RAM.
 - `moonfern/agents.ts`: Five departments, employees, models, and live "doing" lines (`map.gif`, `build.gif`, `development.gif`, `terminal.gif`, `machines.gif`, `subscriptions.gif`).
-- `moonfern/tasks.ts`: Turn 6 ("Launch the iOS beta", 40 tasks, 24 done) and the three waiting requests (`tasks.gif`).
+- `moonfern/tasks.ts`: Turn 6 ("Launch the iOS beta", 40 tasks, 24 done), later tasks and the camera flow's subtasks, the company goals with their smaller goals (`goals.gif`), the people who answer for each department, the pipeline "Beta build way" (`board.gif`), the three waiting requests (`tasks.gif`), and the history of #237 with thirty one-shot calls and a judge call (`calls.gif`).
+- `moonfern/route.ts`: A task's route at a stage, for tasks on the map and in the tree.
+- `moonfern/tracker-scene.ts`: Helpers of the tracker scenes: pick a view, scroll smoothly, and print the `/api` paths no mock answered.
 - `moonfern/images.ts`: Three SVG onboarding card variants served from `/api/attachments/*` for the designer's choice card.
 - `moonfern/tree.ts` and `moonfern/tree-clock.ts`: Sequence of `DepartmentTree` snapshots for Turn 6 (`tree.gif` and `speed.gif`), advancing the clock so idle and blocked developers move forward, tasks merge into `turn-6`, and multi-maker turn review verdicts appear.
 - `moonfern/oak-lane.ts`: Complete dataset for the Oak Lane home company (`home.gif`).
@@ -74,4 +82,5 @@ node -e 'console.log(0, Buffer.from("moonfern$ npm test\r\n").toString("base64")
 Each file in `scenes/*.spec.ts` produces one animated GIF in `.github/assets/` (no static PNGs are emitted):
 
 - Every scene calls `createSceneRecorder(page)` (`moonfern/record.ts`), calls `await recorder.markReady()` once the initial screen and fonts have settled (trimming initial page load frames), restores its opening state at the end so the loop closes cleanly, and finishes with `await recorder.finishGif('<name>')`.
-- `run.sh` removes any stale `machines.png` or `subscriptions.png`, converts each video with `ffmpeg` from `mark.startSec` for `mark.durationSec` at 12 fps, width 1200 (`1200x750`), temporal denoise (`atadenoise`), `palettegen=stats_mode=diff` (stepping `max_colors` down from 64 through 48, 32, 24, 16 if needed), and `paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle` (`-loop 0`), and checks that every GIF is under 6 MB (`8..10 s` for `machines.gif` and `subscriptions.gif`, `6..12 s` for the other nine scenes).
+- `run.sh` removes any stale `machines.png` or `subscriptions.png`, converts each video with `ffmpeg` from `mark.startSec` for `mark.durationSec` at 12 fps, width 1200 (`1200x750`), temporal denoise (`atadenoise`), `palettegen=stats_mode=diff` (stepping `max_colors` down from 64 through 48, 32, 24, 16 if needed), and `paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle` (`-loop 0`), and checks that every GIF is under 6 MB (`8..10 s` for `machines.gif` and `subscriptions.gif`, `6..12 s` for the other scenes).
+- `skins.spec.ts` adds a skin from a file made from the Cyberpunk sample, the way the guide "Your own skin in a minute" says.

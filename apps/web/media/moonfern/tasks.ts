@@ -1,7 +1,9 @@
-import type { AgentRef, Decisions, TaskDetail, TaskLine, TaskStatus, TurnView, WaitingRequest } from '../../src/types';
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
+import type { AgentRef, Decisions, GoalView, PersonRef, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskStatus, TurnView, WaitingRequest } from '../../src/types';
 import { PLACEMENTS } from './agents';
-import { isoMinutes } from './clock';
-import { LEO_VIEW, MAYA_VIEW } from './people';
+import { BASE_ISO, isoMinutes } from './clock';
+import { LEO_VIEW, MAYA_VIEW, SAM_VIEW } from './people';
+import { routeAt } from './route';
 
 const refOf = (agentId: string): AgentRef => {
   const p = PLACEMENTS.find(x => x.employee.id === agentId)!;
@@ -84,10 +86,74 @@ if (TURN_6_SEEDS.length !== 40 || TURN_6_SEEDS.filter(s => s[5] === 'done').leng
   throw new Error('Moonfern Turn 6 must have 40 tasks with 24 done.');
 }
 
-export const MOONFERN_TASKS: TaskLine[] = TURN_6_SEEDS.map((s, idx) => {
-  const [number, title, brief, dept, agentId, status, stage = 0, waitsFor = [], bounces = 0] = s;
+/* Work after Turn 6 nobody has started yet, and the three parts of the camera flow, #221. */
+const LATER_SEEDS: TaskSeed[] = [
+  [241, 'Background sync retry backoff on cellular', 'Back off sync retries on weak cellular so the battery lasts the day.', 'dev', 'dev-6', 'open'],
+  [242, 'Widget refresh budget on iOS 18', 'Refresh the watering widget at most four times an hour.', 'dev', 'dev-8', 'open'],
+  [243, 'Low-light exposure hint banner', 'Tell the grower to move closer to a window when the photo is too dark.', 'dev', 'dev-1', 'open'],
+  [237, 'Care guide pages for 30 common houseplants', 'One page per plant: light, water, soil, pets and the usual mistake.', 'mkt', 'mkt-seo', 'working'],
+];
+const CAMERA_PARTS: TaskSeed[] = [
+  [244, 'Frame guide overlay for the leaf', 'Show where to hold the leaf so the classifier sees it whole.', 'dev', 'dev-1', 'done'],
+  [245, 'White balance for indoor light', 'Correct warm lamp light before the photo reaches the classifier.', 'dev', 'dev-1', 'working'],
+  [246, 'Top three species cards', 'Show the three likeliest species with their care in one line each.', 'dev', 'dev-1', 'open'],
+];
+
+export const MAYA: PersonRef = { id: MAYA_VIEW.id, name: MAYA_VIEW.name };
+export const LEO: PersonRef = { id: LEO_VIEW.id, name: LEO_VIEW.name };
+export const SAM: PersonRef = { id: SAM_VIEW.id, name: SAM_VIEW.name };
+
+/* What the company aims at: 500 testers, and under it what Development, Design and Marketing each answer for. */
+const goal = (id: string, number: number, title: string, over: Partial<GoalView>): GoalView => ({
+  id, number, title, why: '', department: null, parentId: 'g-1', responsible: MAYA, target: null, current: null, unit: '', dueAt: null,
+  status: 'active', progress: null, done: 0, total: 0, version: 1, mayEdit: true, ...over,
+});
+const GOAL_SEEDS: GoalView[] = [
+  goal('g-1', 1, '500 TestFlight testers by December', { why: 'Real growers show us what to fix before the App Store launch.', parentId: null, target: 500, current: 312, unit: 'testers', dueAt: '2026-12-01T00:00:00.000Z' }),
+  goal('g-2', 2, 'A beta build testers can trust', { why: 'Camera ID, reminders and sync must just work on the first day.', department: PLACES.dev, responsible: SAM, dueAt: '2026-11-28T00:00:00.000Z' }),
+  goal('g-5', 5, 'Works offline', { why: 'Plants live in rooms with bad Wi-Fi.', department: PLACES.dev, parentId: 'g-2', responsible: SAM }),
+  goal('g-3', 3, 'A store page that wins installs', { why: 'Most testers find us through the store page.', department: PLACES.dsn, responsible: LEO }),
+  goal('g-4', 4, 'Waitlist to 1,000 sign-ups', { why: 'Every sign-up is a tester we can invite.', department: PLACES.mkt, responsible: LEO, target: 1000, current: 640, unit: 'sign-ups' }),
+];
+const OFFLINE = new Set([213, 216, 219, 226, 241]);
+const goalOf = (number: number, dept: keyof typeof PLACES): string => {
+  if (dept === 'dev') return OFFLINE.has(number) ? 'g-5' : 'g-2';
+  if (dept === 'dsn') return 'g-3';
+  if (dept === 'mkt') return 'g-4';
+  return 'g-1';
+};
+const RESPONSIBLE: Record<keyof typeof PLACES, PersonRef> = { dev: SAM, dsn: LEO, mkt: LEO, ops: MAYA, biz: MAYA };
+const WHY: Partial<Record<number, string>> = {
+  218: 'Testers get reminders the day the beta opens.',
+  221: 'Naming a plant from a photo is why people install Moonfern.',
+  225: 'Growers bring the plants they already keep in lists.',
+  227: 'Someone can water the plants while the grower is away.',
+  230: 'The first card decides whether a tester adds a second plant.',
+};
+
+/* The way every Development change goes: built, reviewed by another maker, checked for security and smoke-tested on
+   TestFlight. */
+export const MOONFERN_PIPELINE: Pipeline = {
+  id: 'pl-beta', department: PLACES.dev, name: 'Beta build way', archived: false, version: 1, mayEdit: true,
+  why: 'Every change is built, reviewed by another maker, checked for security and smoke-tested on TestFlight.',
+  stages: [
+    { id: 's-build', parentId: null, name: 'Build', ownerRole: null, owner: null, position: 0 },
+    { id: 's-review', parentId: 's-build', name: 'Review', ownerRole: null, owner: { id: 'rev-codex', name: 'Marcus' }, position: 0 },
+    { id: 's-security', parentId: 's-review', name: 'Security', ownerRole: null, owner: { id: 'dev-sec', name: 'Petra' }, position: 0 },
+    { id: 's-smoke', parentId: 's-security', name: 'TestFlight smoke test', ownerRole: null, owner: { id: 'dev-test', name: 'Gideon' }, position: 0 },
+  ],
+};
+const STAGE_IDS = ['s-build', 's-review', 's-security', 's-smoke'];
+
+function line(s: TaskSeed, idx: number, turn: number | null, parentId: string | null = null): TaskLine {
+  const [number, title, brief, dept, agentId, status, stage = 0, waitsFor = []] = s;
   const gateCount = dept === 'dev' ? 3 : 0;
+  const updatedAt = isoMinutes(-45 + (idx % 30));
+  const since = status === 'waiting' ? isoMinutes(-(40 + (idx % 5) * 9)) : isoMinutes(-(25 + (idx % 7) * 23));
+  const waiting = status === 'waiting' ? [{ who: { kind: 'person' as const, ...(dept === 'dsn' ? LEO : MAYA) }, since }] : [];
+  const onWay = dept === 'dev' && gateCount > 0;
   return {
+    echelons: routeAt(stage, gateCount),
     id: `t-${number}`,
     number,
     title,
@@ -96,20 +162,56 @@ export const MOONFERN_TASKS: TaskLine[] = TURN_6_SEEDS.map((s, idx) => {
     department: PLACES[dept],
     product: null,
     assignee: refOf(agentId),
-    stage,
-    gateCount,
-    merging: false,
-    bounces,
-    turn: 6,
-    parentId: null,
+    turn,
+    parentId,
     waitsFor,
+    goal: (() => { const g = GOAL_SEEDS.find(x => x.id === goalOf(number, dept))!; return { id: g.id, number: g.number, title: g.title }; })(),
+    responsible: RESPONSIBLE[dept],
+    why: WHY[number] ?? '',
+    dueAt: number === 218 || number === 221 ? '2026-11-20T00:00:00.000Z' : number === 230 ? '2026-11-19T00:00:00.000Z' : null,
+    time: { inStatusSince: status === 'done' ? updatedAt : since, workSeconds: 600 + ((number * 977) % 9000), waitsOn: waiting },
+    pipelineId: onWay ? MOONFERN_PIPELINE.id : null,
+    pipelineStageId: onWay && status !== 'open' ? STAGE_IDS[Math.min(stage, 3)]! : null,
     createdAt: isoMinutes(-300 + idx * 4),
-    updatedAt: isoMinutes(-45 + (idx % 30)),
+    updatedAt,
   };
+}
+
+export const MOONFERN_TASKS: TaskLine[] = [
+  ...TURN_6_SEEDS.map((s, idx) => line(s, idx, 6)),
+  ...LATER_SEEDS.map((s, idx) => line(s, 40 + idx, null)),
+  ...CAMERA_PARTS.map((s, idx) => line(s, 44 + idx, 6, 't-221')),
+];
+
+/* Each goal's tasks done of all of them, cancelled aside, counted over its smaller goals too; a number to reach wins. */
+export const MOONFERN_GOALS: GoalView[] = GOAL_SEEDS.map(g => {
+  const under = (id: string): string[] => [id, ...GOAL_SEEDS.filter(x => x.parentId === id).flatMap(x => under(x.id))];
+  const ids = new Set(under(g.id));
+  const mine = MOONFERN_TASKS.filter(t => t.goal && ids.has(t.goal.id) && t.status !== 'cancelled');
+  const done = mine.filter(t => t.status === 'done').length;
+  const progress = g.target ? Math.min(1, (g.current ?? 0) / g.target) : mine.length ? done / mine.length : null;
+  return { ...g, done, total: mine.length, progress };
+});
+
+export const MOONFERN_TASK_DEPARTMENTS: TaskDepartments = {
+  whole: true,
+  mayPlanCompany: true,
+  departments: [
+    { ...PLACES.dev, templateKey: null, mine: true, mayPlan: true, responsible: SAM },
+    { ...PLACES.dsn, templateKey: null, mine: true, mayPlan: true, responsible: LEO },
+    { ...PLACES.mkt, templateKey: null, mine: true, mayPlan: true, responsible: LEO },
+    { ...PLACES.ops, templateKey: null, mine: true, mayPlan: true, responsible: MAYA },
+    { ...PLACES.biz, templateKey: null, mine: true, mayPlan: true, responsible: MAYA },
+  ],
+};
+
+const turn = (over: Pick<TurnView, 'id' | 'number' | 'title' | 'goal' | 'status' | 'messages' | 'taskId' | 'startedAt' | 'openedAt' | 'closedAt' | 'tasks'>): TurnView => ({
+  version: over.status === 'closed' ? `v0.${over.number}.0` : null, commit: null, baseVersion: over.status === 'closed' ? null : 'v0.5.0',
+  departmentId: PLACES.dev.id, releases: true, ...over,
 });
 
 export const MOONFERN_TURNS: TurnView[] = [
-  {
+  turn({
     id: 'turn-6',
     number: 6,
     title: 'Launch the iOS beta',
@@ -127,21 +229,8 @@ export const MOONFERN_TURNS: TurnView[] = [
     openedAt: isoMinutes(-318),
     closedAt: null,
     tasks: { total: 40, done: 24 },
-  },
-  {
-    id: 'turn-7',
-    number: 7,
-    title: 'Nursery partner directory and Android waitlist',
-    goal: 'Add local nursery care tags and open the Android beta signup.',
-    status: 'planned',
-    messages: [],
-    taskId: null,
-    startedAt: isoMinutes(-120),
-    openedAt: null,
-    closedAt: null,
-    tasks: { total: 14, done: 0 },
-  },
-  {
+  }),
+  turn({
     id: 'turn-5',
     number: 5,
     title: 'Offline plant journal and watering engine',
@@ -153,7 +242,7 @@ export const MOONFERN_TURNS: TurnView[] = [
     openedAt: isoMinutes(-1795),
     closedAt: isoMinutes(-400),
     tasks: { total: 32, done: 32 },
-  },
+  }),
 ];
 
 export const INITIAL_MOONFERN_REQUESTS: WaitingRequest[] = [
@@ -227,7 +316,6 @@ export function buildDecisions(requests: WaitingRequest[]): Decisions {
   return {
     requests,
     proposals: [],
-    computerAccess: null,
     counts: {
       byPerson,
       byAgent,
@@ -236,32 +324,70 @@ export function buildDecisions(requests: WaitingRequest[]): Decisions {
   };
 }
 
+/* The thirty plants Jonah's one-shot calls each wrote a care page for, and the brief they shared. */
+export const CARE_PLANTS = [
+  'Pothos', 'Monstera', 'Snake plant', 'ZZ plant', 'Peace lily', 'Spider plant', 'Rubber plant', 'Fiddle leaf fig', 'Calathea', 'Philodendron',
+  'Aloe vera', 'Jade plant', 'Boston fern', 'Chinese evergreen', 'Dracaena', 'English ivy', 'Bird of paradise', 'Prayer plant', 'String of pearls', 'Ponytail palm',
+  'Parlor palm', 'Hoya', 'Peperomia', 'Begonia', 'Anthurium', 'Croton', 'Areca palm', 'Cast iron plant', 'Haworthia', 'Orchid',
+] as const;
+const CARE_BRIEF = 'Write one care page for the plant in your input, in the format of moonfern.app/care/pothos: light, water, soil, pets, and the one mistake new growers make. Return Markdown only.';
+
+const call = (number: number, input: string | null, startMin: number, minutes: number, result: string, over: Record<string, unknown> = {}): TaskLogLine => ({
+  kind: 'call',
+  text: '',
+  data: { batch: 'b1d2c3e4-0000-4000-8000-000000000237', number, judge: false, brief: CARE_BRIEF, input, stage: null, status: 'done', error: null, verdict: null, result,
+    startedAt: isoMinutes(startMin), finishedAt: isoMinutes(startMin + minutes), ...over },
+  by: { kind: 'agent', id: 'mkt-seo', name: 'Jonah' },
+  at: isoMinutes(startMin + minutes),
+});
+
+/* What the history of #237 keeps: the task given, then the calls that answered and the judge that read them all. */
+const CARE_LOG: TaskLogLine[] = [
+  { kind: 'created', text: '', data: null, by: { kind: 'agent', id: 'mkt-head', name: 'Robin' }, at: isoMinutes(-70) },
+  { kind: 'assigned', text: '', data: null, by: { kind: 'agent', id: 'mkt-head', name: 'Robin' }, at: isoMinutes(-70) },
+  call(1, 'Pothos', -24, 3, '## Pothos\nBright, indirect light. Water when the top 2 cm are dry. Toxic to cats and dogs.'),
+  call(2, 'Monstera', -24, 4, '## Monstera\nBright, indirect light, a moss pole as it climbs. Water every 1 to 2 weeks.'),
+  call(3, 'Snake plant', -24, 2, '## Snake plant\nAny light. Water once a month in winter: the usual mistake is too much water.'),
+  call(30, 'Orchid', -21, 3, '## Orchid\nEast window, water by soaking for 10 minutes, let it drain fully.'),
+  {
+    ...call(31, null, -17, 2, 'All 30 pages follow the format and give the pet warning. Calls 7 and 19 named the same mistake for different plants; both are fixed.', {
+      judge: true, brief: 'Read the 30 pages. Check the format, the pet warning and that no two pages repeat each other. Fix what you find.', verdict: { pass: true, reason: 'All 30 pages are ready to publish.' },
+    }),
+  },
+];
+
 export function moonfernTaskDetail(taskId: string): TaskDetail | null {
-  const line = MOONFERN_TASKS.find(t => t.id === taskId);
-  if (!line) return null;
-  const devGates = line.department?.id === 'dept-dev' && line.gateCount > 0
-    ? [
-        { ...refOf('rev-codex'), state: (line.stage > 1 ? 'passed' : line.stage === 1 ? 'current' : 'next') as 'passed' | 'current' | 'next' },
-        { ...refOf('dev-sec'), state: (line.stage > 2 ? 'passed' : line.stage === 2 ? 'current' : 'next') as 'passed' | 'current' | 'next' },
-        { ...refOf('dev-test'), state: (line.stage >= 3 ? 'current' : 'next') as 'current' | 'next' },
-      ]
-    : [];
+  const found = MOONFERN_TASKS.find(t => t.id === taskId);
+  if (!found) return null;
+  const head = found.department?.id === 'dept-dev' ? 'dev-head' : found.department?.id === 'dept-mkt' ? 'mkt-head' : 'dsn-head';
+  const headName = PLACEMENTS.find(p => p.employee.id === head)?.employee.name ?? 'Dana';
+  const by = { kind: 'agent' as const, id: head, name: headName };
+  const subtasks = MOONFERN_TASKS.filter(t => t.parentId === found.id);
+  const log: TaskLogLine[] = found.id === 't-237' ? CARE_LOG : [
+    { kind: 'created', text: '', data: null, by, at: found.createdAt },
+    { kind: 'assigned', text: '', data: null, by, at: found.createdAt },
+    ...(found.status === 'open' ? [] : [{ kind: 'status', text: '', data: { fromStatus: 'open', toStatus: 'working' }, by, at: isoMinutes(minutesAgoOf(found.createdAt) > 60 ? -60 : -20) }]),
+  ];
   return {
-    ...line,
-    body: `${line.brief}\n\n### Acceptance criteria\n- Works offline without blocking the main thread.\n- Covered by unit tests on the Turn 6 branch.\n- Verified in light and dark appearance on iPhone.`,
-    parent: { id: 't-201', number: 201, title: 'Launch the iOS beta' },
-    after: line.waitsFor.map(num => {
+    ...found,
+    echelonFindings: emptyEchelonFindings(),
+    body: `${found.brief}\n\n### Done when\n- It works offline and never blocks the main thread.\n- Its tests pass on the Turn 6 branch.\n- It reads well in light and dark on iPhone.`,
+    parent: found.parentId ? { id: found.parentId, number: Number(found.parentId.slice(2)), title: MOONFERN_TASKS.find(t => t.id === found.parentId)?.title ?? '' } : null,
+    after: found.waitsFor.map(num => {
       const dep = MOONFERN_TASKS.find(x => x.number === num);
       return { id: dep?.id ?? `t-${num}`, number: num, title: dep?.title ?? `Task #${num}`, status: dep?.status ?? 'working' };
     }),
-    executor: line.assignee,
-    gates: devGates,
-    createdBy: { kind: 'agent', id: 'dev-head', name: 'Dana' },
-    subtasks: [],
-    log: [
-      { kind: 'created', text: '', data: null, by: { kind: 'agent', id: 'dev-head', name: 'Dana' }, at: line.createdAt },
-      { kind: 'assigned', text: '', data: null, by: { kind: 'agent', id: 'dev-head', name: 'Dana' }, at: line.createdAt },
-    ],
+    neededFor: MOONFERN_TASKS.filter(x => x.waitsFor.includes(found.number)).map(x => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
+    mayEdit: true,
+    version: 1,
+    revision: 1,
+    executor: found.assignee,
+    createdBy: by,
+    subtasks,
+    log,
     requests: [],
+    files: [],
   };
 }
+
+const minutesAgoOf = (iso: string) => Math.round((Date.parse(BASE_ISO) - Date.parse(iso)) / 60_000);
