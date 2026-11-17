@@ -1,0 +1,71 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ✓ test/test-runs.test.ts (40 tests) 18627ms
+   ✓ a test run (24)
+     ✓ runs on a machine that joined without a plan, as on any machine of the company 3135ms
+     ✓ splits into parts across the freest machines, puts each log on the task and wakes the agent with the result 462ms
+     ✓ runs one part at a time on a machine, and a part that finds none free waits for the first that frees up 354ms
+     ✓ waits while no machine has the free memory its repository needs 330ms
+     ✓ leaves out a machine its owner took back, and one whose owner does not reach the repository 544ms
+     ✓ fails a part that runs past its time, and tells its node to stop it 357ms
+     ✓ stops on stop_tests: its parts end, their nodes stop them, and nobody is woken 471ms
+     ✓ wakes its agent when another one stopped it 387ms
+     ✓ keeps a part through a 60-second disconnect and accepts its result after return 453ms
+     ✓ runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost 311ms
+     ✓ takes no end from the machine that was away once its part runs on another machine, and tells it to stop 301ms
+     ✓ does not count a turn that ended while its test run goes on as standing still 535ms
+     ✓ gives no part to the server’s own built-in node when the computer it runs on is taken back 543ms
+     ✓ runs the parts of a machine disconnected from the company, and of a removed plan, again on another machine 686ms
+     ✓ brings its result into the turn that already waits on the task 461ms
+     ✓ is refused without a repository, without {part} in a split command, past 3 open runs, and without a task 619ms
+   ✓ pinned product environment runs (3)
+     ✓ requests metadata before parts, retains its snapshot, and runs final checks after the suite 833ms
+     ✓ ignores an answer from an unassigned node and terminates invalid metadata without a successful empty run 441ms
+     ✓ cancels a pending description and refuses a late snapshot after stop 362ms
+   ✓ refuses a successful product result with missing receipt evidence 490ms
+   ✓ refuses a successful product result with wrong-selection receipt evidence 1120ms
+   ✓ refuses a successful product result with wrong-hash receipt evidence 467ms
+   ✓ selects a capable sibling volume, holds no machine to where it ran before as each has the harness, and goes on when one disappears 426ms
+ ✓ test/test-runs-hosts.test.ts (19 tests) 12039ms
+   ✓ parts on physical computers (19)
+     ✓ sends run_tests parts to a free machine while another waits for an update 3598ms
+     ✓ sends run_work parts to a free machine while another waits for an update 1139ms
+     ✓ uses the selected node with 2 GB, even when its sibling reports 12 GB last 758ms
+     ✓ uses the selected node with 12 GB, even when its sibling reports 2 GB last 768ms
+     ✓ groups reports received through the node protocol without injecting hub state 657ms
+     ✓ sends the next run to another host even when a sibling container looks idle 494ms
+     ✓ keeps the next run queued until a part on the shared host ends 324ms
+     ✓ allows two places on one host when configured and queues the third 626ms
+     ✓ uses the newest report of a shared host even when its other container reported an idle host earlier 363ms
+     ✓ reserves the shared host between parts of one run in one queue pass 367ms
+     ✓ keeps the host slot occupied while a disconnected node may still run its part 364ms
+     ✓ tries another physical computer when a sibling container lost a part 392ms
+     ✓ recovers the occupied host from the database when its sibling reconnects before it after a server restart 487ms
+     ✓ queues and explains a run whose host has memory but whose container does not 365ms
+ ✓ test/test-runs-wait.test.ts (49 tests) 14816ms
+   ✓ a run that ends while the one who started it waits (47)
+     ✓ run_tests (8)
+       ✓ ends the wait and wakes the agent once with the result and where to read it, when it passes 2857ms
+       ✓ ends the wait and wakes the agent once when its tests or command fail 445ms
+       ✓ ends the wait and wakes the agent once when it runs out of time 371ms
+     ✓ run_work (8)
+       ✓ ends the wait and wakes the agent once when the agent stops it from another turn 309ms
+       ✓ wakes the agent once, after the last part, when it has several 340ms
+     ✓ tells the agent of each run that ends, also of one that ended after it waited again 356ms
+     ✓ keeps both results in the one turn that waits when two runs end before it starts 324ms
+     ✓ and its wait names which run it is for (10)
+       ✓ refuses a wait for a run that ended, one of another task or one that never was 321ms
+     ✓ refuses a wait while the result of run_tests waits for the agent in a turn 415ms
+     ✓ refuses a wait while the result of run_work waits for the agent in a turn 457ms
+   ✓ rejects a stale wait after unread check when run_work commits its result before the wait write 460ms
+ ✓ test/test-runs-work.test.ts (12 tests) 5282ms
+   ✓ a run of other work (6)
+     ✓ runs a command with no branch on a free machine, hands its node the task's files it names, and puts what it made on the task 2635ms
+     ✓ drops what a lost attempt put on the task, so the part that runs again makes its own files 379ms
+     ✓ runs a part again after its machine went offline only when the run said it may run twice, and says why it did not 335ms
+
+ Test Files  4 passed (4)
+      Tests  120 passed (120)
+   Start at  11:40:59
+   Duration  104.92s (tests 88%, import 10%, transform 2%)

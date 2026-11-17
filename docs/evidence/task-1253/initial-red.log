@@ -1,0 +1,78 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ❯ test/check-queue.test.ts (10 tests | 1 failed) 11ms
+   ❯ physical machine admission across subscription nodes (6)
+     × reads holders and FIFO waiters without admitting, releasing or changing a claim 4ms
+     ✓ refuses a request without a registered machine instead of leaving its caller waiting 0ms
+     ✓ does not refresh an old load measurement when the same node asks for a slot 0ms
+     ✓ shares FIFO slots across nodes and prevents another node from releasing them 1ms
+     ✓ keeps machines independent and treats only a live queued job as waiting 1ms
+     ✓ revokes stale leases and holds their slots through the cleanup grace 0ms
+   ✓ a lease counts from when the machine was last heard (1)
+     ✓ keeps the lease of a machine heard while its load waits to be handled, and ends the one of a silent machine 0ms
+   ✓ a machine whose connection drops keeps its leases for 90 s (3)
+     ✓ keeps the lease of a machine back within 90 s and answers its claim with the lease it held 2ms
+     ✓ ends the leases of a machine away for 90 s, and its late claim, without queueing it anew 0ms
+     ✓ ends a claim to resume a lease that another machine holds, and leaves that lease alone 0ms
+ ❯ test/test-runs-slots.test.ts (4 tests | 4 failed) 4512ms
+   ❯ reading a part that waits for a machine check slot (4)
+     × shows the current holder and ordered queue for tests, and updates on release 1318ms
+     × shows the current holder and ordered queue for work, and updates on release 1187ms
+     × keeps inaccessible holders private and refuses an unrelated reader before showing slot details 761ms
+     × identifies an agent check by its task without treating its label as a run 1244ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/check-queue.test.ts > physical machine admission across subscription nodes > reads holders and FIFO waiters without admitting, releasing or changing a claim
+TypeError: queue.inspect is not a function
+ ❯ test/check-queue.test.ts:26:24
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > shows the current holder and ordered queue for tests, and updates on release
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > shows the current holder and ordered queue for work, and updates on release
+TypeError: Cannot read properties of undefined (reading 'id')
+ ❯ stand test/test-runs-slots.test.ts:20:127
+     18|   const [owner] = await c.db.select().from(people).where(eq(people.isO…
+     19|   const [machine] = await c.db.insert(machines).values({ companyId: c.…
+     20|   const [node] = await c.db.insert(nodes).values({ companyId: c.task.c…
+       |                                                                                                                               ^
+     21|   const id = nodeIdentity(node!.id);
+     22|   vi.spyOn(c.app.ctx.hub, 'loadOf').mockImplementation(() => ({ ...idl…
+ ❯ test/test-runs-slots.test.ts:45:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > keeps inaccessible holders private and refuses an unrelated reader before showing slot details
+TypeError: Cannot read properties of undefined (reading 'id')
+ ❯ stand test/test-runs-slots.test.ts:20:127
+     18|   const [owner] = await c.db.select().from(people).where(eq(people.isO…
+     19|   const [machine] = await c.db.insert(machines).values({ companyId: c.…
+     20|   const [node] = await c.db.insert(nodes).values({ companyId: c.task.c…
+       |                                                                                                                               ^
+     21|   const id = nodeIdentity(node!.id);
+     22|   vi.spyOn(c.app.ctx.hub, 'loadOf').mockImplementation(() => ({ ...idl…
+ ❯ test/test-runs-slots.test.ts:65:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > identifies an agent check by its task without treating its label as a run
+TypeError: Cannot read properties of undefined (reading 'id')
+ ❯ stand test/test-runs-slots.test.ts:20:127
+     18|   const [owner] = await c.db.select().from(people).where(eq(people.isO…
+     19|   const [machine] = await c.db.insert(machines).values({ companyId: c.…
+     20|   const [node] = await c.db.insert(nodes).values({ companyId: c.task.c…
+       |                                                                                                                               ^
+     21|   const id = nodeIdentity(node!.id);
+     22|   vi.spyOn(c.app.ctx.hub, 'loadOf').mockImplementation(() => ({ ...idl…
+ ❯ test/test-runs-slots.test.ts:76:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 9 passed (14)
+   Start at  11:17:06
+   Duration  16.82s (tests 38%, transform 34%, import 28%)

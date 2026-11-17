@@ -1,0 +1,78 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253-baseline/apps/server
+
+ × test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once with the result and where to read it, when it passes 45860ms
+   → Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when its tests or command fail
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when it runs out of time
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when someone else stops it
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when the agent stops it from another turn
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > wakes the agent once, after the last part, when it has several
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > wakes the agent once as before when it does not wait
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > wakes nobody on a task cancelled meanwhile
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once with the result and where to read it, when it passes
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once when its tests or command fail
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once when it runs out of time
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once when someone else stops it
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once when the agent stops it from another turn
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > wakes the agent once, after the last part, when it has several
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > wakes the agent once as before when it does not wait
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_work > wakes nobody on a task cancelled meanwhile
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > wakes the agent when the machine is gone for good
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > wakes the agent when a test run was lost as often as it may be
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > tells the agent of each run that ends, also of one that ended after it waited again
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > keeps both results in the one turn that waits when two runs end before it starts
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > leaves a wait of its starter alone when it names no run, and tells it of run_tests all the same
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > leaves a wait of its starter alone when it names no run, and tells it of run_work all the same
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > lets the agent end the wait it no longer needs as it reads the result, with no wake at its deadline
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > refuses end_wait with no wait, and on the wait of another holder
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > leaves a wait for another run alone, and ends with the run it names
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > gives no second wake at the deadline of a wait run_tests ended
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > gives no second wake at the deadline of a wait run_work ended
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > ends a wait that came back at its deadline when its run ends later, with no new wake for the wait
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > refuses a wait for a run that ended, one of another task or one that never was
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > and its wait names which run it is for > takes no wait for the run of someone else
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > run_tests keeps who started it and makes up no date with no policy, not even from its limit
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > run_work keeps who started it and makes up no date with no policy, not even from its limit
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > gives each stage its own clock from its policy, with the time counted from that stage
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > goes to its retry clock when a machine loses a part, and back to executing
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > stands at the host slot while a machine that can take it has no room, on a clock of its own
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > ends once with its result when it passes
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > ends once with its result when it fails
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > is cancelled when the run is stopped
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > ends with its task closed meanwhile, and the run ending later changes nothing
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > is refused with its run where the department set dates and none for where a run starts
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > its own wait > stays with no plan when no head is there to review it
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > leaves another holder's wait alone when run_tests ends and still tells its starter
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > leaves another holder's wait alone when run_work ends and still tells its starter
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > refuses a wait while the result of run_tests waits for the agent in a turn
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > refuses a wait while the result of run_work waits for the agent in a turn
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > refuses a wait while the result of run_tests is still on its way to a turn
+ ↓ test/test-runs-wait.test.ts > a run that ends while the one who started it waits > refuses a wait while the result of run_work is still on its way to a turn
+ ↓ test/test-runs-wait.test.ts > rejects a stale wait after unread check when run_tests commits its result before the wait write
+ ↓ test/test-runs-wait.test.ts > rejects a stale wait after unread check when run_work commits its result before the wait write
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once with the result and where to read it, when it passes
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:58:5
+     56| describe('a run that ends while the one who started it waits', () => {
+     57|   describe.each(RUN_TOOLS)('$tool', run => {
+     58|     it('ends the wait and wakes the agent once with the result and whe…
+       |     ^
+     59|       const c = await company();
+     60|       const ivan = await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 48 skipped (49)
+   Start at  12:01:01
+   Duration  304.03s (transform 48%, tests 29%, import 23%)
+
+::hh-test-timing::{"kind":"file","package":"apps/server","file":"test/test-runs-wait.test.ts","totalMs":161016,"setupMs":156587,"testsMs":4405,"teardownMs":24,"slowest":[{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once with the result and where to read it, when it passes","ms":4405},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when its tests or command fail","ms":0},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when it runs out of time","ms":0},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when someone else stops it","ms":0},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when the agent stops it from another turn","ms":0}]}
+::hh-test-timing::{"kind":"package","package":"apps/server","tests":49,"medianTestMs":0,"slowerThanMedian":1}

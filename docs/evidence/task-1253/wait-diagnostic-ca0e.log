@@ -1,0 +1,146 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ❯ test/test-runs-wait.test.ts (49 tests | 6 failed) 328718ms
+   ❯ a run that ends while the one who started it waits (47)
+     ❯ run_tests (8)
+       × ends the wait and wakes the agent once with the result and where to read it, when it passes 56311ms
+       × ends the wait and wakes the agent once when its tests or command fail 26064ms
+       × ends the wait and wakes the agent once when it runs out of time 24245ms
+       × ends the wait and wakes the agent once when someone else stops it 46997ms
+       × ends the wait and wakes the agent once when the agent stops it from another turn 42377ms
+       × wakes the agent once, after the last part, when it has several 35524ms
+       ✓ wakes the agent once as before when it does not wait 11723ms
+       ✓ wakes nobody on a task cancelled meanwhile 1318ms
+     ✓ run_work (8)
+       ✓ ends the wait and wakes the agent once with the result and where to read it, when it passes 853ms
+       ✓ ends the wait and wakes the agent once when its tests or command fail 887ms
+       ✓ ends the wait and wakes the agent once when it runs out of time 1363ms
+       ✓ ends the wait and wakes the agent once when someone else stops it 6608ms
+       ✓ ends the wait and wakes the agent once when the agent stops it from another turn 2260ms
+       ✓ wakes the agent once, after the last part, when it has several 1008ms
+       ✓ wakes the agent once as before when it does not wait 1357ms
+       ✓ wakes nobody on a task cancelled meanwhile 3572ms
+     ✓ wakes the agent when the machine is gone for good 1844ms
+     ✓ wakes the agent when a test run was lost as often as it may be 1820ms
+     ✓ tells the agent of each run that ends, also of one that ended after it waited again 2959ms
+     ✓ keeps both results in the one turn that waits when two runs end before it starts 5370ms
+     ✓ and its wait names which run it is for (10)
+       ✓ leaves a wait of its starter alone when it names no run, and tells it of run_tests all the same 1979ms
+       ✓ leaves a wait of its starter alone when it names no run, and tells it of run_work all the same 526ms
+       ✓ lets the agent end the wait it no longer needs as it reads the result, with no wake at its deadline 1627ms
+       ✓ refuses end_wait with no wait, and on the wait of another holder 665ms
+       ✓ leaves a wait for another run alone, and ends with the run it names 1608ms
+       ✓ gives no second wake at the deadline of a wait run_tests ended 1036ms
+       ✓ gives no second wake at the deadline of a wait run_work ended 1089ms
+       ✓ ends a wait that came back at its deadline when its run ends later, with no new wake for the wait 754ms
+       ✓ refuses a wait for a run that ended, one of another task or one that never was 1012ms
+       ✓ takes no wait for the run of someone else 866ms
+     ✓ its own wait (11)
+       ✓ run_tests keeps who started it and makes up no date with no policy, not even from its limit 742ms
+       ✓ run_work keeps who started it and makes up no date with no policy, not even from its limit 1005ms
+       ✓ gives each stage its own clock from its policy, with the time counted from that stage 1587ms
+       ✓ goes to its retry clock when a machine loses a part, and back to executing 1592ms
+       ✓ stands at the host slot while a machine that can take it has no room, on a clock of its own 3414ms
+       ✓ ends once with its result when it passes 2279ms
+       ✓ ends once with its result when it fails 1562ms
+       ✓ is cancelled when the run is stopped 1174ms
+       ✓ ends with its task closed meanwhile, and the run ending later changes nothing 1213ms
+       ✓ is refused with its run where the department set dates and none for where a run starts 1299ms
+       ✓ stays with no plan when no head is there to review it 1055ms
+     ✓ leaves another holder's wait alone when run_tests ends and still tells its starter 4598ms
+     ✓ leaves another holder's wait alone when run_work ends and still tells its starter 5089ms
+     ✓ refuses a wait while the result of run_tests waits for the agent in a turn 2956ms
+     ✓ refuses a wait while the result of run_work waits for the agent in a turn 1610ms
+     ✓ refuses a wait while the result of run_tests is still on its way to a turn 962ms
+     ✓ refuses a wait while the result of run_work is still on its way to a turn 797ms
+   ✓ rejects a stale wait after unread check when run_tests commits its result before the wait write 2362ms
+   ✓ rejects a stale wait after unread check when run_work commits its result before the wait write 6104ms
+::hh-test-timing::{"kind":"file","package":"apps/server","file":"test/test-runs-wait.test.ts","totalMs":396734,"setupMs":296417,"testsMs":99379,"teardownMs":938,"slowest":[{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when the agent stops it from another turn","ms":11991},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once with the result and where to read it, when it passes","ms":9759},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when someone else stops it","ms":7387},{"name":"a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when it runs out of time","ms":7019},{"name":"a run that ends while the one who started it waits > run_work > ends the wait and wakes the agent once when someone else stops it","ms":6133}]}
+::hh-test-timing::{"kind":"package","package":"apps/server","tests":49,"medianTestMs":1118,"slowerThanMedian":24}
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once with the result and where to read it, when it passes
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:58:5
+     56| describe('a run that ends while the one who started it waits', () => {
+     57|   describe.each(RUN_TOOLS)('$tool', run => {
+     58|     it('ends the wait and wakes the agent once with the result and whe…
+       |     ^
+     59|       const c = await company();
+     60|       const ivan = await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when its tests or command fail
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:76:5
+     74|     });
+     75|
+     76|     it('ends the wait and wakes the agent once when its tests or comma…
+       |     ^
+     77|       const c = await company();
+     78|       const ivan = await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when it runs out of time
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:85:5
+     83|     });
+     84|
+     85|     it('ends the wait and wakes the agent once when it runs out of tim…
+       |     ^
+     86|       const c = await company();
+     87|       const ivan = await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when someone else stops it
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:94:5
+     92|     });
+     93|
+     94|     it('ends the wait and wakes the agent once when someone else stops…
+       |     ^
+     95|       const c = await company();
+     96|       await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > ends the wait and wakes the agent once when the agent stops it from another turn
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:103:5
+    101|     });
+    102|
+    103|     it('ends the wait and wakes the agent once when the agent stops it…
+       |     ^
+    104|       const c = await company();
+    105|       await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  test/test-runs-wait.test.ts > a run that ends while the one who started it waits > run_tests > wakes the agent once, after the last part, when it has several
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/test-runs-wait.test.ts:111:5
+    109|     });
+    110|
+    111|     it('wakes the agent once, after the last part, when it has several…
+       |     ^
+    112|       const c = await company();
+    113|       const ivan = await c.machine(c.ceo, 'dev-mac');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 43 passed (49)
+   Start at  11:57:06
+   Duration  582.50s (tests 83%, import 9%, transform 8%)

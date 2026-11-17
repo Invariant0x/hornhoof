@@ -1,0 +1,119 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ❯ test/test-runs-slots.test.ts (4 tests | 4 failed) 4616ms
+   ❯ reading a part that waits for a machine check slot (4)
+     × shows the current holder and ordered queue for tests, and updates on release 591ms
+     × shows the current holder and ordered queue for work, and updates on release 865ms
+     × keeps inaccessible holders private and refuses an unrelated reader before showing slot details 1863ms
+     × identifies an agent check by its task without treating its label as a run 1295ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > shows the current holder and ordered queue for tests, and updates on release
+AssertionError: expected { part: 1, status: 'running', …(7) } to match object { queuePosition: 2, …(1) }
+(8 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "checkSlot": {
+-     "ahead": [
+-       {
+-         "kind": "tests",
+-         "part": 1,
+-         "position": 1,
+-         "run": 2,
+-       },
+-     ],
+-     "capacity": 1,
+-     "holders": [
+-       {
+-         "kind": "work",
+-         "part": 1,
+-         "run": 1,
+-         "since": "2026-11-17T11:19:31.407Z",
+-         "task": 1,
+-       },
+-     ],
+-     "machine": "home-api",
+-     "position": 2,
+-     "state": "queued",
+-   },
+    "queuePosition": 2,
+  }
+
+ ❯ test/test-runs-slots.test.ts:47:18
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > shows the current holder and ordered queue for work, and updates on release
+AssertionError: expected { part: 1, status: 'running', …(8) } to match object { queuePosition: 2, …(1) }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "checkSlot": {
+-     "ahead": [
+-       {
+-         "kind": "work",
+-         "part": 1,
+-         "position": 1,
+-         "run": 2,
+-       },
+-     ],
+-     "capacity": 1,
+-     "holders": [
+-       {
+-         "kind": "work",
+-         "part": 1,
+-         "run": 1,
+-         "since": "2026-11-17T11:19:32.284Z",
+-         "task": 1,
+-       },
+-     ],
+-     "machine": "home-api",
+-     "position": 2,
+-     "state": "queued",
+-   },
+    "queuePosition": 2,
+  }
+
+ ❯ test/test-runs-slots.test.ts:47:18
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > keeps inaccessible holders private and refuses an unrelated reader before showing slot details
+TypeError: Cannot read properties of undefined (reading 'holders')
+ ❯ test/test-runs-slots.test.ts:67:27
+     65|     const s = await stand('tests', true);
+     66|     const part = (await s.read()).parts[0];
+     67|     expect(part.checkSlot.holders).toEqual([{ kind: 'unavailable', sin…
+       |                           ^
+     68|     expect(part.waiting).toContain('details unavailable');
+     69|     expect(JSON.stringify(part)).not.toContain('Private work');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > identifies an agent check by its task without treating its label as a run
+TypeError: Cannot read properties of undefined (reading 'holders')
+ ❯ test/test-runs-slots.test.ts:84:27
+     82|     await new Promise<void>(resolve => setImmediate(resolve));
+     83|     const part = (await s.read()).parts[0];
+     84|     expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', tas…
+       |                           ^
+     85|     expect(part.waiting).not.toMatch(/[\r\n]/);
+     86|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  11:17:53
+   Duration  12.05s (tests 69%, import 22%, transform 9%)

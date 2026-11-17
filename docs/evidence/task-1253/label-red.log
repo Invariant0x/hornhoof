@@ -1,0 +1,48 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ❯ test/test-runs-slots.test.ts (7 tests | 1 failed | 5 skipped) 1121ms
+   ❯ reading a part that waits for a machine check slot (7)
+     ↓ shows the current holder and ordered queue for tests, and updates on release
+     ↓ shows the current holder and ordered queue for work, and updates on release
+     ↓ keeps inaccessible holders private and refuses an unrelated reader before showing slot details
+     × identifies an agent check by its task with a part label 533ms
+     ✓ identifies an agent check by its task with a line break 521ms
+     ↓ keeps multiple predecessors in their FIFO order
+     ↓ does not mistake an unrecorded part for an empty queue during startup
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > identifies an agent check by its task with a part label
+AssertionError: expected [ { kind: 'work', run: 1, …(5) } ] to match object [ { kind: 'check', task: 1, …(3) } ]
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  [
+    {
+-     "agent": "Bruno",
+-     "kind": "check",
+-     "label": "Run part 437f1ece-e662-4f21-a352-0abccff8b61a",
++     "kind": "work",
+      "since": "2026-11-17T11:31:00.472Z",
+      "task": 1,
+    },
+  ]
+
+ ❯ test/test-runs-slots.test.ts:85:36
+     83|     await new Promise<void>(resolve => setImmediate(resolve));
+     84|     const part = (await s.read()).parts[0];
+     85|     expect(part.checkSlot.holders).toMatchObject([{ kind: 'check', tas…
+       |                                    ^
+     86|     expect(part.waiting).not.toMatch(/[\r\n]/);
+     87|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 5 skipped (7)
+   Start at  11:29:24
+   Duration  6.87s (import 48%, tests 38%, transform 13%)

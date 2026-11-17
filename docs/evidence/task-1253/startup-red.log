@@ -1,0 +1,42 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1253/apps/server
+
+ ❯ test/test-runs-slots.test.ts (6 tests | 1 failed | 5 skipped) 782ms
+   ❯ reading a part that waits for a machine check slot (6)
+     ↓ shows the current holder and ordered queue for tests, and updates on release
+     ↓ shows the current holder and ordered queue for work, and updates on release
+     ↓ keeps inaccessible holders private and refuses an unrelated reader before showing slot details
+     ↓ identifies an agent check by its task without treating its label as a run
+     ↓ keeps multiple predecessors in their FIFO order
+     × does not mistake an unrecorded part for an empty queue during startup 779ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/test-runs-slots.test.ts > reading a part that waits for a machine check slot > does not mistake an unrecorded part for an empty queue during startup
+AssertionError: expected { machine: 'home-api', …(5) } to match object { state: 'not_recorded', …(2) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "capacity": 0,
+-   "queued": 1,
+    "state": "not_recorded",
+  }
+
+ ❯ test/test-runs-slots.test.ts:105:28
+    103|     await receiveCheckRequest(s.c.app.ctx, s.id, { type: 'check.acquir…
+    104|     const part = (await s.read()).parts[0];
+    105|     expect(part.checkSlot).toMatchObject({ state: 'not_recorded', capa…
+       |                            ^
+    106|     expect(part.waiting).not.toContain('Queue is empty');
+    107|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  11:21:45
+   Duration  10.65s (import 60%, transform 20%, tests 20%)
