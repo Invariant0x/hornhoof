@@ -203,16 +203,18 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('defaults to asking only for a new kind: a kind goes free once approved, however it is typed', async () => {
+  it('defaults to asking only for a new kind of spend: a kind goes free once approved, however it is typed', async () => {
     const c = await company();
     const ask = await bruno(c);
-    await ask({ channel: 'message', kind: 'Welcome  email' });
-    const [first] = await openRequests(c);
+    await ask({ channel: 'spend', kind: 'Office  supplies' });
+    const requests = await openRequests(c);
+    expect(requests).toHaveLength(1);
+    const [first] = requests;
     expect((await answer(c, first!.id, true)).statusCode).toBe(200);
-    const again = await ask({ channel: 'message', kind: ' WELCOME   Email' });
+    const again = await ask({ channel: 'spend', kind: ' OFFICE   Supplies' });
     expect(said(again)).toMatch(/no approval/i);
     expect(await openRequests(c)).toEqual([]);
-    await ask({ channel: 'message', kind: 'invoice reminder' });
+    await ask({ channel: 'spend', kind: 'travel booking' });
     expect(await openRequests(c)).toHaveLength(1);
   });
 
