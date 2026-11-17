@@ -6,8 +6,6 @@ import type { Peer } from '../../net/peer-server.js';
 import { stampOf } from './copy.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 
-/* The path a machine that stopped holding the company's data puts what it held to, on the keeper that leads. */
-export const UPLOAD_PATH = /^\/peer\/upload\/([0-9a-f-]{36})$/;
 /* In the control folder of the machine that uploads: what its keeper asks its updater for, { id }. */
 export const UPLOAD_FILE = 'upload.json';
 /* In the control folder of the leader: what its keeper asks its updater to load, { id, machine, file, database,
