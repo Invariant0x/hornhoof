@@ -105,7 +105,13 @@ export class Tmux {
 
   async protectOutput(name: string): Promise<void> {
     this.recordings.protect(name);
-    await this.clearRecording(name);
+    try {
+      await this.run(['pipe-pane', '-t', name]);
+    } catch {
+      if (await this.has(name)) throw new Error('Sensitive terminal recording could not be stopped.');
+    } finally {
+      this.recordings.remove(name);
+    }
   }
 
   /* The arguments that reach this server; viewers attach with them too. */
@@ -329,9 +335,9 @@ export class Tmux {
 
   async kill(name: string): Promise<void> {
     await this.ended(name);
-    await this.run(['kill-session', '-t', `=${name}`]).catch(() => {});
+    const removed = await this.run(['kill-session', '-t', `=${name}`]).then(() => true, () => false);
     this.recordings.remove(name);
-    if (!(await this.has(name))) this.recordings.release(name);
+    if (removed) this.recordings.release(name);
   }
 
   async stopAll(): Promise<void> {

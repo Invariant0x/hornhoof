@@ -58,7 +58,7 @@ it('keeps phone execution private after a vault value, while ordinary replay and
   expect(recording.json().recordings[0].frames[1].imageUrl).toBeNull();
   expect(JSON.stringify(typed)).not.toContain(PASSWORD);
   expect(recording.body).not.toContain(PASSWORD);
-  const tables = await c.db.execute<{ schemaname: string; tablename: string }>(sql`select schemaname, tablename from pg_tables where schemaname in ('public', 'net', 'net_local') order by 1, 2`);
-  const leaks = await c.db.execute(sql.join(tables.rows.map(table => sql`select ${`${table.schemaname}.${table.tablename}`} as table_name where exists (select 1 from ${sql.identifier(table.schemaname)}.${sql.identifier(table.tablename)} t where strpos(row_to_json(t)::text, ${PASSWORD}) > 0)`), sql` union all `));
+  const tables = await c.db.execute(sql`select schemaname, tablename from pg_tables where schemaname in ('public', 'net', 'net_local') order by 1, 2`) as { rows: { schemaname: string; tablename: string }[] };
+  const leaks = await c.db.execute(sql.join(tables.rows.map(table => sql`select ${`${table.schemaname}.${table.tablename}`} as table_name where exists (select 1 from ${sql.identifier(table.schemaname)}.${sql.identifier(table.tablename)} t where strpos(row_to_json(t)::text, ${PASSWORD}) > 0)`), sql` union all `)) as { rows: unknown[] };
   expect(leaks.rows).toEqual([]);
 });
