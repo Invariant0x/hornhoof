@@ -93,15 +93,17 @@ describe('a restore from a backup', () => {
     expect((await s.view<MakerView>()).order).toMatchObject({ id: sealedAway.id, identity: said.identity, carry: true });
     await s.ended((withFile.json() as { attempt: string }).attempt);
 
-    /* Only the CEO, on his own session. */
+    /* Only the CEO, by himself or through the orchestrator. */
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
-    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    for (const who of [as(zed), { headers: orchestratorHeaders(s.owner.id, orchestrator!.id) }]) {
-      expect(await s.refusal(s.restore(s.made.id, {}, who))).toEqual([403, 'not_owner_session']);
-      const warning = await s.app.inject({ url: `/api/backups/${s.made.id}/warning`, ...who });
-      expect(warning.statusCode).toBe(403);
-    }
+    expect(await s.refusal(s.restore(s.made.id, {}, as(zed)))).toEqual([403, 'not_owner_session']);
+    expect((await s.app.inject({ url: `/api/backups/${s.made.id}/warning`, ...as(zed) })).statusCode).toBe(403);
     expect(s.app.ctx.updater.claimed()).toBeNull();
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const inside = { headers: orchestratorHeaders(s.owner.id, orchestrator!.id) };
+    expect((await s.app.inject({ url: `/api/backups/${s.made.id}/warning`, ...inside })).statusCode).toBe(200);
+    const restored = await s.restore(s.made.id, {}, inside);
+    expect(restored.statusCode).toBe(202);
+    await s.ended((restored.json() as { attempt: string }).attempt);
   });
 
   it('tries a bundle again, and lets an order go after an hour', async () => {

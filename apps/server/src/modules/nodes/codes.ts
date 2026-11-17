@@ -2,16 +2,17 @@ import { and, arrayOverlaps, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client.js';
 import { nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 
-export const NODE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+const NODE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /* core: a command that brings the company's core to its machine, and no node. */
 type Place = { companyId: string; personId: string; subscriptionIds: string[]; machineId?: string; core?: boolean };
 
 /* Lock the owner before preparing plans too, so two connect requests cannot create the same plan twice. */
 export async function lockCommandOwner(db: Db, personId: string): Promise<void> {
-  await db.select({ id: people.id }).from(people).where(eq(people.id, personId)).for('update');
+  await db.select(idOnly(people)).from(people).where(eq(people.id, personId)).for('update');
 }
 
 function commandPlace(input: Place) {

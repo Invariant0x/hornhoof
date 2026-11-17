@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { Checker } from '../../checker.js';
 import { certFacts, issuedBy, needsRenewal } from '../network/authority.js';
 import type { MachineRole } from '../../db/schema.js';
 import { readJson, reasonOf, writePrivately } from './machine-keys.js';
@@ -11,7 +12,7 @@ const EVERY_MS = 3_600_000;
 const NOT_FOR_THIS_KEY = "The app's answer is not a certificate for this machine's key.";
 
 export type HeldCertificate = { machine: string; role: MachineRole; certPem: string; authorityPem: string; until: string };
-export type CertificateKeeperOptions = {
+type CertificateKeeperOptions = {
   dir: string;
   key: MachineKey;
   ask: (signKey: string) => Promise<HeldCertificate>;
@@ -21,7 +22,7 @@ export type CertificateKeeperOptions = {
   log: (line: string) => void;
 };
 
-const HeldShape: z.ZodType<HeldCertificate> = z.object({
+const HeldShape: Checker<HeldCertificate> = z.object({
   machine: z.string(),
   role: z.enum(['data', 'worker']),
   certPem: z.string(),

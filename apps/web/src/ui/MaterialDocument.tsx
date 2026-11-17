@@ -3,7 +3,7 @@ import { api } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import { Markdown } from './Markdown';
 
-export type PdfPageView = {
+type PdfPageView = {
   pageNumber: number;
   width: number;
   height: number;
@@ -11,13 +11,13 @@ export type PdfPageView = {
   renderToCanvas: (canvas: HTMLCanvasElement) => Promise<void> | void;
 };
 
-export type PdfDocumentHandle = {
+type PdfDocumentHandle = {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfPageView>;
   destroy: () => Promise<void>;
 };
 
-export type PdfLoader = (bytes: Uint8Array) => Promise<PdfDocumentHandle>;
+type PdfLoader = (bytes: Uint8Array) => Promise<PdfDocumentHandle>;
 
 type PdfRawViewport = { width: number; height: number };
 type PdfRawPage = {

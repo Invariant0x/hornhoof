@@ -12,7 +12,7 @@ import { PROMISE_MS } from './update-steps.js';
 export const PROMISE_FILE = 'promise.json';
 
 /* until: when the promise ends, by this machine's own clock. */
-export type UpdateWord = { leader: string; version: string; until: number; migrations: number | null; stopped: boolean; at: number };
+type UpdateWord = { leader: string; version: string; until: number; migrations: number | null; stopped: boolean; at: number };
 
 /* A version goes into a line of the log and a row of the database, so it is a plain word. */
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;

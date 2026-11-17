@@ -2,15 +2,15 @@ import { X509Certificate, webcrypto } from 'node:crypto';
 import * as x509 from '@peculiar/x509';
 
 // The library needs a crypto provider once per process; Node's own is enough.
-x509.cryptoProvider.set(webcrypto as unknown as Crypto);
+x509.cryptoProvider.set(webcrypto);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STAND_IN_DAYS = 30;
 const KEY_ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256' } as const;
 const SIGNING_ALGORITHM = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
-export type SelfSignedOptions = { days?: number; serial?: string; now?: Date };
-export type CertInfo = { names: string[]; notBefore: Date; notAfter: Date; fingerprint256: string };
+type SelfSignedOptions = { days?: number; serial?: string; now?: Date };
+type CertInfo = { names: string[]; notBefore: Date; notAfter: Date; fingerprint256: string };
 
 // The library's PEM text has no final newline, and two such texts joined into a chain do not load in TLS.
 export function toPem(label: string, der: ArrayBuffer): string {

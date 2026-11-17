@@ -5,8 +5,11 @@ import { canViewAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
+import { fileLink } from '../assistants/files.js';
 import { turnGoingOn } from '../conversation/queue.js';
+import { publicUrl } from '../link/link.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
@@ -184,7 +187,9 @@ class Listener {
       }
       const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
       if (!file) continue;
-      await sendDocument(
+      /* A bot sends no file over 50 MB: a big one goes as its link. */
+      if (file.big) await this.say(row.chatId, WORDS[row.lang].bigFile(file.name, fileLink(this.ctx.config.secret, await publicUrl(this.ctx.db, this.ctx.config), file.id)));
+      else await sendDocument(
         this.ctx.config.telegramApiUrl,
         this.token,
         row.chatId,
@@ -234,7 +239,7 @@ class Listener {
       return;
     }
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
-    const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
+    const [job] = await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
     const over = !job || !(OPEN as readonly string[]).includes(job.status);
     const answered = await this.sayWords(person, row);
     if (answered === null || !over) return;

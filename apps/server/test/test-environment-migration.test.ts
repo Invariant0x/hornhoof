@@ -1,4 +1,3 @@
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -6,9 +5,10 @@ import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 
 import { migrationsBefore } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 type Db = ReturnType<typeof drizzle>;
 async function open() {
-  const client = new PGlite(); onTestFinished(() => client.close()); return drizzle(client);
+  const client = await freshPglite(); onTestFinished(() => client.close()); return drizzle(client);
 }
 const id = async (db: Db, query: ReturnType<typeof sql>) => (await db.execute<{ id: string }>(query)).rows[0].id;
 async function legacyRun(db: Db, name: string, singleton: boolean) {

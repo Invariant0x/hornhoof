@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, programDeliveries, programOperatorCases } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { wordsForTurn } from '../conversation/turn-words.js';
 import { wordsDigest } from './deliveries.js';
 
@@ -12,7 +13,7 @@ export async function queuedOperatorAssignment(ctx: Ctx, agentId: string, jobId:
   if (!bound || bound.job.error === 'cancelled' || bound.job.error === 'stale') return null;
   const source = (await wordsForTurn(ctx, agentId, jobId)).at(-1);
   if (!source) return null;
-  const [used] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'queuedEvent' = ${String(source.seq)}`)).limit(1);
+  const [used] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'queuedEvent' = ${String(source.seq)}`)).limit(1);
   if (used) return null;
   return { seq: source.seq, job: bound.job, source: { ...source, data: { ...source.data as object, operatorDelivery: { id: bound.delivery.id, ordinal: bound.delivery.ordinal } } } };
 }

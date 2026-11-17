@@ -2,6 +2,7 @@ import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
 import { appOn, createTestDb, SETUP, statements, ownDatabases } from './helpers.js';
 import { company, FOUR, opsDepartments, roles, staff, staffedLike } from './operations-required-fixture.js';
@@ -10,7 +11,7 @@ ownDatabases();
 
 /* Every department has its open turn, which ends before the department goes, as when the structure removes one. */
 async function removeDepartments(db: Db, where: SQL): Promise<void> {
-  await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(inArray(turns.departmentId, db.select({ id: departments.id }).from(departments).where(where)));
+  await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(inArray(turns.departmentId, db.select(idOnly(departments)).from(departments).where(where)));
   await db.delete(departments).where(where);
 }
 

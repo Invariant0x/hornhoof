@@ -6,15 +6,13 @@ const HOST = 'worker-linux';
 const GIB = 1024 ** 3;
 const VERSION = { version: '0.6.1', commit: 'a'.repeat(40), migrations: 51 };
 const BUILD = { tag: 'latest', version: '0.6.2', commit: 'b'.repeat(40), created: '2026-11-04T10:00:00Z', title: 'Wait for agents before an update', migrations: 52 };
-const LINE = { en: 'Waiting for agents to finish before the update: 3 turns left, until 21:30', ru: 'Ждет конца работы агентов перед обновлением: осталось 3 хода, до 21:30' };
-const POSTPONED = { en: 'The update is postponed: agents did not finish in time. Next try at 22:05', ru: 'Обновление отложено: агенты не успели закончить работу. Следующая попытка в 22:05' };
+const LINE = { en: 'Waiting since 21:30 for agents to finish before the update: 3 turns left. It takes no new work until then', ru: 'С 21:30 ждет конца работы агентов перед обновлением: осталось 3 хода. До тех пор новой работы не берет' };
 const ASK = { en: '3 agent turns are running.', ru: 'Идут 3 хода агентов.' };
 const UPDATE = { en: 'Update', ru: 'Обновить' };
 /* Tall enough at phone width to show the whole card without scrolling under the top bar. */
 const SIZES = [[1440, 900], [375, 1800]] as const;
 
-const WAITING: MachineDrain = { state: 'waiting', turnsLeft: 3, partsLeft: 0, until: '2026-11-04T21:30:00.000Z' };
-const LATER: MachineDrain = { state: 'postponed', turnsLeft: 2, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' };
+const WAITING: MachineDrain = { state: 'waiting', turnsLeft: 3, partsLeft: 0, since: '2026-11-04T21:30:00.000Z' };
 
 /* newer: a newer build is out, so the update banner offers it. */
 async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', drain: MachineDrain, newer = false) {
@@ -59,16 +57,6 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     expect(box.x + box.width).toBeLessThanOrEqual(width);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('waiting')), fullPage: true });
-  });
-
-  test(`shows the postponed update in the card, ${place}`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height });
-    await openMachines(page, language, theme, LATER);
-    await page.getByRole('button', { name: `${language === 'en' ? 'Open the card of' : 'Открыть карточку'} ${HOST}`, exact: true }).click();
-    const card = page.getByRole('article', { name: HOST });
-    await expect(card.getByText(POSTPONED[language])).toBeVisible();
-    expect(await noSideScroll(page)).toBe(true);
-    await page.screenshot({ path: info.outputPath(shot('postponed')), fullPage: true });
   });
 
   test(`asks how many turns would stop, ${place}`, async ({ page }, info) => {

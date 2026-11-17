@@ -7,24 +7,24 @@ const CURRENT = { version: '0.7.0', commit: COMMIT, migrations: 62 };
 const BUILD = { ...CURRENT, tag: '0.7.0', created: '2026-11-05T10:00:00Z', title: 'Each node updates by itself' };
 const WAITS: NodeWait[] = [
   { node: 'builtin', provider: null, hostname: null, drain: { state: 'restarting', since: '2026-11-05T11:17:00.000Z' }, work: [] },
-  { node: 'n1', provider: 'antigravity', hostname: 'node-a', drain: { state: 'waiting', turnsLeft: 1, partsLeft: 0, until: '2026-11-05T12:47:00.000Z' }, work: [{ agent: 'Developer', task: 251 }] },
-  { node: 'n2', provider: 'claude', hostname: 'node-a', drain: { state: 'postponed', turnsLeft: 2, partsLeft: 1, retryAt: '2026-11-05T13:05:00.000Z' }, work: [{ agent: 'Developer with a long name', task: 7 }, { agent: 'Head of development', task: null }] },
+  { node: 'n1', provider: 'antigravity', hostname: 'node-a', drain: { state: 'waiting', turnsLeft: 1, partsLeft: 0, since: '2026-11-05T12:47:00.000Z' }, work: [{ agent: 'Developer', task: 251 }] },
+  { node: 'n2', provider: 'claude', hostname: 'node-a', drain: { state: 'waiting', turnsLeft: 2, partsLeft: 1, since: '2026-11-05T13:05:00.000Z' }, work: [{ agent: 'Developer with a long name', task: 7 }, { agent: 'Head of development', task: null }] },
 ];
 const WORDS = {
   en: {
     account: 'Account', versions: 'Versions', title: 'Updating the nodes',
     rows: [
       ['Built-in node', 'Free: being replaced now, then takes work again by itself'],
-      ['Antigravity on node-a', 'Waiting for agents to finish before the update: 1 turn left, until 12:47', 'Waits for: Developer (#251)'],
-      ['Claude on node-a', 'The update is postponed: agents did not finish in time. Next try at 13:05', 'Waits for: Developer with a long name (#7), Head of development'],
+      ['Antigravity on node-a', 'Waiting since 12:47 for agents to finish before the update: 1 turn left. It takes no new work until then', 'Waits for: Developer (#251)'],
+      ['Claude on node-a', 'Waiting since 13:05 for agents to finish before the update: 2 turns and 1 run part left. It takes no new work until then', 'Waits for: Developer with a long name (#7), Head of development'],
     ],
   },
   ru: {
     account: 'Аккаунт', versions: 'Версии', title: 'Обновление нод',
     rows: [
       ['Встроенная нода', 'Свободна: заменяется сейчас и сама снова возьмет работу'],
-      ['Antigravity на node-a', 'Ждет конца работы агентов перед обновлением: остался 1 ход, до 12:47', 'Ждет: Developer (#251)'],
-      ['Claude на node-a', 'Обновление отложено: агенты не успели закончить работу. Следующая попытка в 13:05', 'Ждет: Developer with a long name (#7), Head of development'],
+      ['Antigravity на node-a', 'С 12:47 ждет конца работы агентов перед обновлением: остался 1 ход. До тех пор новой работы не берет', 'Ждет: Developer (#251)'],
+      ['Claude на node-a', 'С 13:05 ждет конца работы агентов перед обновлением: осталось 2 хода и 1 часть прогона. До тех пор новой работы не берет', 'Ждет: Developer with a long name (#7), Head of development'],
     ],
   },
 } as const;

@@ -1,0 +1,22 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+
+ ✓ test/attach.test.ts (10 tests) 18546ms
+   ✓ hh-attach (6)
+     ✓ uses the node link for Kimi's terminal when the bridge has lost the turn token, and refuses once the turn ends 956ms
+     ✓ gives a file over 50 MB through the bridge as it reads it, whole and with its length, and fetches it back the same way 9434ms
+     ✓ sends each file with the turn token and prints the id to pass on 1196ms
+     ✓ keeps the headless Kimi runner, its MCP configuration and hh-attach on the direct turn token 1080ms
+     ✓ says what went wrong: no turn, no file, or Hornhoof's refusal 2083ms
+     ✓ puts files of any kind on a task under their own names 347ms
+   ✓ hh-fetch (4)
+     ✓ downloads a task's file by its name into the folder it runs in, never above it 380ms
+     ✓ downloads a picture that came with a message, as the message says 728ms
+     ✓ saves it where it is told, into a folder or as a file 1583ms
+     ✓ says what went wrong: no turn, no task and file, or Hornhoof's refusal 684ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  03:35:30
+   Duration  25.08s (tests 76%, transform 17%, import 7%)
+

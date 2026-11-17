@@ -3,7 +3,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
-import { EchelonRun } from '../tasks/echelons-run.js';
 import { endOwnWait } from '../tasks/external-wait.js';
 import { taskByRef } from '../tasks/views.js';
 import { refuse } from '../tasks/engine.js';
@@ -11,6 +10,7 @@ import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
 import { repoAt } from '../departments/repository.js';
 import { harnessState } from './harness.js';
+import { FULL_RUN_MINUTES } from './describe.js';
 import { startRun, stopRun, taskFor, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
@@ -32,6 +32,8 @@ const TaskRef = (what: string) =>
     .describe(`The task ${what}, by number; by default the one this turn is on.`);
 const Parts = z.number().int().min(1).max(MAX_TEST_PARTS).optional().describe('How many parts to split it into; 1 by default.');
 const Minutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each part, ${TEST_MINUTES} minutes by default.`);
+const TestMinutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional()
+  .describe(`The time limit of each part, ${TEST_MINUTES} minutes by default and ${FULL_RUN_MINUTES} for the first run of a release, which goes out in 2 to 4 parts that each fit in it.`);
 
 /* Whole suites and assigned non-check work use the free machines. Checks of a change stay in its owner's workspace. */
 export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -39,23 +41,16 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Runs the whole test suite or a declared profile, split into groups over the free machines. Checks of your own change run in your own workspace and need no run_tests: contributors on individual task branches (in echelons or parallel turnkey teams) and intermediate gates never call run_tests on working task branches; one release owner runs run_tests once per release candidate on the combined release branch before main (or on the single commit of a standalone release to main). Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. Profile final takes a result only from the repository's main branch or the turn's, and every so many turns everything runs on the turn's branch and any mismatch with the kept results is named. Without profile a run checks the manifest's default profile, which may leave suites out. The check of a release is a run of the profile the manifest names for its full run (execution.fullRun.profile), with no suite and no candidate: it runs every suite and every test file anew and keeps no earlier result. The result says what a run left out. " +
-        "With command, runs the manual whole-suite command and returns at once with the run's number; a command that names a test file the pinned commit does not have is refused before any part goes out. " +
-        "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
-        "a part that checked another one fails the run. The product's harness is ready there before the command starts: dependencies and what the repository prepares are in place, so a command needs no installation or build. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
-        `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
-        `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
-        'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
-        "A run of the whole product (no suite, with the profile a turn ends with or the full run) sets the GitHub status hornhoof/tests on the pinned commit as it ends, files that kept a green result counting as checked, and so does a run of exactly the command its repository declared as its full test command: GitHub then need not run the tests again.",
+        "Runs every test of a release over the free machines, only on main, a turn's branch turn-<number> or a release-<name> branch: on any other branch it starts nothing, as a change is checked by its author's local tests of what it touched. " +
+        "The first run of a release runs every test file; each later run of the same release runs only what failed or changed since, and a run of the whole product, or of exactly the repository's declared full test command, sets the GitHub status hornhoof/tests on the pinned commit, so GitHub need not run the tests again. " +
+        `Hornhoof pins the commit the branch is at now, readies the product's harness, and wakes you on the task with the result; with command it runs that command instead, split into up to ${MAX_TEST_PARTS} parts with {part} and {parts} in it.`,
       inputSchema: {
         command: z.string().trim().min(1).max(4000).optional().describe('Manual command. Dependencies are in place already; omit it for the pinned product environment.'),
-        suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
-        profile: z.string().min(1).max(64).optional().describe('Product profile ID; defaults to defaultProfile in the pinned manifest.'),
-        task: TaskRef('whose branch it tests'),
-        candidate: EchelonRun.optional().describe('At Tests, name the exact current candidateId and route revision. The server binds this run to that assignment and pins its branch and commit.'),
-        branch: Branch.optional().describe("By default the task's own: task-<number>, or the only branch that starts with task-<number>-."),
+        suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run every suite of the release.'),
+        task: TaskRef('the run is for'),
+        branch: Branch.describe('The release branch to test: main, turn-<number> or release-<name>.'),
         parts: Parts,
-        minutes: Minutes,
+        minutes: TestMinutes,
       },
     },
     async input => answer(() => startRun(ctx, job, input)),

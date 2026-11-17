@@ -60,12 +60,19 @@ export function windowsCommand(command: string): string | null {
     : `powershell -ExecutionPolicy Bypass -c "irm ${script} | iex"`;
 }
 
+/* A flag of a command, like --owner-key, stays in one piece: its line breaks between words, never at its hyphens. A long
+   word of its own, like a key, still breaks where it must. */
+const FLAG = /^--?[A-Za-z][A-Za-z0-9-]{0,22}$/;
+const commandText = (command: string) => command.split(/( )/).map((part, at) => (FLAG.test(part) ? <span key={at} className="flag">{part}</span> : part));
+
 function CommandLine({ command, label }: { command: string; label?: string }) {
   const id = useId();
+  /* The code reads left to right from its left edge on any page; Copy and the words around it follow the page. */
   const line = (
     <div className="command">
-      <code>{command}</code>
-      <CopyButton text={command} />
+      <code dir="ltr">{commandText(command)}</code>
+      {/* Copy stands under the command, on the end edge, a button of 44 px at any width (style book, section 6, rule 15). */}
+      <div className="entry-actions"><CopyButton text={command} className="btn ghost" /></div>
     </div>
   );
   if (!label) return line;

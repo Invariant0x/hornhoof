@@ -1,11 +1,11 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
-import { checkerFor } from './echelons-assign.js';
+import { only } from '../../db/selections.js';
+import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
-import { changeRoute, routeOf, type Route } from './echelons-store.js';
-import { RepoPath } from './review-schema.js';
+import { changeRoute, checkedScopePaths, routeOf, type Route } from './echelons-store.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
 import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
 import { openTurnOf, workOfOpenTurn } from './turn-department.js';
@@ -15,7 +15,7 @@ export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, a
   if (!actor || (actor.kind !== 'orchestrator' && !(actor.kind === 'head' && actor.departmentId === task.departmentId))) throw refuse(403, 'task_not_yours', 'Only this department head or the orchestrator may revise the route.');
 }
 
-export function withCleanup(route: Route, enabled: boolean): Route['state'] {
+function withCleanup(route: Route, enabled: boolean): Route['state'] {
   if (route.state.resultKind === 'coordination') return route.state;
   const review = route.state.stages.findIndex(step => step.stage === 'review');
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
@@ -28,11 +28,7 @@ export function withCleanup(route: Route, enabled: boolean): Route['state'] {
 
 type RouteChange = { state: Route['state']; set: Partial<Task>; paths: string[] };
 
-function changedPaths(route: Route, change: TaskChange): string[] {
-  const paths = change.paths ?? route.paths;
-  if (paths.some(path => !RepoPath.safeParse(path).success)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
-  return paths;
-}
+const changedPaths = (route: Route, change: TaskChange): string[] => checkedScopePaths(change.paths ?? route.paths);
 
 /* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. It stays with a member of a
    turnkey team, as the team of who does a task is what takes it past the echelons. */
@@ -51,6 +47,10 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
   let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
   const paths = changedPaths(route, change);
   state = withRisk(state, agentId, change.riskClass);
+  if (state.security.required && !route.state.security.required) {
+    const producer = route.state.candidateId ? await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)) : null;
+    state = await populateSecurityOwner(ctx.db, task, state, producer);
+  }
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
@@ -92,7 +92,7 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
 export async function turnCleanupDefault(tx: Tx, task: Task): Promise<boolean> {
   const turnId = task.turnId ?? (await openTurnOf(tx, task.companyId, task.departmentId))?.id;
   if (!turnId) return false;
-  const [event] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
+  const [event] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
   return (event?.data.turnCleanup as { enabled?: boolean } | undefined)?.enabled === true;
 }
 

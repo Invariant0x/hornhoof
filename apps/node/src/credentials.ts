@@ -9,10 +9,10 @@ import { ensureDir, readPrivate, writePrivate } from './providers/process.js';
    the node writes from the key; Claude Code in GLM mode reads glm-key. */
 export const CRED_FILES: Record<CredKind, string> = { claude_token: 'claude-oauth-token', codex_auth: 'auth.json', kimi_key: 'kimi-key', glm_key: 'glm-key' };
 /* Codex renews its own sign-in, so it runs on one machine of a plan at a time: the one holding this file. */
-export const LEASE_FILE = 'codex-lease';
+const LEASE_FILE = 'codex-lease';
 /* A machine of a Codex plan that another machine runs: it is signed out of Codex here, whatever file a Codex that still
    runs on it writes, until it holds the plan again. */
-export const SPARE_FILE = 'codex-spare';
+const SPARE_FILE = 'codex-spare';
 
 /* A token or key is one word, so it cannot break the settings it goes into. */
 const WORD = /^[A-Za-z0-9._~+/=-]{8,4096}$/;

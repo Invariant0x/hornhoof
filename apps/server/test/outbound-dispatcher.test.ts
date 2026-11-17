@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { agents, modelChecks, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundEvents, outboundMessageRevisions, outboundMessages, waitNotices } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { minuteRound, startTimers } from '../src/modules/agents/timers.js';
 import type { SmtpSettings } from '../src/modules/outbound/accounts.js';
 import { beginDispatch, dueMessages, reserveDispatch, submitOutbound } from '../src/modules/outbound/core.js';
@@ -359,7 +360,7 @@ describe('what no one knows the end of', () => {
       lastInserted = attemptId;
     }
     const asked = new Set<string>();
-    const everyAttempt = (await w.c.db.select({ id: outboundAttempts.id }).from(outboundAttempts)).map(a => a.id).toSorted();
+    const everyAttempt = (await w.c.db.select(idOnly(outboundAttempts)).from(outboundAttempts)).map(a => a.id).toSorted();
     const lastOfAll = everyAttempt.at(-1)!;
     expect(everyAttempt).toContain(lastInserted);
     use.smtp.reconcile = async ({ attemptId }) => {

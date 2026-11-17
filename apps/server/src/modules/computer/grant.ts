@@ -6,10 +6,10 @@ import { isP256 } from './owner-key.js';
    against the key it holds, so nothing the server keeps can open a machine by itself. */
 export type Grant = { payload: string; signature: string };
 /* machine: the network id of the one machine it opens. until, at: seconds. nonce: 16 random bytes, in base64url. */
-export type GrantFacts = { v: 1; machine: string; until: number; at: number; nonce: string };
+type GrantFacts = { v: 1; machine: string; until: number; at: number; nonce: string };
 
 /* How far a browser's clock and a machine's may be apart. */
-export const GRANT_SKEW_S = 300;
+const GRANT_SKEW_S = 300;
 /* A grant opens for a day at most, and the skew on top. */
 export const GRANT_MAX_S = 24 * 3600 + GRANT_SKEW_S;
 

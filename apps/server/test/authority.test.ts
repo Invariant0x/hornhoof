@@ -1,4 +1,5 @@
 import { X509Certificate, createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import type { webcrypto } from 'node:crypto';
 import { once } from 'node:events';
 import http2 from 'node:http2';
 import type { Http2SecureServer } from 'node:http2';
@@ -46,8 +47,8 @@ function daysAgo(days: number): Date {
   return new Date(Date.now() - days * DAY_MS);
 }
 
-function ed25519Keys(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as Promise<CryptoKeyPair>;
+function ed25519Keys(): Promise<webcrypto.CryptoKeyPair> {
+  return crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as Promise<webcrypto.CryptoKeyPair>;
 }
 
 // Carries the authority's name and key id but is signed with another key, so only the signature tells it apart.

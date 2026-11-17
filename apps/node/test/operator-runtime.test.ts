@@ -54,13 +54,14 @@ it.each<[string, Partial<RecoverySource>, Record<string, unknown>]>([
   expect(await stateOf(c)).toMatchObject({ program: 'here', current: c.identity.instance, ...facts });
 });
 
-it('counts what a program did since the words as work it is on, and says which generation of it that is', async () => {
+/* program_screen calls a program idle when it works on no turn; the release is told the same, whatever it did since. */
+it('counts no work a program did since the words as work it is on, and says which generation of it that is', async () => {
   const c = fixture(), key = c.identity.agentKey;
   c.runtime.typed(key);
   const typed = await stateOf(c) as OperatorRecoveryState;
   expect(typed).toMatchObject({ input: 'empty', busy: false });
   c.runtime.activity(key);
-  expect(await stateOf(c)).toMatchObject({ input: 'empty', busy: true, generation: typed.generation + 1 });
+  expect(await stateOf(c)).toMatchObject({ input: 'empty', busy: false, generation: typed.generation + 1 });
 });
 
 it('ignores an older revoke and does not move a case deadline on replay', async () => {
@@ -214,4 +215,34 @@ it('retires replaced physical programs without a startup incident or a stale fir
   c.at(300000); c.runtime.tick();
   expect(c.sent.filter(f => f.type === 'program.delivery' && f.deliveryId === c.assignment.id && f.phase === 'cancelled')).toHaveLength(1);
   expect(c.sent.filter(f => f.type === 'program.operator_needed')).toEqual([]);
+});
+
+/* Neo's turn b559a00c on 17.11: its assignment (delivery 268) got no receipt, as the node refused the program's hooks, yet
+   the program took the live words that came after it (delivery 269) at 01:50:48. The operator's case closed as failed at
+   02:06:13, and the turn ended with it although the program worked on. */
+const unrecordedCase = (c: ReturnType<typeof fixture>) => ({ type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, disposition: 'open' as const, revision: 1, reason: 'assignment_unrecorded' as const });
+
+it('fails no turn by the end of its case once the program took words that came after the assignment', async () => {
+  const c = fixture(), key = c.identity.agentKey, opened = unrecordedCase(c);
+  await c.runtime.message(opened);
+  const live = { id: randomUUID(), ordinal: c.assignment.ordinal + 1 };
+  c.runtime.live(key, live, 'Live words.');
+  c.runtime.receipt(key, live, 'taken');
+  await c.runtime.message({ ...opened, revision: 2, disposition: 'revoke', closedBecause: 'failed' });
+  expect([c.runtime.failure(key), c.runtime.failureDetail(key), c.runtime.wordsWaiting(key)]).toEqual([null, null, false]);
+  c.at(600000); c.runtime.tick();
+  expect(c.runtime.failure(key)).toBeNull();
+});
+
+it.each<[string, (c: ReturnType<typeof fixture>) => void]>([
+  ['later words it only queued', c => { const live = { id: randomUUID(), ordinal: 2 }; c.runtime.live(c.identity.agentKey, live, 'Live words.'); c.runtime.receipt(c.identity.agentKey, live, 'queued'); }],
+  ['later words it did not take', c => { const live = { id: randomUUID(), ordinal: 2 }; c.runtime.live(c.identity.agentKey, live, 'Live words.'); c.runtime.receipt(c.identity.agentKey, live, 'not_taken'); }],
+  ['earlier words it took', c => c.runtime.receipt(c.identity.agentKey, { id: randomUUID(), ordinal: 1 }, 'taken')],
+])('still fails the turn with its case when the program took nothing after the assignment: %s', async (_name, meanwhile) => {
+  const c = fixture(), key = c.identity.agentKey, opened = unrecordedCase(c);
+  await c.runtime.message(opened);
+  meanwhile(c);
+  await c.runtime.message({ ...opened, revision: 2, disposition: 'revoke', closedBecause: 'failed' });
+  expect(c.runtime.failure(key)).toBe('failed');
+  expect(c.runtime.failureDetail(key)).toBe(`failed; case ${opened.case}`);
 });

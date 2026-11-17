@@ -8,6 +8,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { certificates, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, publicLinks, type MachineRole } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { dropAccess } from '../computer/access.js';
 import { holdsData } from '../copies/holds.js';
@@ -20,9 +21,9 @@ import type { Go, LeaderBuild } from './follow.js';
 import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
-export const TICKET_HOURS = 24;
-export const RENEW_WINDOW_MS = 5 * 60_000;
-export const ONLINE_STEP_S = 20;
+const TICKET_HOURS = 24;
+const RENEW_WINDOW_MS = 5 * 60_000;
+const ONLINE_STEP_S = 20;
 
 const HOUR_MS = 3_600_000;
 const DAY_S = 86_400;
@@ -69,7 +70,7 @@ type RenewAsk = { machine: string; serial: string; at: string };
 
 /* A renewal travels over plain HTTP too, so the machine takes its answer only with the signature of the authority it
    holds: a path that changes the answer only makes the renewal fail. */
-export async function signedAnswer(ctx: Ctx, ask: RenewAsk, body: object): Promise<Signed> {
+async function signedAnswer(ctx: Ctx, ask: RenewAsk, body: object): Promise<Signed> {
   const authority = await authorityOf(ctx.db, ctx.config);
   if (!authority) throw notAMachine();
   const payload = JSON.stringify(body);
@@ -96,7 +97,7 @@ export async function dropPeerSecrets(tx: Db): Promise<void> {
 export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date): Promise<boolean> {
   if (machineIds.length === 0) return false;
   const these = inArray(machines.id, machineIds);
-  const cored = await tx.select({ id: machines.id }).from(machines).where(and(these, isNotNull(machines.networkId)));
+  const cored = await tx.select(idOnly(machines)).from(machines).where(and(these, isNotNull(machines.networkId)));
   await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.machineId, machineIds), isNull(certificates.revokedAt)));
   await dropAccess(tx, machineIds, now);
   await tx.update(machines).set({ networkId: null }).where(and(these, eq(machines.role, 'worker')));
@@ -214,7 +215,7 @@ export async function countOnline(tx: Db, machineId: string, prevReportAt: Date 
    a minute old. The window begins inside a day, and that day's seconds count by the part of it inside the window, out of
    the part of it the machine was there at all. */
 export async function onlineShare(db: Db, machineId: string, now = new Date()): Promise<number | null> {
-  const [row] = await db.select({ createdAt: machines.createdAt }).from(machines).where(eq(machines.id, machineId));
+  const [row] = await db.select(only(machines, 'createdAt')).from(machines).where(eq(machines.id, machineId));
   if (!row) return null;
   const days = await db.select().from(machineOnline).where(and(eq(machineOnline.machineId, machineId), gte(machineOnline.day, dayOf(new Date(now.getTime() - SHARE_DAYS * DAY_MS))), lte(machineOnline.day, dayOf(now))));
   return shareOf(row.createdAt, days, now);
@@ -241,7 +242,7 @@ function shareOf(createdAt: Date, days: { day: string; seconds: number }[], now:
   return Math.min(1, Math.max(0, (online * 1000) / length));
 }
 
-export type JoinAsk = { ticket: string; networkId: string; signKey: string };
+type JoinAsk = { ticket: string; networkId: string; signKey: string };
 type Certified = { machine: string; role: MachineRole; issued: Issued; authorityPem: string };
 
 /* A machine's keeper redeems its ticket: the ticket's machine becomes a worker of the network under the id of its
@@ -257,12 +258,12 @@ export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
   const join = ctx.db.transaction(async tx => {
     /* The machine's row first and the ticket after it, as Disconnect takes them: the other way round the two would wait
        on each other. */
-    const [named] = await tx.select({ machineId: machineTickets.machineId }).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
+    const [named] = await tx.select(only(machineTickets, 'machineId')).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
     const row = named ? await lockLiveMachine(tx, named.machineId) : null;
     const [ticket] = row ? await tx.select().from(machineTickets).where(eq(machineTickets.ticketHash, hash)).for('update') : [];
     if (!row || !ticket || ticket.expiresAt <= now) throw ticketUsed();
     if (ticket.usedAt && row.signKey !== ask.signKey) throw ticketUsed();
-    const [person] = await tx.select({ status: people.status }).from(people).where(eq(people.id, row.personId));
+    const [person] = await tx.select(only(people, 'status')).from(people).where(eq(people.id, row.personId));
     if (person?.status !== 'active') throw ticketUsed();
     if (ask.networkId !== hostIdOf(row.machineKey)) throw machineTaken();
     /* A disconnected row that still names this computer gives it up. A live one keeps it: its row is not locked here,
@@ -298,7 +299,7 @@ export async function claimRenewal(tx: Db, row: { id: string; renewAt: Date | nu
   return true;
 }
 
-export type RenewAnswer = { status: 200 | 410; answer: Signed };
+type RenewAnswer = { status: 200 | 410; answer: Signed };
 
 /* The view as an answer may carry it: the link's secrets go only into one that travels over TLS, so a listener on the
    local network sees none, and the machine keeps the link it has. */
@@ -319,7 +320,7 @@ export async function signedRenewal(ctx: Ctx, ask: RenewAsk & { signature: strin
   const taken = await ctx.db.transaction(async tx => {
     const row = await lockLiveMachine(tx, ask.machine);
     if (!row) {
-      const [gone] = await tx.select({ signKey: machines.signKey }).from(machines).where(and(eq(machines.id, ask.machine), isNotNull(machines.revokedAt)));
+      const [gone] = await tx.select(only(machines, 'signKey')).from(machines).where(and(eq(machines.id, ask.machine), isNotNull(machines.revokedAt)));
       if (gone?.signKey && signedByMachine(gone.signKey, ask)) return null;
       throw notAMachine();
     }

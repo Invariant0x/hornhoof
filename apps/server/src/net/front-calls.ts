@@ -5,11 +5,11 @@ import { heldAnswer, HOLD, hopHeaders, INVOCATION, socketAddress, type Refusal, 
 /* For how long front tries a call, counted from when the call came. It leaves the agent's MCP client, which gives up after
    a minute, time to read front's own answer. The keeper holds a request for the app too, so each try tells it how long of
    this is left, and the two holds together stay inside this one. */
-export const CALL_HOLD_MS = 50_000;
+const CALL_HOLD_MS = 50_000;
 /* The app's own body limit, which /mcp has. */
 export const CALL_BODY_MAX = 1024 * 1024;
 /* An answer longer than this goes on as it comes, and is not tried again. */
-export const CALL_ANSWER_MAX = 4 * 1024 * 1024;
+const CALL_ANSWER_MAX = 4 * 1024 * 1024;
 export const CALL_LOST = 'Hornhoof did not answer this call in time. It may have run; look at its result before you repeat it.';
 export const CALL_NOT_SENT = 'Hornhoof could not be reached in time, so this call did not run. Try it again shortly.';
 export const CALL_PAUSED = 'Hornhoof cannot take changes on this machine for a moment, so this call did not run. Try it again in a minute; if it keeps failing, end your turn with what you have done.';

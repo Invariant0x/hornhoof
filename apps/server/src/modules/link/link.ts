@@ -7,6 +7,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { machines, publicLinks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { linkMode, readLinkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
@@ -18,7 +19,7 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 /* The tunnel's settings in the control folder: the updater keeps a copy with each backup, and the installer reads the
    link's address from it. frpc itself goes by what the keeper reads from the database. */
-export const TUNNEL_FILE = 'tunnel.json';
+const TUNNEL_FILE = 'tunnel.json';
 
 /* The company's link as people have it. A hidden name, which Hornhoof took by itself so the company's machines can
    keep copies, is no link to anyone: no page is served under it, and Settings offers to turn a link on. */
@@ -100,7 +101,7 @@ export class PublicLinks {
      ever uses it. True once the company has a link row, hidden or not; false while the relay does not give one. */
   ensureHidden(companyId: string): Promise<boolean> {
     return this.inTurn(async () => {
-      const [old] = await this.ctx.db.select({ name: publicLinks.name }).from(publicLinks).where(eq(publicLinks.companyId, companyId));
+      const [old] = await this.ctx.db.select(only(publicLinks, 'name')).from(publicLinks).where(eq(publicLinks.companyId, companyId));
       if (old) return true;
       try {
         await this.change(companyId, undefined, true);
@@ -145,7 +146,7 @@ export class PublicLinks {
       if (!old) return;
       const { db, config } = this.ctx;
       const others = sql`${machines.networkId} IS DISTINCT FROM ${config.machineId}`;
-      const [copy] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
+      const [copy] = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
       if (copy) {
         if (!old.hidden) await this.change(companyId, undefined, true, true);
         return;

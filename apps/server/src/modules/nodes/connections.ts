@@ -3,6 +3,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodeConnections, nodes, type jobs } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { type LinkEnd, type NodeIdentity } from './hub.js';
 import { hasCurrentKey } from './nodes.js';
 
@@ -78,7 +79,7 @@ export async function nodeDisconnected(ctx: Writes, id: NodeIdentity, end: LinkE
 export async function cameBack(db: Db, nodeId: string | null, queuedAt: Date, sentAt = new Date()): Promise<boolean> {
   if (!nodeId) return false;
   const [back] = await db
-    .select({ id: nodeConnections.id })
+    .select(idOnly(nodeConnections))
     .from(nodeConnections)
     .where(and(eq(nodeConnections.nodeId, nodeId), gt(nodeConnections.connectedAt, queuedAt), lte(nodeConnections.connectedAt, sentAt)))
     .limit(1);
@@ -95,7 +96,7 @@ export async function nodeReported(ctx: Ctx, id: NodeIdentity, msg: Extract<Node
   if (!(await hasCurrentKey(ctx, id))) return;
   const place = await placeOf(ctx.db, id);
   if (!place) return;
-  const [, before] = await ctx.db.select({ id: nodeConnections.id }).from(nodeConnections).where(connectionsOf(place)).orderBy(desc(nodeConnections.connectedAt)).limit(2);
+  const [, before] = await ctx.db.select(idOnly(nodeConnections)).from(nodeConnections).where(connectionsOf(place)).orderBy(desc(nodeConnections.connectedAt)).limit(2);
   if (!before) return;
   const report = NodeReconnect.parse(msg);
   await ctx.db
