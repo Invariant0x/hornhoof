@@ -79,7 +79,7 @@ describe('time facts', () => {
     expect(time.inStatusSince).toBe(at.toISOString());
     expect(time.workSeconds).toBeGreaterThanOrEqual(240);
     expect(time.workSeconds).toBeLessThan(260);
-    expect(time.waitsOn).toEqual([{ who: { kind: 'person', id: olegId, name: 'Oleg' }, since: since.toISOString() }]);
+    expect(time.waitsOn).toEqual([{ kind: 'person', reason: null, who: { kind: 'person', id: olegId, name: 'Oleg' }, since: since.toISOString() }]);
   });
 
   it('takes the time of the last status change over later words', async () => {

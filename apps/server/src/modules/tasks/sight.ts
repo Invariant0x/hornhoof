@@ -75,10 +75,13 @@ function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: st
 /* Whom a task waits for, as whom its waits answer to shows: no employee the reader does not know of, and no other person. */
 const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number]['who']) =>
   !who || (who.kind === 'agent' ? knowsAgentId(viewer, who.id) : who.id === viewer.personId) ? who : null;
-const shownTime = (viewer: AgentViewer, time: TaskLine['time']): TaskLine['time'] => ({ ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who) })) });
+const shownTime = (viewer: AgentViewer, time: TaskLine['time'], externalWait: TaskLine['externalWait']): TaskLine['time'] => ({
+  ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who), reason: w.kind === 'external' && !externalWait ? null : w.reason })),
+});
 
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time) };
+  const externalWait = shownWait(viewer, line);
+  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait, independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time, externalWait) };
 }
 
 /* Task lines as this person reads them. */
