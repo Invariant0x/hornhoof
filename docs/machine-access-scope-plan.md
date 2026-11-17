@@ -163,3 +163,20 @@ worst counted CRAP 9.648. registerComputerTools is now CC 7 and registerAccessRe
 Final exact-commit author-check output, lint and build records accompany the Development hand-in. An unavailable
 formatter or a selector requiring the release suite must stay explicitly unavailable. Review, independent Security and
 Tests have not been performed by this author. No integration is authorized by these local checks.
+
+## Worker terminal input follow-up
+
+A further RED on published candidate `36df758abf4ead6dd6bd3c4904e3f314f46dc3d4` found that a worker's terminal Enter
+was never recorded by answersFromNow. machinePrincipal then kept the owner's fallback after another person typed.
+The head explicitly extended scope to record typed input for workers, including an unknown speaker (`personId: null`).
+ANSWERS_PEOPLE, decisionPrincipal and standingPrincipal retain their prior eligibility filter.
+
+`computer-scope-input.test.ts` exercises the real MCP command boundary: another plan owner's Enter denies root without
+creating a command, an Enter crossing into a new turn records null and also denies root, and the named machine owner's
+input restores machine access. Ordinary management decisions remain unavailable to a worker in every case. Together
+with computer-scope, decision-context and decisions, this passed 72 checks. Source fingerprints preserve the earlier
+237-check evidence for unchanged code, with fresh measured coverage for decision-context after this repair.
+
+The author-check run on 36df758ab was interrupted by its author for this repair, after checking the owned process and
+workspace. It is not a passed result. The final author wrapper checks the follow-up delta against that published candidate;
+the hand-in also carries the earlier named checks and unchanged-file fingerprints for the complete change against turn-31.
