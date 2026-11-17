@@ -3,7 +3,7 @@ import { createServer as createHttps, type Server as HttpsServer } from 'node:ht
 import { createServer as createPlain, type AddressInfo, type Socket } from 'node:net';
 import { createServer as createTls, type TLSSocket } from 'node:tls';
 import { SMTPServer, type SMTPServerAuthentication, type SMTPServerSession } from 'smtp-server';
-import { listenIn, testPort } from '../../../test-support/ports.mjs';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 /* Certificates made for these tests only, for localhost until 2126. They protect nothing: nothing outside these tests
    trusts them. STRANGER is another certificate for the same name, which a client that trusts CERT must refuse. */
@@ -203,11 +203,6 @@ export async function silentPort() {
     return closeTls(server);
   };
   return { port: portOf(server), close };
-}
-
-/* The first free port found and let go again: nothing listens there. */
-export async function closedPort(): Promise<number> {
-  return testPort();
 }
 
 /* The part of a raw message after its headers, as the words it carries. */
