@@ -70,7 +70,7 @@ export type Templates = {
 };
 
 /* Every employee has these, locked on: what working in Hornhoof takes, whatever the department. */
-export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks', 'hh-web-pages', 'hh-tables'] as const;
+export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks', 'hh-web-pages', 'hh-tables', 'hh-one-shot-calls'] as const;
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on; what a department knows comes with its own skills. */
