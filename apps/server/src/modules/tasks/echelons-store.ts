@@ -58,6 +58,12 @@ function stageAbilities(plan: StageRoute): Route['state']['abilities'] {
   return Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : []));
 }
 
+/* The stages the route runs as one-shot calls, kept only where it has some. */
+function oneShotStages(plan: StageRoute): Pick<Route['state'], 'oneShot'> {
+  const marked = plan.stages.flatMap(step => step.oneShot ? [[step.stage, step.oneShot] as const] : []);
+  return marked.length ? { oneShot: Object.fromEntries(marked) } : {};
+}
+
 function developmentOwner(task: Task, resultKind: 'code' | 'document'): string | null {
   return resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
 }
@@ -93,7 +99,7 @@ function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: Stag
   const hasSecurity = plan.stages.some(step => step.stage === 'security');
   return {
     kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan),
+    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan), ...oneShotStages(plan),
     security: hasSecurity ? policy : NO_SECURITY,
   };
 }

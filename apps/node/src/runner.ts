@@ -9,6 +9,7 @@ import { redact } from './redact.js';
 import { withModel } from './turn-tokens.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
 import { placeSkills } from './skills.js';
+import { programFor } from './providers/index.js';
 import { readSessions, rememberSession } from './state.js';
 import type { Worktree } from './tests.js';
 import { headOf, prepareRepo, type Git } from './workspace.js';
@@ -55,6 +56,9 @@ export interface ProviderAdapter {
   setupNeeded?(): Promise<boolean>;
   setup?(io: LoginIo): Promise<void>;
   run(input: RunInput): Promise<RunResult>;
+  /* One call in the program's mode that answers once and exits, in a session it keeps nowhere: what a one-shot call runs.
+     A program without such a mode has none, and its one-shot calls end at once saying so. */
+  oneCall?(input: RunInput): Promise<RunResult>;
   /* Values that must never leave the node, such as the tokens in the program's credentials file. */
   secrets(): Promise<string[]>;
   /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
@@ -103,10 +107,19 @@ function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/* The folder of a one-shot call, which goes when the call ends. */
+const callFolder = (dir: string, jobId: string) => join(dir, 'work', 'calls', jobId);
+
+/* What a one-shot call ends with when its program runs no call that answers once and exits. */
+export const noOneCall = (msg: Pick<JobRun, 'provider' | 'api'>) =>
+  `${programFor(msg.provider, msg.api).name} has no mode that runs one call and exits, so it takes no one-shot calls. Start them on a subscription whose program has one.`;
+
 /* An agent's turn works in the agent's own folder; a session this node saved in another folder cannot go on there, so
    the turn starts a new one. Other jobs work in the folder of the session they resume, or a new one. Only sessions this
    node saved count: one from another machine, or from before a fresh volume, is not here to resume, so the turn starts a new one. */
 function workDirFor(msg: JobRun, dir: string): { workDir: string; sessionId: string | null } {
+  /* A one-shot call goes on from nothing, in a folder of its own. */
+  if (msg.call) return { workDir: callFolder(dir, msg.jobId), sessionId: null };
   const saved = msg.sessionId ? readSessions(dir) : {};
   const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
   if (msg.workspace) {
@@ -251,6 +264,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       .catch(() => {});
   };
   let res: RunResult;
+  const call = msg.call ? adapter.oneCall?.bind(adapter) ?? null : undefined;
+  if (call === null) return jobDone(msg.jobId, failed(noOneCall(msg), 'agent_failed'), [...known]);
   try {
     const place = await placeOfTurn(adapter, msg, dir);
     const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
@@ -260,7 +275,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
-      agentKey: msg.workspace?.key ?? null,
+      agentKey: call ? null : (msg.workspace?.key ?? null),
       jobId: msg.jobId,
       prompt: msg.prompt,
       model: msg.model,
@@ -276,12 +291,14 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       ...(env ? { env } : {}),
     };
     await beforeRun();
-    const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
-    res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
-    if (res.sessionId) rememberSession(dir, res.sessionId, place.workDir);
+    const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => failed(message(err), 'agent_failed'));
+    res = await (untimed && !call ? run : withTimeout(run, msg.timeoutMs));
+    if (res.sessionId && !call) rememberSession(dir, res.sessionId, place.workDir);
   } catch (err) {
     res = failed(message(err), 'agent_failed');
   }
+  /* A call leaves nothing behind: what it was to keep went out in its answer, or in commits it pushed. */
+  if (call) await withOwnFs(adapter, own => own.remove(callFolder(dir, msg.jobId))).catch(() => {});
   await live;
   /* A job Hornhoof called off ends as cancelled, whatever the stopped program said. */
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
