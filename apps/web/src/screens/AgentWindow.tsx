@@ -186,25 +186,24 @@ function personWords(e: LogEvent): boolean {
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
 
+/* Who did a step of machine access: its person, else whoever acts without one. */
+const personOr = (e: EventView, other: string) => e.person?.name ?? other;
+type ComputerStep = (t: Messages, language: Language, e: EventView, machine: string) => string;
+
 /* What the orchestrator asked of a machine, what its owner did about it, what the machine itself refused, and an access
-   its time closed. An opening no person made is the orchestrator's, for the owner (#1119). */
+   its time closed. An opening no person made is the orchestrator's, for the owner (#1119); any other step is a refusal. */
+const COMPUTER_STEPS = new Map<string, ComputerStep>([
+  ['asked', (t, _, e, machine) => t.window.computerAsked(field(e.data, 'reason'), machine)],
+  ['opened', (t, language, e, machine) => t.window.computerOpened(personOr(e, t.window.computerByOrchestrator), clock(language, field(e.data, 'until')) ?? '', machine)],
+  ['expired', (t, _, __, machine) => t.window.computerExpired(machine)],
+  ['closed', (t, _, e, machine) => t.window.computerClosed(personOr(e, t.window.hornhoof), machine)],
+  ['refused', (t, _, __, machine) => t.window.computerRefused(machine)],
+]);
+const declinedStep: ComputerStep = (t, _, e, machine) => t.window.computerDeclined(personOr(e, t.window.hornhoof), machine);
+
 function computerLine(t: Messages, language: Language, e: EventView): string {
-  const who = e.person?.name ?? t.window.hornhoof;
   const machine = field(e.data, 'machine') || t.window.computerServer;
-  switch (field(e.data, 'state')) {
-    case 'asked':
-      return t.window.computerAsked(field(e.data, 'reason'), machine);
-    case 'opened':
-      return t.window.computerOpened(e.person?.name ?? t.window.computerByOrchestrator, clock(language, field(e.data, 'until')) ?? '', machine);
-    case 'expired':
-      return t.window.computerExpired(machine);
-    case 'closed':
-      return t.window.computerClosed(who, machine);
-    case 'refused':
-      return t.window.computerRefused(machine);
-    default:
-      return t.window.computerDeclined(who, machine);
-  }
+  return (COMPUTER_STEPS.get(field(e.data, 'state')) ?? declinedStep)(t, language, e, machine);
 }
 
 /* What an agent said, and the files it attached: a file sent on its own comes without words. */

@@ -37,8 +37,14 @@ const Line = ({ className, children }: { className?: string; children: ReactNode
   </p>
 );
 
-/* To whom it is open, until when, what that allows and who opened it: an opening the server names no person for is the
-   orchestrator's, for the owner (#1119); an older server sends no scope and no opener. */
+/* Who opened it: an opening the server names no person for is the orchestrator's, for the owner (#1119); an older
+   server sends no scope and no opener. */
+function Opener({ c, view }: { c: Messages['machines']['computer']; view: ComputerAccessView }) {
+  if (view.openedBy) return <Line className="muted">{c.openedBy(view.openedBy.name)}</Line>;
+  return view.scope ? <Line className="muted">{c.openedByOrchestrator}</Line> : null;
+}
+
+/* To whom it is open, until when, what that allows and who opened it. */
 function OpenLines({ t, language, view, full }: { t: Messages; language: Language; view: ComputerAccessView; full: boolean }) {
   const c = t.machines.computer;
   return (
@@ -46,7 +52,7 @@ function OpenLines({ t, language, view, full }: { t: Messages; language: Languag
       <Line className="acc-who">{full ? c.forTeam : c.forOrchestrator}</Line>
       <Line>{c.until(clock(language, view.until) ?? '')}</Line>
       <Line className="muted">{full ? c.fullText : c.openText}</Line>
-      {view.openedBy ? <Line className="muted">{c.openedBy(view.openedBy.name)}</Line> : view.scope && <Line className="muted">{c.openedByOrchestrator}</Line>}
+      <Opener c={c} view={view} />
       {view.machine.os === 'darwin' && <Line className="muted">{t.window.computerMac}</Line>}
     </>
   );
