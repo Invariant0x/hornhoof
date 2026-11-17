@@ -3,7 +3,6 @@ import { once } from 'node:events';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
@@ -151,6 +150,16 @@ describe('through front and the next hop', () => {
     return (await front(await listening(nextHop))).door;
   }
 
+  /* Ten minutes: far past every timer either hop sets for itself. */
+  const QUIET_MS = 10 * 60_000;
+
+  /* The timers both hops set run on the test's clock from here on, so a test stays quiet as long as it likes without
+     waiting for it. */
+  function keepQuietOnTheTestsClock(): void {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+  }
+
   async function opened(door: Target, path: string): Promise<http.IncomingMessage> {
     const out = http.request({ ...door, agent: false, path });
     out.on('error', () => {});
@@ -163,17 +172,21 @@ describe('through front and the next hop', () => {
 
   it('gives an event stream as it comes, and keeps it open while it is quiet', async () => {
     let secondWritten = false;
+    const quietOver = deferred();
     const app = http.createServer((_, res) => {
       res.write('data: 1\n\n');
-      void sleep(3000).then(() => {
+      void quietOver.promise.then(() => {
         secondWritten = true;
         res.end('data: 2\n\n');
       });
     });
+    keepQuietOnTheTestsClock();
     const res = await opened(await throughTwoHops(app), '/events');
     const [first] = (await once(res, 'data')) as [Buffer];
     expect(first.toString()).toBe('data: 1\n\n');
     expect(secondWritten).toBe(false);
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    quietOver.resolve();
     const [second] = (await once(res, 'data')) as [Buffer];
     expect(second.toString()).toBe('data: 2\n\n');
   });
@@ -186,7 +199,7 @@ describe('through front and the next hop', () => {
     });
     const res = await opened(await throughTwoHops(app), '/events');
     const atAppRes = await atApp.promise;
-    const closed = once(atAppRes, 'close', { signal: AbortSignal.timeout(1000) });
+    const closed = once(atAppRes, 'close');
     res.destroy();
     await closed;
   });
@@ -198,7 +211,7 @@ describe('through front and the next hop', () => {
     out.on('error', () => {});
     out.end();
     const atAppRes = await atApp.promise;
-    const closed = once(atAppRes, 'close', { signal: AbortSignal.timeout(1000) });
+    const closed = once(atAppRes, 'close');
     out.destroy();
     await closed;
   });
@@ -212,7 +225,7 @@ describe('through front and the next hop', () => {
     const res = await opened(await throughTwoHops(app), '/events');
     res.resume();
     const socket = await atApp.promise;
-    const cut = once(res, 'close', { signal: AbortSignal.timeout(1000) });
+    const cut = once(res, 'close');
     socket.destroy();
     await expect(cut).rejects.toMatchObject({ code: 'ECONNRESET' });
   });
@@ -231,20 +244,21 @@ describe('through front and the next hop', () => {
       return { client, atApp };
     };
 
+    keepQuietOnTheTestsClock();
     const first = await open();
-    await sleep(3000);
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
     const up = once(first.atApp, 'message');
     first.client.send('still here');
     expect(String((await up)[0])).toBe('still here');
     const down = once(first.client, 'message');
     first.atApp.send('so am I');
     expect(String((await down)[0])).toBe('so am I');
-    const appClosed = once(first.atApp, 'close', { signal: AbortSignal.timeout(1000) });
+    const appClosed = once(first.atApp, 'close');
     first.client.close();
     await appClosed;
 
     const second = await open();
-    const clientClosed = once(second.client, 'close', { signal: AbortSignal.timeout(1000) });
+    const clientClosed = once(second.client, 'close');
     second.atApp.close();
     await clientClosed;
   });
