@@ -1,10 +1,10 @@
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { goals as trees, humanStatus, type Asks, type Goal as TaskTree, type HumanStatus } from './task-board';
-import type { Employee, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskLine } from './types';
+import type { Employee, GoalView, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 export type { TaskTree };
 
-/* Three ways to look at the same work. */
+/* Ways to look at the same work. */
 export const TRACKER_VIEWS = ['list', 'board', 'due', 'goals', 'graph'] as const;
 export type TrackerView = (typeof TRACKER_VIEWS)[number];
 
@@ -137,21 +137,6 @@ export const isWaitForPerson = (wait: NonNullable<TaskLine['time']>['waitsOn'][n
 
 export function waitingOn(tasks: TaskLine[], personId: string): TaskLine[] {
   return tasks.filter(t => !closed(t) && (t.time?.waitsOn ?? []).some(w => isWaitForPerson(w, personId)));
-}
-
-/* Who answers for the departments and the goals, in the departments' order: the departments each answers for and how many
-   open tasks they hold. */
-export type Responsible = { person: PersonRef; departments: string[]; open: number };
-export function responsibles(departments: { id: string; responsible?: PersonRef | null }[], goals: GoalView[], tasks: TaskLine[]): Responsible[] {
-  const people: Responsible[] = [];
-  const add = (person: PersonRef, department?: string) => {
-    let found = people.find(r => r.person.id === person.id);
-    if (!found) people.push((found = { person, departments: [], open: tasks.filter(t => !closed(t) && t.responsible?.id === person.id).length }));
-    if (department) found.departments.push(department);
-  };
-  for (const d of departments) if (d.responsible) add(d.responsible, d.id);
-  for (const g of goals) if (g.status === 'active') add(g.responsible);
-  return people;
 }
 
 /* A department's employees for the left panel: those at work first, then the rest, at least so many in sight. */

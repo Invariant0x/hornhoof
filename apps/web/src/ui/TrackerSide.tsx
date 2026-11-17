@@ -27,7 +27,7 @@ type Props = {
   onClose: () => void;
 };
 
-/* An item of the panel: a place to go, marked while the person is there, with a line under it and a count. */
+/* An item of the panel: a place to go, marked while the person is there, with its icon and optional count. */
 function Item({ on, onClick, count, attention, icon, children }: { on: boolean; onClick: () => void; count?: number; attention?: boolean; icon: ReactNode; children: ReactNode }) {
   return (
     <button className={`tr-item${on ? ' on' : ''}`} type="button" aria-current={on ? 'page' : undefined} onClick={onClick}>
@@ -39,8 +39,7 @@ function Item({ on, onClick, count, attention, icon, children }: { on: boolean; 
 
 type Dept = TaskDepartments['departments'][number];
 
-/* A department: its name, who answers for it and how many work now; unfolded, its goals, pipelines, products and employees,
-   those at work first with the task they are on, the rest under "N more". */
+/* A department unfolds to its goals and pipelines. Its products and employees have their own disclosures. */
 function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept; org: Org | null; place: TrackerPlace; go: (place: TrackerPlace) => void; onOpenTask: (id: string) => void; pipelines: Pipeline[] }) {
   const t = useT();
   const words = t.tracker.side;
@@ -95,8 +94,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept;
   );
 }
 
-/* The left panel: what waits for the person, their tasks and what works now; who answers for what; the departments with
-   what is in them; and the turns and releases. On a phone it is a drawer over the page. */
+/* A phone opens the tracker sidebar in a drawer. */
 export function TrackerSide({ id, place, onPlace, onOpenTask, org, places, pipelines, tasks, counts, open, onClose, onAddTask }: Props) {
   const t = useT();
   const words = t.tracker.side;

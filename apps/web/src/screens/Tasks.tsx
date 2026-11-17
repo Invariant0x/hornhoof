@@ -335,9 +335,7 @@ function MakeHere({ places, org, department, pipeline, making, setMaking, onOpen
   );
 }
 
-/* The tracker: on the left what waits for the person, their tasks, what works now, who answers for what, the departments
-   and the turns; on top where the person is, View as and the search; then the work as a list, a board or a graph, each
-   task and goal opening the same card. Everyone of the company reads every department's work. */
+/* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
   const sideId = useId();

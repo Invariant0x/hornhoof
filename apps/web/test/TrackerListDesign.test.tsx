@@ -81,7 +81,7 @@ it('uses status shapes, stable identity marks and a colored priority arrow', () 
   expect(within(row).getByRole('img', { name: 'Luisa Rivera' })).toHaveAttribute('data-program', 'claude');
   expect(within(row).getByRole('img', { name: 'Max' })).toHaveClass('tr-avatar');
   expect(within(row).getByText('Urgent')).toHaveClass('tr-priority', 'urgent');
-  expect(within(within(row).getByText('Urgent')).getByTestId('priority-arrow')).toBeInTheDocument();
+  expect(within(row).getByText('Urgent').querySelector('.tr-priority-arrow')).toBeInTheDocument();
   expect(screen.getByRole('img', { name: 'In work' })).toHaveClass('working');
   expect(screen.getByRole('img', { name: 'Done' })).toHaveClass('done');
   expect(screen.getByRole('img', { name: 'Not started' })).toHaveClass('open');

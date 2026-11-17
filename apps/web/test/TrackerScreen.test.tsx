@@ -68,7 +68,7 @@ describe('My tasks and View as', () => {
     const user = userEvent.setup();
     shell();
     const list = await main();
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#24 Fix the login page', '#23 Refund button']));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
     expect(screen.getByRole('region', { name: 'Your goals' })).toHaveTextContent('500 subscribers');
     expect(screen.getByRole('region', { name: 'Your goals' })).not.toHaveTextContent('Card payments');
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe('My tasks and View as', () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
     const list = await main();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('My tasks');
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#24 Fix the login page', '#23 Refund button']));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
     expect(screen.getByRole('region', { name: 'Your goals' })).toHaveTextContent('500 subscribers');
     expect(screen.queryByRole('region', { name: 'Goals of Maria' })).not.toBeInTheDocument();
     expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
@@ -294,12 +294,12 @@ describe('the views and the card', () => {
     shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [LOGIN, checked, FORM, { ...PAY, assignee: RITA, executor: null }] }] });
     const list = await main();
     const row = await waitFor(() => rowOf(list, '#23 Refund button'));
-    expect(row).toHaveTextContent('Bruno');
-    expect(row).not.toHaveTextContent('Rita');
+    expect(within(row).getByRole('img', { name: 'Bruno' })).toBeInTheDocument();
+    expect(within(row).queryByRole('img', { name: 'Rita' })).toBeNull();
     const executor = within(screen.getByRole('group', { name: 'Filters' })).getByLabelText('Executor');
     expect(within(executor).getAllByRole('option').map(o => o.textContent)).toEqual(['Any', 'Bruno', 'Rita']);
     await user.selectOptions(executor, 'Bruno');
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#24 Fix the login page', '#23 Refund button', '#22 Card form']));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page', '#22 Card form']));
     await user.click(screen.getByRole('radio', { name: 'Board' }));
     const board = await main();
     expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Does it: Bruno');
@@ -379,17 +379,17 @@ describe('a goal', () => {
 });
 
 describe('the list', () => {
-  it('folds what is done at the bottom and shows what was cancelled only under its filter', async () => {
+  it('shows done work at the bottom and shows cancelled work only under its filter', async () => {
     const user = userEvent.setup();
     const shipped = line({ id: 't19', number: 19, title: 'Price page', status: 'done' });
     const dropped = line({ id: 't18', number: 18, title: 'Old checkout', status: 'cancelled' });
     shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [...TASKS, shipped, dropped] }] });
     const list = await main();
     const done = await within(list).findByRole('button', { name: 'Done: 1' });
-    expect([...list.querySelectorAll('h2')].map(h => h.textContent)).toEqual(['Waiting: 1', 'Review: 1', 'In work: 1', 'Done: 1']);
-    expect(within(list).queryByRole('listitem', { name: '#19 Price page' })).not.toBeInTheDocument();
-    await user.click(done);
+    expect([...list.querySelectorAll('h2 button')].map(b => b.getAttribute('aria-label'))).toEqual(['In work: 1', 'Review: 1', 'Waits for a person: 1', 'Done: 1']);
     expect(within(list).getByRole('listitem', { name: '#19 Price page' })).toBeInTheDocument();
+    await user.click(done);
+    expect(within(list).queryByRole('listitem', { name: '#19 Price page' })).not.toBeInTheDocument();
     expect(within(list).queryByRole('listitem', { name: '#18 Old checkout' })).not.toBeInTheDocument();
     await user.selectOptions(within(screen.getByRole('group', { name: 'Filters' })).getByLabelText('Status'), 'Cancelled');
     await user.click(await within(list).findByRole('button', { name: 'Cancelled: 1' }));
@@ -412,6 +412,19 @@ describe('making work in a department', () => {
     await user.click(screen.getByRole('button', { name: 'Create task' }));
     await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/tasks')?.body).toMatchObject({ title: 'Refund API', brief: 'Give the money back.', department: 'd2' }));
     expect(await card('#25 Refund API')).toBeInTheDocument();
+  });
+
+  it('gives a group task its pipeline and the priority chosen in the form', async () => {
+    const user = userEvent.setup();
+    const made = detail(line({ id: 't25', number: 25, title: 'New payment option', pipelineId: 'pl1', priority: 'high' }));
+    const calls = shell('/tasks?department=d2&pipeline=pl1', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
+    const list = await main();
+    await user.click(within(list).getByRole('button', { name: 'Add task' }));
+    await user.type(screen.getByLabelText('Title'), 'New payment option');
+    await user.selectOptions(screen.getByLabelText('Priority'), 'high');
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await card('#25 New payment option');
+    expect(calls.find(c => c.method === 'POST' && c.path === '/api/tasks')?.body).toMatchObject({ title: 'New payment option', department: 'd2', pipeline: 'pl1', priority: 'high' });
   });
 
   it('says the head gets a new task without naming it twice when it is called after its role', async () => {

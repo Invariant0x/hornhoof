@@ -4,7 +4,6 @@ import { humanStatus, type Asks, type HumanStatus } from '../task-board';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
-import { Fold } from './TaskBoard';
 import { dueText, sinceSeconds, spanText, taskWaits, waitLabel, waitText } from './tracker-words';
 import { routePath } from '../routes';
 import { TrackerIcon, type Program } from './icons';
@@ -137,10 +136,11 @@ function Group({ group, rows, relations, onAddTask, showSubtasks }: { group: Lis
   const [open, setOpen] = useState(group.status !== 'cancelled');
   const label = group.status === 'waitingPerson' ? t.tracker.list.waitingPerson : t.tracker.groups[group.status];
   const state = group.status === 'waitingPerson' ? 'waiting' : STATE_CLASS[group.status];
+  const heading = t.tracker.list.group(label, group.trees.length);
   return (
-    <section className={`tr-group ${state}`} aria-label={t.tracker.list.group(label, group.trees.length)}>
-      <h2 className="tr-group-head">
-        <button className="tr-group-toggle" type="button" aria-expanded={open} aria-controls={`${id}-rows`} aria-label={t.tracker.list.group(label, group.trees.length)} onClick={() => setOpen(!open)}>
+    <section className={`tr-group ${state}`} aria-label={heading}>
+      <h2 className="tr-group-head" aria-label={heading}>
+        <button className="tr-group-toggle" type="button" aria-expanded={open} aria-controls={`${id}-rows`} aria-label={heading} onClick={() => setOpen(!open)}>
           <span className="tr-group-arrow" aria-hidden="true" />
           <span className="tr-status-pill">{label}</span>
           <span className="tr-count">{group.trees.length}</span>

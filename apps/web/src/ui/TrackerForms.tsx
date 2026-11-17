@@ -1,4 +1,4 @@
-import { TASK_PRIORITIES } from '@hornhoof/protocol';
+import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
@@ -152,7 +152,7 @@ export function TaskEdit({ task, onDone, onCancel, onReload }: { task: TaskDetai
         )}
       </Field>
       <Field label={t.tracker.priority.label}>{p => (
-        <select {...p} value={priority} onChange={e => set({ priority: e.target.value })}>
+        <select {...p} value={priority} onChange={e => set({ priority: e.target.value as TaskPriority })}>
           {TASK_PRIORITIES.map(level => <option key={level} value={level}>{t.tracker.priority[level]}</option>)}
         </select>
       )}</Field>
@@ -368,5 +368,5 @@ export function TrackerNewTask({ department, pipelineId, onCreated, onCancel }: 
   const { language } = useLanguage();
   const head = department.employees.find(e => e.kind === 'head');
   if (!head) return null;
-  return <NewTask department={department} pipelineId={pipelineId} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} />;
+  return <NewTask department={department} showPriority pipelineId={pipelineId} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} />;
 }

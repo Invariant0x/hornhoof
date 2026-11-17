@@ -6,30 +6,19 @@ step people must take before updating is the first entry under Changed, starting
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
 ## [Unreleased]
-
 ### Fixed
-
 - The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
-
 ### Added
-
 - People and agents can set task priority, which appears on the task card and orders tasks within each list group.
-
 ### Changed
-
 - The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
 - Task rows show what they wait for and which tasks from other departments need them.
-
 - Task lists distinguish status, priority, people, departments and executor programs by shape and color.
-
 - The task sidebar shows company people and wait counts, with shortcuts to due dates, department goals and work outside a pipeline.
-
 - The tracker puts the current place, person picker and search in one header, followed by views and compact filters.
 - The tracker can show tasks by due date and department goals, and new tasks on a pipeline keep that pipeline.
-
 - Expand a task from the arrow next to its title to see its subtasks in the same list columns.
-
 - On narrow screens, tracker rows stack their facts and show the full names behind the initials.
 
 ## [0.32.0] - 2026-11-17

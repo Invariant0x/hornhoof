@@ -177,7 +177,7 @@ describe('the tracker', () => {
     await goTo(user, /^Development/);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ })).toHaveTextContent('Rita'));
+    await waitFor(() => expect(within(within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ })).getByRole('img', { name: 'Rita' })).toBeInTheDocument());
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -201,13 +201,13 @@ describe('the tracker', () => {
     moved = true;
     stream.send({ type: 'task', id: 't11' });
     const reviewed = () => within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ });
-    await waitFor(() => expect(reviewed()).toHaveTextContent('Rita'));
+    await waitFor(() => expect(within(reviewed()).getByRole('img', { name: 'Rita' })).toBeInTheDocument());
     await act(async () => {
       late();
       /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(reviewed()).toHaveTextContent('Rita');
+    expect(within(reviewed()).getByRole('img', { name: 'Rita' })).toBeInTheDocument();
   });
 });
 

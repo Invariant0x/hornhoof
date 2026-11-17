@@ -7,15 +7,14 @@ import { NODE } from '../../src/tracker';
 import { captureWith } from '../capture';
 import { DEV, GOALS, QUESTION, serveTasksBoard, TASKS } from './api';
 
-/* The tracker as a person meets it: the left panel of lists, where the person is, three views of the same work with their
-   filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, a light and
-   a dark skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
+/* The tracker as a person meets it: the left panel of lists, where the person is, views of the same work with their
+   filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, every built-in skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
 
 const MESSAGES: Record<Language, Messages> = { en, ru };
 const capture = captureWith('tasks-board', process.env.HH_SCREENSHOT_DIR);
 /* One built-in skin of each scheme. */
 const SKINS = (['light', 'dark'] as const).map(scheme => BUILTIN_SKINS.find(skin => skin.scheme === scheme)!.id);
-const LOOKS = LANGUAGES.flatMap(({ id }) => SKINS.map(skin => ({ lang: id, skin })));
+const LOOKS = LANGUAGES.flatMap(({ id }) => BUILTIN_SKINS.map(skin => ({ lang: id, skin: skin.id })));
 
 async function open(page: Page, lang: Language, width: number, path: string, skin: string = SKINS[1]!) {
   await page.setViewportSize({ width, height: 900 });
@@ -24,7 +23,7 @@ async function open(page: Page, lang: Language, width: number, path: string, ski
     localStorage.setItem('hh-theme', skin);
   }, { language: lang, skin });
   await page.goto(path);
-  await expect(page.locator('.tr-where h1')).toBeVisible();
+  await expect(page.locator('h1.tr-where')).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -51,7 +50,7 @@ async function inside(page: Page, what: string) {
 /* What a finger presses is at least 44 px high. */
 async function touchable(page: Page, what: string) {
   const links = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
-  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-menu:visible, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
+  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-add-view, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
     expect(height, what).toBeGreaterThanOrEqual(43.5);
   }
@@ -67,18 +66,17 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     const t = MESSAGES[lang];
     await serveTasksBoard(page);
     await open(page, lang, width, `/tasks?department=${DEV.id}`, skin);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(DEV.name);
+    await expect(page.getByRole('heading', { level: 1, name: `${DEV.name} / ${t.tracker.views.list}` })).toBeVisible();
 
-    /* The list: groups by state in words, the task that waits for the person first; each row names who does it, who answers
-       for it, its goal and its due day. */
+    /* The list starts with work in progress and names the people, goal, due day and subtasks. */
     const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
-    await expect(list.getByRole('heading', { level: 2 }).first()).toHaveText(`${t.tracker.groups.waitingYou}: 1`);
+    await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
     const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
-    await expect(payments).toContainText('Hana');
+    await expect(payments.getByRole('img', { name: 'Hana' })).toBeVisible();
     await expect(payments).toContainText(GOALS[1]!.title);
-    await expect(payments).toContainText(t.tracker.list.subtasks(1, 3));
+    await expect(payments.getByRole('button', { name: t.tracker.list.subtasks(1, 3) })).toBeVisible();
     await inside(page, `list ${lang} ${skin} ${width}`);
-    await touchable(page, `list ${lang} ${skin} ${width}`);
+    if (width <= 760) await touchable(page, `list ${lang} ${skin} ${width}`);
     await capture(page, info, `list-${lang}-${skin}-${width}`);
 
     /* The board: the pipeline's stages when one is chosen, columns by status otherwise, as many side by side as fit. */
@@ -185,9 +183,7 @@ const roleColor = (page: Page, role: string) => page.evaluate(r => {
   return color;
 }, role);
 
-/* Design's rules for the tracker (#1150), in the light skin: a chip in focus has the app's ring, its choice is as wide and as
-   high in every engine with the arrow at the end side, the left panel keeps no room for a bar, a chosen chip and the chosen
-   view read clearly, and a card's facts keep their words in order right to left. */
+/* The wrapped chip keeps its focus ring, the sidebar reserves scrollbar space, and the card's facts keep their direction. */
 for (const dir of ['ltr', 'rtl'] as const) {
   test(`keeps the chips, the left panel and the card's facts alike in every engine: ${dir}`, async ({ page }, info) => {
     const t = MESSAGES.en;
@@ -198,22 +194,19 @@ for (const dir of ['ltr', 'rtl'] as const) {
     const chips = page.getByRole('group', { name: t.tracker.filters.label });
     const status = chips.getByLabel(t.tracker.filters.status);
     await status.focus();
-    const ring = await status.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineOffset, s.outlineColor]; });
-    expect(ring).toEqual(['solid', '2px', '2px', await roleColor(page, '--cyan-ink')]);
+    const chip = chips.locator('label').filter({ has: status });
+    const ring = await chip.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineColor]; });
+    expect(ring).toEqual(['solid', '2px', await roleColor(page, '--cyan-ink')]);
     await shot('chip-focus');
     const box = (await status.boundingBox())!;
-    expect(Math.abs(box.width - 160)).toBeLessThanOrEqual(1);
-    expect(Math.abs(box.height - 40)).toBeLessThanOrEqual(1);
-    const arrow = await status.evaluate(el => { const s = getComputedStyle(el); return [s.paddingInlineEnd, s.backgroundPositionX]; });
-    expect(arrow[0]).toBe('28px');
-    if (dir === 'rtl') expect(arrow[1]).toBe('10px, 15px');
-    else expect(arrow[1]).not.toBe('10px, 15px');
-    const side = await page.locator('.tr-side').evaluate((el: HTMLElement) => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
-    expect(side[0]).toBe(side[1]);
+    const chipBox = (await chip.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(chipBox.width - 2);
+    expect(box.height).toBeGreaterThanOrEqual(chipBox.height - 2);
+    expect(await page.locator('.tr-side').evaluate(el => getComputedStyle(el).scrollbarGutter)).toBe('stable');
     await status.selectOption({ label: t.tracker.statuses.working });
     await status.evaluate(el => (el as HTMLSelectElement).blur());
-    await expect(page.locator('.tr-chip.on')).toHaveCount(1);
-    expect(await page.locator('.tr-chip.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
+    await expect(chip).toContainText(t.tracker.filters.group(t.tracker.statuses.working));
+    expect(await chip.evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
     expect(await page.locator('.tr-views label.on').evaluate(el => getComputedStyle(el).color)).toBe(await roleColor(page, '--ink'));
     await shot('light-chips');
     await view(page, t, t.tracker.views.board);

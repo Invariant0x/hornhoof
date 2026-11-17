@@ -170,5 +170,5 @@ export function TrackerIcon({ name }: { name: keyof typeof TRACKER_ICONS }) {
 }
 
 export function PriorityArrow() {
-  return <svg className="ic tr-priority-arrow" data-testid="priority-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 3 5 10H3z" /></svg>;
+  return <svg className="ic tr-priority-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 3 5 10H3z" /></svg>;
 }
