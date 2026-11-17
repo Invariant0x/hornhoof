@@ -1,6 +1,6 @@
 # Task 1177: direct keeper-peer scenarios
 
-Current integration base: `a27bc368b1e027af70883d06d1da9ba2b07985ab`.
+Current integration base: `c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6`.
 The incoming merge did not change the task's five test/helper files or the lockfile.
 The hand-in names the exact checked candidate. Run receipts, raw timing/load data and the 28-case before/after table are retained on `task-1177-evidence` and attached to task 1177, preserving the checked source SHA.
 
