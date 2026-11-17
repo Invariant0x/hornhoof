@@ -97,6 +97,57 @@ describe('a person given several departments, not the whole company, runs the me
   }, 60_000);
 });
 
+type Listed1175 = { permissionId: string; channelId: string; kind: string; address: string; purpose: string; source: string; status: string; grantedAt: string; revokedAt: string | null; doNotContact: boolean; addedBy: { person: { name: string } | null; agent: { name: string } | null } | null };
+type LogEntry = { kind: string; subjectId: string | null; channel: { name: string } | null; detail: Record<string, unknown>; person: { name: string } | null };
+
+/* The addresses added to a department's channels, test addresses among them, for the people who run it: each with the
+   channel's purpose, its consent, and when and by whom it was added. Taking a consent back goes through the consent
+   the server already keeps, and both steps go into the department's setup log with no address in it. */
+describe('a person who runs a department sees the addresses added to it and takes back a consent', () => {
+  const add = (m: Awaited<ReturnType<typeof fourDepartments>>, channelId: string, address: string, token?: string) =>
+    m.post('/api/outbound/contacts', { channelId, kind: 'email', address, source: 'Test address of the team', evidence: 'Their own address, for trying the letters' }, token);
+
+  it('lists each address of their department with its purpose, consent, when and by whom, and nothing of another department', async () => {
+    const m = await fourDepartments();
+    const added = await add(m, m.channelId, 'Max.Test@Acme.example');
+    expect(added.statusCode, added.body).toBe(200);
+    expect((await add(m, m.devChannelId, 'dev.test@acme.example', m.c.ceoToken)).statusCode).toBe(200);
+    const listed = await m.get(`/api/outbound/contacts?department=${m.mkt.id}`);
+    expect(listed.statusCode, listed.body).toBe(200);
+    const contacts = listed.json()['contacts'] as Listed1175[];
+    expect(contacts).toEqual([{
+      permissionId: added.json()['permissionId'], channelId: m.channelId, kind: 'email', address: 'max.test@acme.example', purpose: 'newsletter',
+      source: 'Test address of the team', status: 'granted', grantedAt: expect.any(String), revokedAt: null, doNotContact: false,
+      addedBy: { person: { id: expect.any(String), name: 'Max' }, agent: null },
+    }]);
+    const refused = await m.get(`/api/outbound/contacts?department=${m.c.dev.id}`);
+    expect([refused.statusCode, reasonOf(refused)]).toEqual([403, 'outbound_not_allowed']);
+  }, 60_000);
+
+  it('takes back the consent of an address of their department, logs both steps without the address, and no consent of another', async () => {
+    const m = await fourDepartments();
+    const permissionId = (await add(m, m.channelId, 'Max.Test@Acme.example')).json()['permissionId'] as string;
+    const taken = await m.post(`/api/outbound/permissions/${permissionId}/revoke`, {});
+    expect(taken.statusCode, taken.body).toBe(200);
+    const [listed] = (await m.get(`/api/outbound/contacts?department=${m.mkt.id}`)).json()['contacts'] as Listed1175[];
+    expect(listed).toMatchObject({ permissionId, status: 'revoked', revokedAt: expect.any(String) });
+
+    const log = await m.get(`/api/outbound/setup-log?department=${m.mkt.id}`);
+    const entries = log.json()['entries'] as LogEntry[];
+    expect(entries.filter(e => e.subjectId === permissionId).map(e => [e.kind, e.channel?.name, e.person?.name, e.detail])).toEqual([
+      ['consent_revoked', 'B2C Email Outreach', 'Max', { kind: 'email' }],
+      ['contact_added', 'B2C Email Outreach', 'Max', { kind: 'email' }],
+    ]);
+    expect(log.body.toLowerCase()).not.toContain('acme.example');
+
+    const devPermission = (await add(m, m.devChannelId, 'dev.test@acme.example', m.c.ceoToken)).json()['permissionId'] as string;
+    const refused = await m.post(`/api/outbound/permissions/${devPermission}/revoke`, {});
+    expect([refused.statusCode, reasonOf(refused)]).toEqual([403, 'outbound_not_allowed']);
+    const [still] = await m.c.db.select().from(outboundPermissions).where(eq(outboundPermissions.id, devPermission));
+    expect(still!.status).toBe('granted');
+  }, 60_000);
+});
+
 type Shown = { id: string; revision: number; status: string; value: { subject?: string; parts?: unknown[] }; createdAt: string; createdBy: { kind: string; name: string | null } };
 type Listed = { entryId: string; kind: string; locale: string | null; current: number | null; revisions: Shown[] };
 
