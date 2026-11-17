@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Assignment changes made by a department head show the head and the person whose authority it used.
+- Editing an employee card preserves a tracker nudge that arrives during the edit.
 
 ### Changed
 

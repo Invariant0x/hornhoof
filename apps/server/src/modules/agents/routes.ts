@@ -429,31 +429,32 @@ function patchOverrides(ctx: Ctx, next: AgentRow, body: PatchBody): void {
   if (!Object.keys(next.overrides.skills!).length) delete next.overrides.skills;
 }
 
-async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: AgentRow, changed: ReturnType<typeof diffAgent>): Promise<void> {
+async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: AgentRow, changed: ReturnType<typeof diffAgent>): Promise<AgentRow> {
   if (changed.length) {
-    await db.transaction(async tx => {
-      await tx
-        .update(agents)
-        .set({
-          name: next.name,
-          model: next.model,
-          effort: next.effort,
-          subscriptionId: next.subscriptionId,
-          teamId: next.teamId,
-          skills: next.skills,
-          overrides: next.overrides,
-          templateHashes: next.templateHashes,
-          switchedOffAt: next.switchedOffAt,
-          timerMinutes: next.timerMinutes,
-          timerOrder: next.timerOrder,
-          timerAt: next.timerAt,
-          timerNudgedAt: next.timerNudgedAt,
-          timerForWork: next.timerForWork,
-        })
-        .where(eq(agents.id, agent.id));
+    return db.transaction(async tx => {
+      const fields = new Set(changed.map(c => c.field));
+      const resetTimer = next.timerMinutes !== agent.timerMinutes;
+      const [saved] = await tx.update(agents).set({
+        name: fields.has('name') ? next.name : undefined,
+        model: fields.has('model') ? next.model : undefined,
+        effort: fields.has('effort') ? next.effort : undefined,
+        subscriptionId: fields.has('subscription') ? next.subscriptionId : undefined,
+        teamId: fields.has('team') ? next.teamId : undefined,
+        skills: fields.has('skills') ? next.skills : undefined,
+        overrides: fields.has('prompt') ? next.overrides : undefined,
+        templateHashes: fields.has('skills') ? next.templateHashes : undefined,
+        switchedOffAt: fields.has('switch') ? next.switchedOffAt : undefined,
+        timerMinutes: resetTimer ? next.timerMinutes : undefined,
+        timerOrder: fields.has('timer') ? next.timerOrder : undefined,
+        timerAt: resetTimer ? next.timerAt : undefined,
+        timerNudgedAt: resetTimer ? next.timerNudgedAt : undefined,
+        timerForWork: fields.has('timer') ? next.timerForWork : undefined,
+      }).where(eq(agents.id, agent.id)).returning();
       await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), ...c })));
+      return saved!;
     });
   }
+  return next;
 }
 
 /* Applies a card change to the agent as it is now and records each changed field. */
@@ -480,8 +481,8 @@ async function patched(ctx: Ctx, me: Person, agent: AgentRow, body: z.infer<type
 
   /* One row per changed field, with who changed it. */
   const changed = diffAgent(agent, next);
-  await savePatch(db, me, agent, next, changed);
-  return { agent, next, changed: changed.length > 0 };
+  const saved = await savePatch(db, me, agent, next, changed);
+  return { agent, next: saved, changed: changed.length > 0 };
 }
 
 type AgentRequest = Awaited<ReturnType<typeof agentFor>>;

@@ -245,6 +245,22 @@ describe('the employee card', () => {
     expect(told.skills.find(skill => skill.name === file)?.body.endsWith(body)).toBe(true);
   });
 
+  it('preserves a tracker nudge written after the card has read the employee', async () => {
+    const { app, db, ceo, brunoId } = await company();
+    const last = new Date('2026-11-15T12:00:00Z');
+    const nudged = new Date('2026-11-15T12:02:00Z');
+    await db.update(agents).set({ timerMinutes: 60, timerOrder: 'Check the tracker.', timerAt: last }).where(eq(agents.id, brunoId));
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async (...args) => {
+      await db.update(agents).set({ timerAt: nudged, timerNudgedAt: nudged }).where(eq(agents.id, brunoId));
+      return transaction(...args);
+    });
+    const edited = await patch(app, ceo, brunoId, { name: 'Bruna' });
+    expect(edited.statusCode).toBe(200);
+    const [row] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    expect(row).toMatchObject({ name: 'Bruna', timerAt: nudged, timerNudgedAt: nudged });
+  });
+
   it('keeps both of two changes sent at once', async () => {
     const { app, ceo, brunoId } = await company();
     /* The first change holds its write until the second asked for the employee's lane, so the second would read the card
