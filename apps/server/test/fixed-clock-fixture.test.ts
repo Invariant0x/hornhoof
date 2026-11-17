@@ -9,7 +9,7 @@ const AT = Date.parse('2030-01-01T00:00:00Z');
 
 function clock(): void {
   vi.useFakeTimers({ now: AT, toFake: ['Date'] });
-  onTestFinished(() => vi.useRealTimers());
+  onTestFinished(() => { vi.useRealTimers(); });
 }
 
 describe('rows captured at an explicit virtual time', () => {
