@@ -97,9 +97,6 @@ export function parseDataset(raw: Buffer, rules: DatasetRules): Parsed {
   return { ok: true, dataset: { hash: createHash('sha256').update(raw).digest('hex'), cases, holdout: count(row => row.split === 'holdout'), mustBlock: count(row => row.mustBlock) } };
 }
 
-/* All that whoever tunes a prompt may see: the held-out part reaches them only as counts in a report. */
-export const tuningCases = (dataset: Dataset): Case[] => dataset.cases.filter(row => row.split === 'dev');
-
 const NEW_LINE = 0x0a;
 const closed = (raw: Buffer): Buffer => (raw.at(-1) === NEW_LINE ? raw : Buffer.concat([raw, Buffer.from('\n')]));
 
