@@ -18,7 +18,7 @@ it('observes startRun blocked by the company row owner and commits exactly once 
     expect(owner).not.toBe(waiter);
     await locker.query('BEGIN');
     await locker.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [fixture.companyId]);
-    pending = startRun(actor.ctx, actor.job, { task: actor.task.number, command: 'lock-fixture', parts: 1 }).then(reply => { completions++; return reply; });
+    pending = startRun(actor.ctx, actor.job, { task: actor.task.number, branch: `release-${actor.task.number}`, command: 'lock-fixture', parts: 1 }).then(reply => { completions++; return reply; });
     void pending.catch(() => {});
     const waiting = async () => (await pg.admin.query<{ blocked: boolean; query: string }>('SELECT $1::int = ANY(pg_blocking_pids(pid)) AS blocked, query FROM pg_stat_activity WHERE pid = $2', [owner, waiter])).rows[0];
     await until(async () => (await waiting())?.blocked === true);

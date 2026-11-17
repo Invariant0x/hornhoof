@@ -8,6 +8,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { NotConfirmed } from '../src/db/confirm.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
@@ -174,7 +175,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
     expect(await commands()).toMatchObject([{ id: made[0]!.id, dismissedSubscriptionIds: [plan!.id] }]);
     expect((await call(client, 'view', { path: '/api/nodes/commands' })).isError).toBe(true);
-    const events = JSON.stringify(await db.select({ data: agentEvents.data }).from(agentEvents));
+    const events = JSON.stringify(await db.select(only(agentEvents, 'data')).from(agentEvents));
     for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));
   });
 

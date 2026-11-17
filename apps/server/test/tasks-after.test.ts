@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { cancel, comment, createTask as createTaskEngine, report, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -10,7 +11,7 @@ import { taskDetail } from '../src/modules/tasks/views.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks } from './development-echelons-verification.js';
+import { verified } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
@@ -47,10 +48,7 @@ async function company() {
   const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
   const accept = async (id: string) => {
     const task = await read(id), current = await snapshot(id);
-    const [tester] = await db.select().from(agents).where(eq(agents.id, task.assigneeAgentId!));
-    const checks = await candidateChecks({ ctx, db, task, tester: tester! }, current, HEAD);
-    const run = await checks.run();
-    await report(ctx, tester!.id, id, checks.verified([run.id]));
+    await report(ctx, task.assigneeAgentId!, id, verified(current));
     const ready = await snapshot(id);
     return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in turn-17.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };
@@ -114,7 +112,7 @@ describe('a task that comes after others', () => {
     const last = await accept(schema.id);
     expect(woken(last)).toContainEqual([tess.id, 'assigned']);
     /* The turn is kept with the move that finished the last of them. */
-    expect(await db.select({ why: pendingWakes.why }).from(pendingWakes).where(and(eq(pendingWakes.taskId, tests.task.id), eq(pendingWakes.agentId, tess.id)))).toEqual([{ why: 'assigned' }]);
+    expect(await db.select(only(pendingWakes, 'why')).from(pendingWakes).where(and(eq(pendingWakes.taskId, tests.task.id), eq(pendingWakes.agentId, tess.id)))).toEqual([{ why: 'assigned' }]);
     expect((await read(tests.task.id)).assigneeAgentId).toBe(tess.id);
     const log = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(eq(taskEvents.taskId, tests.task.id));
     expect(log.at(-1)).toEqual({ kind: 'started', text: `#${api.number} and #${schema.number} are done, so it starts now.` });
@@ -409,16 +407,16 @@ describe('an independent part of a dependent task', () => {
     const api = (await member('Checkout API', bruno.id)).task;
     const input = { title: 'Dependent work', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, after: [api.id] };
     const before = {
-      tasks: (await db.select({ id: tasks.id }).from(tasks)).length,
-      events: (await db.select({ id: taskEvents.id }).from(taskEvents)).length,
-      wakes: (await db.select({ id: pendingWakes.id }).from(pendingWakes)).length,
+      tasks: (await db.select(idOnly(tasks)).from(tasks)).length,
+      events: (await db.select(idOnly(taskEvents)).from(taskEvents)).length,
+      wakes: (await db.select(idOnly(pendingWakes)).from(pendingWakes)).length,
     };
     await expect(createTaskEngine(ctx, { agentId: head.id }, input)).rejects.toMatchObject({ reason: 'task_invalid', message: 'A task with after needs independentPart or independentNone.' });
     await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, independentPart: { title: 'Tests', brief: '', body: 'Write tests.', executor: bruno.id }, independentNone: 'Both.' })).rejects.toMatchObject({ reason: 'task_invalid' });
     await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, after: [], independentNone: 'Not needed.' })).rejects.toMatchObject({ reason: 'task_invalid' });
-    expect((await db.select({ id: tasks.id }).from(tasks)).length).toBe(before.tasks);
-    expect((await db.select({ id: taskEvents.id }).from(taskEvents)).length).toBe(before.events);
-    expect((await db.select({ id: pendingWakes.id }).from(pendingWakes)).length).toBe(before.wakes);
+    expect((await db.select(idOnly(tasks)).from(tasks)).length).toBe(before.tasks);
+    expect((await db.select(idOnly(taskEvents)).from(taskEvents)).length).toBe(before.events);
+    expect((await db.select(idOnly(pendingWakes)).from(pendingWakes)).length).toBe(before.wakes);
   });
 
   it('starts the independent child while the parent waits and exposes the declaration', async () => {

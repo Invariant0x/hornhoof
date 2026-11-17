@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { mayChangeRules } from '../departments/approval-policy.js';
 
@@ -14,7 +15,7 @@ const notYours = () => new ApiError(403, 'forbidden', 'Only this department\'s o
 /* The department of the head a call comes through; null when it comes through no head. */
 async function headDepartment(db: Pick<Db, 'select'>, me: Person): Promise<string | null> {
   if (!me.viaHead || !me.via) return null;
-  const [head] = await db.select({ departmentId: agents.departmentId }).from(agents).where(eq(agents.id, me.via));
+  const [head] = await db.select(only(agents, 'departmentId')).from(agents).where(eq(agents.id, me.via));
   return head?.departmentId ?? null;
 }
 

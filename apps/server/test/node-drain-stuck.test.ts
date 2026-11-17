@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
@@ -23,7 +24,7 @@ async function stuckStand(env: NodeJS.ProcessEnv = {}) {
   await setUpCompany(app);
   const url = await listen(app);
   const [company] = await db.select().from(companies);
-  const [person] = await db.select({ id: people.id }).from(people);
+  const [person] = await db.select(idOnly(people)).from(people);
   const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: person!.id, machineKey: 'laptop-host-key', hostname: 'laptop' }).returning();
   const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'kimi', kind: 'personal', label: 'Kimi', ownerPersonId: person!.id, status: 'ready' }).returning();
@@ -169,7 +170,7 @@ describe('node drain updates silent or stuck nodes without interrupting live wor
       signAt: nowMs - MINUTE_MS,
     }, new Date(nowMs));
     expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
-    expect((await s.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
+    expect((await s.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
 
     /* Once the same old turn has been stuck in continuous retrying since 4 hours ago, the drain stops waiting forever. */
     await handleNodeMessage(s.app.ctx, identity, {

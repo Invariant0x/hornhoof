@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { WebSocket } from 'ws';
 import { agentEvents, agents, jobs, machines, nodeConnections, nodes, subscriptions, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { company } from './department-owner-fixture.js';
@@ -168,7 +169,7 @@ describe('an agent writing to an employee whose machine is getting back on the l
     return { homebox: homebox!, write };
   }
   const waiting = (c: C) => c.db.select().from(jobs).where(and(eq(jobs.agentId, c.worker.id), eq(jobs.status, 'queued')));
-  const statusOf = async (c: C, id: string) => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id)))[0]!.status;
+  const statusOf = async (c: C, id: string) => (await c.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, id)))[0]!.status;
 
   it('keeps the message while the connection is closed, and sends it once the machine is back and says hello', async () => {
     const c = await staged();

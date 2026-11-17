@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { published, refuse, type Task, type Tx } from './engine.js';
 import { routeOf, type Route } from './echelons-store.js';
 import { currentCandidate } from './echelons-candidates.js';
@@ -121,7 +122,7 @@ function submittedForVerdict(source: Event, verdict: Event): boolean {
 }
 
 export async function findingTurnReport(db: Reader, companyId: string, number: number): Promise<TurnFindingReport> {
-  const rows = await db.select({ id: tasks.id }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
+  const rows = await db.select(idOnly(tasks)).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
   const events = await reviewEvents(db, rows.map(row => row.id));
   if (hasUnattestedVerdict(events)) return { status: 'unavailable', reason: 'finding-provenance-unavailable', uniqueReported: null, uniqueConfirmed: null, review: null, security: null, cleanup: null, byVendor: [], issues: [] };
   return { ...countedFindings(events), status: 'recorded', reason: null };

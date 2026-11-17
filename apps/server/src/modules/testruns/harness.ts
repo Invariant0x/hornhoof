@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { agents, departments, harnessBuilds, harnessProducts, machines, nodes, people, personAccess, subscriptions, type HarnessMachine, type HarnessProblem } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, orchestratorOf } from '../conversation/queue.js';
 import { quote } from '../conversation/prompt.js';
@@ -18,7 +19,7 @@ import { liveNode } from '../nodes/nodes.js';
 import { identify } from '../nodes/socket.js';
 import { repositoryScope } from './describe.js';
 import { harnessPlaces } from './load.js';
-import { mayTake, placesOf, type Place } from './runs.js';
+import { builtinLent, mayTake, placesOf, type Place } from './runs.js';
 
 /* A product's test harness as one thing for all the company's machines. A unit is built once per architecture: the first
    machine to ask holds a lease and builds, the others wait and take its bundle through here. Each minute the head of the
@@ -54,7 +55,7 @@ async function removeAttempt(dir: string, build: Build): Promise<void> {
 }
 /* An ID is never reused: only an attempt that no row can publish any more may clean up after its delayed work. */
 async function discardSuperseded(ctx: Ctx, dir: string, build: Build): Promise<void> {
-  const [current] = await ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(eq(harnessBuilds.id, build.id)).limit(1);
+  const [current] = await ctx.db.select(idOnly(harnessBuilds)).from(harnessBuilds).where(eq(harnessBuilds.id, build.id)).limit(1);
   if (!current) await removeAttempt(dir, build);
 }
 
@@ -70,18 +71,19 @@ function decideClaim(build: Build, me: string, now: Date, stored: boolean): { an
 }
 
 /* A machine shares a product's harness when it may take the product's parts: it lends its time, and its owner reaches the
-   department. What one builds the others run, and what they build holds the product's dependencies. */
-function nodeAllowed(ctx: Ctx, node: NodeIdentity, department: Department) {
-  if (node.kind === 'builtin') return sql`true`;
-  const reaches = dbExists(ctx.db.select({ id: personAccess.id }).from(personAccess).where(and(eq(personAccess.personId, people.id), or(eq(personAccess.departmentId, department.id), department.parentId ? eq(personAccess.departmentId, department.parentId) : undefined))));
-  return dbExists(ctx.db.select({ id: nodes.id }).from(nodes)
+   department. What one builds the others run, and what they build holds the product's dependencies. A built-in node shares
+   it while the computer it runs on lends itself. */
+async function nodeAllowed(ctx: Ctx, node: NodeIdentity, department: Department) {
+  if (node.kind === 'builtin') return builtinLent(ctx, department.companyId, node.machine);
+  const reaches = dbExists(ctx.db.select(idOnly(personAccess)).from(personAccess).where(and(eq(personAccess.personId, people.id), or(eq(personAccess.departmentId, department.id), department.parentId ? eq(personAccess.departmentId, department.parentId) : undefined))));
+  return dbExists(ctx.db.select(idOnly(nodes)).from(nodes)
     .innerJoin(machines, eq(machines.id, nodes.machineId)).innerJoin(people, eq(people.id, machines.personId))
     .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
     .where(and(eq(nodes.id, node.nodeId), eq(nodes.companyId, department.companyId), node.keyHash ? eq(nodes.keyHash, node.keyHash) : liveNode,
       isNull(subscriptions.removedAt), isNull(machines.revokedAt), eq(machines.kind, 'computer'), eq(machines.lendsTests, true), eq(people.status, 'active'), or(eq(people.scopeKind, 'company'), reaches))));
 }
 async function nodeMayTake(ctx: Ctx, node: NodeIdentity, department: Department): Promise<boolean> {
-  const [row] = await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, department.id), nodeAllowed(ctx, node, department))).limit(1);
+  const [row] = await ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, department.id), await nodeAllowed(ctx, node, department))).limit(1);
   return !!row;
 }
 
@@ -107,7 +109,7 @@ async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now =
     const decided = decideClaim(build!, me, now, await exists(bundleFile(dir, build!)));
     const scoped = { ...ctx, db: tx };
     if (decided.set) {
-      const changed = await tx.update(harnessBuilds).set(decided.set).where(and(eq(harnessBuilds.id, build!.id), nodeAllowed(scoped, node, department))).returning();
+      const changed = await tx.update(harnessBuilds).set(decided.set).where(and(eq(harnessBuilds.id, build!.id), await nodeAllowed(scoped, node, department))).returning();
       if (!changed.length) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
       if (decided.set.id && decided.set.id !== build!.id) await removeAttempt(dir, build!);
     }
@@ -153,7 +155,7 @@ async function prune(ctx: Ctx, dir: string, keep: string, now: Date): Promise<vo
 }
 
 async function headOfProduct(ctx: Ctx, department: Department): Promise<string | null> {
-  const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, department.parentId ?? department.id), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  const [head] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.departmentId, department.parentId ?? department.id), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   return head?.id ?? (await orchestratorOf(ctx, department.companyId))?.id ?? null;
 }
 
@@ -195,7 +197,7 @@ async function heldBuild(ctx: Ctx, node: NodeIdentity, key: string, lease: Lease
 async function changeBuild(ctx: Ctx, node: NodeIdentity, build: Build, patch: Partial<Build>): Promise<void> {
   const [department] = await ctx.db.select().from(departments).where(eq(departments.id, build.departmentId));
   if (!department || !await nodeMayTake(ctx, node, department)) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
-  const changed = await ctx.db.update(harnessBuilds).set(patch).where(and(activeAttempt(node, build), nodeAllowed(ctx, node, department))).returning();
+  const changed = await ctx.db.update(harnessBuilds).set(patch).where(and(activeAttempt(node, build), await nodeAllowed(ctx, node, department))).returning();
   if (!changed.length) {
     if (!await nodeMayTake(ctx, node, department)) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
     throw conflict();
@@ -381,7 +383,7 @@ async function noteReady(ctx: Ctx, department: Department, request: Request, mes
       .where(and(eq(harnessBuilds.companyId, department.companyId), eq(harnessBuilds.departmentId, department.id), inArray(harnessBuilds.key, result.keys)));
   }
   if (!request.head) return;
-  const failed = dbExists(ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))));
+  const failed = dbExists(ctx.db.select(idOnly(harnessBuilds)).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))));
   await ctx.db.update(harnessProducts).set({ goodCommit: message.commitSha, version: result.version }).where(and(eq(harnessProducts.departmentId, department.id), eq(harnessProducts.headCommit, message.commitSha)));
   const machineProblem = sql`exists (select 1 from jsonb_each(${harnessProducts.machines}) as machine where machine.value->>'commitSha' = ${message.commitSha} and machine.value->>'problem' is not null)`;
   if (recovered) await ctx.db.update(harnessProducts).set({ problem: null, told: null }).where(and(eq(harnessProducts.departmentId, department.id), eq(harnessProducts.headCommit, message.commitSha), sql`not ${failed}`, sql`not ${machineProblem}`));
@@ -391,7 +393,7 @@ async function noteTrouble(ctx: Ctx, department: Department, message: HarnessSyn
   if (PASSING.includes(problem.code)) return null;
   /* A build that failed was told of when it failed, with its output, whichever machine built it. */
   if (problem.code === 'build_failed' && ctx.config.harnessDir) {
-    const [reported] = await ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))).limit(1);
+    const [reported] = await ctx.db.select(idOnly(harnessBuilds)).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))).limit(1);
     if (reported) return null;
   }
   const signature = problem.code === 'build_failed' ? `${problem.code}:${message.commitSha}` : `${problem.code}:${problem.detail}`;

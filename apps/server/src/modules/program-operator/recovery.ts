@@ -2,6 +2,7 @@ import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQ
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { conversationOf, GONE_ALONG, insertTurn, liveSubscription, NoSubscription, STOPPED_ON_PURPOSE, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import type { MessageParty } from '../events/parties.js';
@@ -25,12 +26,12 @@ const OWNER_TURN: HoldEnd = { outcome: 'owner_turn', text: 'The existing owner t
 const NOT_AWAITED: HoldEnd = { outcome: 'not_awaited', text: 'The task no longer waits for these words, so they do not go on.' };
 const BY_ITSELF = ['went_on', 'program_gone'];
 const stoppedOnPurpose = (job: Job) => STOPPED_ON_PURPOSE.includes(job.error ?? '');
-const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
+const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select(only(agents, 'removedAt')).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
 const deliveryOf = async (ctx: Ctx, row: Case) => row.deliveryId ? (await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)))[0] : undefined;
 const programLeft = (delivery: typeof programDeliveries.$inferSelect) => delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken';
 
 export async function runsATurn(ctx: Ctx, agentId: string): Promise<boolean> {
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
   return Boolean(running);
 }
 
@@ -43,7 +44,7 @@ export async function operatorHandledFailure(ctx: Ctx, jobId: string): Promise<b
 }
 
 async function recoveryHolds(ctx: Ctx, scope: SQL): Promise<boolean> {
-  const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(scope, eq(programOperatorCases.recoveryHold, true))).limit(1);
+  const [held] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(scope, eq(programOperatorCases.recoveryHold, true))).limit(1);
   return Boolean(held);
 }
 
@@ -75,7 +76,7 @@ async function wakeNow(ctx: Ctx, job: Job): Promise<{ taskWake?: TaskWake } | nu
    out of date by its time, and has words of its own to go on with when a late receipt ends this one. None when the task no
    longer waits for them or the agent has no plan. The caller holds the agent. */
 export async function sayAgain(ctx: Ctx, job: Job, at: Date, prompt: string, data: object = {}): Promise<string | null> {
-  const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
+  const [existing] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
   if (existing) return existing.id;
   const wake = await wakeNow(ctx, job);
   if (!wake) return null;
@@ -141,7 +142,7 @@ export async function settleDeliveryHolds(ctx: Ctx, deliveryId: string): Promise
 /* agent.start is emitted only by an owner opening a view whose physical program is gone. */
 export async function resumeOperatorProcess(ctx: Ctx, agentId: string, nodeId: string): Promise<boolean> {
   return operatorTransaction(ctx, async (tx, inside) => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
     const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), eq(programOperatorCases.nodeId, nodeId), eq(programOperatorCases.recoveryHold, true))).for('update');
     if (!rows.length) return false;
     for (const row of rows) await continueRecovery(inside, row, BY_OWNER);
@@ -185,13 +186,13 @@ async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | n
 
 /* The words a case is about were recorded: those of its own delivery, or, for a case first opened for something else, those
    of its turn. */
-const wordsRecorded = (ctx: Ctx) => exists(ctx.db.select({ id: programDeliveries.id }).from(programDeliveries).where(and(isNotNull(programDeliveries.receiptAt),
+const wordsRecorded = (ctx: Ctx) => exists(ctx.db.select(idOnly(programDeliveries)).from(programDeliveries).where(and(isNotNull(programDeliveries.receiptAt),
   or(eq(programDeliveries.id, programOperatorCases.deliveryId), and(eq(programDeliveries.jobId, programOperatorCases.jobId), eq(programDeliveries.kind, 'assignment'))))));
 
 /* A late receipt always wins over an unsent child, including after readiness already resolved its case. */
 export async function reconcileRecoveryReceipts(ctx: Ctx, agentId: string): Promise<void> {
   const recorded = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), wordsRecorded(ctx)));
-  const [waiting] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.continueOf))).limit(1);
+  const [waiting] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.continueOf))).limit(1);
   for (const incident of recorded) {
     if (waiting) await cancelRepeats(ctx, incident);
     if (incident.recoveryHold) await finishRecovery(ctx, incident, incident.continuationJobId, LATE_RECEIPT);
@@ -203,7 +204,7 @@ export async function reconcileRecoveryReceipts(ctx: Ctx, agentId: string): Prom
 async function cancelRepeats(ctx: Ctx, incident: Case): Promise<void> {
   const [carrier] = await ctx.db.select().from(jobs).where(eq(jobs.id, incident.jobId));
   const along = carrier ? await wentAlong(ctx, carrier) : [];
-  const repeats = along.length ? await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, incident.agentId), inArray(jobs.continueOf, along.map(gone => gone.id)))) : [];
+  const repeats = along.length ? await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, incident.agentId), inArray(jobs.continueOf, along.map(gone => gone.id)))) : [];
   const first = [...(incident.continuationJobId ? [incident.continuationJobId] : []), ...repeats.map(repeat => repeat.id)];
   if (first.length) await cancelContinuations(ctx, incident.agentId, first);
 }
@@ -218,7 +219,7 @@ async function cancelContinuations(ctx: Ctx, agentId: string, first: string[]): 
 
 export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: string, nodeId: string): Promise<void> {
   await operatorTransaction(ctx, async (tx, inside) => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
     const [typed] = await tx.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.agentId, agentId), eq(jobs.nodeId, nodeId), eq(jobs.status, 'running')));
     if (!typed) return;
     const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), eq(programOperatorCases.nodeId, nodeId)));

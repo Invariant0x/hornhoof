@@ -3,6 +3,7 @@ import type { TurnRetry } from '@hornhoof/protocol/map';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { agentState, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { turnAgain } from './again.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
@@ -45,7 +46,7 @@ async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string,
 }
 
 export async function agentFailureState(ctx: Ctx, agentId: string): Promise<FailureState> {
-  const [agent] = await ctx.db.select({ companyId: agents.companyId }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await ctx.db.select(only(agents, 'companyId')).from(agents).where(eq(agents.id, agentId));
   return agent ? (await agentFailureStates(ctx, agent.companyId, [agentId])).get(agentId)! : { retry: null, failure: null, obsolete: null };
 }
 
@@ -95,7 +96,7 @@ async function retryHistory(ctx: Ctx, companyId: string, waiting: Job[]): Promis
 }
 
 async function alreadySent(ctx: Ctx, caseId: string): Promise<boolean> {
-  const [seen] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' is not null and ${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
+  const [seen] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' is not null and ${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
   return !!seen;
 }
 
@@ -121,7 +122,7 @@ export async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: st
   const to = pickOpsRecipient(await operationsWatchers(ctx, job.companyId), agent.id, new Set(busy.flatMap(j => j.id ? [j.id] : [])));
   if (!to) {
     if (options.waitForWatcher === false) return;
-    const [pending] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'operationsPending' is not null and ${agentEvents.data}->>'operationsPending' = ${caseId}`).limit(1);
+    const [pending] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents).where(sql`${agentEvents.data}->>'operationsPending' is not null and ${agentEvents.data}->>'operationsPending' = ${caseId}`).limit(1);
     if (!pending) await logTurnFact(ctx, job, `No Operations watcher is available. This message waits for one: ${text}`, { operationsPending: caseId, operationsText: text, operationsTellHead: tellHead });
     return;
   }
@@ -152,7 +153,7 @@ async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, task
   const note = task ? `${continuationNote(job, task)}\n${why}` : why;
   const prompt = task ? note : `${note}\n\n${await originalPromptOf(ctx, job)}`;
   const id = await onAgent(ctx, agent.id, async () => {
-    const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
+    const [existing] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
     if (existing) return existing.id;
     const repeated = await repeatedTurn(ctx, job);
     return taskTurn ? turnAgain(ctx, taskTurn, note, { continueOf: job.id }, prompt, at, repeated) : insertTurn(ctx, {
@@ -283,7 +284,7 @@ export async function sendWaitingFailureAlarms(ctx: Ctx): Promise<void> {
 }
 
 async function waitsForSignIn(ctx: Ctx, subscriptionId: string): Promise<boolean> {
-  const waiting = await ctx.db.selectDistinct({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.subscriptionId, subscriptionId), eq(jobs.status, 'queued')));
+  const waiting = await ctx.db.selectDistinct(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.subscriptionId, subscriptionId), eq(jobs.status, 'queued')));
   for (const turn of waiting) if (turn.agentId && (await agentState(ctx, turn.agentId)).reason === 'needs_login') return true;
   return false;
 }

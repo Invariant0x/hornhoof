@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, programDeliveries } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { insertTurn, onAgent, pump, settleWords } from '../conversation/queue.js';
 import { deliveredWords, repeatedTurn, UNHEARD_NOTE, wordsForTurn } from '../conversation/turn-words.js';
@@ -53,7 +54,7 @@ export async function reconcileOperatorFallbacks(ctx: Ctx, now = new Date()): Pr
 }
 
 async function fallbackMessage(ctx: Ctx, delivery: StoredDelivery): Promise<Unheard | null> {
-  const events = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.companyId, delivery.companyId), eq(agentEvents.agentId, delivery.agentId), eq(agentEvents.jobId, delivery.jobId), sql`${agentEvents.data}->'operatorDelivery'->>'id' = ${delivery.id}`));
+  const events = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.companyId, delivery.companyId), eq(agentEvents.agentId, delivery.agentId), eq(agentEvents.jobId, delivery.jobId), sql`${agentEvents.data}->'operatorDelivery'->>'id' = ${delivery.id}`));
   for (const event of events) {
     const text = deliveredWords(event.data);
     if (text !== null && wordsDigest(text) === delivery.digest) return { type: 'agent.unheard', agentKey: delivery.agentId, jobId: delivery.jobId, text, operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal } };
@@ -65,7 +66,7 @@ async function recordFallback(tx: Tx, inside: Ctx, nodeId: string, message: Unhe
   const [agent] = await tx.select().from(agents).where(and(eq(agents.id, message.agentKey), isNull(agents.removedAt))).for('update');
   const [delivery] = await tx.select().from(programDeliveries).where(eq(programDeliveries.id, metadata.id));
   if (!agent || !delivery || !validFallbackDelivery(delivery, agent, nodeId, message, metadata)) return;
-  const [previous] = await tx.select({ jobId: agentEvents.jobId }).from(agentEvents).where(and(eq(agentEvents.agentId, agent.id), eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->>'operatorFallback' = ${metadata.id}`)).limit(1);
+  const [previous] = await tx.select(only(agentEvents, 'jobId')).from(agentEvents).where(and(eq(agentEvents.agentId, agent.id), eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->>'operatorFallback' = ${metadata.id}`)).limit(1);
   if (delivery.outcome === 'taken') {
     if (previous?.jobId) await tx.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already took these words.', finishedAt: now }).where(and(eq(jobs.id, previous.jobId), eq(jobs.status, 'queued')));
     return;

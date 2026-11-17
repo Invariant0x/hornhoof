@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -6,8 +6,9 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
-import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
+import { nodeDrain, nodeHeldFrom, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 import { gets } from './test-runs-company.js';
 import { BUILTIN } from './builtin.js';
@@ -30,7 +31,7 @@ async function computer(env: NodeJS.ProcessEnv = {}) {
   const ceo = await setUpCompany(app);
   const url = await listen(app);
   const [company] = await db.select().from(companies);
-  const [person] = await db.select({ id: people.id }).from(people);
+  const [person] = await db.select(idOnly(people)).from(people);
   const [apiKey] = await db.select().from(subscriptions);
   const [host] = await db.insert(machines).values({ companyId: company!.id, personId: person!.id, machineKey: HOST_KEY, hostname: 'host-a' }).returning();
   const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
@@ -326,7 +327,7 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: job });
     expect(await f.statusOf(job)).toMatchObject({ nodeId: other.nodeId });
     expect(await f.gotTurnOf(head.id, here)).toBe(false);
-    expect((await f.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
+    expect((await f.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
   });
 
   it('stays on its own node past the limit when every machine of its plan waits, and starts on that one', async () => {
@@ -373,7 +374,7 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(nodeHeldLong(f.app.ctx, node)).toBe(true);
   });
 
-  it('never sends a head onto a node that restarts, however long it takes: it goes to another machine of its plan', async () => {
+  it('sends a head to another machine of its plan while its node restarts, not onto that node', async () => {
     const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
     const [away] = await f.db.insert(machines).values({ companyId: f.company.id, personId: f.person.id, machineKey: 'another-machine', hostname: 'away' }).returning();
     const google = await f.plan('antigravity');
@@ -393,18 +394,75 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await f.gotTurnOf(head.id, here)).toBe(false);
   });
 
-  it('keeps a head waiting on a node that restarts when its plan has no other machine', async () => {
-    const f = await computer({ NODE_LEADER_HOLD_MS: '50' });
+  /* The updater heard the node is free and went before it stopped the node, or its answer was lost on the way. */
+  it('lets the orchestrator in within the limit when an updater heard its node is free and never stopped it', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
     const google = await f.plan('antigravity');
     const node = await f.online(google.key);
     await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
+    const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
+    await f.db.update(agents).set({ subscriptionId: google.plan, nodeId: google.nodeId }).where(eq(agents.id, orchestrator.id));
+    const worker = await f.hire('Bob', 'worker', google.plan, google.nodeId);
+    expect((await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} })).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+
+    const job = await f.turnFor(orchestrator.id);
+    const waiting = await f.turnFor(worker.id, 'A worker turn');
+    await vi.advanceTimersByTimeAsync(HOLD - 1);
+    expect(await f.gotTurnOf(orchestrator.id, node)).toBe(false);
+    await vi.advanceTimersByTimeAsync(ROUND - HOLD + 1);
+
+    expect(nodeHeldFrom(f.app.ctx, { kind: 'node', nodeId: google.nodeId }, orchestrator.roleKey, true)).toBe(false);
+    expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
+    expect(await f.gotTurnOf(worker.id, node)).toBe(false);
+    expect((await f.statusOf(waiting)).status).toBe('queued');
+    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })?.state).toBe('restarting');
+  });
+
+  it('holds a head as before once its node began to stop, past the limit and the lease of a wait, and starts it on the node that comes back', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const google = await f.plan('antigravity');
+    const id = { kind: 'node' as const, nodeId: google.nodeId };
+    const node = await f.online(google.key);
+    await until(() => f.app.ctx.hub.isReady(id));
     const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
     await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    /* The installer stops the node: it says so and closes its link. */
+    node.send({ type: 'node.stopping', startedAt: BOOT.startedAt, exit: { kind: 'planned', reason: 'node_update', startedAt: BOOT.startedAt, at: new Date().toISOString(), log: '' } });
+    node.close();
+    await until(() => !f.app.ctx.hub.isReady(id));
     const job = await f.turnFor(head.id);
-    /* Past the limit and past the look at the waits that lets the leaders in. */
-    await vi.advanceTimersByTimeAsync(ROUND);
-    expect(await f.gotTurnOf(head.id, node)).toBe(false);
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + ROUND);
+    expect(nodeDrain(f.app.ctx, id)?.state).toBe('restarting');
+    expect(nodeHeldFrom(f.app.ctx, id, 'DEV-HEAD', true)).toBe(true);
     expect((await f.statusOf(job)).status).toBe('queued');
+
+    const back = await connectNode(f.url, google.key);
+    onTestFinished(() => back.close());
+    back.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], boot: NEW_BOOT });
+
+    expect(await nextOf(back, 'job.run')).toMatchObject({ jobId: job });
+    expect(nodeDrain(f.app.ctx, id)).toBeNull();
+  });
+
+  /* Before 0.29.1 the server's own look made a free node restart with no updater told; such a restart comes back from
+     its file after the update, and the node it names never stopped. */
+  it('lets the orchestrator in within the limit on a restart an earlier build saved for a node that never stopped', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-node-each-'));
+    writeFileSync(join(control, 'node-drains.json'), JSON.stringify([{ key: 'builtin', boot: BOOT.startedAt, view: { state: 'restarting', since: new Date().toISOString() }, touched: Date.now() }]));
+    const f = await computer({ HORNHOOF_CONTROL_DIR: control, NODE_LEADER_HOLD_MS: String(HOLD) });
+    expect(nodeDrain(f.app.ctx, BUILTIN)?.state).toBe('restarting');
+    const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
+    await f.db.update(agents).set({ subscriptionId: f.apiKey.id, nodeId: null }).where(eq(agents.id, orchestrator.id));
+    const job = await f.turnFor(orchestrator.id);
+    const builtin = await f.online(NODE_KEY);
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
+    expect(await f.gotTurnOf(orchestrator.id, builtin)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(ROUND);
+
+    expect(nodeHeldFrom(f.app.ctx, BUILTIN, orchestrator.roleKey, true)).toBe(false);
+    expect(await nextOf(builtin, 'job.run')).toMatchObject({ jobId: job });
+    expect(nodeDrain(f.app.ctx, BUILTIN)?.state).toBe('restarting');
   });
 });
 

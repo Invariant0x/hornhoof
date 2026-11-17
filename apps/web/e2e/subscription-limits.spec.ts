@@ -6,6 +6,7 @@ import type { SubView } from '../src/types';
 import { openAgent } from './agent-window-panels-api';
 import { CARD } from './agent-window-api';
 import { box, serveApi } from './api';
+import { cutByNavigation } from './look-steps';
 
 const BEFORE = process.env.LIMITS_BEFORE === '1';
 const NOW = Date.parse('2026-11-04T22:00:00.000Z');
@@ -126,7 +127,7 @@ for (const lang of ['en', 'ru'] as const) for (const skin of BUILTIN_SKINS.map(s
   test(`Subscriptions complete single-window Claude and offline machines: ${lang} ${mode} ${width}`, async ({ page }, info) => {
     const t = messages[lang];
     const errors: string[] = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => { if (!cutByNavigation(page, error)) errors.push(error.message); });
     page.on('console', message => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text()); });
     page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
     await page.setViewportSize({ width, height: 900 });

@@ -4,6 +4,7 @@ import { actsAsCeo } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, people, tasks, teams } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx } from './engine.js';
 import { freePeers, type Work } from './role-peers.js';
@@ -19,7 +20,7 @@ export const mayHoldTask = ({ urgent }: Pick<Task, 'urgent'>, { urgentOnly }: { 
 export async function urgentOnlyAgents(db: Db | Tx, companyId: string, agentIds: readonly string[]): Promise<ReadonlySet<string>> {
   if (!agentIds.length) return new Set();
   const rows = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .innerJoin(teams, and(eq(teams.id, agents.teamId), eq(teams.companyId, companyId)))
     .where(and(eq(agents.companyId, companyId), inArray(agents.id, [...agentIds]), eq(teams.urgentOnly, true)));
@@ -57,7 +58,7 @@ const notAllowed = () => refuse(403, 'urgent_not_allowed', 'Only the CEO, the CE
 /* The orchestrator acts for the CEO and for a department's owner: its tools check that the turn answers them. */
 async function maySayUrgent(db: Db | Tx, companyId: string, actor: Actor, departmentId: string | null): Promise<boolean> {
   if (actor.agentId !== undefined) {
-    const [agent] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, companyId)));
+    const [agent] = await db.select(only(agents, 'kind')).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, companyId)));
     return agent?.kind === 'orchestrator';
   }
   const [person] = await db.select().from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, companyId)));
@@ -79,7 +80,7 @@ export async function setUrgent(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task
   if (task.parentId) throw refuse(409, 'urgent_follows_parent', `#${task.number} is as urgent as the task above it. Change the top of its tree.`);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is closed.`);
   const row = await ctx.db.transaction(async tx => {
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+    await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     await tx.execute(sql`
       WITH RECURSIVE tree AS (
         SELECT id FROM tasks WHERE id = ${task.id}
