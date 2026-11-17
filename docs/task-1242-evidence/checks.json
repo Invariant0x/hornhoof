@@ -1,0 +1,59 @@
+{
+  "baseCommit": "11aa5777c4a5f74a550c0e53570ec35ebae39f53",
+  "codeCommit": "877f28cd0193da7b3f304aa09d9a8d46e9eda659",
+  "changedTest": "apps/web/test/Inbox.test.tsx",
+  "testSha256": "30de042eb516b6f38469948130bb3fc0f064837e298e272cc982a487e1084220",
+  "baseline": {
+    "command": "cd apps/web && npx --no-install vitest run test/Inbox.test.tsx",
+    "repeats": 3,
+    "testsPerRun": 15,
+    "exitCodes": [
+      0,
+      0,
+      0
+    ],
+    "redSource": "task #1120 tests-97-3.log, run 97 part 3"
+  },
+  "green": {
+    "command": "cd apps/web && npx --no-install vitest run test/Inbox.test.tsx",
+    "repeats": 10,
+    "testsPerRun": 15,
+    "exitCodes": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "static": [
+    {
+      "command": "npm run build -w @hornhoof/web",
+      "exitCode": 0
+    },
+    {
+      "command": "npx --no-install tsc -p apps/web/tsconfig.json --noEmit",
+      "exitCode": 0
+    },
+    {
+      "command": "npx --no-install eslint apps/web/test/Inbox.test.tsx",
+      "exitCode": 0
+    }
+  ],
+  "ownReview": {
+    "manual": "No blocking findings; all original assertions and API payload checks preserved. Only test synchronization changed.",
+    "codexBaseReview": "Unavailable: bwrap cannot create a namespace; not a pass. See self-review.log.",
+    "pastedDiffReview": "No correctness or security findings. See pasted-review.log and review-input.txt."
+  },
+  "limits": [
+    "No local reproduction in three baseline attempts; original run 97 proves the failure on the base.",
+    "Only the named test file changed; no neighboring tests, production code, fixtures, dependencies, clocks, timeout values or access rules changed.",
+    "No browser or full release run; run_tests was not called.",
+    "The head owns integration into turn-31 and the full release run."
+  ]
+}

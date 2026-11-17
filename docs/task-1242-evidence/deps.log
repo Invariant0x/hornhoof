@@ -1,0 +1,2 @@
+$ npm run -s build -w @hornhoof/protocol
+$ npm run -s build -w @hornhoof/node
