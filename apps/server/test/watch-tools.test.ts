@@ -420,7 +420,8 @@ describe('tools a skill grants', () => {
     ].join('\n');
     await blocked(app.ctx, bruno.id, task.id, report);
     const heldBy = async (token: string) => (JSON.parse((await call(await mcp(app, token), 'failures', { hours: 6 })).content[0]!.text) as { blocked: { why: string; whyTail: string | null; next: string }[] }).blocked;
-    expect(await heldBy(own)).toEqual([expect.objectContaining({ why: report, whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
+    /* The stored report has already lost its credential; its own department still reads its private path. */
+    expect(await heldBy(own)).toEqual([expect.objectContaining({ why: report.replace(GITHUB_TOKEN, '[hidden]'), whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
     expect(await heldBy(TOKEN)).toEqual([expect.objectContaining({ why: expect.not.stringContaining(HOME), whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
   });
 
@@ -564,13 +565,15 @@ describe('tools a skill grants', () => {
   it("keeps credentials and private paths out of another department's agent's last failure and the tasks it holds", async () => {
     const c = await company(['ops-failure-review']);
     await failedHolder(c);
-    /* A task of the watchdog's own department that the agent holds is the watchdog's to read as it is. */
+    /* Its own task stays readable, with the credential hidden when the task was created. */
     const [orchestrator] = await c.db.select().from(agents).where(and(eq(agents.companyId, c.acme.id), eq(agents.kind, 'orchestrator')));
     const opsTask = (await createTask(c.app.ctx, { agentId: orchestrator!.id }, { title: `Rotate ${GITHUB_TOKEN}`, brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: c.bruno.id, executor: true })).task;
     const client = await mcp(c.app, TOKEN);
     expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
     const own = await call(client, 'task', { task: opsTask.number });
     expect(own.isError, own.content[0]!.text).toBeFalsy();
+    expect(JSON.parse(own.content[0]!.text).title).toBe('Rotate [hidden]');
+    expect(own.content[0]!.text).not.toContain(GITHUB_TOKEN);
     const { tasks: holds, ...bruno } = (JSON.parse((await call(client, 'agents')).content[0]!.text) as Watched).find(a => a.name === 'Bruno')!;
     const closed = holds.find(t => t.number === c.task.number);
     for (const secret of [GITHUB_TOKEN, HOME, 'fixture805']) expect.soft(JSON.stringify([bruno, closed])).not.toContain(secret);
@@ -578,7 +581,7 @@ describe('tools a skill grants', () => {
     expect(holds).toHaveLength(2);
     expect(holds).toEqual(expect.arrayContaining([
       expect.objectContaining({ number: c.task.number, title: 'Checkout API for [hidden]', externalWait: expect.objectContaining({ reason: 'Waits for the bank to read [hidden]' }) }),
-      expect.objectContaining({ number: opsTask.number, title: `Rotate ${GITHUB_TOKEN}` }),
+      expect.objectContaining({ number: opsTask.number, title: 'Rotate [hidden]' }),
     ]));
   });
 

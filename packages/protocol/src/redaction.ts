@@ -16,7 +16,9 @@ const LABELLED_PASSWORD: Pattern = [/((?<![\p{L}\p{N}_])(?:пароль|password
 /* A password right after its label: quoted, or one word of six characters or more with a digit or a sign, never a task number. */
 const NAMED_PASSWORD: Pattern = [/((?<![\p{L}\p{N}_])(?:пароль|password|passwd)\s+)(?:"[^"\r\n]+"|'[^'\r\n]+'|(?!#)(?=[^\s,;]{6})(?=[^\s,;]*[\d!@#$%])[^\s,;]+)/giu, `$1${HIDDEN}`];
 const PRIVATE_KEY: Pattern = [/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g, HIDDEN];
-const URL_PASSWORD: Pattern = [/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, `$1${HIDDEN}@`];
+/* Try each run of scheme characters once. A leading digit or sign stays with the prefix, so credentials after it are
+   still hidden; retrying at every letter would repeatedly scan long plain text. */
+const URL_PASSWORD: Pattern = [/(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, `$1${HIDDEN}@`];
 const KNOWN_TOKEN: Pattern = [/\b(?:sk-(?:ant-)?[a-z0-9_-]{8,}|ghp_[a-z0-9]+|github_pat_[a-z0-9_]+|AKIA[A-Z0-9]{16}|AGE-SECRET-KEY-[A-Z0-9]+)/gi, HIDDEN];
 const JWT: Pattern = [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/g, HIDDEN];
 

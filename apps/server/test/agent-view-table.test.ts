@@ -196,6 +196,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/departments/:id/backlog/schedule': 'backlog.test.ts: a person with the department and items of it, 403 or 409 otherwise',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
+  'POST /api/tasks/:id/hide-secret': 'stored-secrets.test.ts: the CEO, the CEO delegate or a person running the task department; 403 for ordinary readers and people of another department',
+  'DELETE /api/people/:id': 'people-delete.test.ts: the CEO alone, directly or through the orchestrator; 403 for the delegate and other people, 404 for another company or no person',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
   'GET /api/phones/:id': 'phones.test.ts: phone metadata of this company, 403 for another company; the connection address is shown only to its owner',
   'GET /api/phones/:id/live': 'phone-recording.test.ts, phones.test.ts: the signed-in phone owner or the orchestrator acting for the CEO reads the live frame; 403 for another person or a head',

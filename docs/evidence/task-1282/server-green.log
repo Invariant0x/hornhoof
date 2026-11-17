@@ -1,0 +1,57 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ✓ test/assistant-agent.test.ts (35 tests) 9901ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 653ms
+   ✓ the sender of an assistant message (2)
+     ✓ marks replies and their end when the own agent sent the message, and keeps the origin after a restart 303ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1173ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1152ms
+   ✓ persona_call (6)
+     ✓ is in its instructions only while there is a skills address, and a change of that starts its program anew 305ms
+   ✓ freshText (6)
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 340ms
+ ✓ test/agent-view-table.test.ts (58 tests) 8791ms
+   ✓ every real route (1)
+     ✓ has its place in the table 752ms
+   ✓ one thing of one agent (30)
+     ✓ GET /api/agents/:id 821ms
+     ✓ PATCH /api/agents/:id 301ms
+     ✓ POST /api/tasks/:id/comments 337ms
+     ✓ POST /api/tasks/:id/cancel 373ms
+   ✓ every list (27)
+     ✓ GET /api/org shows each person only what they may see 353ms
+ ✓ test/watch-tools.test.ts (35 tests) 10283ms
+   ✓ tools a skill grants (35)
+     ✓ exposes node restart evidence to the failure collector separately from agent output 1327ms
+     ✓ let any employee write to the people of its own department, and only to them 440ms
+     ✓ let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message 668ms
+     ✓ let a watchdog see every agent with what it holds, and nudge one in its window 598ms
+     ✓ send at most ten messages in one turn 365ms
+     ✓ shares the ten-message quota between employee messages and reports to the orchestrator 433ms
+     ✓ keep to ten messages when a turn sends several at once 1230ms
+     ✓ count what a turn sent before Hornhoof restarted 473ms
+     ✓ lets a failure collector of the same department read what its own task says as it is 342ms
+     ✓ let a failure collector read every message an employee could not deliver, with its code, its recipient and its task, and no credential in it 322ms
+ ✓ test/stored-secrets.test.ts (10 tests) 8238ms
+   ✓ secrets in stored prose (10)
+     ✓ masks tasks and comments before storing their copies 1927ms
+     ✓ keeps code and ordinary words of a task, a comment and a chat as they were written 433ms
+     ✓ masks nested chat events, letters and queued prompts 368ms
+     ✓ hides an existing selection from tasks, nested copies, journals and API responses 963ms
+     ✓ never sends the selected value in SQL text or parameters 1112ms
+     ✓ checks department authority on the server and rejects ordinary readers 831ms
+     ✓ never changes service state when the selected secret is a common word 777ms
+     ✓ keeps the mask stable even when the selection occurs within its spelling 1017ms
+     ✓ cleans an archived comment and lets a person select its full saved text 324ms
+ ✓ test/people-delete.test.ts (8 tests) 3865ms
+   ✓ DELETE /api/people/:id (8)
+     ✓ takes a person off the list and the map for good: their sessions, keys, machines and own plans end 2348ms
+
+ Test Files  5 passed (5)
+      Tests  146 passed (146)
+   Start at  15:14:24
+   Duration  58.70s (tests 84%, import 12%, transform 4%)
+

@@ -1,0 +1,264 @@
+
+ RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/server
+
+ ❯ test/watch-tools.test.ts (35 tests | 2 failed) 20236ms
+   ❯ tools a skill grants (35)
+     ✓ exposes node restart evidence to the failure collector separately from agent output 6148ms
+     ✓ are not there for an employee without such a skill 279ms
+     ✓ let any employee write to the people of its own department, and only to them 342ms
+     ✓ let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message 557ms
+     ✓ let a watchdog see every agent with what it holds, and nudge one in its window 426ms
+     ✓ count as an agent's activity only what it did, not the messages others sent it 620ms
+     ✓ shows only open prerequisites of the held task department, without task bodies or hidden references 658ms
+     ✓ distinguishes a person question from work that can be handed out, even beside an open prerequisite 345ms
+     ✓ keeps an external wait separate from department work: legacy 788ms
+     ✓ keeps an external wait separate from department work: time 379ms
+     ✓ keeps an external wait separate from department work: ceo 246ms
+     ✓ keeps an external wait separate from department work: machine 264ms
+     ✓ keeps an external wait separate from department work: other 175ms
+     ✓ keeps an external wait separate from department work: employee 179ms
+     ✓ show until when a plan is at its limit, so the watchdog leaves its agents to wait 398ms
+     ✓ are turned on only by people who see the whole company, since they show all of it 557ms
+     ✓ send at most ten messages in one turn 669ms
+     ✓ shares the ten-message quota between employee messages and reports to the orchestrator 1158ms
+     ✓ keep to ten messages when a turn sends several at once 596ms
+     ✓ count what a turn sent before Hornhoof restarted 311ms
+     ✓ let a failure collector read the failed turns and blocked tasks of the last hours, with why each task stopped 183ms
+     ✓ let a failure collector read the end of a long blocked reason, where its holder says what stops it, beside its start 200ms
+     ✓ let a failure collector read why a turn failed when its program left no output, and leave out turns Hornhoof ended before they started 197ms
+     ✓ keeps credentials and private paths of another department's blocked task out of what a failure collector reads, at its start and its end 172ms
+     ✓ keeps credentials and private paths of another department's failed turn out of its reason and its output, from its failure and its result alike 118ms
+     ✓ lets a failure collector of the same department read what its own task says as it is 174ms
+     × let a failure collector read the Next section of a blocked report as next, cleaned for every reader, beside why as it was 192ms
+     ✓ let a failure collector read every message an employee could not deliver, with its code, its recipient and its task, and no credential in it 2103ms
+     ✓ keeps credentials and private paths of another department's task out of its stops, stumbles, title and node log 118ms
+     ✓ lets a failure collector of the same department read the stops, stumbles, title and node log of its own task as they are 124ms
+     × keeps credentials and private paths out of another department's agent's last failure and the tasks it holds 139ms
+     ✓ lets a watchdog of the same department read its agent's last failure and the tasks it holds as they are 1050ms
+     ✓ leaves the orchestrator its sight of every task 100ms
+     ✓ tell a failure collector how the turn ended that a blocked task went out in along with another task 111ms
+     ✓ let a failure collector see where agents stumbled: programs they lacked, what they installed by hand, and where they stopped for people 90ms
+ ❯ test/assistant-agent.test.ts (35 tests | 1 failed) 55632ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 500ms
+     ✓ runs only on a personal plan of its owner, which its owner alone picks, and waits with none 185ms
+     ✓ is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant 163ms
+     ✓ is the CEO's own when the CEO owns it, still out of the orchestrator's reach 154ms
+     ✓ works with its owner's assistant tools, the company's vault and phones, not with the rest of the company's 186ms
+   ✓ the sender of an assistant message (2)
+     ✓ marks replies and their end when the own agent sent the message, and keeps the origin after a restart 224ms
+     ✓ marks replies and their end false for a message from the program, even when its own agent answers 177ms
+   ✓ an assistant's own agent, for the company (2)
+     ✓ is changed on its assistant's card, not as an employee: its own card neither edits nor removes it 259ms
+     ✓ is no employee: no task takes it or waits for it, and no plan comes to it by itself 169ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1146ms
+     ✓ is nobody at the other end of a message for the CEO and the orchestrator, as an agent they do not see 192ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1168ms
+     ✓ lets go of its plan when the assistant is switched off, and takes none until it is on again 162ms
+     ✓ is made once when its owner picks a plan from several screens at the same moment 108ms
+   ✓ persona_call (6)
+     ✓ is among its tools only while the assistant has a skills address, as the address is at each list, and a call by name without one says so 213ms
+     ✓ is in its instructions only while there is a skills address, and a change of that starts its program anew 227ms
+     ✓ is not in the instructions of an own agent whose assistant is gone, which speaks for its owner with no names 95ms
+     ✓ asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer 219ms
+     ✓ says so when the assistant has no skills address, or the program refuses, and never follows a redirect 198ms
+     ✓ says so when the program breaks off in the middle of its answer 166ms
+   ✓ GET /api/assistant/attachments/:id (6)
+     ✓ gives a file its own agent put with hh-attach --chat, by the id hh-attach printed, its exact bytes under its type and name, as often as asked 188ms
+     ✓ names a file of any letters as UTF-8 in filename*, and in plain ASCII in filename 201ms
+     ✓ keeps a name with quotes, a backslash or line breaks inside its one header, so no other header comes of it 148ms
+     ✓ opens with the assistant's own key alone, as every assistant call: 401 with none, a wrong one, a turn's token or a revoked key 140ms
+     ✓ answers a file its owner may not have exactly as one that is not there: of another owner's assistant, another company, or no id at all 186ms
+     ✓ keeps operator case files closed even when they are named files of its own agent and visible to its owner 146ms
+   ✓ tell_owner (3)
+     ✓ passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program 170ms
+     ✓ wakes OpenClaw's model for them at once, as words its owner waits for 150ms
+     ✓ passes on no empty words, and nothing of an assistant that is switched off 135ms
+   ❯ freshText (6)
+     × takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused 44452ms
+     ✓ takes a body near 2 MiB, as a program that escapes every letter in its JSON sends it, and refuses a bigger one 1643ms
+     ✓ goes in place of the text and of Hornhoof's catch-up when the own agent's turn starts a new session, and the window shows only the text 386ms
+     ✓ goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew 610ms
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 400ms
+     ✓ is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session 544ms
+ ❯ test/agent-view-table.test.ts (58 tests | 1 failed) 24925ms
+   ❯ every real route (1)
+     × has its place in the table 2945ms
+   ✓ one thing of one agent (30)
+     ✓ GET /api/agents/:id 7460ms
+     ✓ PATCH /api/agents/:id 805ms
+     ✓ DELETE /api/agents/:id 410ms
+     ✓ GET /api/agents/:id/events 489ms
+     ✓ POST /api/agents/:id/messages 175ms
+     ✓ POST /api/agents/:id/pictures 122ms
+     ✓ POST /api/agents/:id/reset 196ms
+     ✓ POST /api/agents/:id/start 123ms
+     ✓ POST /api/agents/:id/stop 180ms
+     ✓ GET /api/agents/:id/terminal 194ms
+     ✓ GET /api/agents/:id/inbox 210ms
+     ✓ POST /api/agents/:id/inbox/read 149ms
+     ✓ POST /api/agents/:id/inbox/mark 126ms
+     ✓ PUT /api/agents/:id/inbox-mode 132ms
+     ✓ PUT /api/agents/:id/telegram 116ms
+     ✓ DELETE /api/agents/:id/telegram 113ms
+     ✓ GET /api/tasks/:id 370ms
+     ✓ GET /api/tasks/:id/waits 275ms
+     ✓ GET /api/vault/:id/log 209ms
+     ✓ POST /api/tasks/:id/comments 622ms
+     ✓ POST /api/tasks/:id/cancel 517ms
+     ✓ PATCH /api/tasks/:id 335ms
+     ✓ GET /api/jobs/:id 144ms
+     ✓ POST /api/jobs/:id/cancel 118ms
+     ✓ POST /api/improvements/:id/take 156ms
+     ✓ POST /api/improvements/:id/dismiss 136ms
+     ✓ POST /api/feedback/preview 137ms
+     ✓ POST /api/feedback 273ms
+     ✓ POST /api/feedback/repeats 289ms
+     ✓ GET /api/attachments/:id 265ms
+   ✓ every list (27)
+     ✓ GET /api/org shows each person only what they may see 545ms
+     ✓ GET /api/tasks shows each person only what they may see 543ms
+     ✓ GET /api/requests shows each person only what they may see 230ms
+     ✓ GET /api/wait-cards shows each person only what they may see 193ms
+     ✓ GET /api/turns shows each person only what they may see 193ms
+     ✓ GET /api/turns/current shows each person only what they may see 221ms
+     ✓ GET /api/subscriptions shows each person only what they may see 461ms
+     ✓ GET /api/machines shows each person only what they may see 358ms
+     ✓ GET /api/phones shows each person only what they may see 223ms
+     ✓ GET /api/pool shows each person only what they may see 287ms
+     ✓ GET /api/people shows each person only what they may see 305ms
+     ✓ GET /api/me shows each person only what they may see 264ms
+     ✓ GET /api/improvements shows each person only what they may see 273ms
+     ✓ GET /api/notebook shows each person only what they may see 161ms
+     ✓ GET /api/computer shows each person only what they may see 250ms
+     ✓ GET /api/machines/access shows each person only what they may see 248ms
+     ✓ GET /api/machines/here shows each person only what they may see 190ms
+     ✓ GET /api/updates shows each person only what they may see 189ms
+     ✓ GET /api/departments/:id/notebook shows each person only what they may see 136ms
+     ✓ GET /api/departments/:id/tree shows each person only what they may see 193ms
+     ✓ GET /api/departments/:id/pipeline shows each person only what they may see 304ms
+     ✓ GET /api/departments/:id/roster shows each person only what they may see 270ms
+     ✓ GET /api/departments/:id/approval-policy shows each person only what they may see 212ms
+     ✓ GET /api/autonomous-releases shows each person only what they may see 213ms
+     ✓ GET /api/vault shows each person only what they may see 160ms
+     ✓ GET /api/departments/:id/wait-policy shows each person only what they may see 152ms
+     ✓ GET /api/departments/:id/branches shows each person only what they may see 124ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/agent-view-table.test.ts > every real route > has its place in the table
+AssertionError: expected [ 'DELETE /api/people/:id', …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "DELETE /api/people/:id",
++   "POST /api/tasks/:id/hide-secret",
++ ]
+
+ ❯ test/agent-view-table.test.ts:296:58
+    294|     const real = new Set(captured.filter(r => r.url !== '/*').flatMap(…
+    295|     const placed = new Set([...POINTED.map(p => p.route), ...LISTS.map…
+    296|     expect([...real].filter(r => !placed.has(r)).sort()).toEqual([]);
+       |                                                          ^
+    297|     expect([...placed].filter(r => !real.has(r)).sort()).toEqual([]);
+    298|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/assistant-agent.test.ts > freshText > takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/assistant-agent.test.ts:633:3
+    631|   }
+    632|
+    633|   it('takes text of 1 to 50000 characters and freshText of up to 20000…
+       |   ^
+    634|     const c = await company();
+    635|     const { ava } = await ready(c);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/watch-tools.test.ts > tools a skill grants > let a failure collector read the Next section of a blocked report as next, cleaned for every reader, beside why as it was
+AssertionError: expected [ { number: 1, …(7) } ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
++     "holder": "Bruno",
++     "lastTurn": null,
+      "next": "the head connects the registry with token=[hidden] from [hidden]",
++     "number": 1,
++     "since": "2026-11-17T15:09:50.377Z",
++     "title": "Checkout API",
+      "why": "- **Status:** BLOCKED
+  - **What changed:** nothing, as /home/fixture805/private-project/.env cannot be read.
+- - **Next:** the head connects the registry with token=ghp_syntheticWatchToken0syntheticWatchToken0syntheticWatchToken0 from /home/fixture805/private-project/.env
++ - **Next:** the head connects the registry with token=[hidden] from /home/fixture805/private-project/.env
+  - **Concerns:** none.",
+      "whyTail": null,
+    },
+  ]
+
+ ❯ test/watch-tools.test.ts:423:31
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/watch-tools.test.ts > tools a skill grants > keeps credentials and private paths out of another department's agent's last failure and the tasks it holds
+AssertionError: expected [ { number: 1, …(6) }, …(1) ] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   ObjectContaining {
+-     "externalWait": ObjectContaining {
++ [
++   {
++     "externalWait": {
+        "reason": "Waits for the bank to read [hidden]",
++       "since": "2026-11-17T15:09:52.906Z",
++       "until": "2026-11-17T15:10:52.906Z",
+      },
+      "number": 1,
++     "status": "open",
+      "title": "Checkout API for [hidden]",
++     "updatedAt": "2026-11-17T15:09:52.902Z",
++     "waitingForPerson": false,
++     "waitsFor": [],
+    },
+-   ObjectContaining {
++   {
++     "externalWait": null,
+      "number": 2,
+-     "title": "Rotate ghp_syntheticWatchToken0syntheticWatchToken0syntheticWatchToken0",
++     "status": "open",
++     "title": "Rotate [hidden]",
++     "updatedAt": "2026-11-17T15:09:52.910Z",
++     "waitingForPerson": false,
++     "waitsFor": [],
+    },
+  ]
+
+ ❯ test/watch-tools.test.ts:579:19
+    577|     expect(bruno.failure).toMatchObject({ text: 'Cannot load [hidden] …
+    578|     expect(holds).toHaveLength(2);
+    579|     expect(holds).toEqual(expect.arrayContaining([
+       |                   ^
+    580|       expect.objectContaining({ number: c.task.number, title: 'Checkou…
+    581|       expect.objectContaining({ number: opsTask.number, title: `Rotate…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  4 failed | 124 passed (128)
+   Start at  15:09:22
+   Duration  118.71s (tests 89%, import 6%, transform 5%)
+

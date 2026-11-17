@@ -32,6 +32,23 @@ describe('stored prose, masked as it is written', () => {
   it('hides an exact value only from eight characters on', () => {
     expect(MIN_SECRET_LENGTH).toBe(8);
   });
+
+  it('keeps a maximum-size assistant conversation and masks a following URL password', () => {
+    const conversation = 'f'.repeat(200_000);
+    const text = `${conversation}\nhttps://bruno:pa55word@github.com/acme/app.git`;
+    const expected = `${conversation}\nhttps://${HIDDEN}@github.com/acme/app.git`;
+    expect(hideCredentials(text)).toBe(expected);
+    expect(cleanDiagnostic(text)).toBe(expected);
+  });
+
+  it('masks URL passwords beside scheme characters, with their prefixes and public addresses preserved', () => {
+    for (const prefix of ['', '0', '+.-', '10+.-', '_', '/', '(', 'text:']) {
+      const address = `${prefix}git+ssh://bruno:pa55word@host.example/repo`;
+      const expected = `${prefix}git+ssh://${HIDDEN}@host.example/repo`;
+      expect(hideCredentials(address), address).toBe(expected);
+      expect(cleanDiagnostic(address), address).toBe(expected);
+    }
+  });
 });
 
 describe('a diagnostic cleaned for a reader who may not read where it comes from', () => {
