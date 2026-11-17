@@ -20,6 +20,8 @@ describe('words that look like a key', () => {
     ['ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6', 'key [hidden] refused'],
     ['AbCd1234EfGh5678IjKl9012MnOp', 'key [hidden] refused'],
     ['0123456789abcdef0123456789abcdef', 'key [hidden] refused'],
+    ['Bearer marker7c41abcdefghijklmnopqrstuvwxyz', 'key Bearer [hidden] refused'],
+    ['Basic dXNlcjpwYXNz', 'key Basic [hidden] refused'],
   ])('hides %s', (key, shown) => {
     expect(hideKeyLike(`key ${key} refused`)).toBe(shown);
   });
