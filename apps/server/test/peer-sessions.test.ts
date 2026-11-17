@@ -288,6 +288,10 @@ describe("a worker's sessions to the company's data machines", () => {
     await expect(sessions.stream('GET', `/peer/backups/${BUNDLE}`)).rejects.toThrow('No leader of the company is in reach.');
     sessions.use([stand.target()]);
     await until(() => sessions.leader() !== null);
+    /* From here the deadline of a stream that stops moving is on a clock the test moves: however slow the machine,
+       a stream that moves is never cut, and one that stalls is cut at its limit to the moment. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
 
     const got = await sessions.stream('GET', `/peer/backups/${BUNDLE}`);
     expect([got.status, got.length]).toEqual([200, bytes.length]);
@@ -307,9 +311,16 @@ describe("a worker's sessions to the company's data machines", () => {
     refusedPut.body.destroy();
     await until(() => source.destroyed);
 
-    /* A stream on which nothing moves is cut, with an error for whoever reads it. */
+    /* A stream on which nothing moves is cut once it stood still for its limit, with an error for whoever reads it. */
     const stalled = await sessions.stream('GET', `/peer/backups/${STALLS}`);
-    await expect(buffer(stalled.body)).rejects.toThrow('stopped moving');
+    let read = 0;
+    stalled.body.on('data', (chunk: Buffer) => void (read += chunk.length)).resume();
+    const ended = new Promise((resolve, reject) => void stalled.body.once('error', reject).once('end', resolve));
+    await until(() => read === 1024);
+    vi.advanceTimersByTime(299);
+    expect(stalled.body.destroyed).toBe(false);
+    vi.advanceTimersByTime(1);
+    await expect(ended).rejects.toThrow('stopped moving');
     /* And the session is as good as before. */
     expect((await sessions.stream('GET', `/peer/backups/${BUNDLE}`)).status).toBe(200);
   });
