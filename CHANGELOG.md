@@ -81,6 +81,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
 - `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
 - Type checks run TypeScript 7, several times faster; the `typescript` package stays 5.9 for its API.
+- A turnkey task's independent parts run in parallel with the program's helpers, and heavy checks run one at a time.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
