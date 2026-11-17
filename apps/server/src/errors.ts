@@ -3,7 +3,6 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import { ZodError } from 'zod';
 import { notConfirmed, requestRoute } from './db/confirm.js';
 import { isLeaseRefused } from './db/net.js';
-import { READ_ONLY_MESSAGE } from './modules/keeper/app-mode.js';
 
 export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone' | 'too_many' | 'unavailable';
 
@@ -250,6 +249,7 @@ export type ErrorReason =
   | 'assistant_agent_refused'
   | 'assistant_switched_off';
 
+export const READ_ONLY_MESSAGE = 'Hornhoof only reads on this machine now, so nothing was changed.';
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
 /* A change counts as sent once any commit of it is listed. One that failed between two commits is listed too, so the
    words promise no more than that. */
@@ -267,6 +267,15 @@ export class ApiError extends Error {
     super(message);
   }
 }
+
+const MODE_MESSAGES = {
+  read_only: READ_ONLY_MESSAGE,
+  maintenance: 'Hornhoof is installing an update and takes no changes until it ends.',
+  starting: 'Hornhoof is starting.',
+} as const;
+
+export type ModeRefusal = keyof typeof MODE_MESSAGES;
+export const modeRefusal = (reason: ModeRefusal): ApiError => new ApiError(503, 'unavailable', MODE_MESSAGES[reason], reason);
 
 const body = (code: ErrorCode, message: string, reason?: ErrorReason, details?: Record<string, unknown>) => ({
   error: { code, message, ...(reason ? { reason } : {}), ...(details ? { details } : {}) },
@@ -306,7 +315,10 @@ function requestError(status: number, message: string, url: string) {
 
 /* A write that failed at a fence reaches people as what it is, never as "Something went wrong.". */
 function fenceAnswer(err: unknown, req: FastifyRequest, reply: FastifyReply): FastifyReply | undefined {
-  if (isLeaseRefused(err)) return reply.status(503).send(body('unavailable', READ_ONLY_MESSAGE, 'read_only'));
+  if (isLeaseRefused(err)) {
+    const refused = modeRefusal('read_only');
+    return reply.status(refused.status).send(body(refused.code, refused.message, refused.reason));
+  }
   if (!notConfirmed(err)) return undefined;
   req.log.warn({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A commit was not confirmed.');
   return reply.status(503).send(body('unavailable', NOT_CONFIRMED, 'not_confirmed'));

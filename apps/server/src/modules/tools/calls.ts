@@ -12,7 +12,7 @@ import { notConfirmed } from '../../db/confirm.js';
 import { isLeaseRefused } from '../../db/net.js';
 import { toolCalls } from '../../db/schema.js';
 import { listed, outsideSources, sources, toolSource, touch, withSource } from '../../db/sources.js';
-import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
+import { READ_ONLY_MESSAGE } from '../../errors.js';
 import { INVOCATION, UUID } from '../../net/proxy.js';
 import { READ_TOOLS } from './read-tools.js';
 

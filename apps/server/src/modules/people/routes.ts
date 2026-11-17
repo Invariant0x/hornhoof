@@ -1,6 +1,6 @@
 import { inLane } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { passResponsibility } from '../tracker/upgrade.js';
+import { passResponsibility } from '../tracker/handoff.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
