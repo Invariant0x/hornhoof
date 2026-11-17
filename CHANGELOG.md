@@ -36,6 +36,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A session between machines stays open while bytes arrive and ends after 30 s of silence, so slow links keep copies.
 - A program that slept starts again for the next turn instead of waiting on turns from its old log.
 - Right-to-left: isolated phrases follow their block's alignment, and short sentences keep their period at the end.
+- An agent still gets a phone screen's elements when its picture is too large to send.
+- `npm run deps` and the author check install again when `node_modules` came from another lockfile.
 
 ### Added
 
@@ -91,6 +93,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A turnkey task's independent parts run in parallel with the program's helpers, and heavy checks run one at a time.
 - `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
 - The orchestrator acting for the owner is refused nothing the CEO or an employee may do; heads keep their limits.
+- Department messaging lists a channel's addresses apart from its buttons, under a heading that counts them.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
