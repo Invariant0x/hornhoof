@@ -17,10 +17,9 @@ async function turnWentOn(more: Record<string, string[]> = {}) {
   const [turn] = await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open')));
   const turnBranch = `turn-${turn!.number}`;
   const heads: Record<string, string> = { main: BASE, [turnBranch]: TURN_HEAD };
-  let candidateHead = MERGED;
   f.ctx.readCommit = async (_repo, want) => {
     const branch = 'branch' in want ? want.branch : 'task-1';
-    return { branch, commitSha: heads[branch] ?? candidateHead };
+    return { branch, commitSha: heads[branch] ?? MERGED };
   };
   const changes: Record<string, string[]> = {
     [`${BASE}..${TURN_HEAD}`]: FROM_TURN, [`${TURN_HEAD}..${TURN_HEAD}`]: [], [`${TURN_HEAD}..${MERGED}`]: OWN, [`${HEAD}..${MERGED}`]: FROM_TURN,
@@ -32,7 +31,9 @@ async function turnWentOn(more: Record<string, string[]> = {}) {
   };
   const took = (baseCommit = TURN_HEAD) => submit(f.ctx, f.tester.id, f.task.id, { summary: `Took ${turnBranch} in.`, evidence: `Merged origin/${turnBranch} into task-1; named tests of the change pass.`, review: { baseCommit } });
   const unchanged = async () => expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active', candidateId: f.snapshot.candidateId });
-  return { ...f, turnBranch, heads, changes, took, unchanged, at: (commit: string) => { candidateHead = commit; } };
+  /* The refusal of a base on neither line: it names this department's turn, never another's. */
+  const offTheLines = (base: string) => `${BASE} does not hold ${base}, or the change between them could not be read; nor does ${turnBranch} at ${heads[turnBranch]}. Take in the main line or ${turnBranch}, and name the commit you took in as review.baseCommit.`;
+  return { ...f, turnBranch, heads, changes, took, unchanged, offTheLines };
 }
 
 describe('Tests takes the open turn of its department into a candidate, as it takes the main line', () => {
@@ -60,7 +61,7 @@ describe('Tests takes the open turn of its department into a candidate, as it ta
 
   it('refuses a base that is on neither the main line nor the open turn of the department', async () => {
     const f = await turnWentOn({ [`${BASE}..${ELSEWHERE}`]: FROM_TURN, [`${ELSEWHERE}..${MERGED}`]: OWN });
-    await expect(f.took(ELSEWHERE)).rejects.toMatchObject({ status: 409, message: expect.stringContaining(ELSEWHERE) as unknown });
+    await expect(f.took(ELSEWHERE)).rejects.toMatchObject({ status: 409, message: f.offTheLines(ELSEWHERE) });
     await f.unchanged();
   });
 
@@ -77,20 +78,22 @@ describe('Tests takes the open turn of its department into a candidate, as it ta
     const opened = await echelonsTurn(f.db, f.task.companyId);
     expect(opened.departmentId).toBe(other!.id);
     f.heads[`turn-${opened.number}`] = OTHER_HEAD;
-    await expect(f.took(OTHER_HEAD)).rejects.toMatchObject({ status: 409 });
+    await expect(f.took(OTHER_HEAD)).rejects.toMatchObject({ status: 409, message: f.offTheLines(OTHER_HEAD) });
     await f.unchanged();
   });
 
   it('refuses a merge that changes the candidate beyond what the turn brought, naming the change', async () => {
     const f = await turnWentOn({ [`${HEAD}..${MERGED}`]: [...FROM_TURN, ...OWN] });
-    await expect(f.took()).rejects.toMatchObject({ status: 409, message: expect.stringContaining('logic/totals.ts') as unknown });
+    await expect(f.took()).rejects.toMatchObject({ status: 409,
+      message: `The merge changes what ${f.turnBranch} did not bring: logic/totals.ts. Take in only ${f.turnBranch}; a failed check of the candidate's own change is reported with done false.` });
     await f.unchanged();
   });
 
   it('refuses a merge of a turn head the turn has since gone on from, as the turn could not take it by fast-forward', async () => {
     const f = await turnWentOn({ [`${TURN_HEAD}..${TURN_LATER}`]: ['logic/fees.ts'], [`${BASE}..${TURN_LATER}`]: [...FROM_TURN, 'logic/fees.ts'] });
     f.heads[f.turnBranch] = TURN_LATER;
-    await expect(f.took()).rejects.toMatchObject({ status: 409, message: expect.stringContaining(TURN_LATER) as unknown });
+    await expect(f.took()).rejects.toMatchObject({ status: 409,
+      message: `${f.turnBranch} went on to ${TURN_LATER}, which ${MERGED} does not hold. Take ${f.turnBranch} in again: it takes the candidate only by fast-forward.` });
     await f.unchanged();
   });
 });

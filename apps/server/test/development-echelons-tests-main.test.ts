@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { tasks } from '../src/db/schema.js';
+import { tasks, turns } from '../src/db/schema.js';
 import { report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { testsFixture, verified } from './development-echelons-verification.js';
@@ -9,17 +9,23 @@ const MAIN = 'd'.repeat(40), MERGED = 'e'.repeat(40), EDITED = '9'.repeat(40);
 const OWN = ['logic/totals.ts'], FROM_MAIN = ['logic/rates.ts'];
 
 /* A candidate at Tests whose own change passed and whose checks failed only for what the main line fixed since its base. The
-   main line is at MAIN; the candidate branch holds MERGED, the candidate with that main line merged in. */
+   main line is at MAIN, and so is the open turn of the department, which started from it and took nothing in yet; the
+   candidate branch holds MERGED, the candidate with that main line merged in. */
 async function behindMain(merge: string[] = FROM_MAIN, branchHead = MERGED, more: Record<string, string[]> = {}) {
   const f = await testsFixture();
-  f.ctx.readCommit = async (_repo, want) => 'branch' in want && want.branch === 'main' ? { branch: 'main', commitSha: MAIN } : { branch: 'task-1', commitSha: branchHead };
+  const [turn] = await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open')));
+  const turnBranch = `turn-${turn!.number}`;
+  f.ctx.readCommit = async (_repo, want) => {
+    const branch = 'branch' in want ? want.branch : 'task-1';
+    return { branch, commitSha: branch === 'main' || branch === turnBranch ? MAIN : branchHead };
+  };
   const changes: Record<string, string[]> = { [`${BASE}..${MAIN}`]: FROM_MAIN, [`${MAIN}..${MAIN}`]: [], [`${MAIN}..${MERGED}`]: OWN, [`${HEAD}..${MERGED}`]: merge, ...more };
   f.ctx.readCompare = async (_repo, refs) => {
     const paths = changes[`${refs.base}..${refs.head}`];
     return paths ? { complete: true, baseSha: refs.base, headSha: refs.head, paths, diff: '@@ -1 +1 @@\n-old\n+new' } : { complete: false, reason: 'not-an-ancestor' };
   };
   const took = (baseCommit = MAIN) => submit(f.ctx, f.tester.id, f.task.id, { summary: 'Took the main line in.', evidence: 'Merged origin/main into task-1.', review: { baseCommit } });
-  return { ...f, took };
+  return { ...f, took, turnBranch };
 }
 
 describe('Tests takes the main line into a candidate whose own change passed', () => {
@@ -51,7 +57,8 @@ describe('Tests takes the main line into a candidate whose own change passed', (
   it('refuses a base that is not on the main line, as it would hide the change from the checks', async () => {
     /* An edit of the candidate's own file, named as if the candidate itself were the main line taken in. */
     const f = await behindMain(OWN, EDITED, { [`${BASE}..${HEAD}`]: OWN, [`${HEAD}..${EDITED}`]: OWN });
-    await expect(f.took(HEAD)).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${MAIN} does not hold ${HEAD}, or the change between them could not be read`) as unknown });
+    await expect(f.took(HEAD)).rejects.toMatchObject({ status: 409,
+      message: `${MAIN} does not hold ${HEAD}, or the change between them could not be read; nor does ${f.turnBranch} at ${MAIN}. Take in the main line or ${f.turnBranch}, and name the commit you took in as review.baseCommit.` });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', candidateId: f.snapshot.candidateId });
   });
 
