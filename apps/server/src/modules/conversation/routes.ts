@@ -22,6 +22,7 @@ import { refusedMessage } from './undelivered.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
+import { firstContactRoutes, greetingOffers } from './first-contact.js';
 
 /* after: what came since seq, a page at a time; last: only the newest so many, before seq when given. */
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), last: z.coerce.number().int().min(1).max(500).optional(), before: z.coerce.number().int().min(1).optional() });
@@ -120,6 +121,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   pictureRoutes(app, ctx);
+  firstContactRoutes(app, ctx);
 
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
@@ -163,7 +165,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
          Operations every company starts with is no building. */
       if (depts.some(d => !isOperations(d)) && !company?.template) return false;
       const greeting = company?.template ? await templateGreeting(depts.filter(d => !d.parentId).map(d => d.id)) : FIRST_TURN;
-      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: greeting, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
+      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: `${greeting}\n\n${greetingOffers(company?.template ?? null)}`, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });
     /* Outside the agent's line, which the pump waits on. */

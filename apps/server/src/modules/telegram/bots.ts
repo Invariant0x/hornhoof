@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { and, asc, eq, gt, inArray, isNull, lte } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { canViewAgent } from '../../auth/agent-view.js';
+import { canContactAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
@@ -54,7 +54,7 @@ async function authorizedRecipient(db: Ctx['db'], bot: BotRow, chatId: number): 
     .where(and(eq(people.companyId, bot.companyId), eq(people.telegramUserId, chatId)));
   if (!person || person.status !== 'active') return null;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, bot.agentId), isNull(agents.removedAt)));
-  if (!agent || !(await canViewAgent(db, person, agent))) return null;
+  if (!agent || !(await canContactAgent(db, person, agent))) return null;
   return person;
 }
 

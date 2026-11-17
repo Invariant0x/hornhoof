@@ -32,6 +32,21 @@ const addKey = (app: FastifyInstance, ceo: string, target: object, apiKey = 'sk-
   app.inject({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', provider: 'anthropic_api', label: 'Company key', apiKey, target }, ...as(ceo) });
 
 describe('POST /api/setup staffs the template', () => {
+  it.each([...COMPANY_TEMPLATE_KEYS, undefined])('offers first work for %s as soon as the company is set up', async template => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    const offer = await app.inject({ url: '/api/orchestrator/first-contact', ...as(ceo) });
+    expect(offer.statusCode).toBe(200);
+    const expected = {
+      project: ['fixProject', 'checkSetup'], startup: ['planLaunch', 'sketchProduct', 'findCustomers'],
+      studio: ['pickProduct', 'reviewScreens'], corporation: ['reviewBills', 'sortRequests', 'planRelease'],
+      security: ['reviewSecurity', 'triageReport'], opensource: ['sortIssues', 'writeGuide'],
+      agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
+      home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
+    };
+    expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'telegram', 'assistant'] });
+  });
+
   it('shows ordinary staff, turnkey members and declared one-shot stages before a template company has plans', async () => {
     const templates = mkdtempSync(join(tmpdir(), 'hornhoof-worker-kinds-'));
     onTestFinished(() => rmSync(templates, { recursive: true, force: true }));

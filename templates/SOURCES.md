@@ -8,6 +8,8 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 
 The one-shot stage declarations, judge briefs and stage-owner guidance are Hornhoof's own text. They use the procedure in `skills/hh-one-shot-calls.md`.
 
+The first-contact offer and setup procedures in `skills/orch-interview.md` and `skills/orch-company.md` are Hornhoof's own text. Telegram's bot guide explains the BotFather and Start steps.
+
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |

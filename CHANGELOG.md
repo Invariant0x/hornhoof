@@ -10,6 +10,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 ### Added
+- The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.
+- Everyone can write to the orchestrator from the company Telegram bot or through their personal assistant.
 - People and agents can set task priority, which appears on the task card and orders tasks within each list group.
 - The map uses squares for employees, diamonds for generalists and ghost outlines for one-shot calls, with a legend for all three.
 - Declared one-shot stages show their places before a call begins and distinguish running calls from waiting calls.
@@ -17,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Owners of one-shot stages get guidance on briefing the calls and using their answers and the judge's verdict.
 - Worker marks also appear in the department staff list, employee card and tracker, and the task route marks its one-shot stages.
 ### Changed
+- Home device helpers carry out reversible cleanup and settings changes allowed by the household rules.
 - The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
 - Task rows show what they wait for and which tasks from other departments need them.
 - Task lists distinguish status, priority, people, departments and executor programs by shape and color.

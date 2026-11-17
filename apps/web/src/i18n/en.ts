@@ -42,6 +42,23 @@ export const en = {
     home: 'Go to the map',
   },
   notificationSources: { ...NOTIFICATION_NAMES } as Record<keyof typeof NOTIFICATION_NAMES, string>,
+  firstContact: {
+    title: 'Talk to the orchestrator', question: 'What would you like me to do?', message: 'Your message', send: 'Send', close: 'Close',
+    working: 'The orchestrator is working on your message.', failed: 'The orchestrator could not finish this reply. You can send another message.',
+    offers: {
+      fixProject: 'Fix a problem in my project', checkSetup: 'Check that my project is ready to run',
+      planLaunch: 'Plan my first launch', sketchProduct: 'Sketch my first product screen', findCustomers: 'Find people who might use my product',
+      pickProduct: 'Choose what to ship next', reviewScreens: 'Review a product’s screens',
+      reviewBills: 'Sort bills and check what is due', sortRequests: 'Sort customer requests', planRelease: 'Plan a product release',
+      reviewSecurity: 'Check my project for security problems', triageReport: 'Review a security report and plan the fix',
+      sortIssues: 'Sort open issues', writeGuide: 'Write a guide for new contributors',
+      findLeads: 'Find possible clients', answerClients: 'Sort and answer client requests',
+      planExperiment: 'Plan an experiment', reviewResults: 'Review the results and suggest what to try next',
+      findDevices: 'Find my TVs and other devices and help clear out junk', checkDevices: 'Check my home devices and Wi-Fi',
+      householdBooks: 'Set up Accounting for my bills and papers', chooseDepartments: 'Set up departments for the work I do',
+      telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
+    },
+  },
   common: {
     loading: 'Loading…',
     somethingWrong: 'Something went wrong.',
@@ -1710,7 +1727,7 @@ export const en = {
     design: { name: 'Design', description: 'Interfaces, brand and visual materials.' },
     support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
     finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
-    home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning. Acting on a device waits for a person.' },
+    home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning.' },
     household: { name: 'Household', description: 'Shopping lists and supplies, bills and subscriptions, chores, the family calendar and reminders. Buying or paying waits for a person.' },
   },
   companyTemplates: {
@@ -1727,7 +1744,7 @@ export const en = {
     opensource: { name: 'Open-source project', description: 'Development and support for a project people build together.' },
     agency: { name: 'Agency', description: 'Sales, delivery through operations, and support for client work.' },
     lab: { name: 'Research lab', description: 'Development with an architect and documentation, for research work.' },
-    home: { name: 'Home', description: 'A family\'s helpers run like a small company: home devices and network, and the household. Works best with a few home computers connected. Anything that acts on the real world waits for a person.' },
+    home: { name: 'Home', description: 'Helpers for the home network, devices, bills and everyday chores.' },
   },
   tasks: {
     hideSecret: { vault: 'Save passwords in the company vault', action: 'Hide secret', value: 'Secret to hide', hint: 'Select the secret in the task or its log, or paste it here: at least 8 characters. All stored copies will be replaced with [hidden].', confirm: 'Hide everywhere', hiding: 'Hiding...', done: 'Secret hidden.', failed: 'The secret could not be hidden. Check your access and select the text again.' },
