@@ -257,13 +257,36 @@ function AccountLine({ account }: { account: SetupAccount }) {
 
 /* The addresses on a channel, newest first: each with its consent, its purpose and where they agreed, and when and by whom
    it was added. A consent in force is taken back here, through the consent the server keeps. */
-function ContactList({ contacts, onChanged }: { contacts: readonly Consent[]; onChanged(): void }) {
+/* What adding an address said, and the address it was about, to say it under that address's entry. */
+type Added = { said: string; permissionId: string | null; address: string };
+
+/* The entry an address added just now stands in: its permission, or, where it was there already, its address as the server
+   spells it. */
+const entryOf = (contacts: readonly Consent[], added: Added | null) =>
+  added && (contacts.find(one => one.permissionId === added.permissionId) ?? contacts.find(one => one.address === added.address.toLowerCase()));
+
+function ContactList({ contacts, added, onChanged }: { contacts: readonly Consent[]; added: Added | null; onChanged(): void }) {
   const c = useT().outboundSetup.contact;
-  if (!contacts.length) return <p className="muted" dir="auto">{c.none}</p>;
-  return <ul className="outbound-list" aria-label={c.listTitle}>{contacts.map(one => <ContactLine key={one.permissionId} contact={one} onChanged={onChanged} />)}</ul>;
+  const id = useId();
+  const at = entryOf(contacts, added);
+  return (
+    <div className="outbound-contacts">
+      <h4 id={id} dir="auto">{c.listTitle(contacts.length)}</h4>
+      {contacts.length ? (
+        <ul className="outbound-list outbound-entries" aria-labelledby={id}>
+          {contacts.map(one => <ContactLine key={one.permissionId} contact={one} said={one === at ? added!.said : null} onChanged={onChanged} />)}
+        </ul>
+      ) : (
+        <p className="muted" dir="auto">{c.none}</p>
+      )}
+      {added && !at && <AddedLine said={added.said} />}
+    </div>
+  );
 }
 
-function ContactLine({ contact, onChanged }: { contact: Consent; onChanged(): void }) {
+const AddedLine = ({ said }: { said: string }) => <p className="muted outbound-added" role="status" dir="auto">{said}</p>;
+
+function ContactLine({ contact, said, onChanged }: { contact: Consent; said: string | null; onChanged(): void }) {
   const s = useT().outboundSetup;
   const { language } = useLanguage();
   const { busy, failure, run } = useMove(onChanged);
@@ -282,6 +305,7 @@ function ContactLine({ contact, onChanged }: { contact: Consent; onChanged(): vo
         </EntryActions>
       )}
       <Failure failure={failure} />
+      {said && <AddedLine said={said} />}
     </li>
   );
 }
@@ -293,7 +317,7 @@ function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; 
   const t = useT();
   const s = t.outboundSetup;
   const [open, setOpen] = useState<Open>(null);
-  const [added, setAdded] = useState<string | null>(null);
+  const [added, setAdded] = useState<Added | null>(null);
   const done = () => {
     setOpen(null);
     onChanged();
@@ -313,12 +337,11 @@ function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; 
       </header>
       {channel.accounts.length ? <ul className="outbound-list">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
       {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
-      {channel.audience === 'direct' && <ContactList contacts={contacts} onChanged={onChanged} />}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); onChanged(); }} onCancel={() => setOpen(null)} />}
-      {added && <p className="muted outbound-added" role="status" dir="auto">{added}</p>}
       {open === null && <ChannelActions channel={channel} onOpen={form => { setAdded(null); setOpen(form); }} onChanged={onChanged} />}
+      {channel.audience === 'direct' && <ContactList contacts={contacts} added={added} onChanged={onChanged} />}
     </div>
   );
 }
@@ -374,7 +397,7 @@ function contactRefusal(t: Messages, email: boolean, err: unknown): { problems: 
 
 /* The address form's state and its sending: each problem at its field with the focus on the first of them, the
    server's refusal where it belongs, and what was added once it was. */
-function useContactForm(channel: SetupChannel, onDone: (said: string) => void) {
+function useContactForm(channel: SetupChannel, onDone: (added: Added) => void) {
   const t = useT();
   const c = t.outboundSetup.contact;
   const email = channel.adapter === 'smtp';
@@ -398,7 +421,7 @@ function useContactForm(channel: SetupChannel, onDone: (said: string) => void) {
     setBusy(true);
     try {
       const said = await api.post<{ permissionId: string | null }>('/api/outbound/contacts', { channelId: channel.id, kind: email ? 'email' : 'direct', address, source: v.source.trim(), evidence: v.evidence.trim() });
-      onDone(said.permissionId ? c.added(address) : c.known(address));
+      onDone({ said: said.permissionId ? c.added(address) : c.known(address), permissionId: said.permissionId, address });
     } catch (err) {
       const refused = contactRefusal(t, email, err);
       show(refused.problems);
@@ -414,7 +437,7 @@ function useContactForm(channel: SetupChannel, onDone: (said: string) => void) {
 /* An address that agreed to the channel's purpose, a test address of the team among them. It goes through the server's
    own consent: the server keeps where they agreed and a fingerprint of the proof, under the channel's purpose, and looks
    for that before every message. The tick is the word of the person adding it that the consent was given. */
-function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(said: string): void; onCancel(): void }) {
+function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(added: Added): void; onCancel(): void }) {
   const t = useT();
   const c = t.outboundSetup.contact;
   const id = useId();
