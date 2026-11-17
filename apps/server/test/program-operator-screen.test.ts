@@ -1,7 +1,28 @@
 import { inflateSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { pictureType } from '../src/modules/tasks/attachments.js';
 import { renderOperatorScreen, renderOperatorScreenSvg } from '../src/modules/program-operator/screen.js';
+
+/* How big a PNG a pane makes is resvg's own business, and laying out tens of thousands of glyphs only measures the machine. A test
+   that needs a PNG of a given size sets it here and gets one without drawing; every other test draws with resvg itself. */
+const sized = vi.hoisted(() => ({ bytes: null as number | null, svgs: [] as string[] }));
+vi.mock('@resvg/resvg-js', async importOriginal => {
+  const real = await importOriginal<typeof import('@resvg/resvg-js')>();
+  function Resvg(svg: string, options?: ConstructorParameters<typeof real.Resvg>[1]) {
+    if (sized.bytes === null) return new real.Resvg(svg, options);
+    sized.svgs.push(svg);
+    const png = new Uint8Array(sized.bytes);
+    return { render: () => ({ asPng: () => png }) };
+  }
+  return { ...real, Resvg };
+});
+
+function pngsOf(bytes: number): string[] {
+  sized.bytes = bytes;
+  sized.svgs = [];
+  onTestFinished(() => { sized.bytes = null; });
+  return sized.svgs;
+}
 
 type DecodedPng = {
   width: number;
@@ -377,7 +398,14 @@ describe('renderOperatorScreen', () => {
     }
     const noisy = noisyRows.join('\n');
     expect(Buffer.byteLength(noisy, 'utf8')).toBeLessThanOrEqual(65_536);
-    expect(() => renderOperatorScreen({ cells: noisy, cols: 512, rows: 256, secrets: [] })).toThrow(/1 MiB/i);
+    const pane = { cells: noisy, cols: 512, rows: 256, secrets: [] };
+    const whole = renderOperatorScreenSvg(pane).svg;
+    /* One byte above 1 MiB throws; exactly 1 MiB goes. Either way the rasterizer got the whole pane, not a clipped one. */
+    const drawn = pngsOf(1_048_577);
+    expect(() => renderOperatorScreen(pane)).toThrow(/1 MiB/i);
+    sized.bytes = 1_048_576;
+    expect(renderOperatorScreen(pane).png.byteLength).toBe(1_048_576);
+    expect(drawn).toEqual([whole, whole]);
   });
 
   it('does not join short secrets across a hard line break', () => {
