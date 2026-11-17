@@ -4,10 +4,10 @@ import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers-basic.js';
-import { invitePerson, setUpCompany } from './helpers-company.js';
+import { appFixture, invitePerson, setUpCompany } from './helpers-company.js';
 
-/* The browser worker owns the app and database itself, without a test runner's lifecycle hooks. */
-export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
+/* The rows are made through the real setup and invitation routes once, then restored independently for each test. */
+async function companyRows(app: FastifyInstance, db: Db) {
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
@@ -55,10 +55,17 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
     deputy: await hire('Lena', 'worker', sales!.id, plans.clara.id),
   };
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  return { companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, product: app_! };
+}
+
+/* The browser worker owns the app and database itself; appFixture leaves that lifecycle alone. */
+export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
+  const rows = await appFixture(app, 'agent visibility company', () => companyRows(app, db));
+  const { crew, dev, product } = rows;
   /* Work of one agent, given by the head of Development. */
-  const work = async (title: string, agent: { id: string }, departmentId = dev!.id) =>
-    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, productId: departmentId === dev!.id ? app_!.id : null, assigneeAgentId: agent.id, executor: true })).task;
+  const work = async (title: string, agent: { id: string }, departmentId = dev.id) =>
+    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, productId: departmentId === dev.id ? product.id : null, assigneeAgentId: agent.id, executor: true })).task;
   const get = (url: string, token: string) => app.inject({ url, ...as(token) });
-  return { app, db, url, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, product: app_!, work, get };
+  return { app, db, url, ...rows, work, get };
 }
 

@@ -33,7 +33,8 @@ import { fakeRelay } from '../fake-relay.js';
 import { appOn, setUpCompany, TEST_SECRET } from '../helpers.js';
 import { forkOf, pgliteSource, type Side } from '../merge-fixture.js';
 import { migratedPgliteDump, readPgliteTemplate } from '../prepare-environment.js';
-import { closedPort, createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
+import { createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
+import { closedPort } from '../closed-port.js';
 
 let migratedTemplate: Blob | undefined;
 
