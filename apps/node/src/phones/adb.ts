@@ -8,6 +8,7 @@ export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
 export type AdbRun = (call: AdbCall) => Promise<Buffer>;
 
+/* The phone's own PNG of a whole screen of a photo, up to 10.4 MB at 1080x2400, comes whole before the node shrinks it. */
 export const ADB_MAX_BYTES = 16 * 1024 * 1024;
 
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
