@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, jobs, people, requests, taskEvents, tasks, taskWaits } from '../src/db/schema.js';
-import { ask, blocked, closeTask, loadTask, submit, type Task } from '../src/modules/tasks/engine.js';
+import { ask, blocked, closeTask, createTask, loadTask, submit, type Task } from '../src/modules/tasks/engine.js';
+import { closedBeyond } from '../src/modules/tasks/tools.js';
 import { routeOf } from '../src/modules/tasks/echelons-store.js';
 import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { setPaused } from '../src/modules/tasks/pause.js';
@@ -131,11 +132,19 @@ describe('closing a task through the API and the tool', () => {
       return mcp(f.app, token);
     };
     for (const agent of [f.head, f.author]) expect((await (await toolsOf(agent.id)).listTools()).tools.map(t => t.name)).not.toContain('close_task');
+    const { group, under } = await f.group();
+    /* A task the orchestrator made to follow work under the group: nobody else hears that it still waits. */
+    const next = (await createTask(f.ctx, { agentId: f.orchestrator.id }, { title: 'Totals, next', brief: '', body: 'After the report.', departmentId: f.task.departmentId!, assigneeAgentId: f.head.id, after: [under[1]!], independentNone: 'It starts only once the report is in.' })).task;
     const boss = await toolsOf(f.orchestrator.id);
-    const said = await boss.callTool({ name: 'close_task', arguments: { task: f.task.number, status: 'done', why: WHY } }) as { isError?: boolean; content: { text: string }[] };
+    const said = await boss.callTool({ name: 'close_task', arguments: { task: group.number, status: 'done', why: WHY } }) as { isError?: boolean; content: { text: string }[] };
     expect(said.isError).toBeFalsy();
-    expect(said.content[0]!.text).toContain(`Closed #${f.task.number} as done.`);
-    expect(await f.read(f.task.id)).toMatchObject({ status: 'done' });
-    expect((await f.log(f.task.id)).at(-1)).toMatchObject({ kind: 'done', agentId: f.orchestrator.id, text: WHY });
+    expect(said.content[0]!.text).toBe(`Closed #${group.number} as done. Open tasks cancelled under it: 2. Still waiting for work cancelled under it: #${next.number}. Give each what to wait for with update_task, or cancel it.`);
+    expect(await f.read(group.id)).toMatchObject({ status: 'done' });
+    expect(await f.read(next.id)).toMatchObject({ status: 'open' });
+    expect((await f.log(group.id)).at(-1)).toMatchObject({ kind: 'done', agentId: f.orchestrator.id, text: WHY });
+  });
+
+  it('says nothing more of a close that ended nothing under the task', () => {
+    expect(closedBeyond({ closed: ['one'], waiting: [] })).toBe('');
   });
 });

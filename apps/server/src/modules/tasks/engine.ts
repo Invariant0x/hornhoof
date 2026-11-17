@@ -89,6 +89,12 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
 }
 
+/* Done means all of it: work under it still open would go on under a finished task, and the turn with it. A move that ends
+   the work under it itself is checked once what goes with it ran (ran true), any other before. */
+async function doneWhole(tx: Tx, task: Task, set: Partial<Task>, n: { endsWorkUnder?: true }, ran: boolean): Promise<void> {
+  if (set.status === 'done' && Boolean(n.endsWorkUnder) === ran) await refuseOpenUnder(tx, task);
+}
+
 /* The last child wakes its current parent owner; each executable child already owns its Review. */
 async function workUnderDone(tx: Tx, closed: Task, actorId: string | undefined): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
@@ -282,13 +288,12 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
-    /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
-    if (set.status === 'done' && !n.endsWorkUnder) await refuseOpenUnder(tx, task);
+    await doneWhole(tx, task, set, n, false);
     await dropEarlierWakes(tx, task.id);
     const event = await note(tx, row, statusNoted(n, task.status, row.status), ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
-    if (set.status === 'done' && n.endsWorkUnder) await refuseOpenUnder(tx, task);
+    await doneWhole(tx, task, set, n, true);
     if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
     await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));

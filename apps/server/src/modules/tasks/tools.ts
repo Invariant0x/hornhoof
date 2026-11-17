@@ -124,6 +124,14 @@ export function registerHolderTools(server: McpServer, ctx: Ctx, job: ToolJob): 
   new TaskTools(server, ctx, job).registerHolderTools();
 }
 
+/* What a close did beyond the task: the open work cancelled under it, and the tasks its closer made that wait for that work,
+   which nobody else is told of. */
+export function closedBeyond(moved: { closed: string[]; waiting: Pick<Task, 'number'>[] }): string {
+  const cancelled = moved.closed.length > 1 ? ` Open tasks cancelled under it: ${moved.closed.length - 1}.` : '';
+  const waiting = moved.waiting.length ? ` Still waiting for work cancelled under it: ${listed(moved.waiting)}. Give each what to wait for with update_task, or cancel it.` : '';
+  return cancelled + waiting;
+}
+
 class TaskTools {
   private readonly db: Ctx['db'];
   private readonly boss: boolean;
@@ -709,9 +717,7 @@ class TaskTools {
           const { task } = await this.find(ref);
           const moved = await closeTask(this.ctx, { agentId: this.job.agentId }, task.id, { status, why });
           await stopTurns(this.ctx, moved.closed, this.job.agentId);
-          const under = moved.closed.length - 1;
-          const left = moved.waiting.length ? ` ${listed(moved.waiting)} ${moved.waiting.length === 1 ? 'came after work cancelled under it and still waits' : 'came after work cancelled under it and still wait'}: give ${moved.waiting.length === 1 ? 'it' : 'them'} what to wait for with update_task, or cancel ${moved.waiting.length === 1 ? 'it' : 'them'}.` : '';
-          return { text: `Closed #${task.number} as ${status}${under ? `, and cancelled ${under} open task${under === 1 ? '' : 's'} under it` : ''}.${left}`, moved };
+          return { text: `Closed #${task.number} as ${status}.${closedBeyond(moved)}`, moved };
         }),
     );
   }
