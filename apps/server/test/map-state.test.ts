@@ -8,6 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -617,7 +618,7 @@ describe('a turn the queue takes', () => {
     const goOn = await stopAt(db, 'map_returns');
     await wakeAll(ctx, [{ agentId: down.id, taskId: next.id, why: 'assigned' }]);
     /* Nothing went out: the turn still waits, and the line still shows the result that came back. */
-    expect(await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.taskId, next.id))).toEqual([{ status: 'queued' }]);
+    expect(await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.taskId, next.id))).toEqual([{ status: 'queued' }]);
     expect(builtin.queued()).toBe(before);
     expect(stateOf(await org(), up, down)).toBe('yellow');
     await goOn();

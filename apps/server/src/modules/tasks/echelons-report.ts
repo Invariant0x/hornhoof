@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { requireTestsReport } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
@@ -58,7 +59,7 @@ async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<Ac
   if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be accepted before the group closes.');
   const route = await routeOf(tx, child);
   if (route.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
-  const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
+  const [report] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
   /* Turnkey work has no candidate and no stages: its holder closed it alone, and nobody checks it after. */
   if (route.state.resultKind === 'turnkey') return { taskId: child.id, turnkey: true };
   if (route.state.resultKind === 'document') return acceptedDocument(tx, child, route, report?.data);
@@ -88,7 +89,7 @@ async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportDat
    there only on accepted results of its subtasks. A head or the orchestrator still closes a finding that has no code. */
 async function closableBy(ctx: Reader, tx: Tx, task: Task, agentId: string, children: unknown[]): Promise<void> {
   if (children.length || !ctx.config) return;
-  const [agent] = await tx.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await tx.select(only(agents, 'kind')).from(agents).where(eq(agents.id, agentId));
   if (agent?.kind !== 'worker' || !(await repoAt({ db: tx, config: ctx.config }, [task.productId, task.departmentId]))) return;
   throw refuse(409, 'task_invalid', `#${task.number} closes only on accepted results of its subtasks, as its department keeps code: hand in code through submit on a code task, or tell whoever gave you #${task.number} what you found with comment, and they close it.`);
 }

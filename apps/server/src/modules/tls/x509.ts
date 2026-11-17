@@ -2,7 +2,7 @@ import { X509Certificate, webcrypto } from 'node:crypto';
 import * as x509 from '@peculiar/x509';
 
 // The library needs a crypto provider once per process; Node's own is enough.
-x509.cryptoProvider.set(webcrypto as unknown as Crypto);
+x509.cryptoProvider.set(webcrypto);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STAND_IN_DAYS = 30;

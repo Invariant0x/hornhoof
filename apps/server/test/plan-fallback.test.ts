@@ -2,6 +2,7 @@ import type { Limits } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentChanges, agents, jobs, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -44,7 +45,7 @@ async function atWork() {
   const full = (until = resetsAt()): Limits => ({ status: 'rejected', windows: [{ name: 'seven_day', utilization: 1, resetsAt: until }] });
   /* A turn ends as the node it went out to tells it. */
   const done = async (id: string) => {
-    const [job] = await c.db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, id));
+    const [job] = await c.db.select(only(jobs, 'nodeId')).from(jobs).where(eq(jobs.id, id));
     await handleNodeMessage(c.ctx, job?.nodeId ? nodeIdentity(job.nodeId) : BUILTIN, { type: 'job.done', jobId: id, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null }, new Date());
   };
   const runningOf = async (agentId: string) => (await c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))))[0];
@@ -68,7 +69,7 @@ describe('a plan at its limit', () => {
     /* The work the limit cut short goes on on the fallback at once, and the task stays his. */
     expect(await c.runningOf(c.agent.id)).toMatchObject({ subscriptionId: c.spare.id, continueOf: c.first.id });
     expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]).toMatchObject({ assigneeAgentId: c.agent.id });
-    const [until] = (await c.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, c.sub.id)))[0]!.limits!.windows.map(w => w.resetsAt);
+    const [until] = (await c.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.id, c.sub.id)))[0]!.limits!.windows.map(w => w.resetsAt);
     expect(await c.card(c.agent.id)).toMatchObject({ subscription: { id: c.spare.id }, fallback: { home: { id: c.sub.id, label: c.sub.label }, until } });
     expect(await c.planChanges(c.agent.id)).toMatchObject([{ before: c.sub.id, after: c.spare.id, personId: null, byOrchestrator: false }]);
   });

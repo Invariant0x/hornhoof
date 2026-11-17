@@ -571,17 +571,16 @@ describe("an agent's live terminal in its window", () => {
     [{ limitUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
     [{ budgetUntil: '2026-11-05T15:00:00Z' }, /The plan used the share set for tasks/],
     [{ limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
-    [{ machineDrain: { state: 'waiting', until: '2026-11-05T15:00:00Z', turnsLeft: 1, partsLeft: 0 } as const }, /finishing its work before an update/],
+    [{ machineDrain: { state: 'waiting', since: '2026-11-05T15:00:00Z', turnsLeft: 1, partsLeft: 0 } as const }, /finishing its work before an update/],
   ])('says what keeps the agent from answering: %j', async (state, says) => {
     open(true, state);
     expect(await screen.findByText(says)).toHaveClass('t-why');
   });
 
-  it('leaves the share of the plan out while the plan is at its limit, and a drain that was put off', async () => {
-    open(true, { limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z', machineDrain: { state: 'postponed' } as unknown as OrchestratorState['machineDrain'] });
+  it('leaves the share of the plan out while the plan is at its limit', async () => {
+    open(true, { limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z' });
     await screen.findByText(/The plan is at its limit/);
     expect(screen.queryByText(/The plan used the share set for tasks/)).toBeNull();
-    expect(screen.queryByText(/finishing its work before an update/)).toBeNull();
   });
 
   it('says nothing of a refused turn while none was refused', async () => {

@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, taskEvents, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
@@ -21,11 +22,11 @@ type Noted = { job: string; stage: Stage; holder: string; host: string | null; s
 async function hostOf(ctx: Ctx, node: NodeIdentity): Promise<string | null> {
   const { db } = ctx;
   if (node.kind === 'node') {
-    const [row] = await db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
+    const [row] = await db.select(only(machines, 'hostname')).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
     return row?.hostname || null;
   }
   if (node.machine === ownMachine(ctx.config)) return null;
-  const [row] = await db.select({ hostname: machines.hostname }).from(machines).where(eq(machines.networkId, node.machine));
+  const [row] = await db.select(only(machines, 'hostname')).from(machines).where(eq(machines.networkId, node.machine));
   return row?.hostname || null;
 }
 
@@ -36,7 +37,7 @@ const named = (ctx: Ctx, node: NodeIdentity, host: string | null): string =>
 /* What was written down of this turn: that its machine went away, and that it came back or the turn ended. */
 async function notedOf(ctx: Ctx, job: Pick<Job, 'id' | 'taskId'>): Promise<Noted[]> {
   const rows = await ctx.db
-    .select({ data: taskEvents.data })
+    .select(only(taskEvents, 'data'))
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, job.taskId!), eq(taskEvents.kind, 'away'), sql`${taskEvents.data} ->> 'job' = ${job.id}`))
     .orderBy(taskEvents.id);
@@ -48,7 +49,7 @@ async function notedOf(ctx: Ctx, job: Pick<Job, 'id' | 'taskId'>): Promise<Noted
 async function hearerOf(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job): Promise<string | null> {
   for (const id of [task.createdByAgentId, (await orchestratorOf(ctx, task.companyId))?.id]) {
     if (!id || id === job.agentId) continue;
-    const [agent] = await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, id));
+    const [agent] = await ctx.db.select(only(agents, 'removedAt')).from(agents).where(eq(agents.id, id));
     if (agent && !agent.removedAt) return id;
   }
   return null;
@@ -84,7 +85,7 @@ export async function turnAway(ctx: Ctx, job: Job, node: NodeIdentity, since: nu
   }
   /* Only the turn of whoever holds the task is kept, and only while it can go on nowhere else. */
   if (task.assigneeAgentId !== job.agentId || (await elsewhere())) return false;
-  const [agent] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  const [agent] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId));
   const [host, at] = [await hostOf(ctx, node), new Date(since).toISOString()];
   const [who, where] = [agent?.name ?? 'An employee', named(ctx, node, host)];
   const text =
@@ -102,7 +103,7 @@ export async function turnBack(ctx: Ctx, job: Job, node: NodeIdentity, now: Date
   if (last?.stage !== 'away') return;
   const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, job.taskId!));
   if (!task || !job.agentId) return;
-  const [agent] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  const [agent] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId));
   const [host, at] = [await hostOf(ctx, node), now.toISOString()];
   const [who, where] = [agent?.name ?? 'An employee', named(ctx, node, host)];
   const text = `Hornhoof: ${where} is in reach again, and ${who}'s turn on #${task.number} "${task.title}" goes on there.`;

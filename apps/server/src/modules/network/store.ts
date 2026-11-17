@@ -4,7 +4,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { authority, certificates, companies, machines, peerSecrets, people, type MachineRole } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { issueCertificate, makeAuthority, type Authority, type Issued } from './authority.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
@@ -86,7 +86,7 @@ export async function certify(tx: Db, by: Authority, holder: { id: string; role:
 
 /* The serials revoked and not yet expired, sorted: what a peer must refuse now. */
 export async function revokedSerials(db: Db, now = new Date()): Promise<string[]> {
-  const rows = await db.select({ serial: certificates.serial }).from(certificates).where(and(isNotNull(certificates.revokedAt), gt(certificates.until, now))).orderBy(asc(certificates.serial));
+  const rows = await db.select(only(certificates, 'serial')).from(certificates).where(and(isNotNull(certificates.revokedAt), gt(certificates.until, now))).orderBy(asc(certificates.serial));
   return rows.map(row => row.serial);
 }
 
