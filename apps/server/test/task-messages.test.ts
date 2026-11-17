@@ -97,6 +97,29 @@ describe('task messages reach their recipient', () => {
     expect((await c.messages(orchestrator!.id)).find(e => e.message?.direction === 'in')).toMatchObject({ data: { text: 'Yes.', task: { id: release.id } } });
   });
 
+  it('delivers a word about a task that just closed, from the one who did it and to the orchestrator, and wakes no work on it', async () => {
+    const c = await messaging();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const task = await c.task();
+    /* The task closes as it does: done, held by nobody, with the one who did it kept as its executor. */
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, executorAgentId: c.agent.id }).where(eq(tasks.id, task.id));
+    const head = await c.run(c.head.id);
+    const worker = await c.run(c.agent.id);
+    const send = (client: typeof worker.client, employee: string, text: string) =>
+      client.callTool({ name: 'message_employee', arguments: { employee, task: task.number, text } }) as Promise<{ isError?: boolean; content: { text: string }[] }>;
+    const done = await send(worker.client, c.head.id, 'The images are published.');
+    expect([done.isError, done.content[0]!.text]).toEqual([undefined, 'Sent to Hana.']);
+    expect((await send(head.client, orchestrator!.id, 'Development published the images.')).isError).toBeFalsy();
+    expect((await c.messages(c.head.id)).find(e => e.message?.direction === 'in')).toMatchObject({ jobId: head.job.id, data: { text: 'The images are published.', task: { id: task.id, number: task.number } } });
+    expect((await c.messages(orchestrator!.id)).find(e => e.message?.direction === 'in')).toMatchObject({ data: { text: 'Development published the images.', task: { id: task.id, number: task.number } } });
+    expect((await c.turnsOf(orchestrator!.id)).map(j => j.taskId)).toEqual([null]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'done', assigneeAgentId: null });
+    /* One who neither did it nor oversees it still hears that it is not theirs. */
+    const peer = await c.hire('Carl', 'worker', 'DEV-FE', c.dev.id);
+    const stranger = await c.run(peer.id);
+    expect((await send(stranger.client, c.head.id, 'Me too.')).content[0]!.text).toContain(`#${task.number} is not with you.`);
+  });
+
   describe('a message that waits in line for the next turn', () => {
     const IN_LINE = 'Sent to Bruno. It gets this with its next turn, not at once.';
     const send = (client: Awaited<ReturnType<typeof mcp>>, employee: string, text: string, task?: number) =>
