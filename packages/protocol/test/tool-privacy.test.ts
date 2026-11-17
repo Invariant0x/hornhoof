@@ -28,6 +28,13 @@ describe('sensitive tool telemetry', () => {
     expect(values.hide({ text: 'Ready.', nested: JSON.stringify({ password: 'a.$"\n' }) })).toEqual({ text: 'Ready.', nested: '{"password":"[hidden]"}' });
   });
 
+  it('masks a source repair report while preserving its verification identity', () => {
+    const values = new PrivateValues();
+    values.remember('private-repair-report-marker');
+    const report = { task: 1178, summary: 'Repair required.', verification: { candidateId: 'candidate-id', revision: 3, delta: 'Repair private-repair-report-marker.' } };
+    expect(values.input(report)).toEqual({ ...report, verification: { ...report.verification, delta: 'Repair [hidden].' } });
+  });
+
   it('preserves media bytes when a short password also occurs in their base64 representation', () => {
     const values = new PrivateValues();
     values.remember('a');
