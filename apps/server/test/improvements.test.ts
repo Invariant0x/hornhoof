@@ -476,12 +476,17 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     await propose({ problem: 'The next node build is missing it too.' });
     const [dev] = await db.select().from(departments).where(eq(departments.roleCode, 'DEV'));
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
+    const repeats = (headers: Record<string, string>) => app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers });
     expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, ...as(dana) })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: { authorization: `Bearer ${TOKENS.orchestrator}` } })).statusCode).toBe(401);
+    expect((await repeats({ authorization: `Bearer ${TOKENS.bruno}` })).statusCode).toBe(401);
     const [ivan] = await db.select().from(people);
     expect(relay.feedback).toHaveLength(1);
-    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(200);
+    expect((await repeats(orchestratorHeaders(ivan!.id, orchestrator.id))).statusCode).toBe(200);
     expect(relay.feedback).toHaveLength(2);
+    /* The orchestrator's own turn token acts for the owner over HTTP too. */
+    await propose({ problem: 'A third node build is missing it too.' });
+    expect((await repeats({ authorization: `Bearer ${TOKENS.orchestrator}` })).statusCode).toBe(200);
+    expect(relay.feedback).toHaveLength(3);
   });
 
   it('keeps the repeats when hornhoof.org does not answer, and counts them on without failing the agent', async () => {
