@@ -6,7 +6,7 @@ import type { GoalView } from '../src/types';
 import { TrackerGraph } from '../src/ui/TrackerViews';
 
 const goal = (id: string, title: string): GoalView => ({
-  id, number: 1, title, why: '', department: null, parentId: null, responsible: null, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, mayEdit: true,
+  id, number: 1, title, why: '', department: null, parentId: null, responsible: { id: 'p1', name: 'Ivan' }, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, mayEdit: true,
 });
 const node = (id: string, title: string, children: GraphNode[] = []): GraphNode => ({ kind: 'goal', id, goal: goal(id, title), children });
 const rows = { selected: null, onOpenTask: () => {} };

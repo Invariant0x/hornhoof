@@ -208,7 +208,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     expect(arrow[0]).toBe('28px');
     if (dir === 'rtl') expect(arrow[1]).toBe('10px, 15px');
     else expect(arrow[1]).not.toBe('10px, 15px');
-    const side = await page.locator('.tr-side').evaluate(el => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
+    const side = await page.locator('.tr-side').evaluate((el: HTMLElement) => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
     expect(side[0]).toBe(side[1]);
     await status.selectOption({ label: t.tracker.statuses.working });
     await status.evaluate(el => (el as HTMLSelectElement).blur());
