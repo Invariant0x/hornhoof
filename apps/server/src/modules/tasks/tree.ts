@@ -2,7 +2,7 @@ import { ECHELON_STAGES, isStaged, type EchelonsSnapshot, type EchelonFindingsVi
 import type { TurnAlarm, TurnProgram } from '@hornhoof/protocol/map';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { countedSegments, turnSegments, withExternalWait, withPrograms, type FactTurn } from './tree-programs.js';
-import { waitingAgents, type TreeWait, type WaitSpan } from './tree-waits.js';
+import { taskActor, waitingAgents, type TreeWait, type WaitSpan } from './tree-waits.js';
 import type { REQUEST_STATUSES, TaskEventKind, TaskStatus } from '../../db/schema.js';
 
 type RequestStatus = (typeof REQUEST_STATUSES)[number];
@@ -409,10 +409,6 @@ function lineSigns(taskId: string, moves: FactTaskEvent[], ix: Indexed): Date[] 
     ...listOf(ix.signsByTask, taskId).map(s => s.at),
     ...listOf(ix.jobsByTask, taskId).flatMap(j => (j.lastActionAt ? [j.lastActionAt] : [])),
   ];
-}
-
-export function taskActor(task: FactTask): string | null {
-  return task.assigneeAgentId ?? task.executorAgentId ?? null;
 }
 
 type OwnershipTask = Pick<FactTask, 'createdAt' | 'echelons' | 'assigneeAgentId' | 'executorAgentId'>;
