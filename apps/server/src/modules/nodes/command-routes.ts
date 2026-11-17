@@ -14,7 +14,7 @@ const unknown = () => new ApiError(404, 'not_found', 'This command is not shown 
 
 async function ownScreen(req: Parameters<typeof requirePerson>[0], db: Db) {
   const me = await requirePerson(req, db);
-  if (me.via) throw new ApiError(403, 'forbidden', "Only the person's own screen shows this.", 'not_owner');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', "Only the person's own screen shows this.", 'not_owner');
   return me;
 }
 

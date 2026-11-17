@@ -254,7 +254,7 @@ const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue
 export const personOf = (me: Person): string | null => (me.via ? null : me.id);
 
 /* The orchestrator acts for the owner, as itself: not a head carrying out the decision of the person its turn answers. */
-export const viaOrchestrator = (me: Person): boolean => !!me.via && !me.viaHead;
+export const viaOrchestrator = (me: Pick<Person, 'via' | 'viaHead'>): boolean => !!me.via && !me.viaHead;
 
 /* Who a change is by: the person, or the orchestrator when it acts for the owner. What a head changes is the decision of
    the person its turn answers, so it is that person's. */
