@@ -1,0 +1,24 @@
+Merge base: a27bc368b1e027af70883d06d1da9ba2b07985ab
+File: apps/server/test/helpers-db.ts
+AST-extracted complete function declarations: freshPglite and ownDatabases.
+Command: git diff --no-index -- base.ts candidate.ts
+Output: empty. Exit: 0.
+Both SHA-256: a0f5a3dab09351bcff21ef19eadb5bea226893fbce7b6172060f9db4da0ffefd
+
+Identical declarations from both versions:
+export async function freshPglite(): Promise<PGlite> {
+  const runs = inject('initdbDataDir') as string | undefined;
+  if (!initdb && runs) initdb = new Blob([readFileSync(runs)]);
+  if (!initdb) {
+    const first = new PGlite();
+    /* A dump asked for before it is ready never comes. */
+    await first.waitReady;
+    initdb = await first.dumpDataDir('none');
+    await first.close();
+  }
+  return withOwnParsers(new PGlite({ loadDataDir: initdb }));
+}
+
+export function ownDatabases(): void {
+  ownEach = true;
+}
