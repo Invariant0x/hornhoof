@@ -35,6 +35,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
 - Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
+- A machine can take only so many agents' turns at once (Turns at once on its card, `limit_machine_turns` for the orchestrator); past that a new turn waits for a place, urgent tasks first, and starts when a turn there ends.
 
 ### Changed
 
