@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { companies, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { REPLICA_FILE } from '../src/modules/keeper/become.js';
 import { COPY_STATE } from '../src/modules/keeper/copy.js';
 import { Hander, readHanding } from '../src/modules/keeper/handing.js';
@@ -956,7 +957,7 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
         return req;
       }
 
-      const copiedNamesOnB = async () => (await dbB.db.select({ name: companies.name }).from(companies)).map(r => r.name);
+      const copiedNamesOnB = async () => (await dbB.db.select(only(companies, 'name')).from(companies)).map(r => r.name);
       const pendingMovesOnB = async () => (await dbB.sql.query('SELECT 1 FROM net.move')).rows;
 
       return {

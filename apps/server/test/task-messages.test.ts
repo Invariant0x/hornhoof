@@ -1,6 +1,6 @@
 import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, jobs, subscriptions, taskRoutes, tasks, taskWaits, teams } from '../src/db/schema.js';
@@ -9,7 +9,7 @@ import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from './builtin.js';
 import { comment, createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { withInputLock } from '../src/modules/conversation/decision-context.js';
-import { enqueueTurn, onAgent } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, holdForWords, onAgent, pump, wordsSettled } from '../src/modules/conversation/queue.js';
 import { queueTaskMessage, waitFor } from '../src/modules/tasks/external-wait.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf } from '../src/modules/tasks/echelons-store.js';
@@ -31,6 +31,14 @@ async function messaging() {
   const task = async () => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
   const messages = async (agentId: string) => (await listEvents(c.db, agentId, 0)).filter(e => e.kind === 'message');
   return { ...c, run, task, messages };
+}
+
+/* The plan of the recipient at its limit for an hour: a turn that waits for it does not end by itself. */
+const planAtLimit = (c: Awaited<ReturnType<typeof messaging>>) => c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+
+/* Waits, with no deadline of its own, until what the server does after a call that broke off is done. */
+async function settled(done: () => Promise<boolean>): Promise<void> {
+  while (!(await done())) await new Promise(resolve => setImmediate(resolve));
 }
 
 describe('task messages reach their recipient', () => {
@@ -89,27 +97,99 @@ describe('task messages reach their recipient', () => {
     expect((await c.messages(orchestrator!.id)).find(e => e.message?.direction === 'in')).toMatchObject({ data: { text: 'Yes.', task: { id: release.id } } });
   });
 
-  it.each([{ bound: true }, { bound: false }])('returns an error when a live message cannot reach the terminal: %j', async ({ bound }) => {
-    const c = await messaging();
-    const task = await c.task();
-    const head = await c.run(c.head.id);
-    await c.run(c.agent.id, task.id);
-    c.sent.mockImplementation((_node, message) => {
-      if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, false));
-      return true;
-    });
-    const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, text: 'Do not lose these words.', ...(bound ? { task: task.number } : {}) } });
-    expect(result.isError).toBe(true);
-    expect(await c.messages(c.agent.id)).toEqual([]);
-    expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
-  });
-
   describe('a message that waits in line for the next turn', () => {
     const IN_LINE = 'Sent to Bruno. It gets this with its next turn, not at once.';
     const send = (client: Awaited<ReturnType<typeof mcp>>, employee: string, text: string, task?: number) =>
       client.callTool({ name: 'message_employee', arguments: { employee, text, ...(task ? { task } : {}) } }) as Promise<{ isError?: boolean; content: { text: string }[] }>;
     const atLimit = (c: Awaited<ReturnType<typeof messaging>>) => c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
     const pastShare = (c: Awaited<ReturnType<typeof messaging>>) => c.db.update(subscriptions).set({ budget: 50, limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.8, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+    /* What a failure collector reads of the messages a sender's turns could not deliver. */
+    const undeliveredBy = async (c: Awaited<ReturnType<typeof messaging>>, agentId: string) =>
+      (await listEvents(c.db, agentId, 0)).filter(e => e.kind === 'tool_result' && (e.data as { undelivered?: unknown }).undelivered).map(e => ({ jobId: e.jobId, data: e.data }));
+    /* The machine of the company key, as Hornhoof sees its line: open before its hello, open past it, or closed. */
+    const line = (c: Awaited<ReturnType<typeof messaging>>, state: 'hello_pending' | 'ready' | 'closed') => {
+      c.ctx.hub.isOnline = () => state !== 'closed';
+      c.ctx.hub.isReady = () => state === 'ready';
+    };
+
+    it.each([{ bound: true }, { bound: false }])('keeps a message for a busy employee whose running turn did not take it, for its next turn: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      const worker = await c.run(c.agent.id, task.id);
+      c.sent.mockImplementation((_node, message) => {
+        if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, false));
+        return true;
+      });
+      const result = await send(head.client, c.agent.id, 'Do not lose these words.', bound ? task.number : undefined);
+      expect([result.isError, result.content[0]!.text]).toEqual([undefined, IN_LINE]);
+      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect(queued).toHaveLength(1);
+      expect(queued[0]!.prompt).toContain('Do not lose these words.');
+      expect((await c.jobOf(worker.job.id)).status).toBe('running');
+      expect((await c.messages(c.agent.id)).find(e => e.message?.direction === 'in')).toMatchObject({ jobId: queued[0]!.id });
+      expect(await undeliveredBy(c, c.head.id)).toEqual([]);
+    });
+
+    it('keeps the orchestrator\'s message for a busy employee whose running turn did not take it', async () => {
+      const c = await messaging();
+      const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+      const sender = await c.run(orchestrator!.id);
+      await c.run(c.agent.id);
+      c.sent.mockImplementation((_node, message) => {
+        if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, false));
+        return true;
+      });
+      const result = await send(sender.client, c.agent.id, 'Check the release notes.');
+      expect(result.isError).toBeFalsy();
+      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect(queued.map(j => j.prompt)).toEqual([expect.stringContaining('Check the release notes.')]);
+    });
+
+    it.each([{ bound: true }, { bound: false }])('keeps a message for an employee whose machine is getting back on the line, and sends it once the machine says hello: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      line(c, 'hello_pending');
+      const result = await send(head.client, c.agent.id, 'Wait for me.', bound ? task.number : undefined);
+      expect([result.isError, result.content[0]!.text]).toEqual([undefined, 'Sent to Bruno. Its machine is getting back on the line, so the turn starts once it is back.']);
+      const [queued, ...more] = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect([queued!.prompt, more]).toEqual([expect.stringContaining('Wait for me.'), []]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([]);
+      line(c, 'ready');
+      await pump(c.ctx, c.agent.id);
+      expect((await c.jobOf(queued!.id)).status).toBe('running');
+    });
+
+    it('keeps the orchestrator\'s message for an employee whose machine is getting back on the line, and refuses one with its code once the line is closed', async () => {
+      const c = await messaging();
+      const task = await c.task();
+      const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+      const sender = await c.run(orchestrator!.id);
+      line(c, 'hello_pending');
+      expect((await send(sender.client, c.agent.id, 'Wait for me.', task.number)).isError).toBeFalsy();
+      expect((await c.turnsOf()).filter(j => j.status === 'queued').map(j => j.prompt)).toEqual([expect.stringContaining('Wait for me.')]);
+      line(c, 'closed');
+      const refused = await send(sender.client, c.agent.id, 'Are you there?', task.number);
+      const said = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task #${task.number}.`;
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toContain(`This employee cannot answer right now. See the window for what to do.\n${said}`);
+      expect(await undeliveredBy(c, orchestrator!.id)).toEqual([{ jobId: sender.job.id, data: { ok: false, summary: said, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: task.number } } }]);
+    });
+
+    it.each([{ bound: true }, { bound: false }])('refuses a message for an employee whose machine is off the line, with the code, the employee and the task: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      line(c, 'closed');
+      const result = await send(head.client, c.agent.id, 'Are you there?', bound ? task.number : undefined);
+      const said = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task ${bound ? `#${task.number}` : 'none'}.`;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toMatch(/^Bruno cannot run now\. /);
+      expect(result.content[0]!.text.endsWith(`\n${said}`)).toBe(true);
+      expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([{ jobId: head.job.id, data: { ok: false, summary: said, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: bound ? task.number : null } } }]);
+    });
 
     it.each([{ bound: true }, { bound: false }])('keeps a message for a busy employee on a node without live terminals: %j', async ({ bound }) => {
       const c = await messaging();
@@ -160,14 +240,100 @@ describe('task messages reach their recipient', () => {
       expect(queued).toHaveLength(2);
     });
 
-    it('still says a message did not go out when only later turns wait behind it', async () => {
+    it.each([{ bound: true }, { bound: false }])('keeps a message for an idle employee whose window did not take its turn, and sends it on the next try: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      c.sent.mockReturnValue(false);
+      const result = await send(head.client, c.agent.id, 'Take this when you can.', bound ? task.number : undefined);
+      expect([result.isError, result.content[0]!.text]).toEqual([undefined, IN_LINE]);
+      const [queued, ...more] = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect([queued!.prompt, more]).toEqual([expect.stringContaining('Take this when you can.'), []]);
+      expect((await c.turnsOf()).filter(j => j.status === 'failed')).toEqual([]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([]);
+      c.sent.mockReturnValue(true);
+      await pump(c.ctx, c.agent.id);
+      expect((await c.jobOf(queued!.id)).status).toBe('running');
+    });
+
+    it('keeps a message whose turn did not go out though only later turns wait behind it', async () => {
       const c = await messaging();
       const head = await c.run(c.head.id);
       c.sent.mockReturnValue(false);
       await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Later.', status: 'queued', timeoutMs: 1000, createdAt: new Date(Date.now() + 60_000) });
-      const result = await send(head.client, c.agent.id, 'Goes first and cannot go.');
-      expect(result.isError).toBe(true);
-      expect((await c.turnsOf()).map(j => j.status).sort()).toEqual(['failed', 'queued']);
+      const result = await send(head.client, c.agent.id, 'Goes first and cannot go yet.');
+      expect([result.isError, result.content[0]!.text]).toEqual([undefined, IN_LINE]);
+      expect((await c.turnsOf()).map(j => j.status)).toEqual(['queued', 'queued']);
+    });
+
+    it('keeps a message for an idle employee whose window still gives back the words of its last turn, and sends it once they are in', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      const last = await c.run(c.agent.id);
+      /* The clock stands still, so the window's time for the words of the turn that ended does not run out by itself. */
+      vi.useFakeTimers({ toFake: ['Date'] });
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
+      await onAgent(c.ctx, c.agent.id, async () => {
+        await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, last.job.id));
+        holdForWords(c.ctx, c.agent.id, last.job.id, BUILTIN, new Date());
+      });
+      const result = await send(head.client, c.agent.id, 'After your last words.');
+      expect([result.isError, result.content[0]!.text]).toEqual([undefined, IN_LINE]);
+      const [queued, ...more] = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect([queued!.prompt, more]).toEqual([expect.stringContaining('After your last words.'), []]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([]);
+      await wordsSettled(c.ctx, BUILTIN, c.agent.id, last.job.id);
+      await pump(c.ctx, c.agent.id);
+      expect((await c.jobOf(queued!.id)).status).toBe('running');
+    });
+
+    it.each([{ bound: true }, { bound: false }])('sends a message once when its sender repeats it in the same turn: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      c.sent.mockReturnValue(false);
+      const first = await send(head.client, c.agent.id, 'Only once, please.', bound ? task.number : undefined);
+      expect([first.isError, first.content[0]!.text]).toEqual([undefined, IN_LINE]);
+      const again = await send(head.client, c.agent.id, 'Only once, please.', bound ? task.number : undefined);
+      expect([again.isError, again.content[0]!.text]).toEqual([undefined, 'Sent to Bruno already in this turn, so this repeat was not sent again.']);
+      expect((await c.turnsOf()).map(j => j.status)).toEqual(['queued']);
+      expect((await c.messages(c.agent.id)).filter(e => e.message?.direction === 'in').map(e => (e.data as { text: string }).text)).toEqual(['Only once, please.']);
+      /* Other words, or the same words from a later turn, go as ever. */
+      expect((await send(head.client, c.agent.id, 'And one more thing.', bound ? task.number : undefined)).content[0]!.text).toBe(IN_LINE);
+      await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(), toolTokenHash: null }).where(eq(jobs.id, head.job.id));
+      const later = await c.run(c.head.id);
+      expect((await send(later.client, c.agent.id, 'Only once, please.', bound ? task.number : undefined)).content[0]!.text).toBe(IN_LINE);
+      expect((await c.messages(c.agent.id)).filter(e => e.message?.direction === 'in')).toHaveLength(3);
+    });
+
+    it('sends a message once when its sender lost the answer of a call that went through, and repeats it', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      const worker = await c.run(c.agent.id);
+      /* The window types the words only after the sender's call broke off, as when its connection was reset. */
+      let typed: ((ref: string) => void) | null = null;
+      const asked = new Promise<string>(resolve => (typed = resolve));
+      c.sent.mockImplementation((_node, message) => {
+        if (message.type !== 'agent.say') return true;
+        if (typed) typed(message.ref);
+        else queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, true));
+        typed = null;
+        return true;
+      });
+      const broken = new AbortController();
+      const lost = head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, text: 'Did this reach you?' } }, undefined, { signal: broken.signal });
+      const ref = await asked;
+      broken.abort();
+      await expect(lost).rejects.toThrow();
+      said(c.ctx, BUILTIN, ref, true);
+      await settled(async () => (await c.messages(c.agent.id)).some(e => e.message?.direction === 'in'));
+      const again = await send(head.client, c.agent.id, 'Did this reach you?');
+      expect([again.isError, again.content[0]!.text]).toEqual([undefined, 'Sent to Bruno already in this turn, so this repeat was not sent again.']);
+      expect((await c.messages(c.agent.id)).filter(e => e.message?.direction === 'in').map(e => [e.jobId, (e.data as { text: string }).text])).toEqual([[worker.job.id, 'Did this reach you?']]);
+      expect(c.sent.mock.calls.map(([, m]) => m).filter(m => m.type === 'agent.say')).toHaveLength(1);
+      expect((await c.turnsOf()).map(j => j.status)).toEqual(['running']);
     });
 
     it('says nothing of a line when the message went into the running turn', async () => {
@@ -193,8 +359,12 @@ describe('task messages reach their recipient', () => {
       c.ctx.hub.hasTerminals = () => false;
       await atLimit(c);
       const result = await send(head.client, c.agent.id, 'At the limit.');
-      expect(result.isError).toBe(true);
+      const line = `Not delivered: reason plan_at_limit, recipient ${c.agent.id}, task none.`;
+      expect([result.isError, result.content[0]!.text]).toEqual([true, `The message did not reach the employee. Check its window and try again.\n${line}`]);
       expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
+      /* The turn it would have been, as a failure collector reads it. */
+      expect((await c.turnsOf()).filter(j => j.status === 'failed')).toEqual([expect.objectContaining({ error: 'message_not_delivered', result: line })]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([{ jobId: head.job.id, data: { ok: false, summary: line, undelivered: { reason: 'plan_at_limit', recipient: c.agent.id, task: null } } }]);
     });
 
     it('still says a task message did not go out when the plan of a busy employee used the share set for tasks', async () => {
@@ -206,6 +376,7 @@ describe('task messages reach their recipient', () => {
       await pastShare(c);
       const result = await send(head.client, c.agent.id, 'Past the share.', task.number);
       expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain(`\nNot delivered: reason plan_budget, recipient ${c.agent.id}, task #${task.number}.`);
       expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
     });
 
@@ -287,12 +458,25 @@ describe('task messages reach their recipient', () => {
     }, 3000);
   });
 
-  it('keeps the external wait when the message cannot be dispatched', async () => {
+  it('ends the external wait with a message whose turn did not go out yet, as the message waits in line for the holder', async () => {
     const c = await messaging();
     const task = await c.task();
     await waitFor(c.ctx, c.agent.id, task.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
     const head = await c.run(c.head.id);
     c.sent.mockReturnValue(false);
+    const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } });
+    expect(result.isError).toBeFalsy();
+    expect((await c.turnsOf()).filter(j => j.status === 'queued').map(j => j.prompt)).toEqual([expect.stringContaining('Please check.')]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toBeNull();
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, task.id))).map(wait => wait.sourceState.stage)).toEqual(['check_back']);
+  });
+
+  it('keeps the external wait when the message is refused', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    await waitFor(c.ctx, c.agent.id, task.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
+    const head = await c.run(c.head.id);
+    await planAtLimit(c);
     const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } });
     expect(result.isError).toBe(true);
     expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Registry' });
@@ -306,18 +490,26 @@ describe('task messages reach their recipient', () => {
     const task = await c.task();
     await waitFor(c.ctx, c.agent.id, task.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
     const failure = new ApiError(503, 'conflict', 'The wait could not be restored.');
+    /* The machine goes off the line as the turn goes to it, so the message is refused, and the next write that takes a
+       transaction is the one that brings the wait back. */
     c.sent.mockImplementation((_node, message) => {
-      if (message.type === 'job.run') vi.spyOn(c.db, 'transaction').mockRejectedValueOnce(failure);
+      if (message.type !== 'job.run') return true;
+      c.ctx.hub.isOnline = () => false;
+      c.ctx.hub.isReady = () => false;
+      vi.spyOn(c.db, 'transaction').mockRejectedValueOnce(failure);
       return false;
     });
     await expect(queueTaskMessage(c.ctx, { companyId: c.companyId, agentId: c.agent.id, task: task.number, actor: { agentId: c.head.id }, text: 'Check.' }, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Check.', createdBy: null, message: { personId: null, text: 'Check.' } })).rejects.toBe(failure);
+    /* The refusal came, and it was the wait's return that failed: the wait is not back. */
+    expect((await c.turnsOf()).map(j => [j.status, j.error])).toEqual([['failed', 'message_not_delivered']]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toBeNull();
   });
 
-  it('keeps a newer task action when restoring a wait after a failed dispatch', async () => {
+  it('keeps a newer task action when restoring a wait after a refused message', async () => {
     const c = await messaging();
     const task = await c.task();
     await waitFor(c.ctx, c.agent.id, task.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
-    c.sent.mockReturnValue(false);
+    await planAtLimit(c);
     let changed: Promise<unknown> | undefined;
     await expect(queueTaskMessage(c.ctx, { companyId: c.companyId, agentId: c.agent.id, task: task.number, actor: { agentId: c.head.id }, text: 'Check.' }, {
       companyId: c.companyId, agentId: c.agent.id, prompt: 'Check.', createdBy: null, message: { personId: null, text: 'Check.' },
@@ -394,24 +586,15 @@ describe('task messages reach their recipient', () => {
     expect(queued[0]!.prompt).toContain('Add the changelog and submit both tasks.');
   });
 
-  it('returns an error when the idle recipient turn cannot go out', async () => {
-    const c = await messaging();
-    const task = await c.task();
-    const head = await c.run(c.head.id);
-    c.sent.mockReturnValue(false);
-    const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'The images are ready.' } });
-    expect(result.isError).toBe(true);
-    expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
-  });
-
-
   it('returns an error when the new turn fails before dispatch', async () => {
     const c = await messaging();
     const task = await c.task();
     const head = await c.run(c.head.id);
     await c.db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS + 1) } }).where(eq(agents.id, c.agent.id));
-    const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } });
+    const result = (await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } })) as { isError?: boolean; content: { text: string }[] };
     expect(result.isError).toBe(true);
+    /* The turn failed with its own reason, which the refusal names. */
+    expect(result.content[0]!.text).toContain(`\nNot delivered: reason instructions_too_long, recipient ${c.agent.id}, task #${task.number}.`);
     expect((await c.turnsOf()).map(j => j.status)).toEqual(['failed']);
   });
 

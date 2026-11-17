@@ -8,14 +8,14 @@ import { RunDepartments, type RunDepartment } from './OutboundSetup';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type CatalogSourceSummary = {
+type CatalogSourceSummary = {
   kind: string;
   entryId: string;
   revision: number;
   summary: string;
 };
 
-export type BoundMessageApproval = {
+type BoundMessageApproval = {
   kind: 'message';
   requestId: string;
   status: string;
@@ -35,7 +35,7 @@ export type BoundMessageApproval = {
   sources: CatalogSourceSummary[];
 };
 
-export type BoundApproachApproval = {
+type BoundApproachApproval = {
   kind: 'approach';
   requestId: string;
   status: string;
@@ -49,7 +49,7 @@ export type BoundApproachApproval = {
   sources: CatalogSourceSummary[];
 };
 
-export type BoundOutboundApproval = BoundMessageApproval | BoundApproachApproval;
+type BoundOutboundApproval = BoundMessageApproval | BoundApproachApproval;
 
 type OutboundChannelItem = {
   id: string;
@@ -180,7 +180,7 @@ function ApproachSnapshotBody({ item }: { item: BoundApproachApproval }) {
   );
 }
 
-export function BoundSnapshotDetails({ snapshot }: { snapshot: BoundOutboundApproval }) {
+function BoundSnapshotDetails({ snapshot }: { snapshot: BoundOutboundApproval }) {
   if (snapshot.kind === 'message') return <MessageSnapshotBody item={snapshot} />;
   return <ApproachSnapshotBody item={snapshot} />;
 }

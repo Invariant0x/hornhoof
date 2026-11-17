@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { requests, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { CLOSED } from '../tasks/engine.js';
 
 /* The watchdog sees wait facts, never dependency bodies or references outside the task's department, and with each task what
@@ -15,7 +16,7 @@ export async function watchedTasks(db: Db, companyId: string, holders: string[])
   const prerequisites = afterIds.length ? await db.select({ id: tasks.id, number: tasks.number, departmentId: tasks.departmentId }).from(tasks)
     .where(and(eq(tasks.companyId, companyId), inArray(tasks.id, afterIds), isNotNull(tasks.departmentId), notInArray(tasks.status, [...CLOSED])))
     .orderBy(tasks.number) : [];
-  const questions = new Set((await db.select({ taskId: requests.taskId }).from(requests)
+  const questions = new Set((await db.select(only(requests, 'taskId')).from(requests)
     .where(and(eq(requests.companyId, companyId), inArray(requests.taskId, held.map(t => t.id)), eq(requests.status, 'open')))).map(r => r.taskId));
   return held.map(({ id, departmentId, executorAgentId, after, externalWait, ...task }) => ({ ...task,
     sight: { status: task.status, departmentId, assigneeAgentId: task.holder, executorAgentId },

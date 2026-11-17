@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Sql } from '../keeper/lease-store.js';
 import type { MoveReason } from '../keeper/switch-step.js';
@@ -12,7 +13,7 @@ import { builtinMachine } from '../nodes/nodes.js';
 /* The CEO's request to move the server to another machine: one row of net.move at a time. preparing: the target gets
    its copy and commits come to wait for it; switching: the keepers hand the server over; failed: it did not move, and
    the row says why until it is taken off or replaced. */
-export type MoveState = 'preparing' | 'switching' | 'failed';
+type MoveState = 'preparing' | 'switching' | 'failed';
 
 /* The request as the Machines tab shows it. machine: the target's row; leader: the hostname of the machine that led
    when it was asked; progress: how far the target's copy is while it is not ready. */
@@ -47,7 +48,7 @@ export async function askMove(ctx: Ctx, machineId: string, by: string): Promise<
   /* Without the row of the machine this app runs on there is nobody to move the server from. */
   if (!leader) throw tryAgain();
   await db.transaction(async tx => {
-    await tx.select({ id: machines.id }).from(machines).where(isNull(machines.revokedAt)).orderBy(asc(machines.id)).for('update');
+    await tx.select(idOnly(machines)).from(machines).where(isNull(machines.revokedAt)).orderBy(asc(machines.id)).for('update');
     const q = queryOf(tx);
     const [stored] = await q<Stored>(STORED);
     if (stored?.state === 'switching') throw switching(stored.hostname);

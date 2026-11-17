@@ -16,6 +16,8 @@ import { as, listen, mcp } from './helpers.js';
 
 const MAIN_BASE = '1'.repeat(40);
 const CANDIDATE = HEAD;
+/* The release branch that holds the candidate, where its release's shared run goes before main moves. */
+const RELEASE_BRANCH = 'release-0.25.0';
 const OTHER_SHA = '9'.repeat(40);
 
 type ToolRes = { content: { type: string; text: string }[]; isError?: boolean };
@@ -112,40 +114,34 @@ async function releaseFixture(options: { product?: boolean } = {}) {
   const journal = (token = ceoToken, query = '') =>
     app.inject({ method: 'GET', url: `/api/autonomous-releases${query}`, ...as(token) });
 
-  /* Run an authenticated product-manifest test run on `commit` with the chosen profile ('full' or 'fast'), optional suite, or file cache reuse. */
+  /* Run an authenticated product-manifest test run on `commit`, on a release branch unless it names another, with an optional suite,
+     or with file cache reuse from before releases were kept. */
   const runProductSuite = async (opts: {
     commit?: string;
     branch?: string;
-    profile?: 'full' | 'fast';
     suite?: string;
     reused?: number;
     status?: 'passed' | 'failed';
-    candidate?: { candidateId: string; revision: number; baseCommit: string };
   } = {}) => {
     const sha = opts.commit ?? CANDIDATE;
-    const runTask = opts.candidate ? task : f.task;
-    const runner = opts.candidate ? tester : author;
-    const branch = opts.branch ?? `task-${task.number}`;
-    const chosenProfile = opts.profile ?? 'full';
+    const branch = opts.branch ?? RELEASE_BRANCH;
     const prevBranchCommit = branchCommit;
     branchCommit = sha;
 
-    const { job } = await openTools(runner);
+    const { job } = await openTools(author);
     await startRun(
       ctx,
-      { id: job.id, companyId: head.companyId, agentId: runner.id, agentKind: runner.kind, departmentId },
+      { id: job.id, companyId: head.companyId, agentId: author.id, agentKind: author.kind, departmentId },
       {
-        task: runTask.id,
+        task: f.task.id,
         branch,
-        profile: chosenProfile,
         ...(opts.suite ? { suite: opts.suite } : {}),
-        ...(opts.candidate ? { candidate: { candidateId: opts.candidate.candidateId, revision: opts.candidate.revision } } : {}),
       },
     );
     const [started] = await db
       .select()
       .from(testRuns)
-      .where(and(eq(testRuns.taskId, runTask.id), eq(testRuns.agentId, runner.id)))
+      .where(and(eq(testRuns.taskId, f.task.id), eq(testRuns.agentId, author.id)))
       .orderBy(desc(testRuns.number))
       .limit(1);
     const request = { ...started!.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
@@ -191,14 +187,6 @@ async function releaseFixture(options: { product?: boolean } = {}) {
         status: 'ready',
         description,
         fingerprints,
-        ...(opts.candidate
-          ? {
-              baseFingerprints: {
-                commitSha: opts.candidate.baseCommit,
-                fingerprints: fingerprints.map(fp => ({ ...fp, fingerprint: '8'.repeat(64) })),
-              },
-            }
-          : {}),
       },
     });
 
@@ -220,7 +208,7 @@ async function releaseFixture(options: { product?: boolean } = {}) {
           ? {
               ...identity,
               version: 2 as const,
-              profile: chosenProfile,
+              profile: 'full',
               selection,
               outcomes: Array.from({ length: count }, (_, index) => ({
                 index,
@@ -250,8 +238,6 @@ async function releaseFixture(options: { product?: boolean } = {}) {
         .set({
           fileCache: {
             mode: 'cached',
-            turn: null,
-            mainLine: false,
             fingerprints: [],
             reused: opts.reused,
             preparationReused: false,
@@ -273,19 +259,13 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     await submit(ctx, author.id, task.id, { summary: 'Keep totals.', evidence: 'Focused checks.', review: { baseCommit: BASE } });
     await verdict(ctx, reviewer.id, task.id, { pass: true, comment: 'Independent review passed.', reviewedCommit: CANDIDATE });
     const snap = (await f.detail(task.id)).echelons;
-    const candidateRun = await runProductSuite({
-      commit: CANDIDATE,
-      profile: 'full',
-      candidate: { candidateId: snap.candidateId!, revision: snap.revision, baseCommit: BASE },
-    });
     await report(ctx, tester.id, task.id, {
       done: true,
       summary: 'Candidate verified.',
-      verification: { candidateId: snap.candidateId!, revision: snap.revision, runIds: [candidateRun.id] },
+      verification: { candidateId: snap.candidateId!, revision: snap.revision },
     });
     const ready = (await f.detail(task.id)).echelons;
     return {
-      candidateRun,
       acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: CANDIDATE },
     };
   };
@@ -338,7 +318,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(mcpPolicy.autonomousRelease).toBe(false);
 
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     /* Echelons acceptance to main without a human card is refused while off. */
     f.setMain(CANDIDATE);
@@ -365,7 +345,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(toggled.json()).toMatchObject({ autonomousRelease: true, canSetAutonomousRelease: true });
 
     const { acceptance } = await f.verifyThroughEchelons();
-    const fullRun = await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    const fullRun = await f.runProductSuite({ commit: CANDIDATE });
 
     const releaseTask = (await f.coordinating('Release 0.23.7', f.task));
     const { call: headCall } = await f.openTools(f.head);
@@ -432,7 +412,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     /* 1. Skipping ask_person / request_approval before pushing to main cannot record a journal entry retroactively at acceptance. */
     f.setMain(CANDIDATE);
@@ -488,7 +468,7 @@ describe('autonomous release for exact commits to main', () => {
     expect((await f.journal()).json().entries).toHaveLength(1);
   });
 
-  it('refuses auto-approval without a green full run, with a narrow/cached/stale/failed run, or with a full run on another SHA', async () => {
+  it('refuses auto-approval without a green whole run of a release: narrow, old cached, failed or stale, on another SHA or on a task branch', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
@@ -502,31 +482,32 @@ describe('autonomous release for exact commits to main', () => {
       expect((await loadTask(f.db, t.id)).status, label).toBe('waiting');
     };
 
-    /* Only candidate-delta run exists so far (not a whole-suite run). */
-    await expectNeedsCard('candidate-delta-only');
-
-    /* Narrow fast profile leaves out e2e suite. */
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'fast' });
-    await expectNeedsCard('fast-profile');
+    /* No whole run of the release exists so far. */
+    await expectNeedsCard('no-run');
 
     /* Single-suite run leaves out the rest. */
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full', suite: 'vitest' });
+    await f.runProductSuite({ commit: CANDIDATE, suite: 'vitest' });
     await expectNeedsCard('single-suite');
 
-    /* Cached file-reuse run did not run every file anew. */
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full', reused: 1 });
+    /* A cached run from before releases were kept took results of any time. */
+    await f.runProductSuite({ commit: CANDIDATE, reused: 1 });
     await expectNeedsCard('cached-files');
 
     /* Failed full run does not count. */
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full', status: 'failed' });
+    await f.runProductSuite({ commit: CANDIDATE, status: 'failed' });
     await expectNeedsCard('failed-full-run');
 
     /* Full green run on a different 40-char SHA proves nothing about CANDIDATE. */
-    await f.runProductSuite({ commit: OTHER_SHA, branch: 'task-other', profile: 'full' });
+    await f.runProductSuite({ commit: OTHER_SHA, branch: 'release-0.25.1' });
     await expectNeedsCard('other-sha');
 
+    /* A green whole run of CANDIDATE kept from its task branch, from before runs went only to releases, checks no release. */
+    const onTask = await f.runProductSuite({ commit: CANDIDATE });
+    await f.db.update(testRuns).set({ branch: `task-${f.task.number}` }).where(eq(testRuns.id, onTask.id));
+    await expectNeedsCard('task-branch-run');
+
     /* Full green run on CANDIDATE whose branch moved on (proves: false / stale) is refused. */
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
     f.setBranch(OTHER_SHA);
     await expectNeedsCard('stale-branch-proves-false');
 
@@ -541,7 +522,7 @@ describe('autonomous release for exact commits to main', () => {
   it('refuses auto-approval when there is no independent non-author PASS verdict on that commit', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     const checkRequiresCard = async (title: string) => {
       const { call: turnCall } = await f.openTools(f.head);
@@ -585,7 +566,7 @@ describe('autonomous release for exact commits to main', () => {
     const OTHER_SEC_SHA = '7'.repeat(40);
     f.setBranch(OTHER_SEC_SHA);
     const secTask = await f.createMainCodeTask({ riskClass: 'security', paths: ['logic/totals.ts'] });
-    await f.runProductSuite({ commit: OTHER_SEC_SHA, branch: `task-${secTask.number}`, profile: 'full' });
+    await f.runProductSuite({ commit: OTHER_SEC_SHA });
     await submit(f.ctx, f.author.id, secTask.id, { summary: 'Auth change.', evidence: 'Checks.', review: { baseCommit: BASE } });
     await verdict(f.ctx, f.reviewer.id, secTask.id, { pass: true, comment: 'Review ok.', reviewedCommit: OTHER_SEC_SHA });
     const beforeSec = (await f.coordinating('missing-sec-pass', secTask));
@@ -602,7 +583,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
     const { call: headCall } = await f.openTools(f.head);
 
     /* Diverged / behind origin/main (not fast-forward). */
@@ -646,7 +627,7 @@ describe('autonomous release for exact commits to main', () => {
     expect((await toggle(c.danaToken, c.dev.id, false)).json()).toMatchObject({ autonomousRelease: false });
   });
 
-  it('forbids agents, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release', async () => {
+  it('forbids heads, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release, and lets the orchestrator for the CEO', async () => {
     const c = await company();
     await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, c.ids.wes));
 
@@ -689,16 +670,6 @@ describe('autonomous release for exact commits to main', () => {
     expect(filteredJournal.statusCode).toBe(200);
     expect(filteredJournal.json().entries).toEqual([]);
 
-    /* Orchestrator acting on a turn, EVEN when answering the CEO, is an agent and MUST be refused. */
-    const orchDirect = await c.app.inject({
-      method: 'PUT',
-      url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
-      headers: orchestratorHeaders(c.ids.ceo, c.orchestrator.id),
-      payload: { enabled: true },
-    });
-    expect(orchDirect.statusCode).toBe(403);
-    expect(orchDirect.json().error.reason).toBe('autonomous_release_not_allowed');
-
     /* Orchestrator cannot relax the commit channel via set_approval_policy either. */
     const orchTools = await c.tools(c.orchestrator, c.ids.ceo);
     const relaxCommit = (await orchTools.callTool({
@@ -729,13 +700,22 @@ describe('autonomous release for exact commits to main', () => {
     expect(botAttempt.statusCode).toBeGreaterThanOrEqual(400);
 
     expect((await c.policy(c.ceoToken, c.dev.id)).json().autonomousRelease).toBe(false);
+
+    /* The orchestrator acts as the CEO, who runs every department. */
+    const orchDirect = await c.app.inject({
+      method: 'PUT',
+      url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
+      headers: orchestratorHeaders(c.ids.ceo, c.orchestrator.id),
+      payload: { enabled: true },
+    });
+    expect(orchDirect.json()).toMatchObject({ autonomousRelease: true, canSetAutonomousRelease: true });
   });
 
   it('immediately restores human approval cards when the CEO turns autonomous release off, while preserving journal history', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     const { call: headCall } = await f.openTools(f.head);
     const firstRel = (await f.coordinating('First auto release', f.task));
@@ -781,7 +761,8 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Looks good for network-1.',
       reviewedCommit: NET_SHA,
     });
-    await net.runProductSuite({ commit: NET_SHA, branch: 'network-1', profile: 'full' });
+    /* The release's whole run is green; only the verdict's branch stands in the way. */
+    await net.runProductSuite({ commit: NET_SHA });
     net.setBranchHead('network-1', NET_SHA);
     const { call: netHeadCall } = await net.openTools(net.head);
     const netRel = (await net.coordinating('Try network-1 ship', netTask));
@@ -806,7 +787,7 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Good for turn branch.',
       reviewedCommit: FEAT_SHA,
     });
-    await inTurn.runProductSuite({ commit: FEAT_SHA, branch: `task-${featTask.number}`, profile: 'full' });
+    await inTurn.runProductSuite({ commit: FEAT_SHA });
     const { call: turnHeadCall } = await inTurn.openTools(inTurn.head);
     const turnCoord = (await inTurn.coordinating('Turn coord', featTask));
     const featAsked = await turnHeadCall('ask_person', { task: turnCoord.number, question: 'Push unmerged turn feature to main?', commit: FEAT_SHA });
@@ -817,7 +798,7 @@ describe('autonomous release for exact commits to main', () => {
     const nonMainRepo = await releaseFixture();
     expect((await nonMainRepo.setAutonomous(nonMainRepo.ceoToken, true)).statusCode).toBe(200);
     await nonMainRepo.verifyThroughEchelons();
-    await nonMainRepo.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await nonMainRepo.runProductSuite({ commit: CANDIDATE });
     await nonMainRepo.db.update(departments).set({ repoBranch: 'network-1' }).where(eq(departments.id, nonMainRepo.productId!));
     nonMainRepo.setBranchHead('network-1', MAIN_BASE);
     const { call: repoHeadCall } = await nonMainRepo.openTools(nonMainRepo.head);
@@ -835,7 +816,7 @@ describe('autonomous release for exact commits to main', () => {
     await submit(moved.ctx, moved.author.id, moved.task.id, { summary: 'Initial.', evidence: 'Checks.', review: { baseCommit: BASE } });
     await verdict(moved.ctx, moved.reviewer.id, moved.task.id, { pass: true, comment: 'Initial ok.', reviewedCommit: OLD_SHA });
     moved.setBranchHead('release-0.23.7', OLD_SHA);
-    await moved.runProductSuite({ commit: OLD_SHA, branch: 'release-0.23.7', profile: 'full' });
+    await moved.runProductSuite({ commit: OLD_SHA, branch: 'release-0.23.7' });
 
     /* Advance f.task's currentCandidate to NEW_SHA via takeMainAtTests (bringing only main paths). */
     moved.setBranch(NEW_SHA);
@@ -854,7 +835,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     /* 2a. Unrelated turnkey worker task (e.g. network-1 fix task) cannot ask for autonomous release of CANDIDATE. */
     const [lane] = await f.db.insert(teams).values({ companyId: f.head.companyId, departmentId: f.departmentId, name: 'Turnkey', turnkey: true }).returning();
@@ -913,7 +894,7 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Release candidate verified.',
       reviewedCommit: REL_SHA,
     });
-    await f.runProductSuite({ commit: REL_SHA, branch: 'release-0.24.0', profile: 'full' });
+    await f.runProductSuite({ commit: REL_SHA, branch: 'release-0.24.0' });
     f.setBranchHead('release-0.24.0', REL_SHA);
 
     const turnCoord = (await f.coordinating('Turn 0.24.0 release', relCodeTask));
@@ -933,7 +914,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture({ product: false });
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
     const coord = (
       await createTask(
         f.ctx,
@@ -955,7 +936,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
     const coordination = (title: string) => createTask(f.ctx, { agentId: f.head.id }, { title, brief: '', body: '', departmentId: f.departmentId, productId: f.productId, assigneeAgentId: f.head.id, resultKind: 'coordination' }).then(made => made.task);
     const { call: headCall } = await f.openTools(f.head);
 
@@ -1001,7 +982,7 @@ describe('autonomous release for exact commits to main', () => {
       evidence: 'Checks.',
       review: { baseCommit: MAIN_BASE, branch: 'release-0.24.1' },
     });
-    await f.runProductSuite({ commit: DESCENDANT_SHA, branch: 'release-0.24.1', profile: 'full' });
+    await f.runProductSuite({ commit: DESCENDANT_SHA, branch: 'release-0.24.1' });
     f.setBranchHead('release-0.24.1', DESCENDANT_SHA);
 
     const { call: testerCall } = await f.openTools(f.tester);
@@ -1044,7 +1025,7 @@ describe('autonomous release for exact commits to main', () => {
       text: 'Superseded by FAIL referencing ancestor.',
       data: { pass: false, stage: 'review', candidateId: candId, reviewedCommit: ANCESTOR_SHA },
     });
-    await f.runProductSuite({ commit: EXACT_SHA, branch: 'release-0.24.2', profile: 'full' });
+    await f.runProductSuite({ commit: EXACT_SHA, branch: 'release-0.24.2' });
     f.setBranchHead('release-0.24.2', EXACT_SHA);
 
     const turnCoord2 = (await f.coordinating('Coord ask after superseded verdict', relTask2));
@@ -1081,7 +1062,7 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Reviewed diff from network-1 only.',
       reviewedCommit: NET_TURN_SHA,
     });
-    await f.runProductSuite({ commit: NET_TURN_SHA, branch: 'release-0.24.0', profile: 'full' });
+    await f.runProductSuite({ commit: NET_TURN_SHA, branch: 'release-0.24.0' });
     f.setBranchHead('release-0.24.0', NET_TURN_SHA);
 
     const turnCoord = (await f.coordinating('Same-turn release coord', netTurnTask));
@@ -1128,7 +1109,7 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Reviewed only against network-1.',
       reviewedCommit: NET_OUT_SHA,
     });
-    await f.runProductSuite({ commit: NET_OUT_SHA, branch: `task-${outVerdictTask.number}`, profile: 'full' });
+    await f.runProductSuite({ commit: NET_OUT_SHA });
 
     const outRelTask = (await f.coordinating('Out-of-turn release coord', outVerdictTask));
     expect(outRelTask.turnId).toBeNull();
@@ -1170,7 +1151,7 @@ describe('autonomous release for exact commits to main', () => {
       evidence: 'Checks.',
       review: { baseCommit: MAIN_BASE },
     });
-    await f.runProductSuite({ commit: DESCENDANT_SHA, branch: `task-${outMainTask.number}`, profile: 'full' });
+    await f.runProductSuite({ commit: DESCENDANT_SHA });
 
     const outRelTask2 = (await f.coordinating('Out-of-turn release coord 2', outMainTask));
     const ancestorAsked = await headCall('ask_person', {
@@ -1186,7 +1167,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f.runProductSuite({ commit: CANDIDATE });
 
     let txDepth = 0;
     const realTransaction = f.ctx.db.transaction.bind(f.ctx.db);
@@ -1229,7 +1210,7 @@ describe('autonomous release for exact commits to main', () => {
     const f2 = await releaseFixture();
     expect((await f2.setAutonomous(f2.ceoToken, true)).statusCode).toBe(200);
     await f2.verifyThroughEchelons();
-    await f2.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await f2.runProductSuite({ commit: CANDIDATE });
 
     let notifyCompareStarted: (() => void) | null = null;
     const compareStarted = new Promise<void>(resolve => {

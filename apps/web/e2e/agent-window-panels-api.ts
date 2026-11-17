@@ -2,12 +2,16 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import type { AgentCardView, NoteView } from '../src/types';
 import { CARD, serveAgentWindow, type AgentFixture } from './agent-window-api';
 import { box, chooseTerminal } from './api';
-import { CLOSED, openWindow, type Settings } from './computer-strip-api';
+import { CLOSED, openWindow, SETTINGS, type Settings } from './computer-strip-api';
+import { cutByNavigation } from './look-steps';
 
 /* The side panels of an agent's window, for the orchestrator and for an employee who heads a department and so keeps a
    notebook too. */
 
 export type Who = 'orchestrator' | 'employee';
+export const PEOPLE: Who[] = ['orchestrator', 'employee'];
+export const WIDE = SETTINGS.filter(s => s.width === 1440);
+export const NARROW = SETTINGS.filter(s => s.width === 375);
 type Rect = { x: number; y: number; width: number; height: number };
 
 const WORDS = {
@@ -46,7 +50,7 @@ async function openEmployee(page: Page, { lang, theme, width }: Settings) {
   }, { lang, theme });
   await chooseTerminal(page);
   const errors: string[] = [];
-  page.on('pageerror', e => errors.push(e.message));
+  page.on('pageerror', e => { if (!cutByNavigation(page, e)) errors.push(e.message); });
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });
   const sent: string[] = [];
   const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, head: true, sent };

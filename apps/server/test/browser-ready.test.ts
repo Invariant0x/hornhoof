@@ -76,7 +76,7 @@ describe('browser launch readiness before handing out work', () => {
     await until(async () => (await db.select().from(jobs).where(and(eq(jobs.id, turnId), eq(jobs.status, 'running')))).length === 1);
 
     const toolJob = { id: turnId, companyId, agentId: bruno!.id, agentKind: 'worker' as const, departmentId: dev!.id, roleKey: 'DEV-ENG', skills: [] };
-    await expect(startRun(app.ctx, toolJob, { command: 'npx playwright test' })).rejects.toMatchObject({
+    await expect(startRun(app.ctx, toolJob, { command: 'npx playwright test', branch: 'main' })).rejects.toMatchObject({
       status: 409,
       code: 'conflict',
       reason: 'browser_failed',
@@ -153,7 +153,7 @@ describe('browser launch readiness before handing out work', () => {
     expect((await db.select().from(jobs).where(eq(jobs.id, veraTurn)))[0]!.nodeId).toBe(brokenId);
 
     const veraJob = { id: veraTurn, companyId, agentId: vera!.id, agentKind: 'worker' as const, departmentId: dev!.id, roleKey: 'DEV-ENG', skills: [] };
-    const started = await startRun(app.ctx, veraJob, { command: 'npx playwright test' });
+    const started = await startRun(app.ctx, veraJob, { command: 'npx playwright test', branch: 'main' });
     expect(started).toContain('on healthy-host');
 
     /* The orchestrator on an API key still runs turns on BUILTIN even when BUILTIN's browser failed. */
@@ -175,7 +175,7 @@ describe('browser launch readiness before handing out work', () => {
 
     /* If peer machines are not lent, only BUILTIN + broken-host remain and startRun refuses naming the broken browsers. */
     await db.update(machines).set({ lendsTests: false });
-    await expect(startRun(app.ctx, veraJob, { command: 'npx playwright test' })).rejects.toMatchObject({
+    await expect(startRun(app.ctx, veraJob, { command: 'npx playwright test', branch: 'main' })).rejects.toMatchObject({
       status: 409,
       code: 'conflict',
       reason: 'browser_failed',

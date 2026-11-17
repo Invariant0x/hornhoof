@@ -105,8 +105,15 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
   repo_hosts: rows('access'),
   google_sheets: rows('access'),
+  /* A vault entry is a way into a site's account of the company, and its log is written only by Hornhoof. */
+  vault_entries: rows('access'),
+  vault_log: rows('protected'),
+  company_phones: rows('protected'),
+  // Historical records follow their task. A row alone never reissues a runtime grant on the node.
+  phone_sessions: rows('protected'),
+  phone_frames: add('protected'),
 
-  ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
+  ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
   machines: rows('machines'),
   computer_runs: rows('machines'),
@@ -145,7 +152,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
   agents: ['context_used', 'timer_at'],
-  nodes: ['last_seen_at', 'status', 'version', 'boot'],
+  nodes: ['last_seen_at', 'status', 'version', 'boot', 'update_wait_since'],
   subscriptions: ['status', 'limits', 'models', 'limits_updated_at', 'lease_node_id'],
   machines: [
     'server_order', 'server_why', 'web_port', 'peer_port', 'commit', 'uptime_s', 'fsync_p99_ms', 'disk_free', 'report_at', 'addresses', 'path', 'direct_fails', 'renew_at',

@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentParty } from '../events/parties.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
@@ -22,8 +23,8 @@ const SECRET_MIN = 8;
 type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 type Program = ProgramAt & { job: Job; name: string };
-export type ViewInput = { employee: string };
-export type KeysInput = { employee: string; snapshot: string; keys?: string[]; text?: string; reason: string; decision?: 'allowed' | 'denied' };
+type ViewInput = { employee: string };
+type KeysInput = { employee: string; snapshot: string; keys?: string[]; text?: string; reason: string; decision?: 'allowed' | 'denied' };
 
 export const accessRefused = () => new ApiError(403, 'forbidden', "Only the orchestrator and Operations look at another employee's program and type into it.", 'agent_not_ready');
 const unavailable = (reason: string) => new ApiError(409, 'unavailable', `The program screen is unavailable: ${reason}.`, 'programs_unavailable');
@@ -42,8 +43,8 @@ export async function ofOperations(db: Db, agent: Agent, department: typeof depa
 
 /* Operations on duty, the program operator before the head of Operations. */
 export async function operationsStaff(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
-  const below = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.parentId, ops)));
+  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+  const below = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.parentId, ops)));
   const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), or(inArray(agents.departmentId, ops), inArray(agents.departmentId, below)), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
   return [PROGRAM_OPERATOR_ROLE, 'OPS-HEAD'].flatMap(role => staff.filter(agent => agent.roleKey === role && OPERATIONS_ROLES[role] === agent.kind));
 }
@@ -59,8 +60,9 @@ export async function authorizeAccess(ctx: Ctx, caller: OperatorCaller): Promise
   return found.me;
 }
 
-/* What reached a node: a turn that started there, or one that went out and has not ended. */
-const reachedNode = or(isNotNull(jobs.startedAt), inArray(jobs.status, ['queued', 'running']));
+/* What reached a node: a turn that started there, one that runs, or one that went out to a node named and waits there. A
+   message that waits in the employee's queue on no node yet is none, however new: the turn it waits behind has the screen. */
+const reachedNode = or(isNotNull(jobs.startedAt), eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), or(isNotNull(jobs.nodeId), isNotNull(jobs.builtinMachine))));
 
 /* The employee's program where its last turn on its plan went, of any department and on any plan. Never the caller's own,
    and never a person's own assistant's, which is its owner's alone. */
@@ -126,7 +128,7 @@ const outcomeOf = (action: string, reply: ProgramInputResult | null): Outcome =>
 /* The program operator's look at the case it was given is the picture its report carries. */
 async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, png: Buffer): Promise<void> {
   await operatorTransaction(ctx, async tx => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, program.agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
     if (row) await storeCasePicture(tx, row, png);
   });
@@ -152,7 +154,7 @@ async function turnOf(ctx: Ctx, { program, reply }: Entry): Promise<Job> {
 
 /* The case this operator turn was given on the employee: a denial it reports rests on this record. */
 async function caseOf(ctx: Ctx, { me, caller, program }: Entry): Promise<string | null> {
-  const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases)
+  const [held] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases)
     .where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, me.companyId), eq(programOperatorCases.operatorJobId, caller.id))).orderBy(desc(programOperatorCases.openedAt)).limit(1);
   return held?.id ?? null;
 }

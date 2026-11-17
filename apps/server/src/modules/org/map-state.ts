@@ -2,6 +2,7 @@ import type { WorkLine } from '@hornhoof/protocol';
 import { and, asc, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, jobs, mapReturns, requests, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { GONE_ALONG } from '../conversation/queue.js';
 
 /* The lines of the company map, kept apart from the pulses of single messages: a line is blue while the one below works on
@@ -31,7 +32,7 @@ const asking = (f: Facts, agentId: string, t: TaskFacts) => f.asked.has(`${agent
 /* An employee acts on the task while it holds it: as its producer, or as the owner of its current checking stage, Tests
    included, which holds it until it hands it on; and neither waiting for the tasks it comes after nor for a person's
    answer. */
-export function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
+function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t || !ready(f, t) || asking(f, agentId, t)) return false;
   return t.assigneeAgentId === agentId && [...LIVE, 'review'].includes(t.status);
@@ -49,14 +50,14 @@ function rootOf(f: Facts, t: TaskFacts): TaskFacts | null {
 
 /* A head acts on the task when it is part of a department task it holds that can go on: not blocked, not over, not
    waiting for the tasks it comes after or for the head's own question. */
-export function headActs(f: Facts, headId: string, taskId: string | null): boolean {
+function headActs(f: Facts, headId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   const root = t && rootOf(f, t);
   return !!root && root.assigneeAgentId === headId && LIVE.includes(root.status) && ready(f, root) && !asking(f, headId, root);
 }
 
 /* An employee's work keeps its department's line on unless the department task above it is blocked or over. */
-export function underLiveRoot(f: Facts, taskId: string | null): boolean {
+function underLiveRoot(f: Facts, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t) return false;
   const root = rootOf(f, t);
@@ -73,7 +74,7 @@ const topOf = (parents: ReadonlyMap<string, string | null>, departmentId: string
 
 async function orchestratorOf(db: Reader, companyId: string): Promise<string | null> {
   const [orchestrator] = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   return orchestrator?.id ?? null;
@@ -82,10 +83,10 @@ async function orchestratorOf(db: Reader, companyId: string): Promise<string | n
 /* The head of the employee's department, of the department holding it when it works on a product. */
 async function headOf(db: Reader, agent: Agent): Promise<string | null> {
   if (!agent.departmentId) return null;
-  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
+  const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(eq(departments.id, agent.departmentId));
   const top = dept?.parentId ?? agent.departmentId;
   const [head] = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.companyId, agent.companyId), eq(agents.kind, 'head'), eq(agents.departmentId, top), isNull(agents.removedAt)));
   return head?.id ?? null;
@@ -117,7 +118,7 @@ async function locked(tx: Tx, e: Ends): Promise<Line> {
 }
 
 /* New work started on the line: it begins a new cycle, once per turn however often that turn's start is told. */
-export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }): Promise<boolean> {
+async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }): Promise<boolean> {
   const row = await locked(tx, s);
   if (row.workJobId === s.jobId) return false;
   await tx
@@ -127,7 +128,7 @@ export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }):
   return true;
 }
 
-export type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJobId: string | null; sourceTaskId: string | null; returnedAt: Date };
+type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJobId: string | null; sourceTaskId: string | null; returnedAt: Date };
 
 /* What a return keeps off the line while its turn runs: the task it handed in. A message hands none in, so the task the
    turn handed in before it stays off. */
@@ -159,7 +160,7 @@ export async function returnAlongLine(tx: Tx, r: { agentId: string; sourceKey: s
   const ends = { companyId: agent.companyId, upstreamAgentId: up, downstreamAgentId: agent.id };
   const line = await locked(tx, ends);
   const [turn] = await tx
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')))
     .limit(1);
@@ -182,7 +183,7 @@ async function factsFor(db: Reader, companyId: string, ids: string[]): Promise<F
 
 async function withDependencies(db: Reader, companyId: string, found: Map<string, TaskFacts>): Promise<Facts> {
   const firstIds = [...new Set([...found.values()].flatMap(t => t.after))];
-  const notDone = firstIds.length ? (await db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, firstIds), notInArray(tasks.status, ['done'])))).map(t => t.id) : [];
+  const notDone = firstIds.length ? (await db.select(idOnly(tasks)).from(tasks).where(and(inArray(tasks.id, firstIds), notInArray(tasks.status, ['done'])))).map(t => t.id) : [];
   const ids = [...found.keys()];
   const asked = ids.length
     ? await db
@@ -224,7 +225,7 @@ async function linesOfTurns(tx: Tx, companyId: string, agent: Agent, up: string,
 }
 
 /* A turn taken to go out: the agent's, with the tasks it carries, its own and those of the turns that go out inside it. */
-export type TakenTurn = { id: string; companyId: string; agentId: string | null; taskIds: readonly (string | null)[] };
+type TakenTurn = { id: string; companyId: string; agentId: string | null; taskIds: readonly (string | null)[] };
 
 /* A turn was taken to go out: a new cycle begins on each line the agent's work on its tasks keeps on, its own and, for an
    employee, its department's. It runs in the transaction that takes the turn, so the cycle is kept exactly when the turn

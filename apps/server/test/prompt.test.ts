@@ -91,7 +91,7 @@ describe('orchestrator instructions', () => {
   });
 
   it('performs authorized screen actions through the corresponding abilities and checks the resulting record', () => {
-    for (const words of ['build_structure', 'hire', 'change_employee', 'message_employee', 'answer_request', 'update_task', 'view', 'database']) {
+    for (const words of ['build_structure', 'hire', 'change_employee', 'message_employee', 'answer_request', 'update_task', 'api', 'database']) {
       expect(carried).toContain(words);
     }
     expect(ability('orch-company')).toMatch(/already requested an exact structure change[\s\S]*build_structure within that authorization[\s\S]*read its actual result/i);

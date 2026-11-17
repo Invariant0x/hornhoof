@@ -54,8 +54,8 @@ export async function rulesFor(db: Pick<Db, 'select'>, departmentId: string, aud
 }
 
 export type Shared = { policyDigest: string; sourceRevisionsDigest: string; authorityFingerprint: string };
-export type ExactMessage = { kind: 'message'; messageId: string; messageRevision: number; contentDigest: string; accountId: string; bindingGeneration: number };
-export type ExactApproach = { kind: 'approach'; channelId: string; templateId: string; templateRevision: number; segmentId: string; locale: string };
+type ExactMessage = { kind: 'message'; messageId: string; messageRevision: number; contentDigest: string; accountId: string; bindingGeneration: number };
+type ExactApproach = { kind: 'approach'; channelId: string; templateId: string; templateRevision: number; segmentId: string; locale: string };
 export type Bound = (ExactMessage | ExactApproach) & Shared;
 
 const messageIs = (b: ExactMessage) => [eq(outboundApprovals.messageId, b.messageId), eq(outboundApprovals.messageRevision, b.messageRevision), eq(outboundApprovals.contentDigest, b.contentDigest), eq(outboundApprovals.accountId, b.accountId), eq(outboundApprovals.bindingGeneration, b.bindingGeneration)];
@@ -84,7 +84,7 @@ export async function approvalState(db: Pick<Db, 'select'>, companyId: string, b
   return said.includes('declined') ? 'declined' : 'missing';
 }
 
-export const ASKED_BEFORE_RESTORE = 'Hornhoof was restored from a backup after this was asked, so it is asked again.';
+const ASKED_BEFORE_RESTORE = 'Hornhoof was restored from a backup after this was asked, so it is asked again.';
 
 /* The questions about exactly this that were asked before the restore and still wait: closed, saying why, so nobody
    answers the words of before. The gate asks anew with what the person needs to know. */

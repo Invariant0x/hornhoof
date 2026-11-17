@@ -1,36 +1,32 @@
 import type { EnvironmentSnapshot, TestEnvironmentV1 } from '@hornhoof/protocol';
 
-/* What a product run stands for. With no one suite asked for, the profile a turn ends with, or the full run that replaces it, runs
-   the whole product: every file that did not keep a green result at its fingerprint. Anything else is a look at what a change
-   reaches. */
+/* What a product run stands for. With no one suite asked for, the profile of the full run, or a profile named final, runs the whole
+   product: every file that did not keep a green result of its release. Anything else is a look at part of it. */
 export function runPurpose(snapshot: EnvironmentSnapshot, suite: string | undefined): 'final' | 'affected' {
-  if (suite || snapshot.candidate) return 'affected';
+  if (suite) return 'affected';
   return snapshot.profile === 'final' || snapshot.profile === snapshot.description.manifest.execution?.fullRun?.profile ? 'final' : 'affected';
 }
 
-/* What a product run left out of the whole product: the suites its profile or its one suite does not run, how many test files kept
-   a green result of an earlier run instead of running, and for a candidate the base whose unchanged files it did not run. A run
-   that left out nothing ran every suite and every test file anew, as the check of a release does: fullProfile names the profile
-   of the product's full run, which does. */
-export type RunScope = { profile: string; leftOut: string[]; kept: number; since: string | null; fullProfile: string | null };
-/* What of a run's snapshot that takes: its profile, its manifest and a candidate's base, without the inventory and fingerprints. */
-export type ScopeSource = { profile: string; manifest: Pick<TestEnvironmentV1, 'profiles' | 'suites' | 'execution'>; baseCommit: string | null };
-export const scopeSource = (snapshot: EnvironmentSnapshot): ScopeSource => ({ profile: snapshot.profile, manifest: snapshot.description.manifest, baseCommit: snapshot.candidate?.baseCommit ?? null });
-export function runScope({ profile, manifest, baseCommit }: ScopeSource, suite: string | null | undefined, kept: number): RunScope {
+/* What a product run left out of the whole product: the suites its profile or its one suite does not run, and how many test files
+   kept a green result of an earlier run instead of running. A run that left out nothing ran every suite and every test file anew,
+   as the first run of a release does. */
+export type RunScope = { profile: string; leftOut: string[]; kept: number };
+/* What of a run's snapshot that takes: its profile and its manifest, without the inventory and fingerprints. */
+export type ScopeSource = { profile: string; manifest: Pick<TestEnvironmentV1, 'profiles' | 'suites' | 'execution'> };
+export const scopeSource = (snapshot: EnvironmentSnapshot): ScopeSource => ({ profile: snapshot.profile, manifest: snapshot.description.manifest });
+export function runScope({ profile, manifest }: ScopeSource, suite: string | null | undefined, kept: number): RunScope {
   const ran = suite ? [suite] : manifest.profiles.find(item => item.id === profile)?.requiredSuiteIds ?? [];
-  return { profile, leftOut: manifest.suites.map(item => item.id).filter(id => !ran.includes(id)), kept, since: baseCommit, fullProfile: manifest.execution?.fullRun?.profile ?? null };
+  return { profile, leftOut: manifest.suites.map(item => item.id).filter(id => !ran.includes(id)), kept };
 }
-export const ranEverything = (scope: RunScope): boolean => !scope.leftOut.length && !scope.kept && !scope.since;
+const ranEverything = (scope: RunScope): boolean => !scope.leftOut.length && !scope.kept;
 
 const listed = (items: string[]): string => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0] ?? '');
-/* The same in words, after "with profile ...", and the profile that runs everything anew. */
+/* The same in words, after "with profile ...". */
 export function scopeWords(scope: RunScope): string {
   if (ranEverything(scope)) return ': every suite and every test file ran anew.';
   const what = [
-    ...(scope.since ? [`checked only the test files that changed since ${scope.since}`] : []),
     ...(scope.leftOut.length ? [`left out the suites ${listed(scope.leftOut)}`] : []),
-    ...(scope.kept ? [`took the green result of an earlier run for ${scope.kept} test ${scope.kept === 1 ? 'file' : 'files'} instead of running ${scope.kept === 1 ? 'it' : 'them'}`] : []),
+    ...(scope.kept ? [`took the green result of an earlier run of its release for ${scope.kept} test ${scope.kept === 1 ? 'file' : 'files'} instead of running ${scope.kept === 1 ? 'it' : 'them'}`] : []),
   ];
-  const whole = scope.fullProfile ? ` Only a run of profile ${scope.fullProfile} with no suite and no candidate runs every suite and every test file anew.` : '';
-  return `, which ${what[0]}${what.slice(1).map(part => `, and ${part}`).join('')}.${whole}`;
+  return `, which ${what[0]}${what.slice(1).map(part => `, and ${part}`).join('')}.`;
 }

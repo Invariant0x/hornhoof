@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
@@ -780,6 +781,15 @@ describe('updates', () => {
     expect(res.json().waiting).toMatchObject({ turns: [{ agent: orchestrator.name, task: null }], lost: [{ agent: 'Zed', task: null }] });
   });
 
+  it('waits for a turn whose node reports no program but streams its work, as the node_silent alarm counts it alive', async () => {
+    const { app, db, ceo, control, acme, zed, job } = await companyAtWork(new Date(Date.now() - LOST_AFTER_MS - 60_000));
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: zed.id, jobId: job.id, kind: 'text', data: { text: 'Working.' }, createdAt: new Date(Date.now() - 60_000) });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    expect(res.json().waiting).toMatchObject({ turns: [{ agent: 'Zed', task: null }], lost: [] });
+  });
+
   it('calls the update off at its deadline: it stops no running work, lets the held turns go, says why and tells the orchestrator', async () => {
     const timeouts = vi.spyOn(globalThis, 'setTimeout');
     onTestFinished(() => timeouts.mockRestore());
@@ -798,8 +808,8 @@ describe('updates', () => {
     const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
     expect(updater.waiting).toBeNull();
     expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), reason: 'deadline', turns: [{ agent: 'Zed', task: null }] });
-    expect((await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, job.id)))[0]!.status).toBe('running');
-    const told = async () => (await db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
+    expect((await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, job.id)))[0]!.status).toBe('running');
+    const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
     await until(async () => (await told()).length > 0);
     expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: the agents did not finish within 5 minutes\. No running work was stopped/);
 

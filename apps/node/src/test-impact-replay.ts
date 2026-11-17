@@ -2,10 +2,10 @@ import type { TestUnit } from '@hornhoof/protocol';
 import type { ImpactChange, ImpactEnvironment, ImpactGraph, ImpactSelection } from './test-impact.js';
 import { selectAffectedTests } from './test-impact.js';
 
-export interface ReplayCommit { commit: string; parent: string; changes: ImpactChange[] }
+interface ReplayCommit { commit: string; parent: string; changes: ImpactChange[] }
 export interface FullComparator { commit: string; run: number; part: number; status: 'passed' | 'failed'; inventory: TestUnit[]; failedUnits: TestUnit[] }
-export type ReplayComparison = { status: 'unavailable'; reason: string } | { status: 'observed'; run: number; part: number; missed: TestUnit[] };
-export interface ImpactReplayRow {
+type ReplayComparison = { status: 'unavailable'; reason: string } | { status: 'observed'; run: number; part: number; missed: TestUnit[] };
+interface ImpactReplayRow {
   commit: string; parent: string; changed: string[]; selectedCount: number; totalCount: number; widthPercent: number;
   selection: ImpactSelection; comparison: ReplayComparison;
 }

@@ -7,19 +7,28 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { Bridge } from '../src/terminal/bridge.js';
+import { kimiProgram, prepareKimi } from '../src/terminal/programs.js';
+import { kimiAdapter } from '../src/providers/kimi.js';
+import { runJob } from '../src/runner.js';
 
 const SCRIPT = fileURLToPath(new URL('../hh-attach.cjs', import.meta.url));
 const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
 
 /* A Hornhoof that answers each picture with an id and remembers what it got. It hands out one file of task 12. */
 async function hub(status = 201) {
-  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; bytes: Buffer }[] = [];
+  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; length: string | undefined; bytes: Buffer }[] = [];
   const server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on('data', c => parts.push(c));
     req.on('end', () => {
-      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], bytes: Buffer.concat(parts) });
+      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], length: req.headers['content-length'], bytes: Buffer.concat(parts) });
       if (req.method === 'GET') {
+        if (req.url === '/api/attachments/file?task=12&file=archive.zip') {
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'x-file-name': 'archive.zip' });
+          res.end(got.find(g => g.url?.endsWith('name=archive.zip'))?.bytes);
+          return;
+        }
         if (req.url === '/api/attachments/file?task=message&file=4f0c8b7e-1111-4222-8333-444455556666') {
           res.writeHead(200, { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('4f0c8b7e-screen.png') });
           res.end('a picture');
@@ -49,6 +58,61 @@ const attach = run(SCRIPT);
 const fetchFile = run(FETCH);
 
 describe('hh-attach', () => {
+  it("uses the node link for Kimi's terminal when the bridge has lost the turn token, and refuses once the turn ends", async () => {
+    const { url, got } = await hub();
+    let running = true;
+    const bridge = new Bridge(url.replace('/api/attachments', ''), () => {}, null, {
+      outside: async (key, body) => {
+        const call = JSON.parse(body) as { id: string; method: string };
+        if (key !== 'kimi-agent' || call.method !== 'attachments/token') throw new Error('Unexpected node authorization request.');
+        return { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: call.id, ...(running ? { result: { token: 'attachment-only-token' } } : { error: { message: 'No Hornhoof turn is running for this agent.' } }) }) };
+      },
+    });
+    await bridge.start();
+    onTestFinished(() => bridge.stop());
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-kimi-'));
+    const file = join(dir, 'review.md');
+    writeFileSync(file, 'Security review');
+    const urls = bridge.agent('kimi-agent');
+    await prepareKimi(join(dir, 'home'), dir, urls.mcpUrl);
+    const { env } = kimiProgram.launch({ bin: 'kimi', home: join(dir, 'home'), workDir: dir, sessionId: 'recorded-session', model: null, instructionsFile: null, urls });
+    const configured = JSON.parse(readFileSync(join(dir, '.kimi-code/mcp.json'), 'utf8')) as { mcpServers: { hornhoof: { url: string } } };
+    expect(env.HH_ATTACH_URL === configured.mcpServers.hornhoof.url.replace('/mcp/', '/attach/')).toBe(true);
+    const asksForPermission = await fetch(urls.mcpUrl, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'attachments/token' }) });
+    expect(asksForPermission.status).toBe(403);
+    expect(await asksForPermission.text()).toBe('');
+    const sent = await attach(['--task', '1151', file], env);
+    expect(sent.code, sent.err).toBe(0);
+    expect(sent.out.trim()).toBe(`${file} id-1`);
+    expect(got.map(g => [g.url, g.auth, g.bytes.toString()])).toEqual([['/api/attachments?task=1151&name=review.md', 'Bearer attachment-only-token', 'Security review']]);
+    running = false;
+    const refused = await attach(['--task', '1151', file], env);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain('No Hornhoof turn is running');
+    expect(got).toHaveLength(1);
+  });
+
+  it('gives a file over 50 MB through the bridge as it reads it, whole and with its length, and fetches it back the same way', async () => {
+    const { url, got } = await hub();
+    const bridge = new Bridge(url.replace('/api/attachments', ''), () => {});
+    await bridge.start();
+    onTestFinished(() => bridge.stop());
+    const { attachUrl } = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'turn-token');
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-big-'));
+    const bytes = Buffer.alloc(60 * 1024 * 1024, 3);
+    bytes[bytes.length - 1] = 9;
+    writeFileSync(join(dir, 'archive.zip'), bytes);
+    const env = { HH_ATTACH_URL: attachUrl, HH_ATTACH_PASS: 'bridge' };
+    const sent = await attach(['--chat', join(dir, 'archive.zip')], env);
+    expect(sent.code, sent.err).toBe(0);
+    expect(got.map(g => [g.url, g.auth, g.length, g.bytes.equals(bytes)])).toEqual([['/api/attachments?chat=1&name=archive.zip', 'Bearer turn-token', String(bytes.length), true]]);
+    mkdirSync(join(dir, 'back'));
+    const back = await fetchFile(['12', 'archive.zip', join(dir, 'back')], env);
+    expect(back.code, back.err).toBe(0);
+    expect(readFileSync(join(dir, 'back', 'archive.zip')).equals(bytes)).toBe(true);
+  });
+
   it('sends each file with the turn token and prints the id to pass on', async () => {
     const { url, got } = await hub();
     const dir = mkdtempSync(join(tmpdir(), 'hh-attach-'));
@@ -61,6 +125,24 @@ describe('hh-attach', () => {
       ['Bearer tool-token-0123456789', 'application/octet-stream', [1, 2, 3]],
       ['Bearer tool-token-0123456789', 'application/octet-stream', [4, 5, 6]],
     ]);
+  });
+
+  it('keeps the headless Kimi runner, its MCP configuration and hh-attach on the direct turn token', async () => {
+    const { url, got } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-headless-'));
+    const file = join(dir, 'review.md');
+    writeFileSync(file, 'Headless review');
+    /* Only our launch and environment run: the stand-in calls our CLI, then emits Kimi's recorded stream. */
+    const sample = readFileSync(new URL('./fixtures/kimi-new.jsonl', import.meta.url), 'utf8');
+    const bin = join(dir, 'kimi.cjs');
+    writeFileSync(bin, `#!/usr/bin/env node\nrequire('node:child_process').execFileSync(process.execPath, ${JSON.stringify([SCRIPT, '--task', '1151', file])}, { stdio: 'inherit' });\nprocess.stdout.write(${JSON.stringify(sample)});\n`, { mode: 0o700 });
+    const home = join(dir, 'home');
+    const adapter = kimiAdapter({ home, tools: dir, bin });
+    const result = await runJob(adapter, { type: 'job.run', jobId: 'headless-job', subscriptionId: 'kimi-plan', provider: 'kimi', prompt: 'Review', sessionId: null, model: null, secret: null, instructions: null, toolToken: 'headless-turn-token', timeoutMs: 2_147_453_647 }, dir, { toolsUrl: url.replace('/api/attachments', '/mcp'), untimed: true });
+    expect(result.ok).toBe(true);
+    const configured = JSON.parse(readFileSync(join(home, 'mcp.json'), 'utf8')) as { mcpServers: { hornhoof: { url: string; bearerTokenEnvVar: string } } };
+    expect(configured.mcpServers.hornhoof).toEqual({ transport: 'http', url: url.replace('/api/attachments', '/mcp'), bearerTokenEnvVar: 'HH_TOOL_TOKEN' });
+    expect(got.map(g => [g.url, g.auth, g.bytes.toString()])).toEqual([['/api/attachments?task=1151&name=review.md', 'Bearer headless-turn-token', 'Headless review']]);
   });
 
   it("says what went wrong: no turn, no file, or Hornhoof's refusal", async () => {

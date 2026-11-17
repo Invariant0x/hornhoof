@@ -39,7 +39,7 @@ export type HolderLink = {
 };
 /* What a machine that lost its leader goes by to find a server restored in its place: its last view of the network,
    and the address it once joined at. */
-export type SurvivorOptions = {
+type SurvivorOptions = {
   view: () => { data: { addresses: string[]; webPort: number | null }[]; link: { url: string } | null } | null;
   joinServer: string;
   fetch?: typeof fetch;
@@ -52,7 +52,7 @@ export type SurvivorOptions = {
 /* The server a recovery key's bundles went to: the number of the challenge it answered, when, and what it has. */
 type Sent = { target: string; nonce: string; at: number; ids: Set<string> };
 
-export type HolderKeeperOptions = {
+type HolderKeeperOptions = {
   /* The keeper's own folder; the bundles lie in a folder of it. */
   dir: string;
   link: HolderLink;
@@ -210,7 +210,7 @@ export class HolderKeeper {
     let outcome: 'answered' | 'refused' | 'unreachable' = 'unreachable';
     try {
       const res = await (survivor.fetch ?? fetch)(`${target}${CHALLENGE_PATH}`, {
-        method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Buffer.from(file) as unknown as BodyInit, signal: AbortSignal.timeout(CHALLENGE_MS), redirect: 'error',
+        method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Buffer.from(file), signal: AbortSignal.timeout(CHALLENGE_MS), redirect: 'error',
       });
       const said = res.status === 200 ? ((await res.json().catch(() => null)) as { proof?: unknown } | null) : null;
       outcome = said?.proof === answerProof(nonce) ? 'answered' : 'refused';

@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { readBranches, readCommit, REFS_MAX_BYTES } from '../src/modules/testruns/refs.js';
-import { listenIn, testPort } from '../../../test-support/ports.mjs';
+import { listenIn } from '../../../test-support/ports.mjs';
+import { closedPort } from './closed-port.js';
 import { until } from './helpers-basic.js';
 
 const ADVERTISEMENT = 'application/x-git-upload-pack-advertisement';
@@ -217,7 +218,7 @@ describe('reading a commit from a repository', () => {
 
   it('says so when the repository cannot be reached', async () => {
     const url = await serve(() => undefined);
-    const port = await testPort();
+    const port = await closedPort();
     expect(url).not.toContain(String(port));
     expect(await readCommit({ url: `http://127.0.0.1:${port}/r.git`, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('could not be reached') });
   });

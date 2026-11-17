@@ -1,4 +1,4 @@
-import { mutationResultMatches, runsInClass, TestExecution, TestEnvironmentReceipt, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
+import { runsInClass, TestExecution, TestEnvironmentReceipt, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
 import type { TestEnvironmentSelection, testParts } from '../../db/schema.js';
 
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
@@ -28,29 +28,13 @@ const sameRuntime = (a: RuntimeCapability, b: RuntimeCapability): boolean => a.i
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
   return runsInClass(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => sameRuntime(runtime, actual)));
 }
-function requiredMutationSuites(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection) {
-  const { mutation } = snapshot.description.manifest;
-  const selection = assigned.selection;
-  const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
-  return mutation.status === 'supported' && snapshot.candidate ? suites.filter(suite => suite.files.some(file => mutation.sourcePaths.includes(file))) : [];
-}
-function suiteMutationMatches(snapshot: EnvironmentSnapshot, suite: ReturnType<typeof requiredMutationSuites>[number], proofs: NonNullable<TestEnvironmentReceipt['mutations']>): boolean {
-  const { mutation } = snapshot.description.manifest, scope = snapshot.candidate?.mutation;
-  const proof = proofs.find(proof => proof.suiteId === suite.suiteId);
-  const files = mutation.status === 'supported' ? suite.files.filter(file => mutation.sourcePaths.includes(file)) : [];
-  return Boolean(scope && proof && mutationResultMatches(scope.selection, proof, files));
-}
-function receiptMutations(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
-  const required = requiredMutationSuites(snapshot, assigned);
-  const proofs = receipt.mutations ?? [];
-  if (proofs.length !== required.length || new Set(proofs.map(proof => proof.suiteId)).size !== proofs.length) return false;
-  return required.every(suite => suiteMutationMatches(snapshot, suite, proofs));
-}
+/* Mutation is proved by its own suite, so a part's receipt names none. */
+const receiptMutations = (receipt: TestEnvironmentReceipt): boolean => !receipt.mutations?.length;
 export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {
   const parsed = TestEnvironmentReceipt.safeParse(message.environmentReceipt);
   if (!snapshot || !selection || !parsed.success) return null;
   const receipt = parsed.data;
-  return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) && receiptMutations(snapshot, selection, receipt) ? receipt : null;
+  return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) && receiptMutations(receipt) ? receipt : null;
 }
 
 /* A part keeps its receipt only when it was accepted against the runtimes its node said it has as the part ended, so the runtimes it

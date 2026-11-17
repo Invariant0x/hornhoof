@@ -92,7 +92,7 @@ async function company({ full = FULL as string | null, env = {} as NodeJS.Proces
 async function started(c: Awaited<ReturnType<typeof company>>, command = FULL, over: object = {}) {
   await c.online();
   const call = await c.tools();
-  const went = await call('run_tests', { command, branch: 'task-1-checkout', ...over });
+  const went = await call('run_tests', { command, branch: 'release-checkout', ...over });
   expect(went.error).toBe(false);
   return call;
 }
@@ -202,7 +202,7 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const reads: unknown[] = [];
     c.ctx.readCommit = async (_repo, want) => {
       reads.push(want);
-      return { branch: 'task-1-checkout', commitSha: MOVED };
+      return { branch: 'release-checkout', commitSha: MOVED };
     };
     c.passes(part);
     await c.ended();
@@ -306,9 +306,9 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const c = await company();
     await c.online();
     const call = await c.tools();
-    const full = await call('run_tests', { command: FULL, branch: 'task-1-checkout' });
+    const full = await call('run_tests', { command: FULL, branch: 'release-checkout' });
     expect(full.text).toContain(`This is the repository's full test command: its end sets hornhoof/tests on the pinned commit.`);
-    const one = await call('run_tests', { command: 'npm test -- cart.test.ts', branch: 'task-1-checkout' });
+    const one = await call('run_tests', { command: 'npm test -- cart.test.ts', branch: 'release-checkout' });
     expect(one.text).toContain(`The repository's full test command is ${FULL}. Only a run of exactly that sets hornhoof/tests, so this one will not.`);
     const work = await call('run_work', { command: FULL, branch: 'main' });
     expect(work.text).not.toContain('hornhoof/tests');
@@ -318,7 +318,7 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const c = await company({ full: null });
     await c.online();
     const call = await c.tools();
-    expect((await call('run_tests', { command: FULL, branch: 'task-1-checkout' })).text).not.toContain('hornhoof/tests');
+    expect((await call('run_tests', { command: FULL, branch: 'release-checkout' })).text).not.toContain('hornhoof/tests');
   });
 
   it('never tells the key', async () => {

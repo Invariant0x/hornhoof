@@ -26,7 +26,7 @@ const EVALUATOR_BRAND: unique symbol = Symbol('hornhoof.trustedEvaluator');
 const WEEK_MS = 7 * 24 * 3_600_000;
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
-export type EvaluatorAuth = { readonly [EVALUATOR_BRAND]: true };
+type EvaluatorAuth = { readonly [EVALUATOR_BRAND]: true };
 
 export const OUTBOUND_CHECK_PROMPTS: Record<ModelCheckKind, string> = {
   outbound_review:

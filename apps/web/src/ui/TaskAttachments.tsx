@@ -135,7 +135,7 @@ export function TaskFiles({ files }: { files?: TaskFile[] }) {
                 target={autoText ? '_blank' : undefined}
                 rel={autoText ? 'noopener noreferrer' : undefined}
               >
-                {name}
+                {f.big ? `${name} · ${t.tasks.bigFile}` : name}
               </a>
               <small>{formatFileSize(t, f.size)}</small>
             </li>

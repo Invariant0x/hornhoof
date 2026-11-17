@@ -21,6 +21,10 @@ describe('program updates managed outside the agent terminal', () => {
     expect(claudeProgram.launch(launch).env.DISABLE_AUTOUPDATER).toBe('1');
   });
 
+  it('enables the explicit Kimi program status independently of hooks', () => {
+    expect(kimiProgram.launch(launch).env.PI_PROGRAM_STATUS).toBe('1');
+  });
+
   it('disables Kimi self-updates in its terminal environment', () => {
     expect(kimiProgram.launch(launch).env).toMatchObject({ KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_CLI_NO_AUTO_UPDATE: '1' });
   });

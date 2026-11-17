@@ -1,6 +1,6 @@
-import { candidateTestUnits, EnvironmentSnapshot, MAX_TEST_PARTS, ProductCommitSha, TestExecution, validateEnvironmentDescription } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, TestExecution } from '@hornhoof/protocol';
 import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type EnvironmentPartPlan } from './plan-environment.js';
-import type { TestPartPlan } from './plan.js';
+import type { PartSpread, TestPartPlan } from './plan.js';
 import type { ReuseDecision } from './reuse.js';
 
 export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[]; computer?: string }[]; estimate: TestPartPlan | null; reason: string };
@@ -22,7 +22,6 @@ function finalLeaves(leaves: ProductPlan['leaves'], suiteIds: string[], onceIds:
 function preparationFor(input: PreparedEnvironmentPlanInput) {
   const { manifest } = input.snapshot.description;
   if (!manifest.execution) throw new Error('A versioned product plan needs its pinned execution policy.');
-  if (input.snapshot.candidate) return undefined;
   const policy = manifest.execution.oncePreparation;
   return policy?.profiles.includes(input.snapshot.profile) ? policy : undefined;
 }
@@ -31,7 +30,6 @@ function finalSuites(input: PreparedEnvironmentPlanInput, onceIds: string[]): st
   return input.snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id);
 }
 async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units']): Promise<EnvironmentPartPlan | null> {
-  if (input.snapshot.candidate && !input.units.length) return null;
   const complete = await planEnvironmentParts(input);
   if (remaining.length === input.units.length) return complete;
   return remaining.length ? planEnvironmentParts({ ...input, units: remaining, purpose: 'affected' }) : null;
@@ -52,17 +50,6 @@ function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null 
 }
 type ReusingInput = PreparedEnvironmentPlanInput & { reuse?: ReuseDecision };
 
-async function candidateInput(input: ReusingInput): Promise<ReusingInput> {
-  if (!input.snapshot.candidate) return input;
-  const snapshot = EnvironmentSnapshot.parse(input.snapshot);
-  if (snapshot.description.commitSha !== ProductCommitSha.parse(input.expectedCommitSha)) throw new Error('The environment commit differs from the candidate commit.');
-  await validateEnvironmentDescription(snapshot.description);
-  const units = candidateTestUnits(snapshot), requested = new Map(input.units.map(unit => [unitKey(unit), unit.selectionUnit]));
-  const canonical = new Map(snapshot.description.inventory.map(unit => [unitKey(unit), unit.selectionUnit]));
-  if (requested.size !== input.units.length || input.units.some(unit => canonical.get(unitKey(unit)) !== unit.selectionUnit)) throw new Error('The candidate selection differs from the canonical inventory.');
-  if (units.some(unit => requested.get(unitKey(unit)) !== unit.selectionUnit)) throw new Error('The candidate selection omits an affected canonical unit.');
-  return { ...input, snapshot, units, purpose: 'affected' };
-}
 /* What is left to run once what was reused and what the preparation runs are left out. */
 function remainingWork(input: ReusingInput) {
   const policy = preparationFor(input), onceIds = policy?.suiteIds ?? [];
@@ -71,18 +58,22 @@ function remainingWork(input: ReusingInput) {
     remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
   };
 }
+/* A full run's parts share the part count with its preparation and final checks. */
+function spreadWithin(spread: PartSpread | undefined, budget: number): { spread?: PartSpread } {
+  if (!spread) return {};
+  const max = Math.max(1, Math.min(spread.max, budget));
+  return { spread: { ...spread, max, min: Math.min(spread.min, max) } };
+}
 /* Plans what is left to run. No file proves a final check, so it stays; a reused preparation leaves nothing for the rest to wait for. */
 export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
-  input = await candidateInput(input);
   const { onceIds, preparation, remaining } = remainingWork(input);
   const finals = finalSuites(input, onceIds);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
-  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, ...rest } = input;
-  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}) }, remaining);
+  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, spread, ...rest } = input;
+  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}), ...spreadWithin(spread, budget) }, remaining);
   const leaves = preparationLeaves(input, preparation, planned);
   leaves.push(...batchLeaves(input, planned));
   leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));
-  const reason = input.snapshot.candidate && !input.units.length ? 'No canonical test unit has a changed influencing fingerprint at the bound base and final commit.' : planReason(preparation, planned);
-  return { leaves, estimate: planEstimate(planned), reason };
+  return { leaves, estimate: planEstimate(planned), reason: planReason(preparation, planned) };
 }

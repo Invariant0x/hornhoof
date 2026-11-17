@@ -5,19 +5,19 @@ import { pipeline } from 'node:stream/promises';
 import { Decrypter, Encrypter } from 'age-encryption';
 import { z } from 'zod';
 import type { HeldCertificate } from '../keeper/certificate.js';
-import type { MachineKey } from '../keeper/machine-keys.js';
+import { jsonOf, type MachineKey } from '../keeper/machine-keys.js';
 import { certFacts, issuedBy } from '../network/authority.js';
 
 /* A backup of the company as one file of three parts, so it travels as one stream and is checked before it is opened:
    this line, the head (what was signed, the signature and the signer's certificate, as one line of JSON), and the part
    sealed with age, which only the machines that hold the data and the recovery file open. */
-export const BUNDLE_LINE = 'hornhoof-bundle v1';
+const BUNDLE_LINE = 'hornhoof-bundle v1';
 /* The first line inside the sealed part. */
-export const CONTENT_LINE = 'hornhoof-bundle-content v1';
+const CONTENT_LINE = 'hornhoof-bundle-content v1';
 /* The first line inside a challenge, which is sealed the same way and is no bundle. */
-export const CHALLENGE_LINE = 'hornhoof-recovery-challenge v1';
+const CHALLENGE_LINE = 'hornhoof-recovery-challenge v1';
 /* What stands before the manifest in what is signed, so the signature is of nothing else the key signs. */
-export const SIGNED_PREFIX = 'hornhoof-bundle-manifest v1\n';
+const SIGNED_PREFIX = 'hornhoof-bundle-manifest v1\n';
 export const MAX_HEAD = 65_536;
 export const MAX_CHALLENGE = 1024;
 
@@ -175,7 +175,7 @@ export function checkHead(head: string, want: { authorityPem: string; company: s
   return manifest;
 }
 
-export type SealOptions = {
+type SealOptions = {
   dump: Readable; id: string; company: string; dumpedAt: Date; now?: Date; reason: BundleReason; migrations: number; secrets: BundleSecrets;
   recipients: string[]; recovery: string | null; recoveryLink: RecoveryLink | null; key: MachineKey; held: HeldCertificate; out: string;
 };
@@ -237,21 +237,13 @@ export async function openBundle(sealed: Readable, manifest: Manifest, identitie
   }
   const from = chunksOf(plain);
   const read = await takeLines(from, [CONTENT_LINE.length, MAX_HEAD]).catch(() => null);
-  const content = read && read.lines[0] === CONTENT_LINE ? Content.safeParse(jsonOrNull(read.lines[1]!)) : null;
+  const content = read && read.lines[0] === CONTENT_LINE ? Content.safeParse(jsonOf(read.lines[1]!)) : null;
   if (!read || !content?.success || content.data.id !== manifest.id || content.data.company !== manifest.company) {
     plain.destroy();
     sealed.destroy();
     throw new BundleRefused('content', BAD_CONTENT);
   }
   return { secrets: content.data.secrets, dump: restOf(read.left, from, plain, () => new BundleRefused('content', 'The sealed part broke off before its end.')) };
-}
-
-function jsonOrNull(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }
 
 const NONCE = /^[A-Za-z0-9_-]{43}$/;

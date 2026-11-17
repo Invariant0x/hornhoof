@@ -17,8 +17,3 @@ export function segmentText(t: Messages, segment: TreeSegment | undefined, now: 
     lost: L.lostSince(at), alarm: L.interruptedSince(at), queued: L.queuedSince(at), unknown: L.noData };
   return labels[segment.kind];
 }
-
-export function segmentTone(segment: TreeSegment | undefined): string {
-  const tones = { work: 'w', after: '', person: 'ps', stall: '', lost: 'bad', alarm: 'bad', queued: '', unknown: '' };
-  return tones[segment?.kind ?? 'unknown'];
-}
