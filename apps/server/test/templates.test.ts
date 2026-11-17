@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -2068,8 +2068,6 @@ describe('identity, defaults and shared instruction delivery', () => {
       const role = templates.roles.get(roleId)!;
       const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
       expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
-      expect(rendered.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-      expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     }
     expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
   });

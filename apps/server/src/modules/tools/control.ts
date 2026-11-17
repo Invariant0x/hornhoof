@@ -13,7 +13,7 @@ import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
 import { NewRepositoryBody } from '../departments/repo-hosts.js';
 import { LinkBody } from '../link/routes.js';
 import { LendBody } from '../nodes/routes.js';
-import { NOTE_MAX, NoteBody } from '../notebook/book.js';
+import { NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
@@ -288,7 +288,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'remember',
     'Writes a note into the company notebook, which your instructions carry into every conversation: a decision, rule, preference or agreement that must outlive this one. One fact per note, ' +
-      `${NOTE_MAX} characters at most. People who see the whole company read and change it too. With department it goes into that department's notebook, for its head.`,
+      "People who see the whole company read and change it too. With department it goes into that department's notebook, for its head.",
     { ...Book, ...NoteBody.shape },
     ({ department, text }) => ({ method: 'POST', url: bookUrl(department), payload: { text } }),
   );

@@ -1016,6 +1016,13 @@
       "when": 1794953551858,
       "tag": "0146_release_approval_optional",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1794953768687,
+      "tag": "0147_submission_receipts_and_message_quota",
+      "breakpoints": true
     }
   ]
 }

@@ -258,53 +258,16 @@ describe('tools a skill grants', () => {
     expect((await grant(ceo, 'ops-failure-review')).statusCode).toBe(200);
   });
 
-  it('send at most ten messages in one turn', async () => {
-    const { app, db, wendy, hana, bruno } = await company(['ops-task-watch']);
-    const client = await mcp(app, TOKEN);
-    for (let i = 0; i < 10; i++) {
-      const result = await call(client, 'message_employee', { employee: i % 2 ? hana.id : bruno.id, text: `Nudge ${i}.` });
-      expect(result.isError, `Message ${i + 1}: ${result.content[0]!.text}`).toBeFalsy();
-    }
-    const more = await call(client, 'message_employee', { employee: hana.id, text: 'One more.' });
-    expect([more.isError, more.content[0]!.text]).toEqual([true, `One turn sends at most 10 messages. Go on in your next round.\nNot delivered: reason send_limit, recipient ${hana.id}, task none.`]);
-    expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Nudge ${i}.`));
-  });
-
-  it('shares the ten-message quota between employee messages and reports to the orchestrator', async () => {
+  it('delivers every employee message and head report from the same turn', async () => {
     const { app, db, wendy, bruno } = await company(['ops-task-watch']);
     await db.update(agents).set({ kind: 'head' }).where(eq(agents.id, wendy.id));
     const client = await mcp(app, TOKEN);
-    for (let i = 0; i < 10; i++) {
-      const name = i % 2 ? 'tell_orchestrator' : 'message_employee';
-      const result = await call(client, name, { text: `Report ${i}.`, ...(i % 2 ? {} : { employee: bruno.id }) });
-      expect(result.isError, `Message ${i + 1}: ${result.content[0]!.text}`).toBeFalsy();
-    }
-    for (const name of ['message_employee', 'tell_orchestrator']) {
-      const more = await call(client, name, { text: 'One more.', ...(name === 'message_employee' ? { employee: bruno.id } : {}) });
-      const undelivered = name === 'message_employee' ? `\nNot delivered: reason send_limit, recipient ${bruno.id}, task none.` : '';
-      expect([more.isError, more.content[0]!.text]).toEqual([true, `One turn sends at most 10 messages. Go on in your next round.${undelivered}`]);
-    }
-    expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Report ${i}.`));
-  });
-
-  it('keep to ten messages when a turn sends several at once', async () => {
-    const { app, db, wendy, hana, bruno } = await company(['ops-task-watch']);
-    const client = await mcp(app, TOKEN);
-    for (let i = 0; i < 9; i++) expect((await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
-    const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
-    expect(last.filter(r => !r.isError)).toHaveLength(1);
-    expect(last.filter(r => r.isError).map(r => r.content[0]!.text)).toEqual(Array(2).fill(`One turn sends at most 10 messages. Go on in your next round.\nNot delivered: reason send_limit, recipient ${hana.id}, task none.`));
-    expect(await messagesFrom(db, wendy.id)).toHaveLength(10);
-  });
-
-  it('count what a turn sent before Hornhoof restarted', async () => {
-    const { app, acme, wendy, hana, bruno } = await company(['ops-task-watch']);
-    /* Sent through the queue before a restart, so only what Hornhoof keeps knows of them. */
-    for (let i = 0; i < 9; i++)
-      await enqueueTurn(app.ctx, { companyId: acme.id, agentId: bruno.id, prompt: `Nudge ${i}.`, createdBy: null, message: { personId: null, text: `Nudge ${i}.`, from: 'agent', name: 'Wendy', by: wendy.id } });
-    const client = await mcp(app, TOKEN);
-    expect((await call(client, 'message_employee', { employee: hana.id, text: 'Last one.' })).isError).toBeFalsy();
-    expect((await call(client, 'message_employee', { employee: hana.id, text: 'One more.' })).isError).toBe(true);
+    const texts = Array.from({ length: 12 }, (_, i) => `Report ${i}.`);
+    const sent = await Promise.all(texts.map((text, i) => i % 2
+      ? call(client, 'tell_orchestrator', { text })
+      : call(client, 'message_employee', { employee: bruno.id, text })));
+    expect(sent.filter(result => result.isError)).toEqual([]);
+    expect((await messagesFrom(db, wendy.id)).sort()).toEqual(texts.sort());
   });
 
   it('let a failure collector read the failed turns and blocked tasks of the last hours, with why each task stopped', async () => {

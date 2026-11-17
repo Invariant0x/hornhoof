@@ -18,6 +18,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A department head can enable a skill that grants only department tracker work.
 - The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
 - Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
+- Assignment changes made by a department head show the head and the person whose authority it used.
+- Editing an employee card preserves a tracker nudge that arrives during the edit.
+- One-shot batches save the wake with their delivery claim so a failed write can be retried.
 
 ### Changed
 
@@ -25,6 +28,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
 - The approval and release guides explain when to ask and which checks prove the exact commit.
+- Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
+- Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Employees can send messages and file improvements throughout a turn.
+- People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
+- One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
 ## [0.32.1] - 2026-11-17

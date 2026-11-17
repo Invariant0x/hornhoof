@@ -1,9 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { Branch } from '@hornhoof/protocol';
+import { Branch, MAX_JOB_TIMEOUT_MS } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
-import { TEST_MINUTES, TEST_MINUTES_MAX } from '../testruns/runs.js';
 import type { ToolJob } from '../tools/job.js';
 import { callsView, startCalls, stopCalls } from './calls.js';
 
@@ -39,7 +38,7 @@ export function registerCallTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         branch: Branch.optional().describe("A branch of the task's repository each call gets a fresh clone of. Left out, a call starts in an empty folder."),
         verdict: z.boolean().optional().describe('true: each call ends its answer with a verdict, pass or not, and why.'),
         judge: z.string().trim().min(1).max(100_000).optional().describe('The brief of a judge call that runs once the others have ended, reads every answer and gives the verdict.'),
-        minutes: z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each call, ${TEST_MINUTES} minutes by default.`),
+        minutes: z.number().int().min(1).max(Math.floor(MAX_JOB_TIMEOUT_MS / 60_000)).optional().describe('The time limit of each call in minutes. Leave it out to run until the call answers or is stopped.'),
         wait: z.boolean().optional().describe('true: this tool call waits for the whole batch and returns every answer itself, and no wake follows. A program that stops waiting first still hears on the task.'),
       },
     },

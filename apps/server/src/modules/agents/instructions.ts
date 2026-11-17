@@ -1,4 +1,4 @@
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
+import type { SkillFile } from '@hornhoof/protocol';
 import { eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
@@ -51,8 +51,7 @@ function told(kept: string[], files: SkillFile[]): string {
   return [...kept, ...(files.length ? [skillList(files)] : [])].join('\n\n');
 }
 
-/* Every skill in the text, as a node that writes no skill files gets them. A turn longer than such a node takes does not
-   go out. */
+/* Every skill in the text, as a node that writes no skill files gets them. */
 const whole = (texts: string[]) => texts.join('\n\n');
 
 /* Skills whose text is the template's for everyone, with no text of an employee's own: how checks run, how heads lead,
@@ -188,31 +187,17 @@ function steadyOf(t: Templates, base: string, ids: readonly string[], assignment
   return { parts, text: told(kept, skills), skills, whole: whole(parts.map(p => p.text)) };
 }
 
-const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';
-
 /* A notebook as its agent reads it, each note with its number: the company's for the orchestrator, a department's for
-   its head. In less room it is cut after a whole note, with where to read the rest; none when not even that fits. */
-export async function notebookPart(db: Ctx['db'], book: Book, room = Infinity): Promise<string> {
+   its head. */
+export async function notebookPart(db: Ctx['db'], book: Book): Promise<string> {
   const notes = await listNotes(db, book);
   const head = book.departmentId
     ? `## Department notebook\n\nWhat you and the people who run your department keep across conversations. Change it with remember, rewrite_note and forget.\n\n`
     : `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n`;
-  const lines = notes.map(n => `[#${n.number}] ${n.text}`);
-  const whole = head + (lines.length ? lines.join('\n') : 'The notebook is empty.');
-  if (whole.length <= room) return whole;
-  let kept = head.trimEnd();
-  for (let i = 0; i < lines.length; i++) {
-    const next = i ? `${kept}\n${lines[i]}` : `${head}${lines[i]}`;
-    if (next.length + CUT.length > room) break;
-    kept = next;
-  }
-  return kept.length + CUT.length <= room ? kept + CUT : '';
+  return head + (notes.length ? notes.map(n => `[#${n.number}] ${n.text}`).join('\n') : 'The notebook is empty.');
 }
 
 const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
-
-/* A turn carries what its node takes at most, the notebook included. */
-const notebookRoom = (said: string, files: boolean): number => (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - said.length - 2;
 
 const forNode = (shown: Rendered, files: boolean): Rendered =>
   files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
@@ -221,7 +206,7 @@ async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, ag
   const steady = orchestratorSteady(ctx.templates, agent.overrides.base);
   const said = files ? steady.text : steady.whole;
   const skills = files ? steady.skills : [];
-  const notebook = await notebookPart(ctx.db, companyBook(agent.companyId), notebookRoom(said, files));
+  const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
   const parts = [...steady.parts, notebookOf(notebook)];
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
 }
@@ -263,10 +248,8 @@ async function appendDepartmentNotebook(
   db: Ctx['db'],
   rendered: Rendered,
   dept: typeof departments.$inferSelect,
-  files: boolean,
 ): Promise<Rendered> {
-  const notebook = await notebookPart(db, departmentBook(dept), notebookRoom(rendered.text, files));
-  if (!notebook) return rendered;
+  const notebook = await notebookPart(db, departmentBook(dept));
   return { ...rendered, parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}` };
 }
 
@@ -280,5 +263,5 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: 
   if (agent.kind === 'assistant') return assistantInstructionsOf(ctx, agent, files);
   const rendered = forNode(renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent)), files);
   const dept = await headDepartment(ctx.db, agent);
-  return dept ? appendDepartmentNotebook(ctx.db, rendered, dept, files) : rendered;
+  return dept ? appendDepartmentNotebook(ctx.db, rendered, dept) : rendered;
 }

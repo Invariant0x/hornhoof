@@ -127,10 +127,10 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates'], rows('protected')),
   ...each(OUTBOUND.filter(name => name !== 'outbound_messages'), rows('protected')),
 
-  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
-  ...each(['feedback_inbox', 'feedback_signals'], rows('work')),
+  ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),
   tasks: rows('work', { number: ['company_id'], task: 'id' }),
   goals: rows('work', { number: ['company_id'] }),
   ...each(['pipelines', 'pipeline_stages'], rows('work')),

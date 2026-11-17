@@ -629,7 +629,6 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
       skills: [],
       parts: [],
       raw: '',
-      instructions: { length: 8420, max: 200_000 },
       runsOn: MOONFERN_SUBSCRIPTIONS.filter(s => s.place.kind === 'company').map(s => ({
         subscription: s,
         models: MODELS_BY_PROVIDER[s.provider],
@@ -680,7 +679,6 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
       { kind: 'base', id: e.roleId, title: e.title, text: 'Keep changes small, test every edge case and leave clear handoff notes.', overridden: false, templateChanged: false },
     ],
     raw: `You are ${e.name}, ${e.title?.en ?? 'employee'} in ${p.departmentName} at Moonfern.`,
-    instructions: { length: 12_480, max: 200_000 },
     runsOn: MOONFERN_SUBSCRIPTIONS.filter(s => s.place.kind === 'company' || s.place.id === p.departmentId).map(s => ({
       subscription: s,
       models: MODELS_BY_PROVIDER[s.provider],

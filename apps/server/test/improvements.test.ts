@@ -298,11 +298,21 @@ describe('improvements', () => {
     expect(listed.map(i => i.title)).toContain('Old but open');
   });
 
-  it('take at most ten from one turn, though it sends them all at once', async () => {
+  it('take every distinct improvement from one turn, even when sent together', async () => {
     const { app } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
-    const all = await Promise.all(Array.from({ length: 11 }, (_, i) => call(wendy, 'propose_improvement', { title: `Fix ${i}`, change: 'x' })));
-    expect(all.filter(r => !r.isError)).toHaveLength(10);
+    const all = await Promise.all(Array.from({ length: 12 }, (_, i) => call(wendy, 'propose_improvement', { title: `Fix ${i}`, change: 'x' })));
+    expect(all.filter(r => !r.isError)).toHaveLength(12);
+  });
+
+  it('reuses a durable improvement when the same turn retries its submission', async () => {
+    const { app, db } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const proposal = { title: 'Keep the full log', change: 'Save the log with the result.' };
+    const submitted = await Promise.all([call(wendy, 'propose_improvement', proposal), call(wendy, 'propose_improvement', proposal)]);
+    expect(submitted.map(r => r.content[0]!.text)).toEqual(Array(2).fill(submitted[0]!.content[0]!.text));
+    const rows = await db.select().from(improvements).where(eq(improvements.title, proposal.title));
+    expect(rows).toMatchObject([{ seen: 1 }]);
   });
 
   it('count every round that finds one again, though two do at once', async () => {
@@ -442,7 +452,7 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     const again = await propose({ title: 'Install git-lfs on the nodes!', problem: 'git-lfs is missing again.' });
     expect(again.isError).toBeFalsy();
     expect(JSON.parse(again.content[0]!.text)).toMatchObject({ improvement: id, sent: { number: 1 } });
-    await propose();
+    await propose({ problem: 'Another round confirmed the missing program.' });
     expect(await db.select().from(improvements)).toHaveLength(1);
     expect(await card()).toMatchObject({ status: 'sent', seen: 3, sent: { number: 1, repeats: 2 } });
     /* Nothing went out by itself. */
@@ -452,7 +462,7 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     await inbox.db.update(feedbackInbox).set({ issueNumber: ISSUE.number, issueUrl: ISSUE.url });
     const told = await reportRepeats();
     expect([told.statusCode, told.json()]).toEqual([200, { sent: true }]);
-    expect(relay.feedback[1]).toEqual({ ...(relay.feedback[0] as object), repeats: 2 });
+    expect(relay.feedback[1]).toEqual({ ...(relay.feedback[0] as object), submission: expect.stringMatching(/^[0-9a-f]{64}$/), repeats: 2 });
     expect(await signals()).toEqual([[1, 3]]);
     expect(await card()).toMatchObject({ status: 'sent', seen: 3, sent: { number: 1, issue: ISSUE, repeats: 0 } });
     const nothingNew = await reportRepeats();
@@ -463,7 +473,7 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
   it('lets only a person who sees the whole company report the repeats, or the orchestrator for the owner, never an agent', async () => {
     const { app, db, ceo, relay, orchestrator, propose, send, id } = await installation();
     expect((await send()).statusCode).toBe(200);
-    await propose();
+    await propose({ problem: 'The next node build is missing it too.' });
     const [dev] = await db.select().from(departments).where(eq(departments.roleCode, 'DEV'));
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
     expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, ...as(dana) })).statusCode).toBe(403);
@@ -478,7 +488,7 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     const { relay, propose, card, send, reportRepeats } = await installation();
     expect((await send()).statusCode).toBe(200);
     relay.down = true;
-    expect((await propose()).isError).toBeFalsy();
+    expect((await propose({ problem: 'A new node is missing it too.' })).isError).toBeFalsy();
     const failed = await reportRepeats();
     expect([failed.statusCode, failed.json().error.reason]).toEqual([503, 'relay_unreachable']);
     expect(await card()).toMatchObject({ seen: 2, sent: { repeats: 1 } });
@@ -496,7 +506,7 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: null } });
     app.ctx.config.version = '99.0.1';
     expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: '99.0.1', repeats: 0 } });
-    const after = JSON.parse((await propose()).content[0]!.text).improvement;
+    const after = JSON.parse((await propose({ problem: 'The new release still needs it.' })).content[0]!.text).improvement;
     expect(after).not.toBe(id);
     expect((await db.select().from(improvements).where(eq(improvements.id, after)))[0]).toMatchObject({ status: 'open', seen: 1 });
   });

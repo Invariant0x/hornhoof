@@ -90,12 +90,6 @@ export function lastBytes(text: string, bytes = TAIL_BYTES): string {
   const buf = new TextEncoder().encode(text);
   return buf.length <= bytes ? text : new TextDecoder().decode(buf.subarray(buf.length - bytes));
 }
-/* The longest standing instructions a job may carry, now that skills go as files; Hornhoof refuses edits that would go
-   past it. */
-export const MAX_INSTRUCTIONS = 200_000;
-/* What a node from before skill files takes: it drops a job with longer instructions. */
-export const OLD_NODE_INSTRUCTIONS = 20_000;
-
 const LimitWindow = z.object({
   name: z.string().min(1).max(40),
   utilization: z.number().min(0).max(1).nullable(),
@@ -707,9 +701,7 @@ export const MAX_OPEN_TASKS = 10_000;
 export const TaskStates = z.object({ open: z.array(z.number().int().positive()).max(MAX_OPEN_TASKS), upTo: z.number().int().min(0) });
 export type TaskStates = z.infer<typeof TaskStates>;
 const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional(), tasks: TaskStates.optional() });
-/* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
-export const MAX_SKILLS = 200;
-const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });
+const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1), body: z.string() });
 export type SkillFile = z.infer<typeof SkillFile>;
 export type Workspace = z.infer<typeof Workspace>;
 
@@ -724,6 +716,8 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
   const description = message.environment.snapshot.description;
   return !message.command && message.commitSha === description.commitSha && JSON.stringify(message.repositoryScope) === JSON.stringify(description.repositoryScope);
 }
+
+export const MAX_JOB_TIMEOUT_MS = 2 ** 31 - 1;
 
 const ServerMessage = z.discriminatedUnion('type', [
   CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
@@ -742,14 +736,14 @@ const ServerMessage = z.discriminatedUnion('type', [
     effort: Effort.nullable().optional(),
     /* How full Claude Code's context gets before it compacts the conversation, in tokens; left out, its own window. */
     compactWindow: z.number().int().min(100_000).max(1_000_000).optional(),
-    /* Node's timers wait at most this long; a longer one fires at once. */
-    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    /* Zero means an untimed one-shot call. Node's timers cannot wait past the signed integer limit. */
+    timeoutMs: z.number().int().nonnegative().max(MAX_JOB_TIMEOUT_MS),
     secret: z.string().nullable(),
     /* For an API key: where its program sends its calls and in which protocol. A node from before runs the Claude and
        OpenAI APIs at their own addresses without it. */
     api: ApiConnection.optional(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
-    instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
+    instructions: z.string().nullable(),
     toolToken: z.string().max(200).nullable(),
     /* The conversation from before, for a program that starts a new session on a turn that types nothing: it goes with
        the instructions when the program starts and is no change of them. */
@@ -757,12 +751,12 @@ const ServerMessage = z.discriminatedUnion('type', [
     /* The agent's own folder on the node and the repository it works in; a test job has none. */
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
-    skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
+    skills: z.array(SkillFile).optional(),
     /* A one-shot call: the program runs once in its mode that answers and exits, in a fresh folder of the call's own with
        the workspace's repository cloned in it, which the node removes after. It keeps no session, has no inbox and takes
        its turn by the machine's memory: it starts, and says so, once the machine has memory for its program. */
     call: z.literal(true).optional(),
-  }),
+  }).refine(job => job.timeoutMs > 0 || job.call === true),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has every numbered message of the node's stream up to this number, applied or failed for good; the node

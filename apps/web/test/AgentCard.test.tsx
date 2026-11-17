@@ -297,9 +297,11 @@ describe('AgentCard', () => {
     expect(calls.some(c => c.method === 'PATCH')).toBe(false);
   });
 
-  it('says how long the instructions are, as every turn sends them all', async () => {
-    open();
-    expect(await screen.findByText('Instructions: 12,345 characters of 200,000. Every turn sends all of them to the program.')).toBeInTheDocument();
+  it('opens the prompt without an instruction budget', async () => {
+    const olderCard = { ...CARD, instructions: { length: 12_345, max: 200_000 } };
+    open({ 'GET /api/agents/b1': [200, olderCard] });
+    expect(await screen.findByRole('region', { name: 'Prompt' })).toBeInTheDocument();
+    expect(screen.queryByText(/Instructions:.*characters of/)).not.toBeInTheDocument();
   });
 
   it('saves a changed model and shows it applies from the next turn', async () => {

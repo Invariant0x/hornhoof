@@ -60,6 +60,12 @@ async function activeOwner(db: Reader, companyId: string): Promise<Principal | n
   return owner ? { personId: owner.id, sourceSeq: null } : null;
 }
 
+/* A head's standing authority is the same in a conversation and when its program calls a tool between turns. */
+export async function headStandingPrincipal(db: Reader, head: { companyId: string; departmentId: string | null }): Promise<Principal | null> {
+  if (!head.departmentId) return null;
+  return (await headOwner(db, head.companyId, head.departmentId)) ?? activeOwner(db, head.companyId);
+}
+
 /* Whom the turn answers by its words alone: what the marks of an Enter keep. */
 async function wordsPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
@@ -73,7 +79,7 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
   if (!job) return null;
   if (job.kind === 'orchestrator') return activeOwner(db, job.companyId);
   if (job.kind !== 'head' || job.status !== 'running' || job.step !== 'conversation' || job.pending || !job.departmentId) return null;
-  return (await headOwner(db, job.companyId, job.departmentId)) ?? activeOwner(db, job.companyId);
+  return headStandingPrincipal(db, job);
 }
 
 export type FindPrincipal = (db: Reader, jobId: string) => Promise<Principal | null>;

@@ -180,16 +180,15 @@ describe('the inbox of Hornhoof developers', () => {
     ]);
   });
 
-  it('takes 10 reports an hour from one installation, and others meanwhile', async () => {
-    const { receive, cards, later } = await inbox();
-    const bug = (n: number) => `Bug ${String.fromCharCode(97 + n)}`;
-    for (let i = 0; i < 10; i++) expect((await receive(report({ title: bug(i) }))).statusCode).toBe(202);
-    const over = await receive(report({ title: bug(10) }));
-    expect([over.statusCode, over.headers['retry-after']]).toEqual([429, '3600']);
-    expect((await receive(report({ installation: installationId(2), title: bug(10) }))).statusCode).toBe(202);
-    later(HOUR);
-    expect((await receive(report({ title: bug(11) }))).statusCode).toBe(202);
-    expect(await cards()).toHaveLength(12);
+  it('counts each identified submission once across concurrent retries', async () => {
+    const { receive, cards } = await inbox();
+    const first = report({ submission: '1'.repeat(64), repeats: 3 });
+    const [one, two] = await Promise.all([receive(first), receive(first)]);
+    expect(one.statusCode).toBe(202);
+    expect(two.json()).toEqual(one.json());
+    expect(await cards()).toMatchObject([{ signals: 3, installations: 1 }]);
+    expect((await receive(report({ submission: '2'.repeat(64) }))).statusCode).toBe(202);
+    expect(await cards()).toMatchObject([{ signals: 4, installations: 1 }]);
   });
 
   it('opens at most 200 new cards an hour, while repeats still count', async () => {
@@ -203,7 +202,7 @@ describe('the inbox of Hornhoof developers', () => {
     expect(await cards()).toHaveLength(201);
   });
 
-  it('bounds signals across made-up installation IDs before counting per-installation attempts', async () => {
+  it("bounds the public inbox's total signals across made-up installation IDs", async () => {
     const { receive, cards, later } = await inbox();
     for (let i = 0; i < 20; i++) expect((await receive(report({ installation: installationId(i), repeats: 100 }))).statusCode).toBe(202);
     expect(await cards()).toMatchObject([{ signals: 2000, installations: 20 }]);
@@ -215,8 +214,8 @@ describe('the inbox of Hornhoof developers', () => {
     expect(await cards()).toMatchObject([{ signals: 2000, installations: 20 }]);
     later(HOUR / 2);
     for (let i = 0; i < 10; i++) expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(202);
-    expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(429);
-    expect(await cards()).toMatchObject([{ signals: 2010, installations: 21 }]);
+    expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(202);
+    expect(await cards()).toMatchObject([{ signals: 2011, installations: 21 }]);
   });
 
   it('refuses a repeat batch whole and names when enough of the signal budget returns', async () => {
