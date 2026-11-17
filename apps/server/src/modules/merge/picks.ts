@@ -12,7 +12,7 @@ import { nameOf, valueWords } from './words.js';
 /* here keeps the leader's row as it is, there takes the source's side, value writes the picker's own for one conflict. */
 export type Take = 'here' | 'there' | 'value';
 export type Picker = { kind: 'ceo'; personId: string } | { kind: 'orchestrator'; agentId: string };
-export type PickFilter = { ids?: string[]; merge?: string; table?: string; from?: Date; to?: Date };
+type PickFilter = { ids?: string[]; merge?: string; table?: string; from?: Date; to?: Date };
 export type ConflictView = {
   id: string; merge: string; label: string; table: string; topic: string; what: string; kind: string; cols: string[];
   here: Record<string, string> | null; there: Record<string, string> | null; at: string | null;

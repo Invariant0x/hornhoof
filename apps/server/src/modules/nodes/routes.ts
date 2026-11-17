@@ -70,7 +70,7 @@ const TicksBody = z
   .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional() })
   .strict()
   .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
-export const PlanBody = z.object({ subscription: z.uuid() }).strict();
+const PlanBody = z.object({ subscription: z.uuid() }).strict();
 /* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
 const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
 

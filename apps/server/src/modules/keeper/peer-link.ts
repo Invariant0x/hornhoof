@@ -46,7 +46,7 @@ const HeldCrl = z.object({ serials: z.array(z.string()), crlPem: z.string() });
 type HeldCrl = z.infer<typeof HeldCrl>;
 
 export type PeerPorts = { peer: number; peerApp: number };
-export type PeerLinkOptions = {
+type PeerLinkOptions = {
   /* The keeper's own folder, where the last list is kept beside the machine's key and certificate. */
   dir: string;
   app: Target;

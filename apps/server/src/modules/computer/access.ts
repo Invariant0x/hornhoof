@@ -16,7 +16,7 @@ import { readGrant, type Grant } from './grant.js';
 import { keyPrint } from './owner-key.js';
 
 /* How long one click keeps access to a machine open where no grant says so: the server's own machine with no key. */
-export const ACCESS_MS = 24 * 60 * 60 * 1000;
+const ACCESS_MS = 24 * 60 * 60 * 1000;
 /* A command runs this many seconds unless the orchestrator gives its own time, never longer than the most. */
 export const RUN_DEFAULT_S = 300;
 export const RUN_MAX_S = 1800;
@@ -25,7 +25,7 @@ export const WAIT_MS = 45_000;
 /* A machine is reachable when its keeper asked, with its updater alive, within this. */
 export const SEEN_MS = 60_000;
 /* Commands that ended, and ones that were lost, go after this long. */
-export const RUN_KEEP_MS = 24 * 3_600_000;
+const RUN_KEEP_MS = 24 * 3_600_000;
 /* A command its keeper took and does not hold this long after is lost: what it did is not known. */
 export const HELD_GRACE_S = 30;
 /* A command its keeper holds past the time it was given, and this much more, is lost all the same: its updater would
@@ -36,7 +36,7 @@ export const WAITING_MS = 10 * 60_000;
 /* How often the commands of long ago are cleared away. */
 const CLEAR_EVERY_MS = 3_600_000;
 /* The end of a command's output that is kept. */
-export const OUTPUT_MAX = 30_000;
+const OUTPUT_MAX = 30_000;
 /* What an app from before access was per machine left in the control folder, set aside until this app leads. */
 export const LEGACY_FILE = 'computer.legacy.json';
 const POLL_MS = 250;
@@ -50,7 +50,7 @@ export type Asked = { reason: string; at: string };
 export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: MachineRole | null; os: 'linux' | 'darwin' | null; data: boolean };
 /* not_needed: the server's own machine while its keeper holds no key, which takes the app's word. held: the machine
    holds the key its owner has now. not_held: it holds none, or another, so nothing its owner signs opens it. */
-export type KeyState = 'not_needed' | 'held' | 'not_held';
+type KeyState = 'not_needed' | 'held' | 'not_held';
 export type AccessState = { machine: AccessMachine; reachable: boolean; until: string | null; asked: Asked | null; key: KeyState };
 export type AccessView = AccessState & { canOpen: boolean; canClose: boolean };
 export type RunResult = { exit: number; output: string };

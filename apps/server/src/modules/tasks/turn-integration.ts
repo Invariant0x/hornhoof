@@ -57,7 +57,7 @@ export async function headOf(ctx: Reader, repo: Repo, branch: string): Promise<s
 
 type Maker = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'readBranches' | 'createBranch'>>;
 type Heads = Awaited<ReturnType<NonNullable<Ctx['readBranches']>>>;
-export type TurnBranch = { head: string; made: boolean } | { problem: string };
+type TurnBranch = { head: string; made: boolean } | { problem: string };
 
 /* Where a turn's branch is made from: the commit the turn starts from, else the release it came from, else main's head. */
 const startOf = (turn: Turn, heads: Record<string, string>, main: string): string | undefined => turn.startCommit ?? turn.baseCommit ?? heads[main];

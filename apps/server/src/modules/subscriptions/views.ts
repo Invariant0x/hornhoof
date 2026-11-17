@@ -61,7 +61,7 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
 
 /* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
    work runs. */
-export type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
 
 export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
   node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);

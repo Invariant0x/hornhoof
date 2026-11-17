@@ -14,7 +14,7 @@ type Reader = Pick<Ctx, 'db' | 'config' | 'readCommit'>;
 /* Where the branches read so far stand, so a task with many runs on a branch asks its repository once. */
 type Heads = Map<string, Promise<CommitAt | null>>;
 
-export type Freshness = 'current' | 'stale' | 'unknown';
+type Freshness = 'current' | 'stale' | 'unknown';
 export type Evidence = { commitSha: string | null; head: string | null; freshness: Freshness; why: string | null };
 /* A test run as a task shows it. proves: it passed, and what it checked is what its branch holds now (T10). */
 export type RunEvidence = Evidence & { run: number; status: Run['status']; branch: string | null; command: string; proves: boolean };
