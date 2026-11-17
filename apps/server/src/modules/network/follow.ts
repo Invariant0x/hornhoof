@@ -2,7 +2,7 @@ import { and, eq, isNotNull, isNull, notInArray, notLike, or, sql } from 'drizzl
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { ON_NODE } from '../jobs/dispatch.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
@@ -230,7 +230,7 @@ export async function followOf(ctx: Ctx, machineId: string, now = new Date()): P
 
 async function machineOfNode(tx: Pick<Db, 'select'>, nodeId: string | null | undefined, lock: boolean): Promise<typeof machines.$inferSelect | null> {
   if (!nodeId) return null;
-  const [node] = await tx.select({ machineId: nodes.machineId }).from(nodes).where(eq(nodes.id, nodeId));
+  const [node] = await tx.select(only(nodes, 'machineId')).from(nodes).where(eq(nodes.id, nodeId));
   if (!node?.machineId) return null;
   const rows = tx.select().from(machines).where(eq(machines.id, node.machineId));
   const [row] = lock ? await rows.for('share') : await rows;

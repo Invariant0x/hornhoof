@@ -1,4 +1,4 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
@@ -81,7 +81,7 @@ function stillOpen(task: Task): void {
 
 /* Work under a task that is still open: a task is done only once all of it is. */
 async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
-  const open = await db.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
+  const open = await db.select(only(tasks, 'number')).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
 }
 
@@ -140,7 +140,7 @@ async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<voi
   let level = ids;
   while (level.length) {
     if (level.includes(task.id)) throw refuse(400, 'task_invalid', `#${task.number} would wait for itself through what it comes after.`);
-    const rows = await db.select({ after: tasks.after }).from(tasks).where(inArray(tasks.id, level));
+    const rows = await db.select(only(tasks, 'after')).from(tasks).where(inArray(tasks.id, level));
     level = rows.flatMap(r => r.after).filter(id => !seen.has(id) && Boolean(seen.add(id)));
   }
 }
@@ -189,7 +189,7 @@ async function startAfter(tx: Tx, done: Task, actor: Actor): Promise<{ wakes: Wa
     await endAfter(tx, t, done, actor);
     if ((await openAfter(tx, t)).length) continue;
     const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
-    const before = await tx.select({ number: tasks.number }).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
+    const before = await tx.select(only(tasks, 'number')).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
     await tx.insert(taskEvents).values({ companyId: t.companyId, taskId: t.id, kind: 'started', text: `${listed(before)} ${before.length === 1 ? 'is' : 'are'} done, so it starts now.` });
     /* One that waits for a person's answer goes on with the answer. */
     if (row!.assigneeAgentId && ['open', 'working'].includes(row!.status)) wakes.push({ agentId: row!.assigneeAgentId, taskId: row!.id, why: 'assigned' });
@@ -1038,7 +1038,7 @@ async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Pr
 /* Whoever gave the task out: the agent that made it, or the orchestrator, who runs every task. */
 async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
   if (task.createdByAgentId === agentId) return true;
-  const [agent] = await db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, agentId));
   return agent?.kind === 'orchestrator';
 }
 
@@ -1394,7 +1394,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
        is now, not as it was read before: one closed meanwhile stays closed. */
-    const [current] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    const [current] = await tx.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, task.id)).for('update');
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
@@ -1472,7 +1472,7 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
   const [job] = await ctx.db.select({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId) return;
   /* One that still waits for what it comes after is not at work, whatever turn went out on it. */
-  const [task] = await ctx.db.select({ after: tasks.after }).from(tasks).where(eq(tasks.id, job.taskId));
+  const [task] = await ctx.db.select(only(tasks, 'after')).from(tasks).where(eq(tasks.id, job.taskId));
   if (!task || (await openAfter(ctx.db, task)).length) return;
   const [row] = await ctx.db
     .update(tasks)

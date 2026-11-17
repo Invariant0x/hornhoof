@@ -1,7 +1,7 @@
 import { deferred as waitRaceBarrier } from '../../../test-support/deferred.mjs';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { ApiError } from '../src/errors.js';
 import * as waitNotices from '../src/modules/tasks/wait-notices.js';
 import { agentEvents, agents, jobs, pendingWakes, people, taskEvents, tasks, taskWaits, testParts, testRuns, waitPolicies } from '../src/db/schema.js';
@@ -20,7 +20,7 @@ const RUN_TOOLS = [
 /* The turns the agent was given on the task since it went to wait, and how often it was told of a run's end. */
 async function toldOf(c: Awaited<ReturnType<typeof company>>, agentId: string, taskId: string) {
   const turns = await c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued')));
-  const events = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'message')));
+  const events = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'message')));
   const news = events.filter(e => ['tests', 'work'].includes((e.data as { taskWake?: { why?: string } }).taskWake?.why ?? ''));
   return { turns, prompts: turns.map(t => t.prompt), news: news.length };
 }
