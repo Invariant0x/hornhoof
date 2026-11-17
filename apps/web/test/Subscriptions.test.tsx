@@ -1,5 +1,4 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
@@ -7,7 +6,7 @@ import type { JobView, Me, SubView } from '../src/types';
 import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { commandCode } from './command-code';
-import { COMMAND, lists, rowOf, openCards, openAll } from './subscriptions-helpers';
+import { waitFor, userEvent, COMMAND, lists, rowOf, openCards, openAll } from './subscriptions-helpers';
 
 vi.mock('../src/ui/AgentTerminal', () => ({
   AgentTerminal: ({ path }: { path: string }) => <div data-testid="live-terminal" data-path={path} />,
@@ -25,7 +24,7 @@ describe('Subscriptions', () => {
     ['ru', 'До ', ', еще 2 ч 10 мин. До тех пор ее агенты ждут.', 'до сброса 2 ч 10 мин', 'Ivan, лимит исчерпан до ', 'Встроенная нода', 'идет вместе с сервером'],
   ])('uses the quoted state, meter and machine-list wording in %s', async (language, until, sentence, reset, localState, builtin, comesWith) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 130 * 60_000).toISOString() }] };
@@ -58,7 +57,7 @@ describe('Subscriptions', () => {
     const machines = [{ ...MACHINE, hostname: 'node-a', status: 'needs_setup' as const }, { ...MACHINE, id: 'm2', hostname: 'node-b', status: 'ready' as const, online: false }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    const row = await screen.findByRole('row', { name: /^Antigravity\b/ });
+    const row = await waitFor(() => screen.getByRole('row', { name: /^Antigravity\b/ }));
     expect(within(row).getByText(state)).toBeInTheDocument();
     expect(row.textContent).toContain(there);
     await openAll();
@@ -116,7 +115,7 @@ describe('Subscriptions', () => {
   it('lists each subscription with its place, machine, state and limits', async () => {
     lists();
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('row', { name: /^Claude\b/ });
+    await waitFor(() => screen.getByRole('row', { name: /^Claude\b/ }));
     expect(within(rowOf('Claude')).getByText('Ready')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('dev-laptop')).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Waiting for the login')).toBeInTheDocument();
@@ -134,7 +133,7 @@ describe('Subscriptions', () => {
     const { agents: _, ...updated } = SUBS[0]!;
     const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...updated, budget: 80 } }] });
     render(<Subscriptions me={ME} />);
-    const claude = await screen.findByRole('row', { name: 'Claude' });
+    const claude = await waitFor(() => screen.getByRole('row', { name: 'Claude' }));
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
     expect(within(claude).getAllByRole('button')).toHaveLength(1);
     await userEvent.click(within(claude).getByText('Ivan'));
@@ -167,7 +166,7 @@ describe('Subscriptions', () => {
       { ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines: [{ ...MACHINE, status: 'needs_setup' }] },
     ] }] });
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('table');
+    await waitFor(() => screen.getByRole('table'));
     const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
     expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Antigravity', 'Claude', 'Kimi']);
     expect(within(screen.getByRole('row', { name: 'Claude' })).getByText(/^until /)).toBeInTheDocument();
@@ -185,12 +184,12 @@ describe('Subscriptions', () => {
   });
 
   it('keeps refreshed subscription values in place while a card is open, then sorts after the last closes', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     let count = 0;
     lists({ 'GET /api/subscriptions': () => [200, { subscriptions: [SUBS[0]!, { ...SUBS[1]!, status: ++count > 1 ? 'ready' : 'needs_login' }] }] });
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('table');
+    await waitFor(() => screen.getByRole('table'));
     const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
     expect(order()).toEqual(['Codex', 'Claude']);
     const button = screen.getByRole('button', { name: 'Open the card of Claude' });
@@ -270,7 +269,7 @@ describe('Subscriptions', () => {
   });
 
   it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['antigravity', 'Antigravity']])('shows an expired rejection as unknown with its last data time for %s', async (provider, label) => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }], complete: true };
@@ -285,7 +284,7 @@ describe('Subscriptions', () => {
 
   it('shows a stale rejection as unknown instead of exhausted, in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' }] };
@@ -366,7 +365,7 @@ describe('Subscriptions', () => {
     ],
   ] as const)('says in %s when a machine is offline instead of Unknown, and Not on this plan for a complete single-window Claude plan', async (language, notOnPlan, offlineState, offlineLine, offlineWithData, offlineNoData) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(new Date('2026-11-13T21:06:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const ownerClaude: SubView = {
@@ -398,7 +397,7 @@ describe('Subscriptions', () => {
     };
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [ownerClaude, claraClaude, maxCodex] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    const rows = await screen.findAllByRole('row');
+    const rows = await waitFor(() => screen.getAllByRole('row'));
     const claraRow = rows.find(r => r.textContent?.includes('Clara'))!;
     expect(within(claraRow).getByText(offlineState)).toBeInTheDocument();
     expect(within(claraRow).getAllByText(offlineWithData)).toHaveLength(2);
@@ -421,7 +420,7 @@ describe('Subscriptions', () => {
   });
 
   it('refreshes on its own, so a node that signs in turns Ready without a reload', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     onTestFinished(() => {
       vi.useRealTimers();
     });
@@ -433,9 +432,9 @@ describe('Subscriptions', () => {
       },
     });
     render(<Subscriptions me={ME} />);
-    expect(await screen.findByText('Waiting for the login')).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText('Waiting for the login'))).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(5000));
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText('Ready'))).toBeInTheDocument();
   });
 
   it('connects Claude and Codex and shows the command with Copy and the trust line', async () => {
@@ -443,14 +442,14 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Connect a subscription' })));
     expect(screen.getByRole('button', { name: 'Show command' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
     await user.click(screen.getByRole('checkbox', { name: 'Codex' }));
     expect(screen.getByRole('checkbox', { name: 'GLM' })).not.toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['claude', 'codex'] } });
-    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText(commandCode(withKey(COMMAND))))).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText(TRUST)).toBeInTheDocument();
   });
@@ -460,7 +459,7 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Connect a subscription' })));
     const google = screen.getByRole('checkbox', { name: 'Antigravity' });
     expect(google).toHaveAccessibleDescription('Google AI Pro or Ultra plan');
     await user.click(google);
@@ -482,9 +481,9 @@ describe('Subscriptions', () => {
     });
     render(<Subscriptions me={ME} />);
     await openAll();
-    const run = await screen.findByRole('button', { name: 'Run a test on Claude' });
+    const run = await waitFor(() => screen.getByRole('button', { name: 'Run a test on Claude' }));
     /* The screen asks about the test once a second, on a clock the test moves; userEvent would wait on a timer of it. */
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     await act(async () => { fireEvent.click(run); });
     await act(() => vi.advanceTimersByTimeAsync(2000));
@@ -540,9 +539,9 @@ describe('Subscriptions', () => {
     lists({ 'POST /api/subscriptions/s-claude/test': [201, { job: { ...job, status: 'queued' } }], 'GET /api/jobs/j2': [200, { job }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    const run = await screen.findByRole('button', { name: 'Run a test on Claude' });
+    const run = await waitFor(() => screen.getByRole('button', { name: 'Run a test on Claude' }));
     /* The screen asks about the test a second on, on a clock the test moves. */
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     await act(async () => { fireEvent.click(run); });
     await act(() => vi.advanceTimersByTimeAsync(1000));
@@ -556,7 +555,7 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Remove Kimi' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Remove Kimi' })));
     expect(screen.getByText('Remove Kimi? Its login will be deleted from the machine.')).toBeInTheDocument();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Yes, remove' }));
@@ -568,9 +567,9 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Use Claude for the orchestrator' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Use Claude for the orchestrator' })));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/orchestrator');
-    expect(await within(rowOf('Claude')).findByText('Orchestrator')).toBeInTheDocument();
+    expect(await waitFor(() => within(rowOf('Claude')).getByText('Orchestrator'))).toBeInTheDocument();
     expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Orchestrator')).not.toBeInTheDocument();
   });
 
@@ -579,10 +578,10 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    const share = await within(rowOf('Claude')).findByRole('combobox', { name: 'Share of Claude for tasks' });
+    const share = await waitFor(() => within(rowOf('Claude')).getByRole('combobox', { name: 'Share of Claude for tasks' }));
     expect(share).toHaveValue('');
     await user.selectOptions(share, '80');
-    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { budget: 80 } }));
+    await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { budget: 80 } }));
     expect(within(rowOf('Claude')).getByRole('combobox', { name: 'Share of Claude for tasks' })).toHaveValue('80');
     expect(within(rowOf('Anthropic key ending 9f3a')).queryByRole('combobox', { name: /^Share of / })).not.toBeInTheDocument();
   });
@@ -593,12 +592,12 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     const card = rowOf('Claude');
-    expect(await within(card).findByText('Any plan of the company with room for the employee')).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText('Any plan of the company with room for the employee'))).toBeInTheDocument();
     const add = within(card).getByRole('combobox', { name: 'Add a fallback plan for Claude, Ivan' });
     expect([...add.querySelectorAll('option')].map(o => o.textContent)).toEqual(['Add a fallback plan', 'Codex, Ivan', 'Kimi, Ivan', 'Orchestrator (Anthropic)']);
     await user.selectOptions(add, 's-codex');
-    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { fallbacks: [{ subscription: 's-codex', model: null }] } }));
-    expect(await within(rowOf('Claude')).findByText('Codex, Ivan')).toBeInTheDocument();
+    await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { fallbacks: [{ subscription: 's-codex', model: null }] } }));
+    expect(await waitFor(() => within(rowOf('Claude')).getByText('Codex, Ivan'))).toBeInTheDocument();
   });
 
   it('orders the fallback plans, picks the model on one, and removes one', async () => {
@@ -614,7 +613,7 @@ describe('Subscriptions', () => {
     await user.click(within(card).getByRole('button', { name: 'Move Codex, Ivan lower' }));
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Model on Orchestrator (Anthropic)' }), 'claude-sonnet-5-5');
     await user.click(within(card).getByRole('button', { name: 'Remove Codex, Ivan from the fallback plans' }));
-    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([
+    await waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([
       { fallbacks: [named[1], named[0]] },
       { fallbacks: [named[0], { subscription: 's-key', model: 'claude-sonnet-5-5' }] },
       { fallbacks: [named[1]] },
@@ -628,7 +627,7 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
     await openAll();
     const card = rowOf('Claude');
-    expect(await within(card).findByText('Codex, Ivan')).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText('Codex, Ivan'))).toBeInTheDocument();
     /* The model named for a fallback shows by its name; the role's own shows nothing. */
     expect([...card.querySelectorAll('.fallback-list li')].map(item => item.textContent)).toEqual(['Codex, Ivan', 'Orchestrator (Anthropic)Claude Sonnet 5.5']);
     expect(within(card).queryByRole('combobox', { name: /fallback|Model on/ })).not.toBeInTheDocument();
@@ -642,7 +641,7 @@ describe('Subscriptions', () => {
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await openAll();
     const card = rowOf('Claude');
-    expect(await within(card).findByText('Запасные тарифы')).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText('Запасные тарифы'))).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Опустить Codex, Ivan ниже' })).toBeDisabled();
     expect(within(card).getByRole('combobox', { name: 'Добавить запасной тариф для Claude, Ivan' })).toBeInTheDocument();
   });
@@ -661,9 +660,9 @@ describe('Subscriptions', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'New command for Kimi' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'New command for Kimi' })));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-kimi/command');
-    expect(await within(rowOf('Kimi')).findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
+    expect(await waitFor(() => within(rowOf('Kimi')).getByText(commandCode(withKey(COMMAND))))).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
   });
 

@@ -1,5 +1,4 @@
 import { act, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
@@ -9,7 +8,7 @@ import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { fakeStream } from './fake-stream';
 import { commandCode } from './command-code';
-import { COMMAND, lists, rowOf, openAll } from './subscriptions-helpers';
+import { waitFor, userEvent, COMMAND, lists, rowOf, openAll } from './subscriptions-helpers';
 
 vi.mock('../src/ui/AgentTerminal', () => ({
   AgentTerminal: ({ path }: { path: string }) => <div data-testid="live-terminal" data-path={path} />,
@@ -21,7 +20,7 @@ describe('subscription search and filters', () => {
   it('searches agents and machines without closing matching cards, then clears the query', async () => {
     lists();
     render(<Subscriptions me={ME} />);
-    expect(await screen.findByText('4 subscriptions')).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText('4 subscriptions'))).toBeInTheDocument();
     const search = screen.getByRole('searchbox', { name: 'Search' });
     await userEvent.click(screen.getByRole('button', { name: 'Open the card of Claude' }));
     await userEvent.type(search, 'bRuNo');
@@ -37,11 +36,10 @@ describe('subscription search and filters', () => {
     expect(screen.getByText('4 subscriptions')).toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'Claude, Ivan' })).toBeInTheDocument();
   });
-
   it('widens providers in one group and combines provider, owner and status filters', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [SUBS[0]!, SUBS[1]!, { ...SUBS[2]!, owner: { id: 'p2', name: 'Maria' } }, SUBS[3]!] }] });
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('table');
+    await waitFor(() => screen.getByRole('table'));
     const provider = screen.getByRole('group', { name: 'Provider' });
     await userEvent.click(within(provider).getByRole('button', { name: /Claude.*2/ }));
     expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
@@ -56,7 +54,7 @@ describe('subscription search and filters', () => {
   it('searches key endings, tiers, account addresses and where the plan serves', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'max', accounts: [{ nodeId: 'n1', hostname: 'dev-laptop', tier: 'max', email: 'private@acme.com' }], place: { kind: 'department', id: 'd1', name: 'Marketing' } }, SUBS[3]!] }] });
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('table');
+    await waitFor(() => screen.getByRole('table'));
     const search = screen.getByRole('searchbox');
     for (const query of ['9f3a', 'max', 'private@acme.com', 'Marketing']) {
       await userEvent.clear(search);
@@ -128,15 +126,15 @@ describe('signing in to plans', () => {
     const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Claude with another account' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Claude with another account' })));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/s-claude/signin', body: { fresh: true } });
-    expect(await screen.findByRole('heading', { name: 'Signing in on dev-laptop' })).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByRole('heading', { name: 'Signing in on dev-laptop' }))).toBeInTheDocument();
     expect(screen.getByTestId('live-terminal')).toHaveAttribute('data-path', `/api/subscriptions/s-claude/signin/terminal?nodeId=${NODE}`);
     /* Another plan's or machine's sign-in leaves this one open. */
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: true, error: null, owner: 'p1' });
     expect(screen.getByRole('heading', { name: 'Signing in on dev-laptop' })).toBeInTheDocument();
     stream.send({ type: 'subscription.signin', subscriptionId: 's-claude', nodeId: NODE, ok: true, error: null, owner: 'p1' });
-    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
@@ -145,12 +143,12 @@ describe('signing in to plans', () => {
     const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
     expect(calls.find(c => c.method === 'POST')!.body).toEqual({ fresh: false });
-    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
+    await waitFor(() => screen.getByRole('heading', { name: 'Signing in on dev-laptop' }));
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'tmux: lost server', owner: 'p1' });
     /* Under the plan's row, as a test's result is. */
-    expect(await screen.findByText('The sign-in did not finish, so nothing changed. Try again.')).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText('The sign-in did not finish, so nothing changed. Try again.'))).toBeInTheDocument();
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
@@ -159,11 +157,11 @@ describe('signing in to plans', () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
+    await waitFor(() => screen.getByRole('heading', { name: 'Signing in on dev-laptop' }));
     const line = 'Error: claude native binary not installed. Either postinstall did not run ... or the platform-native optional dependency was not downloaded (--omit=optional)';
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The sign-in ended before it finished, so nothing changed.', code: 1, line, owner: 'p1' });
-    expect(await screen.findByText(`The sign-in ended with code 1, so nothing changed. The program said: ${line}`)).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText(`The sign-in ended with code 1, so nothing changed. The program said: ${line}`))).toBeInTheDocument();
     expect(screen.queryByText('The sign-in ended before it finished, so nothing changed.')).not.toBeInTheDocument();
   });
 
@@ -177,12 +175,12 @@ describe('signing in to plans', () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    const heading = await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
-    await vi.waitFor(() => expect(shown.some(node => node.contains(heading))).toBe(true));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
+    const heading = await waitFor(() => screen.getByRole('heading', { name: 'Signing in on dev-laptop' }));
+    await waitFor(() => expect(shown.some(node => node.contains(heading))).toBe(true));
     /* Closing it must not trip over what scrolling gave back. */
     await userEvent.click(screen.getByRole('button', { name: 'Stop the sign-in' }));
-    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
   });
 
   it('says what to do when the machine could not install the program to sign in with', async () => {
@@ -190,10 +188,10 @@ describe('signing in to plans', () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
+    await waitFor(() => screen.getByRole('heading', { name: 'Signing in on dev-laptop' }));
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The program could not be installed on this machine, so nothing changed.', owner: 'p1' });
-    expect(await screen.findByText("The program could not be installed on this machine, so nothing changed. Check the machine's internet connection and free disk space, then try again.")).toBeInTheDocument();
+    expect(await waitFor(() => screen.getByText("The program could not be installed on this machine, so nothing changed. Check the machine's internet connection and free disk space, then try again."))).toBeInTheDocument();
   });
 
   it('stops a sign-in half way', async () => {
@@ -201,8 +199,8 @@ describe('signing in to plans', () => {
     const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Stop the sign-in' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop the sign-in' })));
     expect(calls.find(c => c.path.endsWith('/signin/stop'))).toEqual({ method: 'POST', path: '/api/subscriptions/s-codex/signin/stop', body: { nodeId: NODE } });
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
@@ -221,10 +219,10 @@ describe('signing in to plans', () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only(ready, SUBS[0]!), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign in to Codex' })));
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
     const words = 'The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.';
-    expect(await within(card).findByText(words)).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText(words))).toBeInTheDocument();
     expect(within(card).queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Sign in to Codex' })).toBeInTheDocument();
@@ -244,9 +242,9 @@ describe('signing in to plans', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: signIn }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: signIn })));
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
-    expect(await within(card).findByText(text)).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText(text))).toBeInTheDocument();
     expect(within(card).getByText(commandCode(update))).toBeInTheDocument();
     expect(within(card).getByText(trust)).toBeInTheDocument();
     await userEvent.click(within(card).getAllByRole('button', { name: copy })[0]!);
@@ -255,7 +253,7 @@ describe('signing in to plans', () => {
     /* The next try starts clean: the note and its command go once the sign-in starts. */
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     await userEvent.click(within(card).getByRole('button', { name: signIn }));
-    await vi.waitFor(() => expect(within(card).queryByText(commandCode(update))).not.toBeInTheDocument());
+    await waitFor(() => expect(within(card).queryByText(commandCode(update))).not.toBeInTheDocument());
   });
 
   it('says in Russian that no machine of the plan is online to sign in on', async () => {
@@ -265,9 +263,9 @@ describe('signing in to plans', () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, offline] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Войти в Codex' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Войти в Codex' })));
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
-    expect(await within(card).findByText('Ни одна машина этой подписки не в сети. Включите одну из них и попробуйте еще раз.')).toBeInTheDocument();
+    expect(await waitFor(() => within(card).getByText('Ни одна машина этой подписки не в сети. Включите одну из них и попробуйте еще раз.'))).toBeInTheDocument();
   });
 
   it('offers no sign-in for a plan of another person, or one with no machine online', async () => {
@@ -289,11 +287,11 @@ describe('signing in to plans', () => {
     });
     render(<Subscriptions me={ME} />);
     await openAll();
-    await userEvent.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
+    await userEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Paste the key for Kimi' })));
     expect(screen.getByRole('link', { name: /Kimi/ })).toHaveAttribute('href', 'https://www.kimi.com/code/console');
     await userEvent.type(screen.getByLabelText('Kimi key'), KEY);
     await userEvent.click(screen.getByRole('button', { name: 'Connect key' }));
-    await vi.waitFor(() => expect(calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')).toBeTruthy());
+    await waitFor(() => expect(calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')).toBeTruthy());
     const sent = calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')!.body as { kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] };
     expect(sent.kind).toBe('kimi_key');
     expect(sent.version).toBe(3);
@@ -302,7 +300,7 @@ describe('signing in to plans', () => {
     d.addIdentity(identity);
     expect(await d.decrypt(armor.decode(sent.envelopes[0]!.sealed), 'text')).toBe(KEY);
     expect(JSON.stringify(calls)).not.toContain(KEY);
-    await vi.waitFor(() => expect(screen.queryByLabelText('Kimi key')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByLabelText('Kimi key')).not.toBeInTheDocument());
   });
 
   it('says the sign-in lines in Russian', async () => {
@@ -403,7 +401,7 @@ describe('the card of a plan that does not work', () => {
     const [why, steps, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
     expect(steps).toHaveRole('list');
-    await vi.waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
+    await waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
     expect(install).toHaveTextContent(lifetime);
     expect(buttons(install!)).toEqual([actions[0], actions[0]]);
     expect(buttons(last!)).toEqual([actions[1]]);
@@ -431,7 +429,7 @@ describe('the card of a plan that does not work', () => {
     expect(blocks(card)).toEqual(THREE);
     expect(workingParts(card)).toEqual(['Limits', 'Owner and account', 'Settings', 'Machines of this plan', 'Agents on it', 'Run a test', 'Use for the orchestrator']);
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
-    await vi.waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
+    await waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
     expect(workingParts(card)).toEqual([]);
     /* The machine and why, the command and the one for Windows with Copy, and Sign in and Remove under them. */
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
@@ -457,14 +455,14 @@ describe('the card of a plan that does not work', () => {
     await openAll();
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
-    await vi.waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
+    await waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
-    await vi.waitFor(() => expect(asked).toBe(2));
+    await waitFor(() => expect(asked).toBe(2));
     /* While the server has not answered, the card stays as it was. */
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(within(card).getByText(commandCode(UPDATE))).toBeInTheDocument();
     act(() => answer([409, OLD]));
-    await vi.waitFor(() => expect(within(card).getByText(commandCode(UPDATE))).toBeInTheDocument());
+    await waitFor(() => expect(within(card).getByText(commandCode(UPDATE))).toBeInTheDocument());
     expect(blocks(card)).toEqual(['blk blk-fix']);
   });
 
@@ -475,7 +473,7 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
-    await vi.waitFor(() => expect(block.firstElementChild).toHaveTextContent(OLD_TEXT));
+    await waitFor(() => expect(block.firstElementChild).toHaveTextContent(OLD_TEXT));
     expect(within(card).queryByText('On dev-laptop. Only Ivan can sign in.')).not.toBeInTheDocument();
     expect(buttons(block)).toEqual(['Copy', 'Copy', 'Sign in', 'Remove']);
     expect(blocks(card)).toEqual(['blk blk-fix']);
@@ -526,7 +524,7 @@ describe('the forms that connect plans and keys', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Connect a subscription' })));
     expect(screen.getByRole('heading', { name: 'Connect subscriptions' })).toBeInTheDocument();
     const claude = screen.getByRole('checkbox', { name: 'Claude' });
     expect(claude.closest('label')!.querySelector('svg.pm')).not.toBeNull();
@@ -546,7 +544,7 @@ describe('the forms that connect plans and keys', () => {
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
+    await user.click(await waitFor(() => screen.getByRole('button', { name: 'Paste the key for Kimi' })));
     const field = screen.getByLabelText('Kimi key');
     expect(field.closest('form')).toHaveClass('form-grid');
     expect(field).toHaveAccessibleDescription(/Stored encrypted and never shown again after saving\./);
@@ -557,7 +555,7 @@ describe('the forms that connect plans and keys', () => {
     expect(connect).toHaveAccessibleName('Connecting…');
     expect(connect).toHaveAttribute('aria-busy', 'true');
     await act(async () => { finish([200, { version: 1, recipients: [] }]); });
-    expect(await screen.findByRole('alert')).toHaveTextContent('No machine of this plan can take the key yet.');
+    expect(await waitFor(() => screen.getByRole('alert'))).toHaveTextContent('No machine of this plan can take the key yet.');
     expect(connect).toHaveAccessibleName('Connect key');
   });
 });
