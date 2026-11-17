@@ -21,12 +21,15 @@ export async function refreshCasePicture(ctx: Ctx, row: Case): Promise<ProgramVi
   const view = await requestProgramView(ctx, { agentId: row.agentId, node: nodeIdentity(row.nodeId) });
   if (!view || view.result !== 'ok') return null;
   const { rendered } = await renderPicture(view, await pictureSecrets(ctx, row.companyId));
-  await operatorTransaction(ctx, async (tx, inside) => {
-    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
-    const settled = await settleAnsweredQuestions(inside, row.agentId, view, rendered.png);
-    if (!settled.includes(row.id)) await storeCasePicture(tx, row, rendered.png);
-  });
+  await operatorTransaction(ctx, (tx, inside) => keepLook(tx, inside, row, view, rendered.png));
   return view;
+}
+
+/* A case its look closed already has that picture. */
+async function keepLook(tx: Tx, inside: Ctx, row: Case, view: ProgramView, png: Buffer): Promise<void> {
+  await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
+  const settled = await settleAnsweredQuestions(inside, row.agentId, view, png);
+  if (!settled.includes(row.id)) await storeCasePicture(tx, row, png);
 }
 
 type Tx = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];

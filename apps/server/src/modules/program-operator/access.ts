@@ -88,7 +88,8 @@ export async function readProgramView(ctx: Ctx, caller: OperatorCaller, input: V
   if (!view || view.result !== 'ok' || !view.snapshot) throw unavailable(view?.reason ?? 'node_unavailable');
   const secrets = await pictureSecrets(ctx, me.companyId);
   const { rendered } = await renderPicture(view, secrets);
-  await keepForCase(ctx, caller, program, view, rendered.png);
+  await settleLook(ctx, program, view, rendered.png);
+  await keepForCase(ctx, caller, program, rendered.png);
   return {
     employee: program.agentId, name: program.name, job: view.jobId, instance: view.instance, snapshot: view.snapshot, state: view.state,
     tool: view.tool && masked(view.tool, secrets), question: maskedQuestion(view.question, secrets), input: view.input, undelivered: view.undelivered, png: rendered.png, text: rendered.text,
@@ -126,17 +127,22 @@ function typedOf(input: KeysInput): Typed {
 const outcomeOf = (action: string, reply: ProgramInputResult | null): Outcome =>
   reply ? { action, result: reply.result, reason: reply.reason } : { action, result: 'unknown', reason: 'action_unknown' };
 
-/* The program operator's look at the case it was given is the picture its report carries. Anyone's look at the program at
-   work asking nothing closes its question cases. */
-async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, view: ProgramView, png: Buffer): Promise<void> {
+/* Anyone's look at the program at work asking nothing closes its question cases, and its node hears of it. */
+async function settleLook(ctx: Ctx, program: Program, view: ProgramView, png: Buffer): Promise<void> {
   const settled = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
-    const closed = await settleAnsweredQuestions(inside, program.agentId, view, png);
-    const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
-    if (row) await storeCasePicture(tx, row, png);
-    return closed;
+    return settleAnsweredQuestions(inside, program.agentId, view, png);
   });
   if (settled.length) await syncOperatorCases(ctx, program.agentId);
+}
+
+/* The program operator's look at the case it was given is the picture its report carries. */
+async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, png: Buffer): Promise<void> {
+  await operatorTransaction(ctx, async tx => {
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
+    const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
+    if (row) await storeCasePicture(tx, row, png);
+  });
 }
 
 /* Who, why, which keys and what text with its secrets masked, and what came of it, in the employee's conversation. */
