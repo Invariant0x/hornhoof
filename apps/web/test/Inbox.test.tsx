@@ -89,16 +89,17 @@ describe("an employee's inbox", () => {
     const answers = [{ unreadCount: 1 }, { unreadCount: 0 }];
     const calls = show(VIEW, { 'POST /api/agents/b1/inbox/read': () => [200, answers.shift()] }, { onUnread: heard });
     await screen.findByRole('list', { name: 'Letters' });
-    expect(heard).toHaveBeenLastCalledWith(2);
+    /* The list can appear before its effect reports the unread count. Wait for each report before checking its state. */
+    await waitFor(() => expect(heard).toHaveBeenLastCalledWith(2));
     await user.click(screen.getByRole('button', { name: 'Mark the letter from Rita Sousa-Ferreira as read' }));
+    await waitFor(() => expect(heard).toHaveBeenLastCalledWith(1));
     expect(statusOf(letterOf('Rita Sousa-Ferreira'))).toBe('Read');
     expect(screen.getByRole('status')).toHaveTextContent('1 of 3 unread');
     expect(screen.getByRole('heading', { name: 'Letters' })).toHaveFocus();
-    expect(heard).toHaveBeenLastCalledWith(1);
     await user.click(screen.getByRole('button', { name: 'Mark all as read' }));
+    await waitFor(() => expect(heard).toHaveBeenLastCalledWith(0));
     expect(screen.getByRole('status')).toHaveTextContent('All read. 3 in total');
     expect(screen.queryByRole('button', { name: /Mark/ })).toBeNull();
-    expect(heard).toHaveBeenLastCalledWith(0);
     expect(changes(calls)).toEqual([
       { method: 'POST', path: '/api/agents/b1/inbox/read', body: { ids: ['l2'] } },
       { method: 'POST', path: '/api/agents/b1/inbox/read', body: { all: true } },
