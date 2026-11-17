@@ -44,6 +44,20 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it.each([true, false])('cleans a failed recorder stop and refuses a secret only while its session still exists: %s', async exists => {
+    const { tmux, home } = recorded(args => {
+      if (args[0] === 'pipe-pane') return new Error('pipe control failed');
+      if (args[0] === 'has-session' && !exists) return new Error('no session');
+      return '';
+    });
+    const recording = tmux['recordings'].create('a-private', home);
+    writeFileSync(recording.file, 'private-stop-failure-marker-1178');
+    const protectedOutput = tmux.protectOutput('a-private');
+    if (exists) await expect(protectedOutput).rejects.toThrow('Sensitive terminal recording could not be stopped.');
+    else await protectedOutput;
+    expect(existsSync(recording.file)).toBe(false);
+  });
+
   it('clears the private marker when an explicitly removed session was already gone', async () => {
     const { tmux } = recorded(args => ['kill-session', 'has-session'].includes(args[0]!) ? new Error('no session') : '');
     await tmux.protectOutput('a-private');
