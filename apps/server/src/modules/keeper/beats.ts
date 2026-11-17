@@ -55,7 +55,7 @@ export function parseBeat(body: unknown): Beat | null {
   return parsed.success ? parsed.data : null;
 }
 
-export type BeatsOptions = {
+type BeatsOptions = {
   /* This keeper's own beat, as of now. */
   self: () => Beat;
   /* The other live machines that keep data: each one's row, and the id its keeper runs under. */

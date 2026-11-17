@@ -78,7 +78,7 @@ function classifyMiss(said: ProbeRace, nonce: string): LinkMiss | null {
   return said.value.nonce === nonce ? null : 'stale';
 }
 
-export type LeaseProofsOptions = {
+type LeaseProofsOptions = {
   /* A request through the company's link for who holds the lease there, with a nonce of this keeper's. */
   probe: (nonce: string) => Promise<ProbeAnswer>;
   beats: Pick<Beats, 'answer' | 'all'>;

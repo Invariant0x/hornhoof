@@ -12,7 +12,7 @@ import { throughEchelons } from './turnkey.js';
 import { NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 export function checkedScopePaths(paths: string[] = []): string[] {
   if (!validScopePaths(paths)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');

@@ -23,7 +23,7 @@ export type RenderRequest = {
 };
 export type SourceRef = { entryId: string; revision: number; digest: string };
 export type Rendered = { subject: string; text: string; sources: SourceRef[]; sourceRevisionsDigest: string; money: Money[] };
-export type RenderResult = { ok: true; rendered: Rendered } | { ok: false; reasonCodes: GateCode[] };
+type RenderResult = { ok: true; rendered: Rendered } | { ok: false; reasonCodes: GateCode[] };
 
 const MAX_FIELD = 200;
 const ONE_LINE = /^[^\p{Cc}\p{Zl}\p{Zp}]+$/u;

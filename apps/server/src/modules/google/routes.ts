@@ -31,7 +31,7 @@ function requireShareFor(kind: Row['kind'], shareEmail: string | null): void {
   }
 }
 
-export const googleSheetsView = (row: Row) => ({
+const googleSheetsView = (row: Row) => ({
   kind: row.kind,
   account: row.account,
   shareEmail: row.shareEmail,

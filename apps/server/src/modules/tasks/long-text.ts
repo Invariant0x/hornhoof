@@ -17,7 +17,7 @@ type Budget = Pick<Ctx['config'], 'taskFilesBytes'>;
 type Scope = { id: string; companyId: string };
 type Owner = { agentId: string; personId: string | null };
 type Note = { kind: string; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true };
-export type FullText = { field: 'text' | 'evidence'; id: string; name: string; size: number; sha256: string };
+type FullText = { field: 'text' | 'evidence'; id: string; name: string; size: number; sha256: string };
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const forbidden = () => new ApiError(403, 'forbidden', 'You cannot attach text to this task.', 'task_not_yours');
 
