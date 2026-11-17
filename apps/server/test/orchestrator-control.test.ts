@@ -145,7 +145,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await call(await mcp(app, TOKEN), 'view', { path: '/mcp' })).isError).toBe(true);
   });
 
-  it("shows the CEO alone, in this window, the commands that connect the CEO's machines and plans, and never the orchestrator", async () => {
+  it("shows the CEO, in this window, the commands that connect the CEO's machines and plans, and the orchestrator when it reads them", async () => {
     const { app, db, ceo } = await company();
     const client = await mcp(app, TOKEN);
     const SHOWN = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
@@ -174,22 +174,22 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
     expect(await commands()).toMatchObject([{ id: made[0]!.id, dismissedSubscriptionIds: [plan!.id] }]);
-    expect((await call(client, 'view', { path: '/api/nodes/commands' })).isError).toBe(true);
+    expect(JSON.parse(text(await call(client, 'view', { path: '/api/nodes/commands' }))).commands).toEqual(await commands());
     const events = JSON.stringify(await db.select(only(agentEvents, 'data')).from(agentEvents));
     for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));
   });
 
-  it("keeps a machine's command from the people who did not get it, and from the orchestrator's own calls", async () => {
+  it("keeps a machine's command from the people who did not get it, and gives it to the orchestrator acting for the CEO", async () => {
     const { app, db, ceo, orchestrator } = await company();
     await call(await mcp(app, TOKEN), 'machine_command', {});
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
     expect((await app.inject({ url: '/api/nodes/commands', ...as(maria) })).json().commands).toEqual([]);
     const [ivan] = await db.select().from(people).where(eq(people.isOwner, true));
-    const inside = await app.inject({ url: '/api/nodes/commands', headers: orchestratorHeaders(ivan!.id, orchestrator.id) });
-    expect(inside.statusCode).toBe(403);
     const [made] = (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands;
+    const inside = await app.inject({ url: '/api/nodes/commands', headers: orchestratorHeaders(ivan!.id, orchestrator.id) });
+    expect(inside.json().commands).toEqual([made]);
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, ...as(maria) })).statusCode).toBe(404);
-    expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(204);
   });
 
   it('gives these tools to the orchestrator alone', async () => {
