@@ -1,0 +1,77 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ❯ |@hornhoof/node| test/check-command-stop.test.ts (11 tests | 2 failed) 71ms
+   ✓ runs the command in a process group of its own while it holds a slot, and as before with none 39ms
+   ✓ stops the whole group of the command when the slot stream ends, and the check does not pass 8ms
+   ✓ stops the whole group of the command when the slot stream fails, and the check does not pass 2ms
+   ✓ stops the whole group of the command when the slot stream says the node failed, and the check does not pass 3ms
+   ✓ stops the whole group of the command when the slot stream says the slot or the turn ended, and the check does not pass 2ms
+   ✓ kills the group that outlives its grace after TERM, on the clock the test moves 5ms
+   ✓ leaves a command that ends on its own to its end, then ends what it left in its group before the slot goes 1ms
+   ✓ sends a signal it is given to the whole group of the command 1ms
+   × never reports success when a command catches the wrapper cancellation and exits zero 6ms
+   × bounds cleanup when a command ignores cancellation sent to the wrapper 2ms
+   ✓ keeps cancellation cleanup alive when its diagnostic cannot be written 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@hornhoof/node| test/check-command-stop.test.ts > never reports success when a command catches the wrapper cancellation and exits zero
+AssertionError: expected +0 to be 143 // Object.is equality
+
+- Expected
++ Received
+
+- 143
++ 0
+
+ ❯ test/check-command-stop.test.ts:138:25
+    136|   process.emit('SIGTERM', 'SIGTERM');
+    137|   child.emit('exit', 0, null);
+    138|   expect(await pending).toBe(143);
+       |                         ^
+    139| });
+    140|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |@hornhoof/node| test/check-command-stop.test.ts > bounds cleanup when a command ignores cancellation sent to the wrapper
+AssertionError: expected [ 'SIGTERM' ] to deeply equal [ 'SIGTERM', 'SIGKILL' ]
+
+Compared values have no visual difference.
+
+ ❯ test/check-command-stop.test.ts:153:19
+    151|     expect(group).toEqual(['SIGTERM']);
+    152|     vi.advanceTimersByTime(1);
+    153|     expect(group).toEqual(['SIGTERM', 'SIGKILL']);
+       |                   ^
+    154|   } finally {
+    155|     child.emit('exit', null, 'SIGKILL');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: recorded EPIPE
+ ❯ Socket.<anonymous> apps/node/test/check-command-stop.test.ts:165:72
+ ❯ Socket.Mock [as write] node_modules/vitest/dist/chunks/spy.DDMXghXv.js:353:40
+ ❯ write apps/node/src/check-command.ts:24:15
+ ❯ apps/node/src/check-command.ts:115:13
+
+This error originated in "apps/node/test/check-command-stop.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The last test to run before this error was "keeps cancellation cleanup alive when its diagnostic cannot be written". This means either:
+- the error was thrown while Vitest was running this test, or
+- the error was thrown after the test completed, and this was the most recent test at that point.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 9 passed (11)
+     Errors  1 error
+   Start at  04:12:34
+   Duration  410ms (transform 62%, tests 22%, import 13%, setup 2%, worker 1%)
+

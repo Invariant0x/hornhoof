@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ✓ test/check-command-platform.test.ts (2 tests) 50ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  05:30:32
+   Duration  136ms (tests 58%, import 32%, transform 8%, worker 2%)
+

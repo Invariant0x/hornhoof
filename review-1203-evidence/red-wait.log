@@ -1,0 +1,93 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ❯ |@hornhoof/node| test/check-command-wait.test.ts (4 tests | 4 failed) 229ms
+   × reuses an inherited slot for an explicit nested wait 203ms
+   × preserves the recorded SIGINT termination as status 130 7ms
+   × preserves the recorded SIGTERM termination as status 143 2ms
+   × preserves the recorded SIGHUP termination as status 129 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@hornhoof/node| test/check-command-wait.test.ts > reuses an inherited slot for an explicit nested wait
+AssertionError: expected undefined to be '10000000-0000-4000-8000-000000000001' // Object.is equality
+
+- Expected:
+"10000000-0000-4000-8000-000000000001"
+
++ Received:
+undefined
+
+ ❯ test/check-command-wait.test.ts:28:107
+     26|   });
+     27|   expect(await checkCommand(['--wait', '--', 'recorded-tool'], { HH_BR…
+     28|   expect(JSON.parse((request.mock.calls[0] as unknown as [string, Requ…
+       |                                                                                                           ^
+     29| });
+     30|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |@hornhoof/node| test/check-command-wait.test.ts > preserves the recorded SIGINT termination as status 130
+AssertionError: expected 1 to be 130 // Object.is equality
+
+- Expected
++ Received
+
+- 130
++ 1
+
+ ❯ test/check-command-wait.test.ts:37:69
+     35|     return child;
+     36|   });
+     37|   expect(await checkCommand(['--wait', '--', 'recorded-tool'], {})).to…
+       |                                                                     ^
+     38| });
+     39|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  |@hornhoof/node| test/check-command-wait.test.ts > preserves the recorded SIGTERM termination as status 143
+AssertionError: expected 1 to be 143 // Object.is equality
+
+- Expected
++ Received
+
+- 143
++ 1
+
+ ❯ test/check-command-wait.test.ts:37:69
+     35|     return child;
+     36|   });
+     37|   expect(await checkCommand(['--wait', '--', 'recorded-tool'], {})).to…
+       |                                                                     ^
+     38| });
+     39|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  |@hornhoof/node| test/check-command-wait.test.ts > preserves the recorded SIGHUP termination as status 129
+AssertionError: expected 1 to be 129 // Object.is equality
+
+- Expected
++ Received
+
+- 129
++ 1
+
+ ❯ test/check-command-wait.test.ts:37:69
+     35|     return child;
+     36|   });
+     37|   expect(await checkCommand(['--wait', '--', 'recorded-tool'], {})).to…
+       |                                                                     ^
+     38| });
+     39|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  02:50:04
+   Duration  2.53s (import 51%, transform 25%, tests 19%, setup 4%, worker 1%)
+

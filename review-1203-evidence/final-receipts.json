@@ -1,0 +1,99 @@
+{
+  "checkedCommit": "1a4fc21bb8b677fd670e90991ffafbe1064c9b91",
+  "workingTree": "clean before and after named checks",
+  "nodeUnitChecks": [
+    {
+      "file": "check-group.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-group.test.ts",
+      "log": "final-group.log",
+      "chunk_id": "c34476",
+      "wall_time_seconds": 0.206786292,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-command-held.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-held.test.ts",
+      "log": "final-held.log",
+      "chunk_id": "48753e",
+      "wall_time_seconds": 0.193764,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-command-platform.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-platform.test.ts",
+      "log": "final-platform.log",
+      "chunk_id": "30ae57",
+      "wall_time_seconds": 0.147042208,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-command-stop.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-stop.test.ts",
+      "log": "final-stop.log",
+      "chunk_id": "cb130a",
+      "wall_time_seconds": 0.254042875,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-command-wait.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-wait.test.ts",
+      "log": "final-wait.log",
+      "chunk_id": "b1d2a6",
+      "wall_time_seconds": 0.532912459,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-command-lease.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command-lease.test.ts",
+      "log": "final-lease.log",
+      "chunk_id": "afbb49",
+      "wall_time_seconds": 0.085863042,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "file": "check-client.test.ts",
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-client.test.ts",
+      "log": "final-client.log",
+      "chunk_id": "34c5a4",
+      "wall_time_seconds": 0.114088333,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    }
+  ],
+  "additionalChecks": [
+    {
+      "cmd": "node node_modules/vitest/vitest.mjs run --root apps/node test/check-command.test.ts -t 'keeps no running group past the slot'",
+      "log": "final-killed-wrapper.log",
+      "exit_code": 0,
+      "passed": 1,
+      "skipped": 18
+    },
+    {
+      "cmd": "node ../../node_modules/vitest/vitest.mjs run test/Machines.test.tsx -t 'shows why new checks wait'",
+      "cwd": "apps/web",
+      "log": "final-machine-refusal.log",
+      "exit_code": 0,
+      "passed": 1,
+      "skipped": 113
+    }
+  ],
+  "limits": [
+    "No final build, type or lint receipt yet",
+    "No complete check-command file receipt for this commit yet",
+    "Inbox recovery and server machine state proof await remote named checks",
+    "No run_tests or whole suite run"
+  ]
+}

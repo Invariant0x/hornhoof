@@ -1,0 +1,25 @@
+diff --git a/apps/server/test/inbox.test.ts b/apps/server/test/inbox.test.ts
+index 40d2d180d..782d0115a 100644
+--- a/apps/server/test/inbox.test.ts
++++ b/apps/server/test/inbox.test.ts
+@@ -91,6 +91,20 @@ async function company() {
+ type Company = Awaited<ReturnType<typeof company>>;
+ 
+ describe('mail from employees in inbox mode', () => {
++  it('restores folded inbox letters when the ordinary carrier fails before typing', async () => {
++    const c = await company();
++    const talk = await c.ivanWrites(c.bruno.id, 'Let us talk.');
++    await c.letter(c.rita, c.bruno.id, 'Preserve this folded letter.');
++    c.later();
++    const carrier = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.bruno.id, prompt: 'Hornhoof: Check the queue.', createdBy: null });
++    await c.ends(talk);
++    expect(await c.job(carrier)).toMatchObject({ status: 'running', inboxWake: false });
++    expect((await c.inboxOf(c.bruno.id))[0]).toMatchObject({ status: 'read', jobId: carrier });
++    vi.mocked(c.ctx.hub.isReady).mockReturnValue(false);
++    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: carrier, ok: false, sessionId: null, result: '', tail: '', error: 'agent_failed' });
++    expect((await c.inboxOf(c.bruno.id))[0]).toMatchObject({ status: 'unread' });
++  });
++
+   it('keeps 25 letters that come while a person talks with the head in her inbox, and gives them in one turn after it', async () => {
+     const c = await company();
+     const talk = await c.ivanWrites(c.hana.id, 'Let us plan the release.');

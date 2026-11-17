@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+The machine check slot ended. The command stops.
+ ✓ test/check-command-lease.test.ts (1 test) 15ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  05:21:15
+   Duration  465ms (transform 88%, import 8%, tests 4%)
+

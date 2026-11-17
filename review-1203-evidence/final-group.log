@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ✓ test/check-group.test.ts (13 tests) 21ms
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  05:30:31
+   Duration  96ms (tests 68%, import 17%, transform 9%, worker 5%)
+

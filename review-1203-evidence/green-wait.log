@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ✓ |@hornhoof/node| test/check-command-wait.test.ts (4 tests) 256ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  02:59:05
+   Duration  1.05s (tests 42%, import 30%, transform 21%, setup 4%, worker 3%)
+

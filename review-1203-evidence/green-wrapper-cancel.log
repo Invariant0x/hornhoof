@@ -1,0 +1,10 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ✓ |@hornhoof/node| test/check-command-stop.test.ts (11 tests) 63ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  04:17:31
+   Duration  358ms (import 40%, tests 29%, transform 25%, setup 4%, worker 1%)
+

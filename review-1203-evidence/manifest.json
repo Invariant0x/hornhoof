@@ -1,0 +1,70 @@
+[
+  {
+    "path": "codex-review-final.txt",
+    "sha256": "65e0baae330a7413a3be8ecdce720bb6b8f9de31fb0abccaa7bb6eef93a5b4eb"
+  },
+  {
+    "path": "deps.log",
+    "sha256": "e0ac017b42aadc2bc991e9b386a8e7a123ae86d9dd9426e5a9cc142233ad5278"
+  },
+  {
+    "path": "green-wait.log",
+    "sha256": "79449b72aa74924aaa18222a61b6a0c44f199df9ba4f9499c05f7f9ec324430a"
+  },
+  {
+    "path": "inbox-full-company-probe.patch",
+    "sha256": "6adcae2f2405aeac241b80194c77363824a606d2e7525a00206e61a70615227c"
+  },
+  {
+    "path": "merge-status.json",
+    "sha256": "982b9e9bfb10ffe83cad665807abcfd3fa97b37822db5ab7831157a499548a9e"
+  },
+  {
+    "path": "merge-with-turn-31.log",
+    "sha256": "396d92ed036c9cf1b611a74db0b6ca5f9c72032e0948e6d7cc40aad32fd9206e"
+  },
+  {
+    "path": "node-prep-build.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "node-types.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "program-room.log",
+    "sha256": "898b07dcd96c57b2212b413fc515610235a6c7f12d4ca4d82b41d4961a316269"
+  },
+  {
+    "path": "progress-state.json",
+    "sha256": "5cffa664dcd9f56003c3b659828dbb4d6a4a6c0f9a7b6677371f85bf4edf8fda"
+  },
+  {
+    "path": "red-inbox-carrier-recheck.log",
+    "sha256": "cd55f1c6c9afb21acf294ff0619b2bb0d0fbd80ae66c0913e4a64d2803899fa8"
+  },
+  {
+    "path": "red-inbox-carrier.log",
+    "sha256": "386f2ff03623ff6f35bbb25c78fdca36b5295e364e8120635acef8b2189ab576"
+  },
+  {
+    "path": "red-inbox-minimal-recheck.log",
+    "sha256": "5884eeb37ebc28ca278b1675032e8959521fb107c74c6c85c6dd05e5b9d98d24"
+  },
+  {
+    "path": "red-inbox-minimal.log",
+    "sha256": "5884eeb37ebc28ca278b1675032e8959521fb107c74c6c85c6dd05e5b9d98d24"
+  },
+  {
+    "path": "red-lease.log",
+    "sha256": "907719343745b93908c1fb60875f82ebaf6b57f3af1994b67fbf3029f0f28347"
+  },
+  {
+    "path": "red-wait-status.json",
+    "sha256": "e153f5bd2ee7416d77570b30ba1de5bb9196c55f8d145e34df9dab12190ffe43"
+  },
+  {
+    "path": "red-wait.log",
+    "sha256": "ca2d8d873f3989b108ca27f3dfcb448fa9b2d5c39ad46d50673deb32d72bb659"
+  }
+]

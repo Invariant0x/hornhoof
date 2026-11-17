@@ -1,0 +1,57 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ❯ |@hornhoof/node| test/check-command.test.ts (19 tests | 1 failed | 18 skipped) 187ms
+   ↓ check command bridge (9)
+     ↓ runs a command through a granted slot with its output and exit code
+     ↓ makes the CLI preserve command output and its nonzero exit status
+     ↓ allows nested wrappers and hooks from its own checked command while rejecting another agent
+     ↓ cleans the group and returns the slot when the command leader leaves an open output pipe
+     ↓ requires the authenticated agent process and a current turn before accepting a command
+     ↓ retains the slot while a cancelled command ignores TERM and is killed after its grace
+     ↓ with no turn of the agent running (3)
+       ↓ runs a command in a step Hornhoof opens for it, with the slot asked for that step, and says how it ended
+       ↓ gives Hornhoof's words when the command may not run, and the old answer when Hornhoof cannot be asked
+       ↓ stops the command at once when Hornhoof stops its step, and not when a turn of the agent starts
+   ↓ command policy boundary (5)
+     ↓ denies a missing guard before a command sentinel or a slot can start
+     ↓ denies a whole suite agent payload even while the same agent holds a genuine lease
+     ↓ turns a throwing policy into a closed refusal before admission
+     ↓ preserves a classified single-file command output and original nonzero exit
+     ↓ does not admit a command whose current turn ends while its guard is pending
+   ❯ a heavy check in the agent's own shell (5)
+     ↓ runs the command in its own shell once a slot is given, and holds the slot until the command ends
+     ↓ stops the command and what it started as its slot ends, and gives the slot back only after
+     ↓ runs the command at once when the machine has no slot to give or it is not an agent's
+     × keeps no running group past the slot when its wrapper is killed 130ms
+     ↓ makes an agent's tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@hornhoof/node| test/check-command.test.ts > a heavy check in the agent's own shell > keeps no running group past the slot when its wrapper is killed
+AssertionError: expected [ true ] to deeply equal [ false ]
+
+- Expected
++ Received
+
+  [
+-   false,
++   true,
+  ]
+
+ ❯ test/check-command.test.ts:445:23
+    443|     await exited;
+    444|     await eventually(() => m.frames.includes('check.release'));
+    445|     expect(atRelease).toEqual([false]);
+       |                       ^
+    446|     expect(alive(leader)).toBe(false);
+    447|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  04:18:20
+   Duration  1.09s (import 42%, transform 37%, tests 19%, setup 1%)
+

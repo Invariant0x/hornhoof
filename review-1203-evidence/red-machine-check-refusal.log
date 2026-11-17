@@ -1,0 +1,875 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/web
+
+ ❯ test/Machines.test.tsx (114 tests | 1 failed | 113 skipped) 169ms
+   ↓ the link certificate warning (4)
+     ↓ warns 14 days before the link's certificate ends
+     ↓ says nothing while the certificate has 15 days left
+     ↓ warns in Russian with the date in that language
+     ↓ asks nothing about the link for people who do not see the whole company
+   ❯ Machines (88)
+     × shows why new checks wait for a previous process to stop 168ms
+     ↓ shows reported program versions on the machine card in en
+     ↓ shows reported program versions on the machine card in ru
+     ↓ retains an active add-plan command after refreshing program versions
+     ↓ updates programs on the virtual built-in card through its own action
+     ↓ shows read-only priority on the joined server machine only in en
+     ↓ shows read-only priority on the joined server machine only in ru
+     ↓ lists plans with their local states and empty text in en
+     ↓ lists plans with their local states and empty text in ru
+     ↓ shows the whole pool: machines online of all, processor cores, free memory and how busy it is now
+     ↓ shows each machine with its owner, system, processor, memory, load and disk
+     ↓ does not draw an invalid resource bar when a node reports zero total memory or disk
+     ↓ says what runs on a machine now: its employees and the parts of test runs
+     ↓ says unknown for what an offline or older machine has not told
+     ↓ shows the machine the built-in node runs on as one card, with what runs on either
+     ↓ keeps machine notes ahead of built-in notes and uses built-in resources when its machine has none
+     ↓ counts server work once when the joined machine already includes it in map order
+     ↓ shows no built-in node and no pool part of it to those who do not see the whole company
+     ↓ shows one table row per machine and toggles cards independently from any cell
+     ↓ keeps a card and its row order through the five second refresh and sorts unknown loads last both ways
+     ↓ connects a machine without a plan and shows its command
+     ↓ adds one of the person's plans to a machine of theirs and shows the command to run there
+     ↓ keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel
+     ↓ disconnects a machine after a confirm
+     ↓ lends a machine to the company's test runs, or takes it back, for its owner or someone who sees the whole company
+     ↓ ticks backups like test runs, on a machine with a core
+     ↓ shows whether another person's machine keeps backups, without the switch
+     ↓ shows another person's machine as lent or not, without the switch
+     ↓ marks a machine taken off checks, in its row and its card, and no lent one, in en
+     ↓ marks a machine taken off checks, in its row and its card, and no lent one, in ru
+     ↓ marks a machine whose nodes are not the server build, in its row and its card, and no other, in en
+     ↓ marks a machine whose nodes are not the server build, in its row and its card, and no other, in ru
+     ↓ marks a machine whose browser check failed with the named reason in its row and its card in en
+     ↓ marks a machine whose browser check failed with the named reason in its row and its card in ru
+     ↓ marks no machine when the server does not tell builds apart
+     ↓ shows the machines in Russian
+     ↓ writes a copy's line in en
+     ↓ writes a copy's line in ru
+     ↓ writes every state of a copy, and a machine's place without one
+     ↓ sorts by priority
+     ↓ says why in en
+     ↓ says why in ru
+     ↓ lets the CEO choose
+     ↓ offers the places there are to a machine set by hand
+     ↓ shows the choice to the CEO alone
+     ↓ keeps a machine set out changeable
+     ↓ notes the machine the server moved from, beside the move, in en
+     ↓ notes the machine the server moved from, beside the move, in ru
+     ↓ asks before it moves the server
+     ↓ shows no move where it cannot be
+     ↓ shows the move to everyone
+     ↓ says how the move goes
+     ↓ shows a move's refusal in en
+     ↓ shows a move's refusal in ru
+     ↓ keeps the company's install connected
+     ↓ says why a machine cannot take the server in en
+     ↓ says why a machine cannot take the server in ru
+     ↓ says in en why a machine that holds an up-to-date copy has no place, in its card and beside its dash
+     ↓ says in ru why a machine that holds an up-to-date copy has no place, in its card and beside its dash
+     ↓ shows the server's machine as 1
+     ↓ words the refusals in en
+     ↓ words the refusals in ru
+     ↓ tells the CEO a machine left in en
+     ↓ tells the CEO a machine left in ru
+     ↓ says who holds the company in en
+     ↓ says who holds the company in ru
+     ↓ says nothing of copies where the server tells none
+     ↓ says in Russian that the server runs on a machine that joined
+     ↓ searches agents, roles, departments and machine names, with counts, clear and no matches
+     ↓ widens matches inside one filter group and narrows across groups, counting keys by their program
+     ↓ keeps search and filters through refreshes and only offers groups with a choice
+     ↓ waiting before an update (17)
+       ↓ says in the card and the row how many turns are left and since when in en
+       ↓ says in the card and the row how many turns are left and since when in ru
+       ↓ words the count in en for 1 turns and 0 run parts
+       ↓ words the count in en for 0 turns and 0 run parts
+       ↓ words the count in en for 0 turns and 1 run parts
+       ↓ words the count in en for 2 turns and 3 run parts
+       ↓ words the count in ru for 1 turns and 0 run parts
+       ↓ words the count in ru for 5 turns and 0 run parts
+       ↓ words the count in ru for 0 turns and 1 run parts
+       ↓ words the count in ru for 2 turns and 5 run parts
+       ↓ follows the count by itself and drops the line when the wait is over
+       ↓ tells a restart for the update from a lost machine in en
+       ↓ tells a restart for the update from a lost machine in ru
+       ↓ says nothing of an update while there is no wait (null)
+       ↓ says nothing of an update while there is no wait (undefined)
+       ↓ shows the wait of the built-in node on its own card
+       ↓ shows the wait of the built-in node on the machine it runs on
+   ↓ each machine's place in the company's network (8)
+     ↓ shows in en where the company opens on each machine, and whom the server could not take
+     ↓ shows in ru where the company opens on each machine, and whom the server could not take
+     ↓ offers the core in en to a machine joined before machines had one, and shows its command
+     ↓ offers the core in ru to a machine joined before machines had one, and shows its command
+     ↓ keeps a command for the core across a reload, as what it is
+     ↓ says in en what a Disconnect cannot end, for a machine that ran Claude alone
+     ↓ says in ru what a Disconnect cannot end, for a machine that ran Claude alone
+     ↓ says before a machine joins what a Mac that runs the server may ask
+   ↓ computer access on a machine's card (5)
+     ↓ opens the server's own machine on a click, and says what that gives
+     ↓ opens a machine that holds its owner's key with what the owner signs
+     ↓ says until when a machine is open to everyone who sees its card, and lets only who may close it
+     ↓ gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs
+     ↓ tells its owner in Russian what stands in the way, and what opening gives
+   ↓ the filter groups and search of Machines (#1020) (9)
+     ↓ in en starts Provider, Status and Tests with All N (44px, pressed by default) and resets only its own group
+     ↓ in ru starts Provider, Status and Tests with All N (44px, pressed by default) and resets only its own group
+     ↓ sizes whole filter chips from 44x44px, frames chosen and focused ones by tokens, and uses logical RTL properties
+     ↓ in en (narrow=true) uses the phone or wide search hint
+     ↓ in ru (narrow=true) uses the phone or wide search hint
+     ↓ in en (narrow=false) uses the phone or wide search hint
+     ↓ builds pool figures and row counts from whole parameterized dictionary phrases without piece-by-piece concatenation
+     ↓ isolates whole summary figures and counts in <bdi> in en under RTL
+     ↓ isolates whole summary figures and counts in <bdi> in ru under RTL
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/Machines.test.tsx > Machines > shows why new checks wait for a previous process to stop
+TestingLibraryElementError: Unable to find an element with the text: Checks paused. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<article[39m
+  [33maria-label[39m=[32m"dev-laptop"[39m
+  [33mclass[39m=[32m"wcard"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"edge machine"[39m
+    [33mstyle[39m=[32m"--cut: 12px;"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"edge-in"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"card-h"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"card-t"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"ic mc"[39m
+            [33mviewBox[39m=[32m"0 0 16 16"[39m
+          [36m>[39m
+            [36m<rect[39m
+              [33mheight[39m=[32m"8.5"[39m
+              [33mrx[39m=[32m"1"[39m
+              [33mwidth[39m=[32m"13"[39m
+              [33mx[39m=[32m"1.5"[39m
+              [33my[39m=[32m"2.5"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M5.5 13.5h5M8 11v2.5"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [36m<h3>[39m
+            [0mdev-laptop[0m
+          [36m</h3>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"stline"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"status ready"[39m
+          [36m>[39m
+            [0mOnline[0m
+          [36m</span>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"blocks"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"blk blk-facts"[39m
+        [36m>[39m
+          [36m<h4>[39m
+            [0mAbout the machine[0m
+          [36m</h4>[39m
+          [36m<section[39m
+            [33mclass[39m=[32m"part"[39m
+          [36m>[39m
+            [36m<h5[39m
+              [33mclass[39m=[32m"part-h"[39m
+            [36m>[39m
+              [0mResources[0m
+            [36m</h5>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"gauges"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"edge gauge"[39m
+                [33mstyle[39m=[32m"--cut: 8px;"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"edge-in"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-l"[39m
+                  [36m>[39m
+                    [0mLoad[0m
+                  [36m</span>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"g-f"[39m
+                  [36m>[39m
+                    [36m<b>[39m
+                      [0m25%[0m
+                    [36m</b>[39m
+                  [36m</p>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"bar"[39m
+                  [36m>[39m
+                    [36m<i[39m
+                      [33mstyle[39m=[32m"width: 25%;"[39m
+                    [36m/>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-s"[39m
+                  [36m>[39m
+                    [0mof 8 cores[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"edge gauge"[39m
+                [33mstyle[39m=[32m"--cut: 8px;"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"edge-in"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-l"[39m
+                  [36m>[39m
+                    [0mMemory[0m
+                  [36m</span>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"g-f"[39m
+                  [36m>[39m
+                    [36m<b>[39m
+                      [0m6[0m
+                    [36m</b>[39m
+                    [36m<span>[39m
+                      [0mGB free[0m
+                    [36m</span>[39m
+                  [36m</p>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"bar"[39m
+                  [36m>[39m
+                    [36m<i[39m
+                      [33mstyle[39m=[32m"width: 50%;"[39m
+                    [36m/>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-s"[39m
+                  [36m>[39m
+                    [0mof 12 GB, the machine has 32 GB[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"edge gauge"[39m
+                [33mstyle[39m=[32m"--cut: 8px;"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"edge-in"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-l"[39m
+                  [36m>[39m
+                    [0mDisk[0m
+                  [36m</span>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"g-f"[39m
+                  [36m>[39m
+                    [36m<b>[39m
+                      [0m120[0m
+                    [36m</b>[39m
+                    [36m<span>[39m
+                      [0mGB free[0m
+                    [36m</span>[39m
+                  [36m</p>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"bar hi"[39m
+                  [36m>[39m
+                    [36m<i[39m
+                      [33mstyle[39m=[32m"width: 74%;"[39m
+                    [36m/>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-s"[39m
+                  [36m>[39m
+                    [0mof 460 GB[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"edge gauge"[39m
+                [33mstyle[39m=[32m"--cut: 8px;"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"edge-in"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-l"[39m
+                  [36m>[39m
+                    [0mProcessor[0m
+                  [36m</span>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"g-f"[39m
+                  [36m>[39m
+                    [36m<b>[39m
+                      [0m8[0m
+                    [36m</b>[39m
+                    [36m<span>[39m
+                      [0m cores[0m
+                    [36m</span>[39m
+                  [36m</p>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"g-s"[39m
+                  [36m>[39m
+                    [0mApple M2 Pro, the machine has 10[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"machine-note"[39m
+            [36m>[39m
+              [0mDocker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.[0m
+            [36m</p>[39m
+          [36m</section>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"What runs on dev-laptop now"[39m
+          [33mclass[39m=[32m"blk blk-run"[39m
+        [36m>[39m
+          [36m<header[39m
+            [33mclass[39m=[32m"run-h"[39m
+          [36m>[39m
+            [36m<h4>[39m
+              [0mRunning now[0m
+            [36m</h4>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"run-count"[39m
+            [36m>[39m
+              [0m2 agents, 1 working, 1 test run[0m
+            [36m</p>[39m
+          [36m</header>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"vb"[39m
+          [36m>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"Development"[39m
+              [33mclass[39m=[32m"dg"[39m
+            [36m>[39m
+              [36m<header[39m
+                [33mclass[39m=[32m"dg-h"[39m
+              [36m>[39m
+                [36m<h5>[39m
+                  [0mDevelopment[0m
+                [36m</h5>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"c"[39m
+                [36m>[39m
+                  [0m2 agents[0m
+                  [0m, 1 working[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"ticks"[39m
+                [36m>[39m
+                  [36m<i[39m
+                    [33mclass[39m=[32m"on"[39m
+                  [36m/>[39m
+                  [36m<i />[39m
+                [36m</span>[39m
+              [36m</header>[39m
+              [36m<ul[39m
+                [33mclass[39m=[32m"run-chips"[39m
+              [36m>[39m
+                [36m<li>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Open Bruno"[39m
+                    [33mclass[39m=[32m"run-open"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"halo"[39m
+                      [33mstyle[39m=[32m"--cut: 8px;"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"halo-glow"[39m
+                      [36m>[39m
+                        [36m<i />[39m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"halo-ring"[39m
+                      [36m/>[39m
+                    [36m</span>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"edge run-chip on"[39m
+                      [33mstyle[39m=[32m"--cut: 8px;"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"edge-in"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l1"[39m
+                        [36m>[39m
+                          [36m<span[39m
+                            [33mclass[39m=[32m"ag on"[39m
+                          [36m>[39m
+                            [36m<svg[39m
+                              [33maria-hidden[39m=[32m"true"[39m
+                              [33mclass[39m=[32m"ic"[39m
+                              [33mviewBox[39m=[32m"0 0 16 16"[39m
+                            [36m>[39m
+                              [36m<rect[39m
+                                [33mheight[39m=[32m"10"[39m
+                                [33mrx[39m=[32m"1"[39m
+                                [33mwidth[39m=[32m"10"[39m
+                                [33mx[39m=[32m"3"[39m
+                                [33my[39m=[32m"3"[39m
+                              [36m/>[39m
+                              [36m<rect[39m
+                                [33mheight[39m=[32m"4"[39m
+                                [33mwidth[39m=[32m"4"[39m
+                                [33mx[39m=[32m"6"[39m
+                                [33my[39m=[32m"6"[39m
+                              [36m/>[39m
+                              [36m<path[39m
+                                [33md[39m=[32m"M6 1v2M10 1v2M6 13v2M10 13v2M1 6h2M1 10h2M13 6h2M13 10h2"[39m
+                              [36m/>[39m
+                            [36m</svg>[39m
+                          [36m</span>[39m
+                          [36m<b>[39m
+                            [0mBruno[0m
+                          [36m</b>[39m
+                          [36m<svg[39m
+                            [33maria-label[39m=[32m"Claude"[39m
+                            [33mclass[39m=[32m"pm claude"[39m
+                            [33mrole[39m=[32m"img"[39m
+                            [33mviewBox[39m=[32m"0 0 16 16"[39m
+                          [36m>[39m
+                            [36m<title>[39m
+                              [0mClaude[0m
+                            [36m</title>[39m
+                            [36m<path[39m
+                              [33md[39m=[32m"M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5"[39m
+                            [36m/>[39m
+                          [36m</svg>[39m
+                        [36m</span>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l2"[39m
+                        [36m>[39m
+                          [0mBackend engineer[0m
+                        [36m</span>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l3"[39m
+                        [36m>[39m
+                          [36m<span[39m
+                            [33mclass[39m=[32m"tk"[39m
+                            [33mtitle[39m=[32m"Checkout API"[39m
+                          [36m>[39m
+                            [0m#[0m
+                            [0m12[0m
+                          [36m</span>[39m
+                          [36m<span[39m
+                            [33mclass[39m=[32m"tm"[39m
+                          [36m>[39m
+                            [0m12 min[0m
+                          [36m</span>[39m
+                        [36m</span>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                  [36m</button>[39m
+                [36m</li>[39m
+                [36m<li>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Open Vera"[39m
+                    [33mclass[39m=[32m"run-open"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"halo"[39m
+                      [33mstyle[39m=[32m"--cut: 8px;"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"halo-glow"[39m
+                      [36m>[39m
+                        [36m<i />[39m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"halo-ring"[39m
+                      [36m/>[39m
+                    [36m</span>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"edge run-chip"[39m
+                      [33mstyle[39m=[32m"--cut: 8px;"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"edge-in"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l1"[39m
+                        [36m>[39m
+                          [36m<span[39m
+                            [33mclass[39m=[32m"ag"[39m
+                          [36m>[39m
+                            [36m<svg[39m
+                              [33maria-hidden[39m=[32m"true"[39m
+                              [33mclass[39m=[32m"ic"[39m
+                              [33mviewBox[39m=[32m"0 0 16 16"[39m
+                            [36m>[39m
+                              [36m<rect[39m
+                                [33mheight[39m=[32m"10"[39m
+                                [33mrx[39m=[32m"1"[39m
+                                [33mwidth[39m=[32m"10"[39m
+                                [33mx[39m=[32m"3"[39m
+                                [33my[39m=[32m"3"[39m
+                              [36m/>[39m
+                              [36m<rect[39m
+                                [33mheight[39m=[32m"4"[39m
+                                [33mwidth[39m=[32m"4"[39m
+                                [33mx[39m=[32m"6"[39m
+                                [33my[39m=[32m"6"[39m
+                              [36m/>[39m
+                              [36m<path[39m
+                                [33md[39m=[32m"M6 1v2M10 1v2M6 13v2M10 13v2M1 6h2M1 10h2M13 6h2M13 10h2"[39m
+                              [36m/>[39m
+                            [36m</svg>[39m
+                          [36m</span>[39m
+                          [36m<b>[39m
+                            [0mVera[0m
+                          [36m</b>[39m
+                          [36m<svg[39m
+                            [33maria-label[39m=[32m"Claude"[39m
+                            [33mclass[39m=[32m"pm claude"[39m
+                            [33mrole[39m=[32m"img"[39m
+                            [33mviewBox[39m=[32m"0 0 16 16"[39m
+                          [36m>[39m
+                            [36m<title>[39m
+                              [0mClaude[0m
+                            [36m</title>[39m
+                            [36m<path[39m
+                              [33md[39m=[32m"M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5"[39m
+                            [36m/>[39m
+                          [36m</svg>[39m
+                        [36m</span>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l2"[39m
+                        [36m>[39m
+                          [0mReviewer[0m
+                        [36m</span>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"l3"[39m
+                        [36m>[39m
+                          [0mfree[0m
+                        [36m</span>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                  [36m</button>[39m
+                [36m</li>[39m
+              [36m</ul>[39m
+            [36m</section>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"Test runs"[39m
+              [33mclass[39m=[32m"dg"[39m
+            [36m>[39m
+              [36m<header[39m
+                [33mclass[39m=[32m"dg-h"[39m
+              [36m>[39m
+                [36m<h5>[39m
+                  [0mTest runs[0m
+                [36m</h5>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"c"[39m
+                [36m>[39m
+                  [0m1[0m
+                [36m</span>[39m
+              [36m</header>[39m
+              [36m<ul[39m
+                [33mclass[39m=[32m"run-chips"[39m
+              [36m>[39m
+                [36m<li>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"edge run-chip on"[39m
+                    [33mstyle[39m=[32m"--cut: 8px;"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"edge-in"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"l1"[39m
+                      [36m>[39m
+                        [36m<svg[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"ic fl"[39m
+                          [33mviewBox[39m=[32m"0 0 16 16"[39m
+                        [36m>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M5 1h6M6 1v5l-4 7c-.5 1 .5 2 1 2h10c.5 0 1.5-1 1-2l-4-7V1M4.5 10h7"[39m
+                          [36m/>[39m
+                        [36m</svg>[39m
+                        [36m<b>[39m
+                          [0mTests of task 12, part 1 of 2[0m
+                        [36m</b>[39m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"l2"[39m
+                      [36m>[39m
+                        [0mStarted by Bruno[0m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"l3"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"segs"[39m
+                        [36m>[39m
+                          [36m<i[39m
+                            [33mclass[39m=[32m"here"[39m
+                          [36m/>[39m
+                          [36m<i />[39m
+                        [36m</span>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"tm"[39m
+                        [36m>[39m
+                          [0m379 h 16 min[0m
+                        [36m</span>[39m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</li>[39m
+              [36m</ul>[39m
+            [36m</section>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"blk blk-side"[39m
+        [36m>[39m
+          [36m<h4>[39m
+            [0mPlans on this machine[0m
+          [36m</h4>[39m
+          [36m<ul[39m
+            [33maria-label[39m=[32m"Plans on this machine"[39m
+            [33mclass[39m=[32m"plist"[39m
+          [36m>[39m
+            [36m<li>[39m
+              [36m<svg[39m
+                [33maria-label[39m=[32m"Claude"[39m
+                [33mclass[39m=[32m"pm claude"[39m
+                [33mrole[39m=[32m"img"[39m
+                [33mviewBox[39m=[32m"0 0 16 16"[39m
+              [36m>[39m
+                [36m<title>[39m
+                  [0mClaude[0m
+                [36m</title>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"nm"[39m
+              [36m>[39m
+                [36m<b>[39m
+                  [0mClaude[0m
+                [36m</b>[39m
+                [36m<small>[39m
+                  [0mIvan, ready[0m
+                [36m</small>[39m
+              [36m</span>[39m
+            [36m</li>[39m
+            [36m<li>[39m
+              [36m<svg[39m
+                [33maria-label[39m=[32m"Codex"[39m
+                [33mclass[39m=[32m"pm codex"[39m
+                [33mrole[39m=[32m"img"[39m
+                [33mviewBox[39m=[32m"0 0 16 16"[39m
+              [36m>[39m
+                [36m<title>[39m
+                  [0mCodex[0m
+                [36m</title>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"11"[39m
+                  [33mrx[39m=[32m"2.5"[39m
+                  [33mwidth[39m=[32m"13"[39m
+                  [33mx[39m=[32m"1.5"[39m
+                  [33my[39m=[32m"2.5"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M4.6 6.2 6.9 8l-2.3 1.8M8.6 10.2h2.8"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"nm"[39m
+              [36m>[39m
+                [36m<b>[39m
+                  [0mCodex[0m
+                [36m</b>[39m
+                [36m<small>[39m
+                  [0mIvan, waiting for the login[0m
+                [36m</small>[39m
+              [36m</span>[39m
+            [36m</li>[39m
+          [36m</ul>[39m
+        [36m</section>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mc-blocks"[39m
+        [36m>[39m
+          [36m<section[39m
+            [33maria-labelledby[39m=[32m"_r_0_"[39m
+            [33mclass[39m=[32m"blk mc-blk"[39m
+          [36m>[39m
+            [36m<h4[39m
+              [33mid[39m=[32m"_r_0_"[39m
+            [36m>[39m
+              [0mSystem, programs and access[0m
+            [36m</h4>[39m
+            [36m<dl[39m
+              [33mclass[39m=[32m"facts"[39m
+            [36m>[39m
+              [36m<dt>[39m
+                [0mOwner[0m
+              [36m</dt>[39m
+              [36m<dd>[39m
+                [0mIvan[0m
+              [36m</dd>[39m
+              [36m<dt>[39m
+                [0mSystem[0m
+              [36m</dt>[39m
+              [36m<dd>[39m
+                [0mmacOS, arm64[0m
+              [36m</dd>[39m
+            [36m</dl>[39m
+            [36m<section[39m
+              [33mclass[39m=[32m"part"[39m
+            [36m>[39m
+              [36m<h5[39m
+                [33mclass[39m=[32m"part-h"[39m
+              [36m>[39m
+                [0mAgent programs[0m
+              [36m</h5>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"part-note"[39m
+              [36m>[39m
+                [0mThis machine has not reported its program versions yet.[0m
+              [36m</p>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"entry-actions"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"act"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mUpdate programs[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</section>[39m
+          [36m</section>[39m
+          [36m<section[39m
+            [33maria-labelledby[39m=[32m"_r_1_"[39m
+            [33mclass[39m=[32m"blk mc-blk"[39m
+          [36m>[39m
+            [36m<h4[39m
+              [33mid[39m=[32m"_r_1_"[39m
+            [36m>[39m
+              [0mSettings and actions[0m
+            [36m</h4>[39m
+            [36m<dl[39m
+              [33mclass[39m=[32m"facts"[39m
+            [36m>[39m
+              [36m<dt>[39m
+                [0mTest runs[0m
+              [36m</dt>[39m
+              [36m<dd>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"lend"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"tick-box"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33maria-label[39m=[32m"Lend dev-laptop to the company's test runs"[39m
+                      [33mchecked[39m=[32m""[39m
+                      [33mtype[39m=[32m"checkbox"[39m
+                    [36m/>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mviewBox[39m=[32m"0 0 16 16"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3.5 8.5l3 3 6-7"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                  [36m>[39m
+                    [0mLend to test runs[0m
+                  [36m</span>[39m
+                [36m</label>[39m
+              [36m</dd>[39m
+            [36m</dl>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"machine-actions entry-actions"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Add my plan to dev-laptop"[39m
+                [33mclass[39m=[32m"act"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mAdd my plan[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Disconnect dev-laptop"[39m
+                [33mclass[39m=[32m"act danger"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mDisconnect[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</section>[39m
+        [36m</div>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"_r_2_"[39m
+          [33mclass[39m=[32m"blk blk-link"[39m
+        [36m>[39m
+          [36m<h4[39m
+            [33mid[39m=[32m"_r_2_"[39m
+          [36m>[39m
+            [0mConnection to the server[0m
+          [36m</h4>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"part-note"[39m
+          [36m>[39m
+            [0mLoading…[0m
+          [36m</p>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</article>[39m
+ ❯ Object.getElementError ../../node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ test/Machines.test.tsx:96:24
+     94|     render(<Machines me={ME} />);
+     95|     const mac = await openCard('dev-laptop');
+     96|     expect(within(mac).getByText('Checks paused')).toHaveAttribute('ti…
+       |                        ^
+     97|     expect(within(mac).getByText(reason)).toBeInTheDocument();
+     98|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 113 skipped (114)
+   Start at  05:16:55
+   Duration  1.18s (transform 33%, environment 26%, tests 15%, import 15%, setup 11%)
+

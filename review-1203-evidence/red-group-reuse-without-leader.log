@@ -1,0 +1,58 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ❯ test/check-group.test.ts (13 tests | 1 failed) 18ms
+   ✓ keeps cleanup pending until the recorded whole group is gone, with TERM then KILL on virtual time 5ms
+   ✓ refuses new checks after KILL fails and clears the reason itself only once the group is gone 3ms
+   ✓ never signals a reused PID or another user 3ms
+   ✓ never signals a reused PID or another user 2ms
+   × never signals an unanchored group after its original leader disappeared 4ms
+   ✓ reaps an idle parked leader immediately without a grace for a command that already ended 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ rejects a recorded group outside the authenticated caller identity 0ms
+   ✓ accepts only the recorded waiting leader of the authenticated caller 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/check-group.test.ts > never signals an unanchored group after its original leader disappeared
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 2 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      -4242,
+      "SIGTERM",
+    ]
+
+  2nd vi.fn() call:
+
+    Array [
+      -4242,
+      "SIGKILL",
+    ]
+
+
+Number of calls: 2
+
+ ❯ test/check-group.test.ts:68:26
+     66|   const pending = group.run();
+     67|   await vi.advanceTimersByTimeAsync(10000);
+     68|   expect(group.kill).not.toHaveBeenCalled();
+       |                          ^
+     69|   expect(group.block).toHaveBeenCalled();
+     70|   group.gone();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  05:28:30
+   Duration  101ms (tests 45%, transform 38%, import 13%, worker 3%)
+

@@ -1,0 +1,59 @@
+{
+  "task": 1203,
+  "source": "d140cec945b368b16b1415639fa7cc1d76661119",
+  "mergeBase": "816d02652f0c671cd609fa3adeda9e6520865e4f",
+  "turn31": "c2c60377a9cba2b7c6f15b94f5c4b323a9dbdb31",
+  "branch": "task-1203-iv-queue",
+  "head": "0505c296aee784b1c1f39728eb61fbfe229d4870",
+  "leaseRedCommit": "e2f94b27ee1ead3b528e6140c698fe4e54fcb391",
+  "smallFixCommit": "5e6e368649715a6770137f8040c425337db0af13",
+  "checkStatuses": {
+    "redWait": {
+      "exit": 1,
+      "assertionFailures": 4
+    },
+    "leaseProbe": {
+      "exit": 143,
+      "assertionFailures": 1,
+      "note": "expected RED assertion printed before process termination"
+    },
+    "fullInboxFirst": {
+      "exit": 143,
+      "testTimeouts": 1
+    },
+    "fullInboxRepeat": {
+      "exit": 1,
+      "testTimeouts": 1
+    },
+    "minimalInboxFirst": {
+      "exit": 143,
+      "result": "NOT_CHECKED"
+    },
+    "minimalInboxRepeat": {
+      "exit": 143,
+      "result": "NOT_CHECKED"
+    },
+    "greenWait": {
+      "exit": 0,
+      "passed": 4
+    },
+    "nodeTypes2048": {
+      "exit": 0,
+      "commit": "5e6e368649715a6770137f8040c425337db0af13"
+    },
+    "programRoom": {
+      "exit": 143,
+      "reportedAssertionsPassed": 3,
+      "result": "NOT_A_PASSED_PROCESS"
+    },
+    "depsAndNodePrepBuild": {
+      "exit": 143
+    }
+  },
+  "pending": [
+    "Trinity task 1213 lease repair",
+    "Claude reviewer complete heavy-check logs on current commit",
+    "carrier recovery RED/GREEN when executable",
+    "final combined exact-candidate checks and merge compatibility"
+  ]
+}

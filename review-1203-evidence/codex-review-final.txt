@@ -1,0 +1,31 @@
+codex
+Source inspection identifies lost inbox recovery, checks continuing after reservation release, nested-slot deadlock, and changed signal exit statuses. No tests, builds, or typechecks were run.
+
+Full review comments:
+
+- [P1] Stop the local command when its check lease ends — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:77-80
+  After receiving the slot frame, the client stops reading the bridge response and waits only for the child to exit. If `CheckClient` loses the lease or the bridge aborts checks when the turn token changes, `held` resolves and releases the slot, but the local check continues running. Another check can then acquire that capacity concurrently. Monitor the response throughout execution and stop the child before relinquishing its reservation.
+
+- [P1] Restore folded inbox letters when their carrier fails — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/server/src/modules/conversation/queue.ts:1232-1232
+  When an inbox wake is folded into a normal turn, `mailShown` marks its letters read and assigns them to the normal carrier, while the inbox wake finishes as `GONE_ALONG`. If the carrier subsequently fails before delivering its prompt, `afterJob` in `modules/tasks/wake.ts` restores mail only when `job.inboxWake` is true. These letters therefore remain read and cannot trigger another inbox turn. Extend failure recovery to carriers of folded inbox mail.
+
+- [P2] Reuse the inherited lease for explicit nested waits — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:62-62
+  An explicit `hh-check --wait` inside an existing check always requests a new slot because this request omits `env.HH_CHECK_SLOT`. On a machine admitting one check, the nested command waits for the slot its parent holds, and the parent waits for that command to finish. Pass the inherited lease through the existing server-side lease validation, as the non-wait path does.
+
+- [P2] Preserve signal termination status in the automatic wrapper — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:80-81
+  If the wrapped tool terminates from SIGINT, SIGTERM, or SIGHUP, Node emits `exit` with a null code and the terminating signal. Discarding the signal converts every such termination into exit status 1 instead of the original signal status, such as 130 for SIGINT or 143 for SIGTERM. Because the new PATH shim automatically wraps tools, this changes existing shell cancellation behavior without an explicit wrapper invocation. Preserve the terminating signal or its corresponding shell exit code.
+Source inspection identifies lost inbox recovery, checks continuing after reservation release, nested-slot deadlock, and changed signal exit statuses. No tests, builds, or typechecks were run.
+
+Full review comments:
+
+- [P1] Stop the local command when its check lease ends — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:77-80
+  After receiving the slot frame, the client stops reading the bridge response and waits only for the child to exit. If `CheckClient` loses the lease or the bridge aborts checks when the turn token changes, `held` resolves and releases the slot, but the local check continues running. Another check can then acquire that capacity concurrently. Monitor the response throughout execution and stop the child before relinquishing its reservation.
+
+- [P1] Restore folded inbox letters when their carrier fails — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/server/src/modules/conversation/queue.ts:1232-1232
+  When an inbox wake is folded into a normal turn, `mailShown` marks its letters read and assigns them to the normal carrier, while the inbox wake finishes as `GONE_ALONG`. If the carrier subsequently fails before delivering its prompt, `afterJob` in `modules/tasks/wake.ts` restores mail only when `job.inboxWake` is true. These letters therefore remain read and cannot trigger another inbox turn. Extend failure recovery to carriers of folded inbox mail.
+
+- [P2] Reuse the inherited lease for explicit nested waits — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:62-62
+  An explicit `hh-check --wait` inside an existing check always requests a new slot because this request omits `env.HH_CHECK_SLOT`. On a machine admitting one check, the nested command waits for the slot its parent holds, and the parent waits for that command to finish. Pass the inherited lease through the existing server-side lease validation, as the non-wait path does.
+
+- [P2] Preserve signal termination status in the automatic wrapper — /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/src/check-command.ts:80-81
+  If the wrapped tool terminates from SIGINT, SIGTERM, or SIGHUP, Node emits `exit` with a null code and the terminating signal. Discarding the signal converts every such termination into exit status 1 instead of the original signal status, such as 130 for SIGINT or 143 for SIGTERM. Because the new PATH shim automatically wraps tools, this changes existing shell cancellation behavior without an explicit wrapper invocation. Preserve the terminating signal or its corresponding shell exit code.

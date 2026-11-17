@@ -1,0 +1,24 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node
+
+ ❯ test/check-group.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/check-group.test.ts [ test/check-group.test.ts ]
+Error: Cannot find module '../src/check-group.js' imported from /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source/apps/node/test/check-group.test.ts
+ ❯ test/check-group.test.ts:2:1
+      1| import { afterEach, expect, it, vi } from 'vitest';
+      2| import { cleanCheckGroup, type GroupProcess } from '../src/check-group…
+       | ^
+      3|
+      4| const GROUP = { pid: 4242, started: '100' };
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  04:30:37
+   Duration  94ms (worker 98%, environment 2%)
+

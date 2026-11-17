@@ -1,0 +1,70 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+ ❯ |@hornhoof/server| test/inbox.test.ts (37 tests | 1 failed | 36 skipped) 31944ms
+   ❯ mail from employees in inbox mode (11)
+     × restores folded inbox letters when the ordinary carrier fails before typing 31921ms
+     ↓ keeps 25 letters that come while a person talks with the head in her inbox, and gives them in one turn after it
+     ↓ lets a person's words go before the letters that waited
+     ↓ gives the letters that waited with the next turn on a task, so the turn for the inbox never waits behind newer turns
+     ↓ gives every message that waited on the same task in one turn, and keeps a message on another task and a person's words apart
+     ↓ wakes a holder whose task waits with a turn on that task that has the letter whole, and ends the wait as before
+     ↓ keeps a letter on a task for a turn on that task, so its holder cannot wait past it
+     ↓ fails a letter on a task that cannot go out alone: the sender hears it, the wait goes on, and nothing of it waits unread
+     ↓ keeps a letter without a task in the inbox for an employee whose plan is at its limit, and fails no turn of it
+     ↓ takes a person's words that came by Telegram or an assistant as a person's, not as mail
+     ↓ shows each employee only its own letters, cut short, and no task text it does not see
+   ↓ Hornhoof's words on a task (3)
+     ↓ keep a comment that goes into the turn on its task in the inbox as read with that turn
+     ↓ keep each comment that joins a turn already waiting on its task in the inbox with that turn
+     ↓ keep a request the orchestrator explains in its running turn in its inbox as read with that turn
+   ↓ an employee that is switched off (2)
+     ↓ takes no turn for its inbox until it is on again, and then takes one for all its letters
+     ↓ starts no turn for letters that wait with no turn while it is off
+   ↓ the inbox tools (2)
+     ↓ list the unread letters by task and sender, and mark them read or dealt with
+     ↓ let letters marked in the running turn go without a turn of their own
+   ↓ another employee's inbox (3)
+     ↓ opens to the orchestrator whole, and it marks letters by kind, source, task and time, which the employee's log tells with who, why and how many
+     ↓ asks the orchestrator for a reason and a choice of letters, and refuses ids of letters that are not that inbox's whole
+     ↓ is closed to every other employee, a head too, and a person's own assistant's or a removed employee's to the orchestrator
+   ↓ the delivery mode (5)
+     ↓ is the inbox for a company from its first setup
+     ↓ sends letters as before to an employee set to direct delivery, and takes the department's and the company's mode otherwise
+     ↓ is for the CEO alone to set for the orchestrator, which has no department
+     ↓ opens an employee's inbox to the CEO and to the owner of its department only
+     ↓ sets a mode for a department alone, and knows no department by the id of a product in it
+   ↓ the inbox a person opens (11)
+     ↓ shows each letter with who sent it, of what kind, on which task and when, and a letter the employee dealt with as read
+     ↓ gives a comment that waits in a turn of its task with that turn, not again in the turn that takes the inbox
+     ↓ names letters of each kind as the tab shows them
+     ↓ leaves a letter unread when a person opens it, and marks it read only by the person's own buttons
+     ↓ lets only who may change the employee's rules mark its letters, and only its own letters
+     ↓ shows a person who opens the employee on a plan of theirs in a team they have, but does not run its department, its letters with no buttons, and refuses their marks
+     ↓ lets the CEO and the CEO delegate mark any employee's letters read or done by kind, source, task and time, with the reason in its log
+     ↓ asks for a reason and a choice of letters, refuses letters of another inbox, and opens to nobody else, a department owner and a person with the whole company too
+     ↓ names a sender that is no longer in the company "Employee", not by the name its letter kept
+     ↓ gives the newest 50 letters first, and the older ones a page at a time
+     ↓ tells the screens of the employee's place when its inbox changes, and nothing of what it says
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@hornhoof/server| test/inbox.test.ts > mail from employees in inbox mode > restores folded inbox letters when the ordinary carrier fails before typing
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/inbox.test.ts:94:3
+     92|
+     93| describe('mail from employees in inbox mode', () => {
+     94|   it('restores folded inbox letters when the ordinary carrier fails be…
+       |   ^
+     95|     const c = await company();
+     96|     const talk = await c.ivanWrites(c.bruno.id, 'Let us talk.');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 36 skipped (37)
+   Start at  02:51:15
+   Duration  147.35s (tests 47%, transform 41%, import 12%)
+

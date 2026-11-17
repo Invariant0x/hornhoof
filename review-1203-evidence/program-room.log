@@ -1,0 +1,9 @@
+
+ RUN  v5.0.5 /data/work/agents/08667933-3d5b-44c8-a40e-cd2ef5899435/hornhoof-1203-source
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  03:07:14
+   Duration  37.14s (transform 84%, import 16%)
+
