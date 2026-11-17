@@ -1,8 +1,11 @@
 import type { NodeMessage } from '@hornhoof/protocol';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jobDone } from '../src/runner.js';
 import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
 import { SECRET } from './terminal-host-helpers.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 /* What a node shows of a program never carries a known secret, and only a person who may type types into it. tmux and the
    program never run: the test writes what they would show, and checks what our side makes of it. */
@@ -74,6 +77,36 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it.each(['vault_entry', 'vault_save', 'custom_secret'])('learns %s through the bridge when the program emits no tool transcript', async name => {
+    const marker = 'private-unreported-bridge-marker-1178';
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => { body += String(chunk); });
+      req.on('end', () => {
+        const call = JSON.parse(body) as { id: number; method: string };
+        const result = call.method === 'tools/list' ? { tools: [{ name, _meta: { sensitive: true } }] }
+          : { content: [{ type: 'image', data: 'aaaa', mimeType: 'image/png' }, { type: 'text', text: name === 'vault_entry' ? JSON.stringify({ password: marker }) : name === 'vault_save' ? 'Saved.' : marker }] };
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
+      });
+    });
+    await listenIn(server);
+    cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+    const t = await liveTerminal('claude', 'queued', { host: { hornhoof: `http://127.0.0.1:${(server.address() as AddressInfo).port}` } });
+    const post = (method: string, params?: unknown) => fetch(t.host['bridge'].agent('receipt').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+    await t.on(t.carry(async () => {
+      if (name === 'custom_secret') await (await post('tools/list')).text();
+      const response = await post('tools/call', { name, arguments: { password: marker } });
+      expect(response.status).toBe(200);
+      await response.text();
+    }));
+    t.finish(`Report with ${marker}.`);
+    const result = await t.on(t.running);
+    expect(result.result).toBe('Report with [hidden].');
+    expect(jobDone('job-receipt', result, []).tail).toMatch(/hidden/i);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+  });
+
   it.each([false, true])('keeps the retained terminal tail private in a later typed turn, completed: %s', async completed => {
     const marker = 'retained-tail-marker-1178';
     const t = await liveTerminal('claude', 'queued');
