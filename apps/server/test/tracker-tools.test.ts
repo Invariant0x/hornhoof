@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, goals, jobs, people, pipelines, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -36,7 +36,7 @@ async function company() {
   const id = async (email: string) => (await db.select({ id: people.id }).from(people).where(eq(people.email, email)))[0]!.id;
   const work = (departmentId = dev!.id, holder = bruno.id, by = head.id) =>
     createTask(app.ctx, { agentId: by }, { title: 'Checkout', brief: 'Pay by card.', body: '', departmentId, assigneeAgentId: holder, executor: true, resultKind: 'coordination' });
-  return { app, db, ctx: app.ctx, companyId, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, pia, salesHead, tools, work, ivanId: await id('ivan@acme.com'), olegId: await id('oleg@acme.com'), mariaId: await id('maria@acme.com') };
+  return { app, db, ctx: app.ctx, companyId, ceo, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, pia, salesHead, tools, work, ivanId: await id('ivan@acme.com'), olegId: await id('oleg@acme.com'), mariaId: await id('maria@acme.com') };
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -97,6 +97,18 @@ describe('tracker tools', () => {
     expect((await call(pm, 'tidy_task', { task: theirs.number, title: 'Leads' })).isError).toBe(true);
     expect((await call(pm, 'set_pipeline', { department: sales.id, name: 'Deals', stages: [] })).isError).toBe(true);
     expect(await db.select().from(pipelines)).toEqual([]);
+  });
+
+  it("refuse a person's edit read before the product manager tidied the task, keeping what it tidied and the work's version", async () => {
+    const { app, db, ceo, pia, tools, work } = await company();
+    const { task } = await work();
+    const read = (await app.inject({ url: `/api/tasks/${task.id}`, ...as(ceo) })).json().task as { version: number; revision: number };
+    const tidied = await call(await tools(pia), 'tidy_task', { task: task.number, title: 'Customers pay by card' });
+    expect(tidied.isError, text(tidied)).toBeFalsy();
+    const stale = await app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, payload: { title: 'Checkout by card', version: read.version, revision: read.revision }, ...as(ceo) });
+    expect(stale.statusCode, stale.body).toBe(409);
+    expect(stale.json().error.reason).toBe('task_changed');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ title: 'Customers pay by card', version: task.version });
   });
 
   it('wake the product manager soon after a task of its department is made or changes status, once for many', async () => {

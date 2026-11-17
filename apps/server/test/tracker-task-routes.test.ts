@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, goals, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, goals, jobs, pendingWakes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { as, echelonsTurn, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
 
@@ -67,23 +67,53 @@ describe('a person edits what the tracker keeps of a task', () => {
     const { db, ctx, head, oleg, maria, ivanId, send, get, work } = await company();
     const { task } = await work();
     const queued = (await db.select().from(jobs)).length;
-    const edited = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Customers pay by card', why: 'Shops sell online.', responsible: ivanId, due: '2026-12-24T00:00:00.000Z', version: task.version });
+    const edited = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Customers pay by card', why: 'Shops sell online.', responsible: ivanId, due: '2026-12-24T00:00:00.000Z', version: task.version, revision: task.trackerRevision });
     expect(edited.statusCode, edited.body).toBe(200);
     expect(edited.json().task).toMatchObject({ title: 'Customers pay by card', brief: 'Pay by card.', why: 'Shops sell online.', responsible: { id: ivanId }, dueAt: '2026-12-24T00:00:00.000Z', version: task.version });
     const log = (await get(oleg, `/api/tasks/${task.id}`)).json().task.log as { kind: string; data: { fields?: string[] }; by: { name: string } }[];
     expect(log.at(-1)).toMatchObject({ kind: 'edited', data: { fields: ['title', 'why', 'responsible', 'due'] }, by: { name: 'Oleg' } });
     expect((await db.select().from(jobs)).length).toBe(queued);
 
-    /* A move of its work makes what was read before it stale. */
+    /* A move of its work makes what was read before it stale, the revision of the card as it is now. */
+    const revision = edited.json().task.revision as number;
     await updateTask(ctx, head.id, task.id, { brief: 'Pay by card or cash.' });
-    const stale = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Again', version: task.version });
+    const stale = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Again', version: task.version, revision });
     expect([stale.statusCode, stale.json().error.reason]).toEqual([409, 'task_changed']);
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task.mayEdit).toBe(true);
     expect((await get(maria, `/api/tasks/${task.id}`)).json().task.mayEdit).toBe(false);
-    const other = await send('PATCH', maria, `/api/tasks/${task.id}`, { title: 'Mine', version: task.version + 1 });
+    const other = await send('PATCH', maria, `/api/tasks/${task.id}`, { title: 'Mine', version: task.version + 1, revision });
     expect([other.statusCode, other.json().error.reason]).toEqual([403, 'task_not_yours']);
-    const executor = await send('PATCH', oleg, `/api/tasks/${task.id}`, { executor: 'someone', version: task.version + 1 });
+    const executor = await send('PATCH', oleg, `/api/tasks/${task.id}`, { executor: 'someone', version: task.version + 1, revision });
     expect(executor.statusCode).toBe(400);
+  });
+
+  it('refuses an edit made on what an earlier edit changed, keeping the work, its version and its queued turns', async () => {
+    const { db, oleg, ceo, send, get, work } = await company();
+    const { task } = await work();
+    /* The turn its making keeps for its holder, not given out yet. */
+    const queued = async () => ({
+      wakes: (await db.select({ id: pendingWakes.id, agentId: pendingWakes.agentId, why: pendingWakes.why }).from(pendingWakes).where(eq(pendingWakes.taskId, task.id))).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+      jobs: (await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(eq(jobs.taskId, task.id))).sort((a, b) => a.id.localeCompare(b.id)),
+    });
+    const before = await queued();
+    expect(before.wakes.map(w => w.why)).toEqual(['assigned']);
+    /* Two people open the card on the same task. */
+    const read = (await get(oleg, `/api/tasks/${task.id}`)).json().task as { version: number; revision: number };
+    const first = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'First edit', version: read.version, revision: read.revision });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json().task).toMatchObject({ title: 'First edit', version: task.version, revision: read.revision + 1 });
+    const second = await send('PATCH', ceo, `/api/tasks/${task.id}`, { title: 'Stale second edit', version: read.version, revision: read.revision });
+    expect(second.statusCode, second.body).toBe(409);
+    expect(second.json().error.reason).toBe('task_changed');
+
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    expect([row!.title, row!.version]).toEqual(['First edit', task.version]);
+    expect(await queued()).toEqual(before);
+    /* Read again, the card edits on what the first one left. */
+    const again = (await get(ceo, `/api/tasks/${task.id}`)).json().task as { version: number; revision: number };
+    const third = await send('PATCH', ceo, `/api/tasks/${task.id}`, { title: 'Second edit', version: again.version, revision: again.revision });
+    expect(third.statusCode, third.body).toBe(200);
+    expect(await queued()).toEqual(before);
   });
 
   it('leaves what a task comes after to the agents and their tools: a person has no route to set it', async () => {
@@ -107,7 +137,7 @@ describe('a person edits what the tracker keeps of a task', () => {
     const { ceo, olegId, ivanId, send, get, work } = await company();
     const { task: mine } = await work('Prices');
     await work('Checkout');
-    await send('PATCH', ceo, `/api/tasks/${mine.id}`, { responsible: ivanId, version: mine.version });
+    await send('PATCH', ceo, `/api/tasks/${mine.id}`, { responsible: ivanId, version: mine.version, revision: mine.trackerRevision });
     expect((await get(ceo, `/api/tasks?responsible=${ivanId}`)).json().tasks.map((t: { title: string }) => t.title)).toEqual(['Prices']);
     expect((await get(ceo, `/api/tasks?responsible=${olegId}`)).json().tasks.map((t: { title: string }) => t.title)).toEqual(['Checkout']);
   });

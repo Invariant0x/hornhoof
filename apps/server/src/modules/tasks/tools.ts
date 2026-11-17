@@ -41,7 +41,7 @@ import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 import { requireTaskHead } from './echelons-update.js';
-import { editTask, trackerSet } from '../tracker/edit.js';
+import { editTask, seenOf, trackerSet } from '../tracker/edit.js';
 import { hasTrackerFields, TrackerFields, trackerInputOf } from '../tracker/tools.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
@@ -629,7 +629,7 @@ class TaskTools {
       if (edit) await trackerSet(this.ctx, task, edit);
       const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }) : undefined;
       let row = moved?.task ?? task;
-      if (edit) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, row.version);
+      if (edit) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, seenOf(row));
       return { text: `Updated. ${await this.where(row)}`, moved };
     }));
   }

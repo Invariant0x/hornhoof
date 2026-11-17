@@ -1122,6 +1122,9 @@ export const tasks = pgTable(
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
     pipelineStageId: uuid('pipeline_stage_id').references((): AnyPgColumn => pipelineStages.id),
+    /* Grows with every change of what the tracker keeps, which is no move and leaves the version as it is: two such changes
+       that read the same task cannot both land. */
+    trackerRevision: integer('tracker_revision').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),

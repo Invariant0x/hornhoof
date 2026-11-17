@@ -4,6 +4,7 @@ import type { Spot } from '../../auth/access.js';
 import { agents, departments, pipelines, pipelineStages, tasks } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { published, refuse, type Actor, type Task, type Tx } from '../tasks/engine.js';
+import { nextRevision } from './edit.js';
 import { spotOf } from './responsible.js';
 
 type Pipeline = typeof pipelines.$inferSelect;
@@ -82,8 +83,9 @@ async function writeStages(tx: Tx, pipeline: Pipeline, stages: StageInput[]): Pr
   const there = await tx.select({ id: pipelineStages.id }).from(pipelineStages).where(eq(pipelineStages.pipelineId, pipeline.id));
   if (kept.some(id => !there.some(s => s.id === id))) throw invalid('A stage names an id that is not of this pipeline.');
   const gone = there.map(s => s.id).filter(id => !kept.includes(id));
-  /* No move of their work: their version and time of the last change stay, as for any edit of what the tracker keeps. */
-  const moved = gone.length ? await tx.update(tasks).set({ pipelineStageId: null }).where(inArray(tasks.pipelineStageId, gone)).returning() : [];
+  /* No move of their work: their version and time of the last change stay and their revision grows, as for any edit of
+     what the tracker keeps. */
+  const moved = gone.length ? await tx.update(tasks).set({ pipelineStageId: null, trackerRevision: nextRevision() }).where(inArray(tasks.pipelineStageId, gone)).returning() : [];
   await tx.update(pipelineStages).set({ parentStageId: null }).where(eq(pipelineStages.pipelineId, pipeline.id));
   if (gone.length) await tx.delete(pipelineStages).where(inArray(pipelineStages.id, gone));
   const idOf = new Map<string, string>();

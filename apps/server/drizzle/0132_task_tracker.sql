@@ -72,6 +72,7 @@ ALTER TABLE "tasks" ADD COLUMN "why" text DEFAULT '' NOT NULL;--> statement-brea
 ALTER TABLE "tasks" ADD COLUMN "due_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "pipeline_id" uuid;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "pipeline_stage_id" uuid;--> statement-breakpoint
+ALTER TABLE "tasks" ADD COLUMN "tracker_revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "goal_events" ADD CONSTRAINT "goal_events_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "goal_events" ADD CONSTRAINT "goal_events_goal_id_goals_id_fk" FOREIGN KEY ("goal_id") REFERENCES "public"."goals"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "goal_events" ADD CONSTRAINT "goal_events_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

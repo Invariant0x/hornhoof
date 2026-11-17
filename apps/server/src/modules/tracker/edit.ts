@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { pipelineStages, tasks } from '../../db/schema.js';
 import { note, published, refuse, taskSpot, type Actor, type Task } from '../tasks/engine.js';
@@ -58,19 +58,27 @@ async function stageOf(ctx: Pick<Ctx, 'db'>, task: Task, stageId: string | null)
   return stage.id;
 }
 
-/* An edit of what the tracker keeps, made only on the task as its writer saw it. It gives no work and is no move of it: it
-   wakes nobody, leaves what the task waits for as it is, and keeps the task's version and its time of the last change, by
-   which turns kept for it and the quiet department's alarm tell the work going on. Its line in the history says what
-   changed. */
-export async function editTask(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task: Task, edit: TaskEdit, version: number): Promise<Task> {
+/* What the writer of an edit saw of the task: the version of its work and the revision of what the tracker keeps. */
+export type Seen = { version: number; revision: number };
+export const seenOf = (task: Pick<Task, 'version' | 'trackerRevision'>): Seen => ({ version: task.version, revision: task.trackerRevision });
+const sameAs = (task: Pick<Task, 'version' | 'trackerRevision'>, seen: Seen) => task.version === seen.version && task.trackerRevision === seen.revision;
+/* The next revision of what the tracker keeps, for every change of it. */
+export const nextRevision = () => sql`${tasks.trackerRevision} + 1`;
+
+/* An edit of what the tracker keeps, made only on the task as its writer saw it: a move of its work or another edit of it
+   since then refuses it, so neither is written over. It gives no work and is no move of it: it wakes nobody, leaves what
+   the task waits for as it is, and keeps the task's version and its time of the last change, by which turns kept for it
+   and the quiet department's alarm tell the work going on. Its own revision grows instead. Its line in the history says
+   what changed. */
+export async function editTask(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task: Task, edit: TaskEdit, seen: Seen): Promise<Task> {
   const changed = () => refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
-  if (task.version !== version) throw changed();
+  if (!sameAs(task, seen)) throw changed();
   const { set, fields } = await trackerSet(ctx, task, edit);
   if (!fields.length) return task;
   const row = await ctx.db.transaction(async tx => {
-    const [fresh] = await tx.select({ version: tasks.version }).from(tasks).where(eq(tasks.id, task.id)).for('update');
-    if (fresh?.version !== version) throw changed();
-    const [row] = await tx.update(tasks).set(set).where(eq(tasks.id, task.id)).returning();
+    const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for('update');
+    if (!fresh || !sameAs(fresh, seen)) throw changed();
+    const [row] = await tx.update(tasks).set({ ...set, trackerRevision: nextRevision() }).where(eq(tasks.id, task.id)).returning();
     await note(tx, row!, { kind: 'edited', actor, data: { fields } });
     return row!;
   });

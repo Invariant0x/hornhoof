@@ -10,6 +10,7 @@ import { tellOrchestrator } from '../operations/ensure.js';
 import { candidates } from '../tasks/decisions.js';
 import { CLOSED, ownNote, published, taskSpot, type Tx } from '../tasks/engine.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
+import { nextRevision } from './edit.js';
 import { goalNote } from './goals.js';
 import { placeSubject } from './responsible.js';
 
@@ -42,8 +43,9 @@ async function passTasks(ctx: Pick<Ctx, 'db' | 'bus'>, o: Owners, companyId: str
     const to = o.owner(spot);
     if (to === personId) continue;
     const row = await ctx.db.transaction(async tx => {
-      /* No move of its work: its version and time of the last change stay, as for any edit of what the tracker keeps. */
-      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to })
+      /* No move of its work: its version and time of the last change stay, as for any edit of what the tracker keeps, and
+         its revision grows, so a card read before it does not name the person back. */
+      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to, trackerRevision: nextRevision() })
         .where(and(eq(tasks.id, task.id), eq(tasks.responsiblePersonId, personId))).returning();
       if (moved) await ownNote(tx, moved, { kind: 'edited', ...passedOn(o, personId, to) });
       return moved;
@@ -92,7 +94,7 @@ async function fillOpenTasks(tx: Tx, companyId: string): Promise<void> {
   for (const task of open) {
     if (task.responsiblePersonId) continue;
     const person = (task.parentId ? known.get(task.parentId) : null) ?? (task.goalId ? goalPeople.get(task.goalId) : null) ?? o.owner(taskSpot(task));
-    await tx.update(tasks).set({ responsiblePersonId: person }).where(and(eq(tasks.id, task.id), isNull(tasks.responsiblePersonId)));
+    await tx.update(tasks).set({ responsiblePersonId: person, trackerRevision: nextRevision() }).where(and(eq(tasks.id, task.id), isNull(tasks.responsiblePersonId)));
     known.set(task.id, person);
   }
 }

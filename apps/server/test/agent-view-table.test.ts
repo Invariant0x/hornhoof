@@ -89,7 +89,7 @@ const POINTED: Pointed[] = [
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits'), company: true },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
-  { route: 'PATCH /api/tasks/:id', of: aTask('PATCH', '', { why: 'Shops sell online.', version: 0 }) },
+  { route: 'PATCH /api/tasks/:id', of: aTask('PATCH', '', { why: 'Shops sell online.', version: 0, revision: 0 }) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
   { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true, ownerToo: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },

@@ -344,8 +344,8 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
   const closed = task.status === 'done' || task.status === 'cancelled';
   const people = mapPeople(org);
   const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };
-  const version = task.version;
-  const mayEdit = !!task.mayEdit && typeof version === 'number';
+  const { version, revision } = task;
+  const mayEdit = !!task.mayEdit && typeof version === 'number' && typeof revision === 'number';
 
   return (
     <>
@@ -365,7 +365,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
           {mayEdit && !editing && <button className="btn ghost" type="button" onClick={() => setEditing(true)}>{t.tracker.card.edit}</button>}
         </div>
       )}
-      {mayEdit && editing && <TaskEdit task={{ ...task, version }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} onReload={onChanged} />}
+      {mayEdit && editing && <TaskEdit task={{ ...task, version, revision }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} onReload={onChanged} />}
       <TaskWorkflow workflow={task.echelons} task={task} org={org} />
       <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
       <TaskRelatedSection heading={t.tracker.card.waitsFor} items={task.after} onOpen={onOpen} />
