@@ -6,7 +6,6 @@ import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEY
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
-import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { IssueInput } from '../src/modules/tasks/review-findings.js';
 import { copyTemplates, CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
@@ -423,17 +422,16 @@ describe('templates', () => {
     for (const s of skills) expect(s.body.trim(), s.id).not.toBe('');
   });
 
-  it("tells every role's program its instructions with room for a full notebook, its skills going as files", () => {
+  it("tells every role's program its instructions, its skills going as files", () => {
     const place = { company: 'Acme', department: 'Development', product: 'Mascot' };
     for (const r of roles) {
       const agent = { id: 'a', companyId: 'c', kind: r.kind === 'head' ? 'head' : 'worker', name: 'Bruno', roleKey: r.id, skills: r.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
       const { text, skills: files } = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], place);
-      expect(text.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300, r.id).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
       for (const f of files) expect(text, `${r.id} ${f.name}`).toContain(`\n- ${f.name}: `);
     }
   });
 
-  it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
+  it('gives the orchestrator his own skills', () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
       'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls',
@@ -446,8 +444,6 @@ describe('templates', () => {
     expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
-    /* The notebook's heading and a "[#30] " before each note come on top of its text. */
-    expect(steady.text.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
   });
 

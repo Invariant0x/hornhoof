@@ -1,0 +1,9 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1112/apps/web
+
+ ✓ test/ApprovalPolicy.test.tsx (25 tests) 395ms
+
+ Test Files  1 passed (1)
+      Tests  25 passed (25)
+   Start at  14:34:26
+   Duration  1.54s (environment 30%, transform 28%, tests 28%, setup 12%, import 2%)

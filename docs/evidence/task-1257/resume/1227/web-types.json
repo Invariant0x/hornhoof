@@ -1,0 +1,16 @@
+{
+  "commit": "3f950b174115a6b471ebe13c3360bb75a7622f34",
+  "cwd": ".",
+  "command": [
+    "npx",
+    "--no-install",
+    "tsc",
+    "-p",
+    "apps/web/tsconfig.json",
+    "--noEmit"
+  ],
+  "exit": 0,
+  "log": "web-types.log",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

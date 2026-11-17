@@ -1,0 +1,15 @@
+{
+  "commit": "3f950b174115a6b471ebe13c3360bb75a7622f34",
+  "cwd": "apps/node",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/redact.test.ts"
+  ],
+  "exit": 0,
+  "log": "node.log",
+  "sha256": "430b2dbc52ad6c01d4de4327afb4581d64812a878079f7235700d5a4f2077ef2",
+  "originalSha256": "452568972a861c5dca24b6aee2c79311fbbb67fec55aa0e544706fedb7377111"
+}

@@ -5,10 +5,9 @@ import { agents, companies, notebookNotes, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 
-/* A note is one fact; a notebook goes into an agent's instructions, so it stays small. */
+/* A note is one fact, so it stays short. A notebook takes any number of notes: its agent's instructions carry as much of it
+   as a program reads and say where they cut it (notebookPart). */
 export const NOTE_MAX = 300;
-export const NOTES_MAX = 30;
-export const NOTEBOOK_MAX = 4000;
 
 export const NoteBody = z.object({ text: z.string().trim().min(1).max(NOTE_MAX) });
 
@@ -58,22 +57,12 @@ export async function listNotes(db: Db, book: Book): Promise<NoteView[]> {
   }));
 }
 
-/* One change to a company's notebooks at a time, so two writes cannot take one number or both fit the last room. */
+/* One change to a company's notebooks at a time, so two writes cannot take one number. */
 function locked<T>(db: Db, book: Book, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async tx => {
     await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, book.companyId)).for('update');
     return fn(tx);
   });
-}
-
-/* Refuses a notebook that would hold too many notes or too much text once `text` takes the place of note `replacing`. */
-async function checkRoom(tx: Tx, book: Book, text: string, replacing: number | null) {
-  const rows = await tx.select({ number: notebookNotes.number, text: notebookNotes.text }).from(notebookNotes).where(live(book));
-  const kept = rows.filter(r => r.number !== replacing);
-  const size = kept.reduce((n, r) => n + r.text.length, text.length);
-  if (kept.length + 1 > NOTES_MAX || size > NOTEBOOK_MAX) {
-    throw new ApiError(409, 'conflict', `The notebook holds ${NOTES_MAX} notes and ${NOTEBOOK_MAX} characters at most. Rewrite or remove a note first.`, 'notebook_full');
-  }
 }
 
 async function noteOf(tx: Tx, book: Book, number: number) {
@@ -88,7 +77,6 @@ const changed = (ctx: Pick<Ctx, 'bus'>, book: Book) =>
 
 export async function addNote(ctx: Pick<Ctx, 'db' | 'bus'>, book: Book, text: string, by: Writer): Promise<{ number: number; text: string }> {
   const note = await locked(ctx.db, book, async tx => {
-    await checkRoom(tx, book, text, null);
     /* Removed notes count too: a number never comes back. */
     const [{ last } = { last: 0 }] = await tx.select({ last: max(notebookNotes.number) }).from(notebookNotes).where(ofBook(book));
     return (await tx
@@ -103,7 +91,6 @@ export async function addNote(ctx: Pick<Ctx, 'db' | 'bus'>, book: Book, text: st
 export async function rewriteNote(ctx: Pick<Ctx, 'db' | 'bus'>, book: Book, number: number, text: string, by: Writer): Promise<void> {
   await locked(ctx.db, book, async tx => {
     const note = await noteOf(tx, book, number);
-    await checkRoom(tx, book, text, number);
     await tx.update(notebookNotes).set({ text, ...writer(by), updatedAt: new Date() }).where(eq(notebookNotes.id, note.id));
   });
   changed(ctx, book);

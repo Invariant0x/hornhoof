@@ -1,0 +1,14 @@
+{
+  "commit": "f3a9064500ffbaf5c4d7d300f834ec10982dafe9",
+  "cwd": ".",
+  "command": [
+    "git",
+    "push",
+    "origin",
+    "HEAD:refs/heads/turn-32"
+  ],
+  "exit": 1,
+  "log": "integration.log",
+  "sha256": "7bd8dc6ae83d4a4f9591432a9328bb3cdf8ba5e02efa4248150ef690671496f1",
+  "originalSha256": "7bd8dc6ae83d4a4f9591432a9328bb3cdf8ba5e02efa4248150ef690671496f1"
+}

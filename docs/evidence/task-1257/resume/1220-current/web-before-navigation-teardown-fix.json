@@ -1,0 +1,16 @@
+{
+  "commit": "f8cd58b63f766a2a473f5f7bb0af17800c379beb",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/AgentCard.test.tsx"
+  ],
+  "exit": 0,
+  "log": "web-before-navigation-teardown-fix.log",
+  "sha256": "11da736118dcd801155d507ecd9dcc9a1484cfb023d215a415c810c065de508c",
+  "gate": "PASS",
+  "originalSha256": "275d38259049ad17467ca95e60127a31fe153f7f5ac68dca0eb7656ef995a4bf"
+}

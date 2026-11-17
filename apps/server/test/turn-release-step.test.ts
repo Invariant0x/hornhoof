@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { closeTask, report } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -343,6 +344,26 @@ describe('the release step with autonomous release on', () => {
     await f.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'report', agentId: f.author.id, text: 'Done.', data: { done: true, integration: { branch: f.branch, commit: joined.own, from: `task-${task.number}` } } });
     const run = await f.fullRun({ commit: joined.head });
     expect(await f.recordRelease({ commit: joined.head, runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(`#${task.number}`) as unknown });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  /* Work closed past its route, by the orchestrator or by hand in the database, is accepted by nobody: a release takes its proof
+     from the records of each result, never from the report of the group that closed over it. */
+  it.each(['the orchestrator', 'hand in the database'])('still asks a person for work closed by %s, also once its group closed over it, and logs nothing', async how => {
+    const f = await releasing();
+    await autonomous(f);
+    const group = (await f.create({ title: 'Coordinate the late change', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
+    const { task } = await f.create({ title: 'Late change', parentId: group.id });
+    const joined = joinedAfterR(f, task.number);
+    if (how === 'the orchestrator') {
+      const [orchestrator] = await f.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator')));
+      await closeTask(f.ctx, { agentId: orchestrator!.id }, task.id, { status: 'done', why: 'Closed by hand; the work is over.' });
+    } else await f.db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-17T12:00:00.000Z'), turnId: f.turn.id }).where(eq(tasks.id, task.id));
+    expect((await report(f.ctx, f.head.id, group.id, { done: true, summary: 'Closed over the late change.' })).task.status).toBe('done');
+    const run = await f.fullRun({ commit: joined.head });
+    const result = await f.recordRelease({ commit: joined.head, runId: run.id });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(result.text.split('this one brings what was not: ')[1]).toContain(joined.own);
     expect(await journal(f)).toEqual([]);
   });
 

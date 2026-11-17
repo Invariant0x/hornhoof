@@ -62,7 +62,10 @@ async function intoTurn(ctx: Reader, target: IntegrationTarget & { turn: NonNull
   }
   const source = await headOf(ctx, target.repo, candidate.branch);
   if (source !== candidate.commit) throw refuse(409, 'task_changed', 'The source changed after the checks, or it cannot be read.');
-  await requireInTurn(ctx, target, candidate.commit, `fast-forward it to the candidate first, then accept it.`);
+  const { branch } = target;
+  await requireInTurn(ctx, target, candidate.commit, (head, holdsHead) => holdsHead
+    ? `fast-forward ${branch} to the candidate first, then accept it.`
+    : `the candidate does not hold ${head}, the head of ${branch}, so ${branch} cannot go to it by fast-forward: take ${branch} into the candidate and have that checked, then fast-forward ${branch} to it and accept it.`);
   return { branch: target.branch, commit: candidate.commit, approval: null, autoProof: null, observedAt: new Date().toISOString() };
 }
 

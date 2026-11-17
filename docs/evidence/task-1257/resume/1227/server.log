@@ -1,0 +1,51 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1227/apps/server
+
+ ✓ test/tasks-engine.test.ts (27 tests) 5537ms
+   ✓ the task engine (27)
+     ✓ keeps the current stage unassigned after its executor leaves until the head assigns an owner 2104ms
+ ✓ test/tasks-routes.test.ts (18 tests) 5589ms
+   ✓ tasks for people (18)
+     ✓ shows everyone the tasks of the company, and a person only what waits for them 1424ms
+     ✓ streams a task's changes to everyone of the company 1146ms
+ ✓ test/stored-secrets.test.ts (10 tests) 2507ms
+   ✓ secrets in stored prose (10)
+     ✓ masks tasks and comments before storing their copies 988ms
+     ✓ checks department authority on the server and rejects ordinary readers 417ms
+ ✓ test/tracker-task-routes.test.ts (10 tests) 2859ms
+   ✓ a person makes a task with what the tracker keeps (3)
+     ✓ names its goal, responsible person, why, date and pipeline, and a subtask goes to the head of its parent 1237ms
+ ✓ test/events.test.ts (11 tests) 6692ms
+   ✓ GET /api/stream (11)
+     ✓ refuses a signed-out request 379ms
+     ✓ sends the orchestrator's conversation to people who see the whole company 1080ms
+     ✓ keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream 1093ms
+     ✓ keeps the conversation from a department head but tells them the org changed 1251ms
+     ✓ stops sending a department's news to a person at once when they no longer reach it 1084ms
+     ✓ counts an agent with a running conversation as working, on the map and in the stream 1120ms
+ ✓ test/agent-sql-permissions.test.ts (34 tests) 1977ms
+   ✓ keeps program_instances writes from Operations, and the orchestrator makes them as Hornhoof does 681ms
+ ✓ test/secret-redaction-merge.test.ts (4 tests) 4942ms
+   ✓ keeps a secret suppressed when the leader receives a merge 1752ms
+   ✓ keeps a secret suppressed when the offline receives a merge 1084ms
+   ✓ keeps another company unchanged when the leader receives a suppression 588ms
+   ✓ keeps another company unchanged when the offline receives a suppression 1516ms
+ ✓ test/secret-redaction-scan.test.ts (13 tests) 5ms
+ ✓ test/migration-metadata.test.ts (4 tests) 1731ms
+   ✓ merged migration metadata (4)
+     ✓ links snapshots in execution order without a second child of the same predecessor 530ms
+     ✓ describes the columns and regular indexes of a freshly migrated database 1189ms
+ ✓ test/secret-redaction-migration.test.ts (2 tests) 1822ms
+   ✓ upgrades an existing database without discarding prose, and a suppression row changes no row by itself 1143ms
+   ✓ lets frozen evidence lose a hidden value only in the named columns, from the server session itself 678ms
+ ✓ test/orchestrator-sql-secrets.test.ts (3 tests) 1534ms
+   ✓ lets the orchestrator read and change the keys and what carries one, and keeps them from Operations 781ms
+   ✓ drops the role older builds gave the orchestrator, with its rights, policies and guards on agents, and again finds nothing to drop 386ms
+   ✓ lets the orchestrator read hidden-value fingerprints and keeps them from Operations 365ms
+ ✓ test/secret-redaction-rights.test.ts (1 test) 1149ms
+   ✓ keeps suppression records from Operations, permits the orchestrator to change them, and leaves no value-scanning function or trigger 1147ms
+
+ Test Files  12 passed (12)
+      Tests  137 passed (137)
+   Start at  14:25:54
+   Duration  57.56s (tests 74%, import 18%, transform 8%)

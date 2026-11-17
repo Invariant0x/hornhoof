@@ -1,18 +1,20 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { companies, turns } from '../../db/schema.js';
+import { companies, turnReleases, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
+import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 
 /* Where an accepted result goes, and how it joins a release. The open turn of a top-level department gathers the results
    accepted into its branch turn-<number>; its release takes that branch to main. A product, or a part of a department, that
    keeps a repository of its own has no turn: its results go to its main line straight, with a person approving each. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged' | 'readBranches' | 'createBranch'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged' | 'readBranches' | 'createBranch' | 'readTags'>>;
 type Turn = typeof turns.$inferSelect;
+type Release = typeof turnReleases.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
 
@@ -103,11 +105,53 @@ async function turnHead(ctx: Reader, target: IntegrationTarget & { turn: Turn })
   return branch.head;
 }
 
+/* The record of a release that a version tag on commit stands on: one made for that exact commit before main moved to it,
+   from a main line the commit holds. None for a tag made by hand. */
+export async function recordOfTag(ctx: Reader, repo: Repo, records: Release[], commit: string): Promise<Release | null> {
+  const record = records.find(r => r.commit === commit && r.baseCommitSha !== commit);
+  return record && (await branchHolds(ctx, repo, commit, record.baseCommitSha)) ? record : null;
+}
+
+/* The version tags of the repository newer than where the turn started, the newest first; none when they cannot be read. */
+async function tagsSince(ctx: Reader, repo: Repo, baseVersion: string): Promise<[string, string][]> {
+  const read = await ctx.readTags?.(repo, 10_000).catch(() => null);
+  if (!read || 'problem' in read) return [];
+  return versionsNewestFirst(read.tags).filter(([version]) => newerVersion(version, baseVersion));
+}
+
+/* The newest version tag of the turn's line, newer than where the turn started, when no release recorded before main moved
+   stands behind it: main was tagged by hand, so the tag released nothing and the turn stays open. None when the newest such
+   tag is a recorded release, whose turn closes on the next minute, or when the tags cannot be read. */
+async function tagByHand(ctx: Reader, repo: Repo, turn: Turn): Promise<{ version: string; commit: string } | null> {
+  const tags = turn.baseVersion ? await tagsSince(ctx, repo, turn.baseVersion) : [];
+  const onLine = async (commit: string) => !turn.baseCommit || branchHolds(ctx, repo, commit, turn.baseCommit);
+  for (const [version, commit] of tags) {
+    if (!(await onLine(commit))) continue;
+    const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
+    return (await recordOfTag(ctx, repo, records, commit)) ? null : { version, commit };
+  }
+  return null;
+}
+
+/* What the one who joins a result to the turn branch does next: given the head of the turn branch and whether the result
+   holds it, a fast-forward of the turn branch, or first the turn branch taken into the result. */
+type JoinStep = (head: string, holdsHead: boolean) => string;
+
+/* Why the turn branch does not hold the result, and the step that joins it, as the repository stands. A turn left open by a
+   tag made by hand says so first, with the step its head takes to release it. */
+async function notInTurn(ctx: Reader, target: IntegrationTarget & { turn: Turn }, head: string, commit: string, step: JoinStep) {
+  const next = step(head, await branchHolds(ctx, target.repo, commit, head));
+  const tag = await tagByHand(ctx, target.repo, target.turn);
+  if (!tag) return refuse(409, 'task_changed', `${target.branch} does not hold ${commit}: ${next}`);
+  const { branch, repo, turn } = target;
+  return refuse(409, 'task_changed', `${branch} does not hold ${commit}. Turn ${turn.number} is still open: ${tag.version} was tagged on ${tag.commit} with no release recorded with release_turn before ${repo.branch} moved, so it released nothing of Turn ${turn.number}, and its results still join ${branch}. The head of the department releases it: take ${repo.branch} into ${branch}, have the whole run of that release pass, record it with release_turn, then fast-forward ${repo.branch} to it and tag it. For this result: ${next}`);
+}
+
 /* The turn branch holds the result's commit, and the commit the turn started from, the head of the turn before it as that
    one was released: else what that turn left out would be lost from every release. */
-export async function requireInTurn(ctx: Reader, target: IntegrationTarget & { turn: Turn }, commit: string, how: string): Promise<string> {
+export async function requireInTurn(ctx: Reader, target: IntegrationTarget & { turn: Turn }, commit: string, step: JoinStep): Promise<string> {
   const head = await turnHead(ctx, target);
-  if (!(await branchHolds(ctx, target.repo, head, commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${commit}: ${how}`);
+  if (!(await branchHolds(ctx, target.repo, head, commit))) throw await notInTurn(ctx, target, head, commit, step);
   const start = target.turn.startCommit;
   if (start && !(await branchHolds(ctx, target.repo, head, start))) {
     throw refuse(409, 'task_invalid', `${target.branch} does not hold ${start}, the head of the turn before it as that one was released. Create ${target.branch} from ${start}, or take ${start} into it, then fast-forward it again.`);

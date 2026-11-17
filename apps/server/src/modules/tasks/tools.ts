@@ -4,6 +4,7 @@ import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
@@ -12,7 +13,7 @@ import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
@@ -124,6 +125,14 @@ export function registerHolderTools(server: McpServer, ctx: Ctx, job: ToolJob): 
   new TaskTools(server, ctx, job).registerHolderTools();
 }
 
+/* What a close did beyond the task: the open work cancelled under it, and the tasks its closer made that wait for that work,
+   which nobody else is told of. */
+export function closedBeyond(moved: { closed: string[]; waiting: Pick<Task, 'number'>[] }): string {
+  const cancelled = moved.closed.length > 1 ? ` Open tasks cancelled under it: ${moved.closed.length - 1}.` : '';
+  const waiting = moved.waiting.length ? ` Still waiting for work cancelled under it: ${listed(moved.waiting)}. Give each what to wait for with update_task, or cancel it.` : '';
+  return cancelled + waiting;
+}
+
 class TaskTools {
   private readonly db: Ctx['db'];
   private readonly boss: boolean;
@@ -174,6 +183,7 @@ class TaskTools {
   private registerManagementTools(): void {
     this.registerUpdateTask();
     this.registerCancelTask();
+    if (this.boss) this.registerCloseTask();
     this.registerPause();
   }
 
@@ -601,7 +611,7 @@ class TaskTools {
       {
         description:
           "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked, by an independent checker or, for turnkey work, by its holder's own review, security check and tests, needs none, and its entry in the autonomous release log approves it. " +
-          'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
+          'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
       async input =>
@@ -639,8 +649,8 @@ class TaskTools {
 
   private registerUpdateTask(): void {
     this.server.registerTool('update_task', {
-      description: 'The department head revises the current task or checking owner without returning it to the author. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
-      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
+      description: 'The department head revises the current task or checking owner without returning it to the author. With echelonStage and ownerAgentId, assigns an eligible owner to a future pending echelon stage without moving or waking the current owner; producer, model capability, ability and scope rules still apply. stage is the stage of the tracker pipeline, not an echelon stage. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
+      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), echelonStage: z.enum(ECHELON_STAGES).optional().describe('A future pending echelon stage of this task to give ownerAgentId in advance.'), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
     }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
       const tracker = { goal, responsible, why, due, pipeline, stage };
@@ -691,6 +701,24 @@ class TaskTools {
             ? ` ${listed(moved.waiting)} ${moved.waiting.length === 1 ? 'comes after it and still waits' : 'come after it and still wait'}: give ${moved.waiting.length === 1 ? 'it' : 'them'} what to wait for with update_task (after, [] to start now), or cancel ${moved.waiting.length === 1 ? 'it' : 'them'}.`
             : '';
           return { text: `Cancelled #${task.number}.${left}`, moved };
+        }),
+    );
+  }
+
+  /* The orchestrator closes a task its route cannot close, in whatever state it stands. */
+  private registerCloseTask(): void {
+    this.server.registerTool(
+      'close_task',
+      {
+        description: 'Closes any task in any state, past its route: status done or cancelled, why goes into its log as your act. Open work under it is cancelled with it. Done closes only the record: it accepts no result and puts nothing into a turn, a release or main. Use it when a task cannot close through its own moves, such as one whose work was closed outside Hornhoof.',
+        inputSchema: { task: Ref, status: z.enum(['done', 'cancelled']), why: z.string().trim().min(1).max(1000) },
+      },
+      async ({ task: ref, status, why }) =>
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          const moved = await closeTask(this.ctx, { agentId: this.job.agentId }, task.id, { status, why });
+          await stopTurns(this.ctx, moved.closed, this.job.agentId);
+          return { text: `Closed #${task.number} as ${status}.${closedBeyond(moved)}`, moved };
         }),
     );
   }

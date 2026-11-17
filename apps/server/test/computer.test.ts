@@ -11,7 +11,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
-import { Computers } from '../src/modules/computer/access.js';
+import type { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, onAgent, pump } from '../src/modules/conversation/queue.js';
@@ -21,6 +21,10 @@ import { hostIdOf } from '../src/modules/network/join.js';
 import { thisMachine } from '../src/modules/network/store.js';
 import { builtinOf, identityOf } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { companyRows, testComputers } from './helpers-computer.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -40,10 +44,10 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
   const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, HORNHOOF_MACHINE_ID: HOST_ID, ...env });
   const url = await listen(app);
-  const ceo = await setUpCompany(app);
+  const ceo = await companyRows(app, 'computer company', () => setUpCompany(app), vi.isFakeTimers() ? new Date() : undefined);
   const [acme] = await db.select().from(companies);
   const machine = (await thisMachine(db, app.ctx.config, acme!.id)).id;
-  app.ctx.computer.seen(machine, updater);
+  testComputers(app).seen(machine, updater);
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
   builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
@@ -62,11 +66,9 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
 type Company = Awaited<ReturnType<typeof company>>;
 
 /* The same access with another wait for a command's answer. */
-function withWait(c: Pick<Company, 'app' | 'control' | 'machine'>, waitMs: number): Computers {
-  const computer = new Computers(c.app.ctx, { waitMs });
-  computer.moveLegacy(c.control);
+function withWait(c: Pick<Company, 'app' | 'machine'>, waitMs: number): Computers {
+  const computer = testComputers(c.app, { waitMs });
   computer.seen(c.machine, true);
-  c.app.ctx.computer = computer;
   return computer;
 }
 

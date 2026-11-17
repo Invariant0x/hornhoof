@@ -86,7 +86,7 @@ export const companies = pgTable('companies', {
   template: text('template', { enum: COMPANY_TEMPLATE_KEYS }),
   singleton: boolean('singleton').notNull().default(true).unique(),
   /* Task and turn numbers the company gave before their rows were removed by hand: new ones go on after them, so a branch
-     task-N or a version 0.N.0 never names two pieces of work. */
+     task-N or turn-N never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
   /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
@@ -742,6 +742,7 @@ export const agentChanges = pgTable(
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     personId: uuid('person_id').references(() => people.id),
+    actingAgentId: uuid('acting_agent_id').references(() => agents.id),
     /* Made by the orchestrator, which runs the company as the CEO can; no person then. */
     byOrchestrator: boolean('by_orchestrator').notNull().default(false),
     field: text('field', { enum: AGENT_CHANGE_FIELDS }).notNull(),
