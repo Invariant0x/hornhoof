@@ -138,7 +138,7 @@ for (const lang of CHECKED_LOCALES) {
         await expect(part.getByText(a.defaultHint, { exact: true })).toBeVisible();
         await expect(part.getByRole('group', { name: a.channels.message, exact: true }).getByRole('combobox')).toHaveValue('new_kinds');
         await expect(part.getByRole('group', { name: a.channels.price, exact: true }).getByRole('combobox')).toHaveValue('every');
-        await expect(part.getByRole('group', { name: a.channels.commit, exact: true }).getByText(a.readModes.every)).toBeVisible();
+        await expect(part.getByRole('group', { name: a.channels.commit, exact: true }).getByRole('combobox')).toHaveValue('every');
         await fitsTheScreen(page, width);
         expect(await offences(part, { danger: [], groups: '.appr-limit' })).toEqual([]);
         await info.attach('shipped-locale-lengths', { body: JSON.stringify(LOCALE_LENGTHS), contentType: 'application/json' });

@@ -11,6 +11,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
 
+### Changed
+
+- Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
+- Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
+- Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

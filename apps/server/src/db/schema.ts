@@ -1101,8 +1101,7 @@ export const turnReleases = pgTable(
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
-    /* The release task it was asked on, and what approved its commit: a person there, or, with autonomous release on and
-       every commit of it checked, the entry of the autonomous release log. One of the two, never both. */
+    /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
     approvalRequestId: uuid('approval_request_id').references((): AnyPgColumn => requests.id),
     autonomousReleaseId: uuid('autonomous_release_id').references((): AnyPgColumn => autonomousReleases.id),
@@ -1115,7 +1114,7 @@ export const turnReleases = pgTable(
   t => [
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
-    check('turn_releases_approved_once', sql`(${t.approvalRequestId} IS NULL) <> (${t.autonomousReleaseId} IS NULL)`),
+    check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
   ],
 );
 

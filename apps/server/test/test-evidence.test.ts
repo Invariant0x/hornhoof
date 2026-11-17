@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, testRuns, turns } from '../src/db/schema.js';
+import { agents, approvalPolicies, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, submit, type Task } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { commitProof, proofLine } from '../src/modules/testruns/commit-proof.js';
@@ -293,6 +293,7 @@ describe('a reviewer', () => {
 
 describe('an approval of a commit', () => {
   const asked = async (c: Awaited<ReturnType<typeof company>>, commit = TEST_COMMIT) => {
+    await c.db.insert(approvalPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, channel: 'commit', mode: 'every' }).onConflictDoNothing();
     const { call } = await c.turn(c.bruno);
     const res = await call('ask_person', { task: c.task.number, question: 'Release 0.8.0?', commit });
     expect(res.error).toBe(false);
