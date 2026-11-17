@@ -29,11 +29,12 @@ export function selectedSources(listed, mutation) {
   return listed ? JSON.parse(listed).map(path => normalize(path)) : mutation.sourcePaths;
 }
 
-/* The bare configuration leaves out what prepares a database or a report, which a pure test does not need. */
-export function testCommand(tests, reports = new Map()) {
+/* The bare configuration leaves out what prepares a database or a report, which a pure test does not need. Without reports
+   it prints only the counts the tool judges a mutant by; a baseline given reports prints Vitest's full report too. */
+export function testCommand(tests, reports) {
   const packages = Map.groupBy(tests, test => test.split('/').slice(0, 2).join('/'));
   return [...packages].map(([root, files]) => {
-    const report = reports.get(root), flags = report ? ` --reporter=default --reporter=json --outputFile.json=${word(report)}` : '';
+    const report = reports?.get(root), flags = reports ? ` --reporter=default${report ? ` --reporter=json --outputFile.json=${word(report)}` : ''}` : '';
     return `npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root ${word(root)}${flags} ${files.map(file => word(file.slice(root.length + 1))).join(' ')}`;
   }).join(' && ');
 }
@@ -108,7 +109,7 @@ function reportPassed(path) {
   return counts !== null && counts.passed > 0 && counts.failed === 0;
 }
 async function testsPass(tests, counted) {
-  if (!counted) return baselinePasses(testCommand(tests));
+  if (!counted) return baselinePasses(testCommand(tests, new Map()));
   const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-baseline-'));
   try {
     const roots = [...new Set(tests.map(test => test.split('/').slice(0, 2).join('/')))];
