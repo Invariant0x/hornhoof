@@ -1,0 +1,4 @@
+1:  57a210a49 = 1:  3cbad9190 Plan replacement of unavailable future stage owners
+2:  f8027aa43 = 2:  de060de2c Replace unavailable future stage owners and allow head preassignment
+3:  47d80c905 = 3:  fefd58889 Limit future stage replacement to employee removal
+4:  1534c9039 = 4:  5e2fc7f28 Record task 1190 check evidence and handoff limits

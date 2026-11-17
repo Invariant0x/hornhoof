@@ -1,0 +1,160 @@
+log,file,test,ms
+ab-1-base1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,records the Architecture plan before opening Development,8312
+ab-1-base1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,lets Review add Security when it discovers a risk,1049
+ab-1-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,accepts architectAgentId through create_task and names the actual Architecture owner,7303
+ab-1-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,lets the assigned worker hand Architecture forward through report,1741
+ab-1-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,carries the reviewer risk addition through verdict,1463
+ab-1-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,creates a required code route with optional Cleanup and explicit path scope,1497
+ab-1-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,gives a member of a turnkey team its task with no echelons and no paths to keep to,1130
+ab-1-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,records the Architecture plan before opening Development,8658
+ab-1-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,lets Review add Security when it discovers a risk,1882
+ab-1-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,escalates a wrong goal to the actual head when its creator is undefined,1318
+ab-1-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,escalates a wrong goal to the actual head when its creator is author,1004
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,assigns only the named future stage through update_task and reports an ineligible checker,8181
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,accepts architectAgentId through create_task and names the actual Architecture owner,1764
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,lets the assigned worker hand Architecture forward through report,1504
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,carries the reviewer risk addition through verdict,1327
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,creates a required code route with optional Cleanup and explicit path scope,1001
+ab-1-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,gives a member of a turnkey team its task with no echelons and no paths to keep to,1140
+ab-2-base1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,records the Architecture plan before opening Development,7126
+ab-2-base1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,lets Review add Security when it discovers a risk,1686
+ab-2-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,accepts architectAgentId through create_task and names the actual Architecture owner,6075
+ab-2-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,lets the assigned worker hand Architecture forward through report,1555
+ab-2-base1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,carries the reviewer risk addition through verdict,1068
+ab-2-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,records the Architecture plan before opening Development,6633
+ab-2-t1190-development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,lets Review add Security when it discovers a risk,1341
+ab-2-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,assigns only the named future stage through update_task and reports an ineligible checker,7489
+ab-2-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,accepts architectAgentId through create_task and names the actual Architecture owner,2054
+ab-2-t1190-development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,carries the reviewer risk addition through verdict,1030
+agent-switch.log,apps/server/test/agent-switch.test.ts,"switches an employee off and on from its card, shows it on the schema and logs who did it",17753
+agent-switch.log,apps/server/test/agent-switch.test.ts,gives the orchestrator no switch,1694
+agent-switch.log,apps/server/test/agent-switch.test.ts,waits for the head to assign Development again after an employee returns,5903
+agent-switch.log,apps/server/test/agent-switch.test.ts,still answers a person who writes to a switched-off employee,2398
+agent-switch.log,apps/server/test/agent-switch.test.ts,tells the head who is on and refuses a task for an employee that is off,2734
+agent-switch.log,apps/server/test/agent-switch.test.ts,refuses to hand a task over to an employee that is off,1827
+agent-switch.log,apps/server/test/agent-switch.test.ts,"gives no work to a department whose head is off, or whose employees are all off",4518
+agent-switch.log,apps/server/test/agent-switch.test.ts,sends the candidate to one named reviewer and never fans out to another provider,2712
+agent-switch.log,apps/server/test/agent-switch.test.ts,keeps Review waiting when every eligible checker is off instead of skipping it,1965
+agent-switch.log,apps/server/test/agent-switch.test.ts,lets the head assign an available checker while retaining the candidate and rewritten brief,2662
+agent-switch.log,apps/server/test/agent-switch.test.ts,keeps a finding with its checker even when the original producer is off,2534
+agent-switch.log,apps/server/test/agent-switch.test.ts,allows only the current owner to ask and waits for the answer before accepting its verdict,2320
+agent-switch.log,apps/server/test/agent-switch.test.ts,waits for the head to assign someone who is on,2696
+agent-switch.log,apps/server/test/agent-switch.test.ts,reminds a waiting reviewer to finish its current checking stage,1692
+agent-switch.log,apps/server/test/agent-switch.test.ts,drops queued turns after the switched-off employee leaves its assignment,2731
+agent-switch.log,apps/server/test/agent-switch.test.ts,returns to the same employee only after the head explicitly assigns it again,3151
+agent-switch.log,apps/server/test/agent-switch.test.ts,stays with the employee until its running turn ends,1564
+agent-switch.log,apps/server/test/agent-switch.test.ts,gives Review to another eligible checker without losing its unanswered question or candidate,3645
+agent-switch.log,apps/server/test/agent-switch.test.ts,resumes every waiting Review once an eligible checker returns despite a concurrent task edit,3357
+agent-switch.log,apps/server/test/agent-switch.test.ts,leaves every assignment when an employee is switched off despite a concurrent task edit,2228
+agent-switch.log,apps/server/test/agent-switch.test.ts,preserves a question arriving concurrently with its reviewer being switched off,5306
+agents.log,apps/server/test/agents.test.ts,"hires an employee with as many skills as a hire takes, their bodies going as files",17677
+agents.log,apps/server/test/agents.test.ts,stores an orchestrator assignment separately from its standing identity,4173
+agents.log,apps/server/test/agents.test.ts,"opens an employee's card with its skills, prompt parts and raw text",3011
+agents.log,apps/server/test/agents.test.ts,"moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default",3816
+agents.log,apps/server/test/agents.test.ts,"sets how hard an employee thinks, from the levels its model takes, and keeps who changed it",3140
+agents.log,apps/server/test/agents.test.ts,shows the fitted role effort on the map for Kimi unless a person picks a level,5341
+agents.log,apps/server/test/agents.test.ts,shows a Codex employee on the map at its role effort unless set,4887
+agents.log,apps/server/test/agents.test.ts,"shows no level for a model with no known efforts, and its own default for a role without one",5086
+agents.log,apps/server/test/agents.test.ts,"refuses a model the subscription cannot run, and a subscription that cannot serve the department",4332
+agents.log,apps/server/test/agents.test.ts,turns a skill off but never a locked one,3299
+agents.log,apps/server/test/agents.test.ts,keeps every change with who made it,3569
+agents.log,apps/server/test/agents.test.ts,"keeps the instructions within what a turn carries, counting only what is not a skill file",3605
+agents.log,apps/server/test/agents.test.ts,keeps both of two changes sent at once,5630
+agents.log,apps/server/test/agents.test.ts,removes a department whose employees were removed and that had a staff proposal,3530
+agents.log,apps/server/test/agents.test.ts,takes a prompt edit far longer than nodes before skill files took,3176
+agents.log,apps/server/test/agents.test.ts,resets template abilities while preserving the employee assignment,3663
+agents.log,apps/server/test/agents.test.ts,refreshes the map after resetting an effort to the role,3509
+agents.log,apps/server/test/agents.test.ts,"lets someone of a product who owns the plan change an employee, and only the whole company or the department's people remove them",3844
+agents.log,apps/server/test/agents.test.ts,lets go of a plan whose owner lost the department or was disabled,6123
+agents.log,apps/server/test/agents.test.ts,names the model its role asks for when an employee gets a plan and no model comes with it,5234
+agents.log,apps/server/test/agents.test.ts,removes an employee that is not working,2984
+agents.log,apps/server/test/agents.test.ts,changes the orchestrator's model from his card,1910
+agents.log,apps/server/test/agents.test.ts,lists the employees of each department on the map,1329
+agents.log,apps/server/test/agents.test.ts,"lists the head first, then by hire, people hired together in the order of the roster",1676
+agents.log,apps/server/test/agents.test.ts,replaces a checker moved into a sub-unit while retaining required Review and its question (question: false),2318
+agents.log,apps/server/test/agents.test.ts,replaces a checker moved into a sub-unit while retaining required Review and its question (question: true),2439
+agents.log,apps/server/test/agents.test.ts,keeps current and independent questions when a Review owner moves into a sub-unit (other question: false),1862
+agents.log,apps/server/test/agents.test.ts,keeps current and independent questions when a Review owner moves into a sub-unit (other question: true),4291
+agents.log,apps/server/test/agents.test.ts,keeps an executor question when moving into a sub-unit leaves its current assignment,2164
+development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,records the Architecture plan before opening Development,20492
+development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,lets Review add Security when it discovers a risk,15277
+development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,escalates a wrong goal to the actual head when its creator is undefined,3898
+development-echelons-controls.log,apps/server/test/development-echelons-controls.test.ts,escalates a wrong goal to the actual head when its creator is author,4162
+development-echelons-future-owners.log,apps/server/test/development-echelons-future-owners.test.ts,replaces a removed future reviewer without moving the current stage or waking the replacement,3646
+development-echelons-future-owners.log,apps/server/test/development-echelons-future-owners.test.ts,"uses the same role and scope, rejects weaker models, and prefers another provider",1083
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,keeps equal-capability Review available on the same subscription and provider,15945
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,waits for an eligible reviewer instead of assigning claude-haiku-5-5,3113
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,waits for an eligible reviewer instead of assigning unclassified-model,2902
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,asks the actual head for a missing checker when the task creator is its author,1990
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,prefers an eligible different provider without requiring one,3460
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,hands risky work to Security immediately after Review,2837
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,retains a review finding with its checker and never wakes the author,1878
+development-echelons-handoff.log,apps/server/test/development-echelons-handoff.test.ts,records one immutable Development candidate and gives Review that identity,2326
+development-echelons-staff.log,apps/server/test/development-echelons-staff.test.ts,waits at Review when its checker is switched off instead of skipping the stage,17118
+development-echelons-staff.log,apps/server/test/development-echelons-staff.test.ts,resumes an eligible Review owner after the subscription becomes available,1385
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,assigns only the named future stage through update_task and reports an ineligible checker,20573
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,accepts architectAgentId through create_task and names the actual Architecture owner,10358
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,lets the assigned worker hand Architecture forward through report,3812
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,carries the reviewer risk addition through verdict,4989
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,creates a required code route with optional Cleanup and explicit path scope,3178
+development-echelons-tools.log,apps/server/test/development-echelons-tools.test.ts,gives a member of a turnkey team its task with no echelons and no paths to keep to,3949
+development-echelons-wake.log,apps/server/test/development-echelons-wake.test.ts,keeps the actual stage and candidate instead of a numeric gate snapshot,18217
+map-state.log,apps/server/test/map-state.test.ts,"reports no rework when work has not been returned, including after a hand-in",10487
+map-state.log,apps/server/test/map-state.test.ts,"reports the actual rework event time only in its department, to everyone of the company, and drops it after ten minutes",6048
+map-state.log,apps/server/test/map-state.test.ts,does not invent a repair when the current checker leaves after a finding,5754
+map-state.log,apps/server/test/map-state.test.ts,"run blue while an employee works on its task, and yellow once it hands the work in",4617
+map-state.log,apps/server/test/map-state.test.ts,count a hand-in as given back to the head even when a reviewer takes the task next,6467
+map-state.log,apps/server/test/map-state.test.ts,returns one review line while another checker works on an independent candidate,6773
+map-state.log,apps/server/test/map-state.test.ts,"stay off yellow without a return: a comment, a question, a crash or a turn that keeps breaking",9146
+map-state.log,apps/server/test/map-state.test.ts,"show no blue to an employee switched off, and no line to one removed",7712
+map-state.log,apps/server/test/map-state.test.ts,run to a product's employee from the head of the department that holds the product,5706
+map-state.log,apps/server/test/map-state.test.ts,"run blue while anyone in the department works on its tasks, with its head asleep",10500
+map-state.log,apps/server/test/map-state.test.ts,turn yellow when the head reports the work done or blocked,10357
+map-state.log,apps/server/test/map-state.test.ts,keep blue while the head's turn still carries another task of the department,10001
+map-state.log,apps/server/test/map-state.test.ts,does not keep blue for work under a department task its head reported blocked,6267
+map-state.log,apps/server/test/map-state.test.ts,"lights nothing for a turn with no task, on a timer or in a chat",4262
+map-state.log,apps/server/test/map-state.test.ts,"run blue while it acts on its open task in Development, and so does its department",7387
+map-state.log,apps/server/test/map-state.test.ts,stay quiet when it has no open task,8185
+map-state.log,apps/server/test/map-state.test.ts,stay quiet while its task waits for another one,4999
+map-state.log,apps/server/test/map-state.test.ts,"keep to the task of a turn that carries one: handed in, it does not light for the employee's other task",6578
+map-state.log,apps/server/test/map-state.test.ts,run blue for the current Review owner,4822
+map-state.log,apps/server/test/map-state.test.ts,"put out an old return once new work starts, even when that work ends without one, also after a restart",6209
+map-state.log,apps/server/test/map-state.test.ts,lights again with a fresh return in the new cycle,5291
+map-state.log,apps/server/test/map-state.test.ts,keep the rest of the five minutes after a reload and a restart,4451
+map-state.log,apps/server/test/map-state.test.ts,"begin one cycle per turn, however often it is taken or its start is told",3724
+map-state.log,apps/server/test/map-state.test.ts,keep a return once and never go back to an older one,4844
+map-state.log,apps/server/test/map-state.test.ts,refuse a line that is not between an agent and the one above it,3032
+map-state.log,apps/server/test/map-state.test.ts,"shows everyone of the company every line between its agents, and no task or job of them",5534
+map-state.log,apps/server/test/map-state.test.ts,turn the department line yellow when its head writes to the orchestrator,5194
+map-state.log,apps/server/test/map-state.test.ts,"count a message to the own head as a return, and one to another employee or from the head down as none",6293
+map-state.log,apps/server/test/map-state.test.ts,"keep blue while the turn that wrote to its head runs, also about the task it works on, and turn yellow once it ends",6802
+map-state.log,apps/server/test/map-state.test.ts,"keep the department line blue while its head, at work on the department's task, writes to the orchestrator",7600
+map-state.log,apps/server/test/map-state.test.ts,"keep a task the turn handed in off the line, also once that turn writes to the one above",3092
+map-state.log,apps/server/test/map-state.test.ts,turn the Tests owner's line yellow once it hands the verified candidate to the head,2899
+map-state.log,apps/server/test/map-state.test.ts,give a failed check back to the head,5300
+map-state.log,apps/server/test/map-state.test.ts,turn a reviewer's line yellow when it sends a wrong goal back to the head,4489
+map-state.log,apps/server/test/map-state.test.ts,"begins a cycle when a turn on a task starts there, once however often it is told",4193
+map-state.log,apps/server/test/map-state.test.ts,"begins the new cycle of a member line with the turn it takes, so a server that stops once the turn went out leaves the old return out",3685
+map-state.log,apps/server/test/map-state.test.ts,"begins the new cycle of a department line with the turn it takes, so a server that stops once the turn went out leaves the old return out",3628
+map-state.log,apps/server/test/map-state.test.ts,"takes no turn when the new cycle of its member line cannot be kept, and sends it with its cycle on the next try",4399
+map-state.log,apps/server/test/map-state.test.ts,"takes no turn when the new cycle of its department line cannot be kept, and sends it with its cycle on the next try",4879
+map-state.log,apps/server/test/map-state.test.ts,"begins the cycle of a task that goes out inside a head's turn with that turn, also when its own task keeps no line on",3917
+map-state.log,apps/server/test/map-state.test.ts,gives the same lines as with a short one,11765
+map-state.log,apps/server/test/map-state.test.ts,"reads the running turns and their tasks, not the history",9519
+map-state.log,apps/server/test/map-state.test.ts,locks only the lines of a new turn as it starts,9432
+tasks-engine.log,apps/server/test/tasks-engine.test.ts,keeps the current stage unassigned after its executor leaves until the head assigns an owner,6714
+tasks-engine.log,apps/server/test/tasks-engine.test.ts,tells whoever gave it out that a comment no longer opens it,1000
+tasks-engine.log,apps/server/test/tasks-engine.test.ts,delivers a person comment to the blocked executor without opening the task,1113
+tasks-engine.log,apps/server/test/tasks-engine.test.ts,hands Development to mandatory Review and then Tests without closing the result early,1110
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,keeps a long UTF-8 comment intact through MCP,6075
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,keeps a long UTF-8 submit intact through MCP,1586
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,keeps a long UTF-8 report intact through MCP,1291
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,keeps a long UTF-8 verdict intact through MCP and task readback,1809
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,gives each kind of agent its task tools,1038
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,"tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal",1065
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,keeps mandatory Review and skips optional Security when no risk was assigned,1018
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,refuses the eleventh task in one turn,2172
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,"keeps what the question is about, and takes no topic it does not know",1343
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,"is set and read by the giver, never by its executor",1301
+tasks-tools.log,apps/server/test/tasks-tools.test.ts,"takes a promise in ask_person and request_approval, and a question with none where dates are set for others",1197
+wait-producers.log,apps/server/test/wait-producers.test.ts,"in a department with no policy keeps a wait with no dates for each open edge, its holder answering for it",5212

@@ -1,0 +1,202 @@
+[
+  {
+    "log": "ab-1-base1190-development-echelons-controls.log",
+    "file": "apps/server/test/development-echelons-controls.test.ts",
+    "candidate": "d2994cb1d08bdd58277a5fa37e6d15e09d49912d",
+    "tests": 4,
+    "failed": 0,
+    "runner_seconds": 57.68,
+    "tests_seconds": 11.451,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-1-base1190-development-echelons-tools.log",
+    "file": "apps/server/test/development-echelons-tools.test.ts",
+    "candidate": "d2994cb1d08bdd58277a5fa37e6d15e09d49912d",
+    "tests": 5,
+    "failed": 0,
+    "runner_seconds": 72.94,
+    "tests_seconds": 13.649,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-1-t1190-development-echelons-controls.log",
+    "file": "apps/server/test/development-echelons-controls.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 4,
+    "failed": 0,
+    "runner_seconds": 54.46,
+    "tests_seconds": 13.382,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-1-t1190-development-echelons-tools.log",
+    "file": "apps/server/test/development-echelons-tools.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 6,
+    "failed": 0,
+    "runner_seconds": 55.57,
+    "tests_seconds": 15.638,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-2-base1190-development-echelons-controls.log",
+    "file": "apps/server/test/development-echelons-controls.test.ts",
+    "candidate": "d2994cb1d08bdd58277a5fa37e6d15e09d49912d",
+    "tests": 4,
+    "failed": 0,
+    "runner_seconds": 47.07,
+    "tests_seconds": 11.255,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-2-base1190-development-echelons-tools.log",
+    "file": "apps/server/test/development-echelons-tools.test.ts",
+    "candidate": "d2994cb1d08bdd58277a5fa37e6d15e09d49912d",
+    "tests": 5,
+    "failed": 0,
+    "runner_seconds": 47.49,
+    "tests_seconds": 10.769,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-2-t1190-development-echelons-controls.log",
+    "file": "apps/server/test/development-echelons-controls.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 4,
+    "failed": 0,
+    "runner_seconds": 45.87,
+    "tests_seconds": 10.136,
+    "outcome": "PASS"
+  },
+  {
+    "log": "ab-2-t1190-development-echelons-tools.log",
+    "file": "apps/server/test/development-echelons-tools.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 6,
+    "failed": 0,
+    "runner_seconds": 46.4,
+    "tests_seconds": 13.628,
+    "outcome": "PASS"
+  },
+  {
+    "log": "agent-switch.log",
+    "file": "apps/server/test/agent-switch.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 21,
+    "failed": 0,
+    "runner_seconds": 176.0,
+    "tests_seconds": 76.476,
+    "outcome": "PASS"
+  },
+  {
+    "log": "agents.log",
+    "file": "apps/server/test/agents.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 29,
+    "failed": 0,
+    "runner_seconds": 229.09,
+    "tests_seconds": 118.546,
+    "outcome": "PASS"
+  },
+  {
+    "log": "development-echelons-controls.log",
+    "file": "apps/server/test/development-echelons-controls.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 4,
+    "failed": 1,
+    "runner_seconds": 73.29,
+    "tests_seconds": 45.255,
+    "outcome": "NOT_PASS"
+  },
+  {
+    "log": "development-echelons-future-owners.log",
+    "file": "apps/server/test/development-echelons-future-owners.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 7,
+    "failed": 0,
+    "runner_seconds": 39.52,
+    "tests_seconds": 9.391,
+    "outcome": "PASS"
+  },
+  {
+    "log": "development-echelons-handoff.log",
+    "file": "apps/server/test/development-echelons-handoff.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 8,
+    "failed": 0,
+    "runner_seconds": 98.54,
+    "tests_seconds": 35.417,
+    "outcome": "PASS"
+  },
+  {
+    "log": "development-echelons-staff.log",
+    "file": "apps/server/test/development-echelons-staff.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 3,
+    "failed": 0,
+    "runner_seconds": 127.85,
+    "tests_seconds": 20.405,
+    "outcome": "PASS"
+  },
+  {
+    "log": "development-echelons-tools.log",
+    "file": "apps/server/test/development-echelons-tools.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 6,
+    "failed": 1,
+    "runner_seconds": 194.45,
+    "tests_seconds": 49.596,
+    "outcome": "NOT_PASS"
+  },
+  {
+    "log": "development-echelons-wake.log",
+    "file": "apps/server/test/development-echelons-wake.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 1,
+    "failed": 0,
+    "runner_seconds": 127.82,
+    "tests_seconds": 19.51,
+    "outcome": "PASS"
+  },
+  {
+    "log": "map-state.log",
+    "file": "apps/server/test/map-state.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 43,
+    "failed": 0,
+    "runner_seconds": 297.46,
+    "tests_seconds": 266.342,
+    "outcome": "PASS"
+  },
+  {
+    "log": "tasks-engine.log",
+    "file": "apps/server/test/tasks-engine.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 27,
+    "failed": 0,
+    "runner_seconds": 105.1,
+    "tests_seconds": 25.168,
+    "outcome": "PASS"
+  },
+  {
+    "log": "tasks-tools.log",
+    "file": "apps/server/test/tasks-tools.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 30,
+    "failed": 0,
+    "runner_seconds": 63.1,
+    "tests_seconds": 34.383,
+    "outcome": "PASS"
+  },
+  {
+    "log": "wait-producers.log",
+    "file": "apps/server/test/wait-producers.test.ts",
+    "candidate": "5e2fc7f28fc39655bd66c9f353c7724d236fafa8",
+    "tests": 40,
+    "failed": 0,
+    "runner_seconds": 55.79,
+    "tests_seconds": 25.864,
+    "outcome": "PASS"
+  }
+]
