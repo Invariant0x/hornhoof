@@ -19,7 +19,7 @@ const HOOK_WAIT_MS = 10_000;
 const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
-export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
+type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 /* mcpUrl carries the agent's secret in its path. A program that sends a bearer token from its environment, as Codex does, takes
    mcpAddress, which carries none, and the secret itself. Neither goes on a command line, which any process of the machine reads. */
 export type AgentUrls = { mcpUrl: string; mcpAddress: string; secret: string; attachUrl: string; hookUrl: string };

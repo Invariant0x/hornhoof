@@ -13,7 +13,7 @@ import { CLAUDE_NO_AUTO_UPDATE, CODEX_NO_AUTO_UPDATE, KIMI_NO_AUTO_UPDATE } from
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
 
-export type LaunchInput = {
+type LaunchInput = {
   bin: string;
   /* Where the program keeps its sign-in, settings and session logs. */
   home: string;
@@ -31,7 +31,7 @@ export type LaunchInput = {
 /* sessionId: known before the program starts, or null when the program names it later in its log. */
 export type LaunchSpec = { command: string[]; env: Record<string, string>; sessionId: string | null };
 
-export type LimitsRun = { bin?: string; user?: JobUser | null; signal?: AbortSignal };
+type LimitsRun = { bin?: string; user?: JobUser | null; signal?: AbortSignal };
 
 export type TermProgram = {
   kind: 'claude' | 'codex' | 'kimi' | 'antigravity';

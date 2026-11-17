@@ -26,7 +26,7 @@ export type BrowseRequest = { address: string; screenshot: string | null; fullPa
 
 /* What hh-browse uses of Playwright's Chromium. */
 export type BrowserRequest = { url(): string; isNavigationRequest(): boolean; frame(): unknown };
-export type BrowserResponse = { status(): number; headers(): Record<string, string> };
+type BrowserResponse = { status(): number; headers(): Record<string, string> };
 export type Shot = { type: 'png'; fullPage: boolean; clip?: { x: number; y: number; width: number; height: number }; timeout: number };
 export type BrowserPage = {
   url(): string;
