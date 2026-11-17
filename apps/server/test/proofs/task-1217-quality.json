@@ -1,0 +1,870 @@
+{
+  "base": "c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6",
+  "candidate": "411022774e5f6b1d557627383052f9b3af01ada5",
+  "newOrGrown": 23,
+  "worst": 9.0609,
+  "failures": [],
+  "changedLines": {
+    "covered": 157,
+    "total": 162
+  },
+  "functions": [
+    {
+      "name": "requiredStagesComplete",
+      "namespace": "modules.tasks.echelons-accept",
+      "complexity": 9,
+      "coverage": 90.9091,
+      "crap": 9.0609,
+      "baseCc": 7,
+      "verdict": "ok"
+    },
+    {
+      "name": "authorReceiptFor",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 9,
+      "coverage": 92.3077,
+      "crap": 9.0369,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "recordAuthorCheck",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 7,
+      "coverage": 83.3333,
+      "crap": 7.2269,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "requireAuthor",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 7,
+      "coverage": 90,
+      "crap": 7.049,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "requestedRoute",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 7,
+      "coverage": 100,
+      "crap": 7,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "authorCheckAllowsReviewSkip",
+      "namespace": "modules.tasks.author-check-policy",
+      "complexity": 7,
+      "coverage": 100,
+      "crap": 7,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "submitCandidate",
+      "namespace": "modules.tasks.engine",
+      "complexity": 7,
+      "coverage": 100,
+      "crap": 7,
+      "baseCc": 6,
+      "verdict": "ok"
+    },
+    {
+      "name": "requestAuthorCheck",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 5,
+      "coverage": 62.5,
+      "crap": 6.3184,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "matchesCandidate",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 6,
+      "coverage": 100,
+      "crap": 6,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "assignedNode",
+      "namespace": "modules.tasks.author-check",
+      "complexity": 4,
+      "coverage": 100,
+      "crap": 4,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "authorCheckedHandoff",
+      "namespace": "modules.tasks.echelons-handoff",
+      "complexity": 4,
+      "coverage": 100,
+      "crap": 4,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "measuredCrap",
+      "namespace": "author-check",
+      "complexity": 9,
+      "coverage": 92.3077,
+      "crap": 9.0369,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "createAuthorCheckPorts",
+      "namespace": "author-check-runtime",
+      "complexity": 8,
+      "coverage": 80,
+      "crap": 8.512,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "command",
+      "namespace": "author-check-runtime",
+      "complexity": 6,
+      "coverage": 66.6667,
+      "crap": 7.3333,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "checkedResult",
+      "namespace": "author-check",
+      "complexity": 7,
+      "coverage": 83.3333,
+      "crap": 7.2269,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "matchingRecord",
+      "namespace": "author-check",
+      "complexity": 7,
+      "coverage": 100,
+      "crap": 7,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "inspectCheckout",
+      "namespace": "author-check-runtime",
+      "complexity": 4,
+      "coverage": 50,
+      "crap": 6,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "authorCheckoutRefusal",
+      "namespace": "author-check",
+      "complexity": 5,
+      "coverage": 100,
+      "crap": 5,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "parseAuthorCheckOutput",
+      "namespace": "author-check",
+      "complexity": 5,
+      "coverage": 100,
+      "crap": 5,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "executionOwner",
+      "namespace": "author-check-runtime",
+      "complexity": 4,
+      "coverage": 75,
+      "crap": 4.25,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "consume",
+      "namespace": "author-check-runtime.AuthorCheckExecutor",
+      "complexity": 4,
+      "coverage": 100,
+      "crap": 4,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "stop",
+      "namespace": "author-check-runtime.AuthorCheckExecutor",
+      "complexity": 4,
+      "coverage": 100,
+      "crap": 4,
+      "baseCc": null,
+      "verdict": "ok"
+    },
+    {
+      "name": "authorCheckDocuments",
+      "namespace": "author-check",
+      "complexity": 6,
+      "coverage": 100,
+      "crap": 6,
+      "baseCc": null,
+      "verdict": "ok"
+    }
+  ],
+  "oldHigh": [
+    {
+      "name": "handleNodeMessage",
+      "namespace": "modules.nodes.messages",
+      "complexity": 74,
+      "coverage": 25.7426,
+      "crap": 2316.2429,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "registerCancelTask",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 12,
+      "coverage": 15,
+      "crap": 100.434,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "registerTurns",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 10,
+      "coverage": 11.1111,
+      "crap": 80.2332,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "afterReading",
+      "namespace": "modules.nodes.messages",
+      "complexity": 8,
+      "coverage": 0,
+      "crap": 72,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "savePlanMetadata",
+      "namespace": "modules.nodes.messages",
+      "complexity": 7,
+      "coverage": 0,
+      "crap": 56,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "startWork",
+      "namespace": "modules.tasks.engine",
+      "complexity": 7,
+      "coverage": 0,
+      "crap": 56,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "settleListed",
+      "namespace": "modules.nodes.messages",
+      "complexity": 13,
+      "coverage": 36.8421,
+      "crap": 55.5765,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "ask",
+      "namespace": "modules.tasks.engine",
+      "complexity": 23,
+      "coverage": 61.5385,
+      "crap": 53.0978,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "answer",
+      "namespace": "modules.tasks.engine",
+      "complexity": 28,
+      "coverage": 70.5882,
+      "crap": 47.9472,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "jobStarted",
+      "namespace": "modules.nodes.messages",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "settleAndPlace",
+      "namespace": "modules.nodes.messages",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "checkChoiceAnswer",
+      "namespace": "modules.tasks.engine",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "notAPicture",
+      "namespace": "modules.tasks.engine",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "requireUnsubmittedWork",
+      "namespace": "modules.tasks.engine",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "resumeWaitingRoutes",
+      "namespace": "modules.tasks.engine",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "startAfter",
+      "namespace": "modules.tasks.engine",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "afterCancelled",
+      "namespace": "modules.tasks.engine",
+      "complexity": 7,
+      "coverage": 12.5,
+      "crap": 39.8262,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "answerDirectly",
+      "namespace": "modules.tasks.engine",
+      "complexity": 8,
+      "coverage": 27.2727,
+      "crap": 32.6191,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "testNodeMessage",
+      "namespace": "modules.nodes.messages",
+      "complexity": 8,
+      "coverage": 28.5714,
+      "crap": 31.3236,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "seenLately",
+      "namespace": "modules.nodes.messages",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "askAboutStill",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "handOver",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "onFresh",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "waitingRouteChecker",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "registerReplanWait",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "urgentBy",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "handleNodeStatus",
+      "namespace": "modules.nodes.messages",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "helloRow",
+      "namespace": "modules.nodes.messages",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "updatePlanStatus",
+      "namespace": "modules.nodes.messages",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "insertIndependent",
+      "namespace": "modules.tasks.engine",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "turnsGoneOn",
+      "namespace": "modules.tasks.engine",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "holdForWaitingWords",
+      "namespace": "modules.nodes.messages",
+      "complexity": 5,
+      "coverage": 16.6667,
+      "crap": 19.4676,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "checkPictures",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 16.6667,
+      "crap": 19.4676,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "move",
+      "namespace": "modules.tasks.engine",
+      "complexity": 19,
+      "coverage": 96.1538,
+      "crap": 19.0205,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "registerAskPerson",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 10,
+      "coverage": 57.1429,
+      "crap": 17.8717,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "parkUnknown",
+      "namespace": "modules.nodes.messages",
+      "complexity": 11,
+      "coverage": 68.75,
+      "crap": 14.6926,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "jobEnded",
+      "namespace": "modules.nodes.messages",
+      "complexity": 10,
+      "coverage": 66.6667,
+      "crap": 13.7037,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "forwardHandoff",
+      "namespace": "modules.tasks.echelons-handoff",
+      "complexity": 9,
+      "coverage": 64.2857,
+      "crap": 12.6899,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "refuseAbove",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 33.3333,
+      "crap": 12.4074,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "resumeByComment",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 33.3333,
+      "crap": 12.4074,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "autoCommitReply",
+      "namespace": "modules.tasks.tools",
+      "complexity": 5,
+      "coverage": 33.3333,
+      "crap": 12.4074,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "placeWaiting",
+      "namespace": "modules.nodes.messages",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "statusOf",
+      "namespace": "modules.nodes.messages",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "touchNodeSeen",
+      "namespace": "modules.nodes.messages",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "brokeDown",
+      "namespace": "modules.tasks.engine",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "sentByAgent",
+      "namespace": "modules.tasks.engine",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "silentTurn",
+      "namespace": "modules.tasks.engine",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "registerPause",
+      "namespace": "modules.tasks.tools.TaskTools",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "reportedStage",
+      "namespace": "modules.tasks.engine",
+      "complexity": 11,
+      "coverage": 100,
+      "crap": 11,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "refuseCircle",
+      "namespace": "modules.tasks.engine",
+      "complexity": 4,
+      "coverage": 25,
+      "crap": 10.75,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "insertIndependentChange",
+      "namespace": "modules.tasks.engine",
+      "complexity": 5,
+      "coverage": 40,
+      "crap": 10.4,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "updateTask",
+      "namespace": "modules.tasks.engine",
+      "complexity": 9,
+      "coverage": 75,
+      "crap": 10.2656,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "runNode",
+      "namespace": "main",
+      "complexity": 179,
+      "coverage": 68.5259,
+      "crap": 1178.0012,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "run",
+      "namespace": "main",
+      "complexity": 13,
+      "coverage": 0,
+      "crap": 182,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "login",
+      "namespace": "main",
+      "complexity": 9,
+      "coverage": 0,
+      "crap": 90,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "terminalFor",
+      "namespace": "main",
+      "complexity": 9,
+      "coverage": 0,
+      "crap": 90,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "command",
+      "namespace": "main",
+      "complexity": 7,
+      "coverage": 0,
+      "crap": 56,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "sealedFor",
+      "namespace": "main",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "setKey",
+      "namespace": "main",
+      "complexity": 6,
+      "coverage": 0,
+      "crap": 42,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "firstSetup",
+      "namespace": "main",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "status",
+      "namespace": "main",
+      "complexity": 5,
+      "coverage": 0,
+      "crap": 30,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "planWord",
+      "namespace": "main",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "prepareBrowserCommand",
+      "namespace": "main",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "sameNode",
+      "namespace": "main",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "setServer",
+      "namespace": "main",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "shownBy",
+      "namespace": "main",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "upkeepCommand",
+      "namespace": "main",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "withBrowserProblem",
+      "namespace": "main",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "currentLimits",
+      "namespace": "index",
+      "complexity": 7,
+      "coverage": 0,
+      "crap": 56,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "staleSnapshot",
+      "namespace": "index",
+      "complexity": 4,
+      "coverage": 0,
+      "crap": 20,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "validTestMode",
+      "namespace": "index",
+      "complexity": 4,
+      "coverage": 20,
+      "crap": 12.192,
+      "baseCc": null,
+      "verdict": "touched"
+    },
+    {
+      "name": "rejectionOver",
+      "namespace": "index",
+      "complexity": 3,
+      "coverage": 0,
+      "crap": 12,
+      "baseCc": null,
+      "verdict": "touched"
+    }
+  ]
+}
