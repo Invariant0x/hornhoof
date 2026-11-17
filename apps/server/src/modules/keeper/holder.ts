@@ -39,7 +39,7 @@ export type HolderLink = {
 };
 /* What a machine that lost its leader goes by to find a server restored in its place: its last view of the network,
    and the address it once joined at. */
-export type SurvivorOptions = {
+type SurvivorOptions = {
   view: () => { data: { addresses: string[]; webPort: number | null }[]; link: { url: string } | null } | null;
   joinServer: string;
   fetch?: typeof fetch;
@@ -52,7 +52,7 @@ export type SurvivorOptions = {
 /* The server a recovery key's bundles went to: the number of the challenge it answered, when, and what it has. */
 type Sent = { target: string; nonce: string; at: number; ids: Set<string> };
 
-export type HolderKeeperOptions = {
+type HolderKeeperOptions = {
   /* The keeper's own folder; the bundles lie in a folder of it. */
   dir: string;
   link: HolderLink;

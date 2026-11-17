@@ -5,7 +5,7 @@ import { taskEvents, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from './engine.js';
 
-export const IndependentPartSchema = z.strictObject({ title: z.string().trim().min(1), brief: z.string(), body: z.string().trim().min(1), executor: z.uuid() });
+const IndependentPartSchema = z.strictObject({ title: z.string().trim().min(1), brief: z.string(), body: z.string().trim().min(1), executor: z.uuid() });
 export type IndependentPartInput = z.infer<typeof IndependentPartSchema>;
 export type IndependentDeclaration = { kind: 'part'; part: IndependentPartInput } | { kind: 'none'; reason: string };
 export type IndependentRecord = { kind: 'part'; part: IndependentPartInput; child: typeof tasks.$inferSelect } | { kind: 'none'; reason: string };

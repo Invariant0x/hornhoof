@@ -2,7 +2,7 @@ import https from 'node:https';
 import type { TLSSocket } from 'node:tls';
 import { certInfo } from './x509.js';
 
-export type ProbeOptions = {
+type ProbeOptions = {
   tries?: number;
   everyMs?: number;
   timeoutMs?: number;

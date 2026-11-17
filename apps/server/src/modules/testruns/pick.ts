@@ -9,7 +9,7 @@ export type Spot = { key: string; lent: boolean; reaches: boolean; busy: boolean
 /* Two machines whose free shares differ by less than this count as equally free, and the one running fewer jobs wins. */
 export const ABOUT_AS_FREE = 0.1;
 /* A machine whose processors are busy this share of the time or more is loaded: it gets no new part. */
-export const LOADED = 0.9;
+const LOADED = 0.9;
 
 /* Whether a machine's processors are too busy to take another part. */
 export const loaded = (load: NodeLoad): boolean => {

@@ -141,7 +141,7 @@ export async function discardStaleTurn(db: Store, job: TaskTurn): Promise<boolea
 
 const runOf = (job: typeof jobs.$inferSelect, state: TaskWake | null): string => job.retryOf ? 'restart' : job.continueOf ? 'continue' : state ? state.why : 'task';
 
-export type StaleProgram = Pick<TurnProgram, 'state' | 'since' | 'tool' | 'signAt'>;
+type StaleProgram = Pick<TurnProgram, 'state' | 'since' | 'tool' | 'signAt'>;
 
 export function staleOutput(text: string): string {
   const tail = lastBytes(text).trimEnd();

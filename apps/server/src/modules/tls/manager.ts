@@ -29,9 +29,9 @@ type TunnelMode = TlsRow['mode'];
 type Link = { companyId: string; name: string; url: string };
 /* A certificate that is in, for the name of the link it was asked about. */
 type Held = { certPem: string; keyEnc: string; notAfter: Date };
-export type OrderTry = { accountUrl: string | null; replaces: string | null };
-export type RenewalAnswer = RenewalWindow | null | 'error';
-export type ModeFacts = { rowMode: TunnelMode; canServe: boolean; health: Health | null; blockedUntil: Date | null };
+type OrderTry = { accountUrl: string | null; replaces: string | null };
+type RenewalAnswer = RenewalWindow | null | 'error';
+type ModeFacts = { rowMode: TunnelMode; canServe: boolean; health: Health | null; blockedUntil: Date | null };
 type LinkTlsOptions = {
   acme?: (directory: string, accountKeyPem: string, accountUrl: string | null) => Acme;
   renewalInfo?: typeof renewalInfo;

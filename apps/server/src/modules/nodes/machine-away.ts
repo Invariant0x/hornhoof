@@ -41,7 +41,7 @@ function spellsOf(connections: Connection[], startedAt: Date): Spell[] {
 }
 
 /* The last time away that counts: under way, or over within the last day. */
-export function spellToShow(connections: Connection[], heard: Date | null, startedAt: Date, now: Date): Spell | null {
+function spellToShow(connections: Connection[], heard: Date | null, startedAt: Date, now: Date): Spell | null {
   const spells = connections.length ? spellsOf(connections, startedAt) : heard ? [{ since: heard, back: null }] : [];
   const last = spells.filter(s => (s.back ?? now).getTime() - s.since.getTime() >= AWAY_MS).at(-1);
   if (!last) return null;

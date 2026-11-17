@@ -7,11 +7,11 @@ import { BusyLabel } from './BusyLabel';
 import { Field } from './Field';
 
 /* Plans that sign in with a key pasted once, and where their owner gets one. */
-export const KEY_PLANS = {
+const KEY_PLANS = {
   kimi: { kind: 'kimi_key', page: 'https://www.kimi.com/code/console' },
   glm: { kind: 'glm_key', page: 'https://z.ai/manage-apikey/apikey-list' },
 } as const;
-export type KeyPlan = keyof typeof KEY_PLANS;
+type KeyPlan = keyof typeof KEY_PLANS;
 export const isKeyPlan = (provider: string): provider is KeyPlan => provider in KEY_PLANS;
 
 type Recipients = { version: number; recipients: { nodeId: string; publicKey: string }[] };
