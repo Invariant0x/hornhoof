@@ -12,11 +12,25 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `message_employee` counts an employee's recent messages through an index instead of reading every one of them.
 - No false "assignment words not recorded" case while a program runs a tool with those words in it.
 - A program operator case whose question went away by itself closes on its own and reaches nobody; the operator reports `cleared` for a program back at work, and a report on a case already closed says how it closed.
+- A parent task closes once every child is done or cancelled, also a child closed by hand in the database; its report names the children closed without an accepted result.
+- A department whose repository had no version tag yet closes its turn on its first release tag, such as v1.4.0 or v2026.11.0, and each repository goes on from its own last tag, whatever the version of Hornhoof or of another department.
+- When main was tagged by hand with no recorded release, a refused result says why the turn is still open and which step unblocks it.
+- An update that waits for the agents to finish survives a restart or a change of leader, and always ends with the update or a reason it was called off: by a person, or because Hornhoof could not pass it on.
+- An agent's tools secret no longer appears on a program's command line, where any process of its machine could read it.
+- Drawing a program's screen for the operator no longer holds up the server; a picture that cannot be drawn answers "Look again".
+- Vault passwords an operator types into a program are masked on its screen and in the log.
+- The Machines screen no longer brings back a cancelled command, or drops a new one, when a look that began before the change arrives late.
+- A later test run of a release reuses only the green results of that same release, so no file is green that the release did not prove, and `release_turn` takes only a whole run of the product's tests that its department or the orchestrator asked for.
+- At Tests, a candidate can take in the open turn of its own department as it takes in main.
+- A node installs an agent program again, at most twice, when it does not start after an install or an update, and the machine says so or shows the last line the program said.
+- An update that comes while a node still checks a program waits for that check and then installs.
+- A plan's sign-in note says why a sign-in ended early, with the program's exit code and last line.
 
 ### Added
 
 - The orchestrator has a `shell` tool that runs any command in the server's own container.
 - The orchestrator's `database` tool runs as Hornhoof itself: it reads and changes every table, every column and the schema.
+- The orchestrator closes any task in any state, done or cancelled with a reason, with `close_task` or `POST /api/tasks/:id/close`; open work under it is cancelled, and closing it as done accepts no result.
 - Goals split into department goals and smaller goals, each with a why, a person who answers for it, a date and a target; progress comes from the target or from the tasks done under it.
 - Every task has one person who answers for it, a short why and a due date; when that person leaves, their open tasks and goals pass to the one who decides for the department.
 - Every status change of a task is kept, and its card shows how long it stands, how long it was worked on and whom it waits for.
@@ -25,19 +39,37 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Every department and company template has a product manager who keeps titles, whys, goals, the people who answer and pipelines clear, and never gives out or moves work.
 - Agents read `goals`, set goals and pipelines with `set_goal` and `set_pipeline`, a product manager tidies a task of its department with `tidy_task`, and task tools take a goal, the person who answers, why, due date, pipeline and stage.
 - People's routes for goals and pipelines, `PATCH /api/tasks/:id` on the task's version, `GET /api/tasks?responsible=`, and `parent` in `POST /api/tasks`.
-- Each machine's card in Machines opens access to the orchestrator or to every agent of the company for 1 hour, 8 hours or a day, after a separate confirmation for every agent, says who opened it and until when, and closes it; an agent's window keeps only its terminals, with its notes stacked at its foot.
+- Secrets in saved text, such as labelled passwords, private keys, passwords in links and known token formats, are stored as [hidden], and machine join codes stay out of saved conversations.
+- Hide secret on a task replaces a selected value of 8 characters or more with [hidden] in every stored copy of the company, for the CEO, the CEO's delegate and people who run the task's department.
+- Each machine's card in Machines opens access to the orchestrator or to every agent of the company for 1 hour, 8 hours or a day, after a separate confirmation for every agent, says who opened it and until when, and closes it; access ends by itself, personal assistants get none, and an agent's window keeps only its terminals, with its notes stacked at its foot.
+- The CEO deletes a person or an assistant from People for good: their sessions, keys, machines and personal plans end, and old tasks still name them.
+- Any agent starts one-shot calls of its program, as many at once as the machine's memory holds, and hears every answer once; a route can mark a stage one-shot with a fan-out and a judge, and the calls show on the map and in the task's history.
+- Agents send and read their department's mail from their own machine with the new ability Mail from your machine, and mark each step in the department's git.
+- The orchestrator and every head get the ability Ways of working, which says when work goes to standing employees, a turnkey member, the department's route of stages or one-shot calls, and when to send a person to their assistant or call on the program operator.
+- A head can set the owner of a later stage of a task in advance with `echelonStage` in `update_task`; when an employee is removed, its later stages pass to another eligible employee, and the head hears of any stage left with nobody.
+- A test or work run that waits for a machine says which run holds the machine's check slot and which runs are ahead of it.
+- The program operator is called to a thinking program whose screen stood still for three minutes, and passes the program's own windows, such as a poll, a folder's trust, an update, a full context or a sign-in from the vault, as the agent's owner would.
 
 ### Changed
 
 - Before you update: put each department's mailbox sign-ins into the vault and its letters and recipient lists into its git, as External messaging is gone (its tables stay in the database).
 - External messaging is removed: agents write to people themselves, from a department mailbox or through the company's phones, and mark each step in the department's git.
 - Only an irreversible deletion waits for the CEO's yes; a message, a price or a publication asks nobody unless the department sets its own rule.
+- A head runs its own department in any turn with the rights of whoever runs it, its named owner or else the CEO, with no fresh word from a person; a spend or other work with no rule of its own asks only for a kind nobody approved yet.
+- An employee's card history names the head that made a change and on whose authority.
 - The orchestrator is refused nothing: it sets up assistants, sends files, and reaches plans and computer events like the owner.
 - Security and code review never count what the orchestrator can see or do as a finding.
 - The orchestrator's prompt and the setup screen say plainly that it can do anything and change its own system.
+- `release_turn` takes any commit of the turn branch with its own green whole run, so the branch keeps taking work during a release; what came after that commit goes into the next turn.
+- Turnkey work joins the turn branch as soon as its holder finishes it, and autonomous release counts the holder's own review, security check and tests as covering it.
+- Agents give the proof of their checks in `submit` or `report`, and commit no raw logs and no commit that only records proof or a note.
+- `release_turn` names the version tag of the department's own repository that the next version follows, and a version scheme tied to turn numbers belongs only to the repository it was approved for.
+- Agents' commits never name Claude as co-author, and the release check stops a commit that does before it reaches a turn or main.
+- Agents write a path they delete as "${VAR:?}" or literally, so Claude Code's own check does not stop the command for a person's approval.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
 - A company or department notebook takes any number of notes and characters; each note is still 300 characters at most, and an agent's instructions carry as much of the notebook as its program reads and say where they cut it.
 - Migration 0138 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
+- Migrations 0137 and 0139 to 0144 come with this release and convert nothing old: an index for counting messages, and the tables and columns of kept update waits, removed people, one-shot calls, machine access for all agents, hidden secrets and who changed an employee.
 
 ## [0.31.0] - 2026-11-17
 
