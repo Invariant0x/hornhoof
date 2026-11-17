@@ -49,7 +49,7 @@ function relationsOf(tasks: TaskLine[]): Relations {
   return needed;
 }
 
-function ListRow({ tree, rows, relations, depth = 0 }: { tree: TaskTree; rows: Rows; relations: Relations; depth?: number }) {
+function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tree: TaskTree; rows: Rows; relations: Relations; depth?: number; showSubtasks?: boolean }) {
   const t = useT();
   const { language } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -102,7 +102,7 @@ function ListRow({ tree, rows, relations, depth = 0 }: { tree: TaskTree; rows: R
         </Cell>
         <Cell name={words.due}>{due && <span className={due.late ? 'tp-late' : undefined}>{due.text}</span>}</Cell>
       </div>
-      {tree.children.length > 0 && (
+      {showSubtasks && tree.children.length > 0 && (
         <>
           <Fold open={open} onToggle={() => setOpen(!open)}>{words.subtasks(tree.done, tree.total)}</Fold>
           {open && <ul className="tr-rows sub">{tree.children.map(child => <ListRow key={child.task.id} tree={child} rows={rows} relations={relations} depth={depth + 1} />)}</ul>}
@@ -123,7 +123,7 @@ function ListHead() {
 }
 
 /* The count is for the top-level tasks in this status. Every group can fold. */
-function Group({ group, rows, relations, onAddTask }: { group: ListGroup; rows: Rows; relations: Relations; onAddTask?: () => void }) {
+function Group({ group, rows, relations, onAddTask, showSubtasks }: { group: ListGroup; rows: Rows; relations: Relations; showSubtasks: boolean; onAddTask?: () => void }) {
   const t = useT();
   const id = useId();
   const over = group.status === 'done' || group.status === 'cancelled';
@@ -140,7 +140,7 @@ function Group({ group, rows, relations, onAddTask }: { group: ListGroup; rows: 
         </button>
       </h2>
       <div id={`${id}-rows`} hidden={!open}>
-        {open && <ul className="tr-rows">{group.trees.map(tree => <ListRow key={tree.task.id} tree={tree} rows={rows} relations={relations} />)}</ul>}
+        {open && <ul className="tr-rows">{group.trees.map(tree => <ListRow key={tree.task.id} tree={tree} rows={rows} relations={relations} showSubtasks={showSubtasks} />)}</ul>}
         {!over && onAddTask && <button className="tr-add-task" type="button" aria-label={t.tracker.list.addTask} onClick={onAddTask}>+ {t.tracker.list.addTask}</button>}
       </div>
     </section>
@@ -158,7 +158,7 @@ export function TrackerFound({ tasks, all, rows }: { tasks: TaskLine[]; all: Tas
   );
 }
 
-export function TrackerList({ tasks, all, rows, empty, onAddTask }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: string; onAddTask?: () => void }) {
+export function TrackerList({ tasks, all, rows, empty, onAddTask, showSubtasks = true }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: string; onAddTask?: () => void; showSubtasks?: boolean }) {
   const t = useT();
   const groups = listGroups(tasks, rows.asksYou, all);
   const relations = relationsOf(all);
@@ -167,7 +167,7 @@ export function TrackerList({ tasks, all, rows, empty, onAddTask }: { tasks: Tas
       {groups.length ? (
         <>
           <ListHead />
-          {groups.map(group => <Group key={group.status} group={group} rows={rows} relations={relations} onAddTask={onAddTask} />)}
+          {groups.map(group => <Group key={group.status} group={group} rows={rows} relations={relations} onAddTask={onAddTask} showSubtasks={showSubtasks} />)}
         </>
       ) : <p className="muted">{empty}</p>}
     </section>

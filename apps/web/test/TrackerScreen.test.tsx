@@ -161,6 +161,34 @@ describe('My tasks and View as', () => {
 });
 
 describe('the views and the card', () => {
+  it('keeps the pipeline breadcrumb and search with the picker, and opens the added view controls', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?department=d2&pipeline=pl1');
+    await act(async () => {});
+    const title = screen.getByRole('heading', { level: 1, name: 'Development / Payments way' });
+    expect(title.querySelector('.tr-dept-mark')).toHaveAttribute('data-tone', 'accent');
+    const picker = screen.getByRole('combobox', { name: 'View as' });
+    expect(within(picker).getByRole('option', { name: 'Me, Ivan' })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' }).closest('header')).toContainElement(picker);
+    await user.selectOptions(picker, 'p2');
+    expect(location.search).toBe('?department=d2&pipeline=pl1&person=p2');
+    expect(screen.getByRole('heading', { level: 1, name: 'Development / Payments way' })).toBeInTheDocument();
+    const tabs = screen.getByRole('group', { name: 'View' });
+    expect(within(tabs).getAllByRole('radio').map(tab => tab.parentElement?.textContent)).toEqual(['List', 'Board', 'Due dates', 'Goals', 'Pipeline diagram']);
+    expect(tabs.querySelectorAll('svg')).toHaveLength(6);
+    const filters = screen.getByRole('group', { name: 'Filters' });
+    expect(filters).toHaveTextContent('Group: status');
+    const toggle = within(filters).getByRole('button', { name: 'Subtasks: show' });
+    await user.click(toggle);
+    expect(toggle).toHaveTextContent('Subtasks: hide');
+    await user.selectOptions(within(filters).getByLabelText('Goal'), 'g2');
+    expect(filters).toHaveTextContent('Goal: Card payments');
+    await user.click(within(tabs).getByRole('radio', { name: 'Due dates' }));
+    expect(screen.getByRole('region', { name: 'Due dates' })).toHaveTextContent('No tasks here have a due date.');
+    await user.click(within(tabs).getByRole('button', { name: 'Add view' }));
+    expect(screen.getByText('There are no saved views yet.')).toBeInTheDocument();
+  });
+
   it('orders list tasks by priority and shows it in the row and the card', async () => {
     const user = userEvent.setup();
     const high = line({ ...PAY, priority: 'high' });

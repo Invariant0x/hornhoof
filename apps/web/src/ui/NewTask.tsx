@@ -7,6 +7,7 @@ import { Field } from './Field';
 
 type Props = {
   department: Department;
+  pipelineId?: string;
   /* The head's name, or null when it is called after its role. */
   head: string | null;
   onCreated: (task: TaskDetail) => void;
@@ -14,7 +15,7 @@ type Props = {
 };
 
 /* A task for a department from a person: it goes to the department's head, for one of its products or the whole department. */
-export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
+export function NewTask({ department: d, pipelineId, head, onCreated, onCancel }: Props) {
   const t = useT();
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
@@ -35,6 +36,7 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
         brief: brief.trim(),
         body: body.trim(),
         department: d.id,
+        ...(pipelineId ? { pipeline: pipelineId } : {}),
         ...(priority === 'normal' ? {} : { priority }),
         ...(product ? { product } : {}),
       });

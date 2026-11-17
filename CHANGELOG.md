@@ -25,6 +25,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The task sidebar shows company people and wait counts, with shortcuts to due dates, department goals and work outside a pipeline.
 
+- The tracker puts the current place, person picker and search in one header, followed by views and compact filters.
+- The tracker can show tasks by due date and department goals, and new tasks on a pipeline keep that pipeline.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
