@@ -161,6 +161,18 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state()).toEqual({ path: 'direct', directFails: false, refused: false });
   });
 
+  it('counts the bytes that come on a session, the answers to its hellos among them, as its silence is told by them', async () => {
+    const stand = await standUp();
+    const sessions = stand.sessionsWith();
+    sessions.use([stand.target()]);
+    await until(() => sessions.leader() !== null);
+    const session = sessions['kept'][0]!.session!;
+    const before = session.read();
+    const hellos = stand.state.hellos;
+    await until(() => stand.state.hellos > hellos + 2);
+    expect(session.read()).toBeGreaterThan(before);
+  });
+
   it('times its hellos to the leader', async () => {
     const stand = await standUp();
     const sessions = stand.sessionsWith();

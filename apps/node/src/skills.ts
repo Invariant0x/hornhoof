@@ -83,12 +83,6 @@ async function placed(fs: AgentFs, workDir: string): Promise<Placed> {
   }
 }
 
-/* Everything placing these skills puts in a folder. */
-export function skillPaths(provider: ProviderId, skills: SkillFile[]): string[] {
-  const folder = skillsFolder(provider);
-  return [...skills.map(s => `${folder}/${s.name}`), PLACED];
-}
-
 /* Writes the agent's skills where its program finds them before each turn, so a changed skill reaches the program
    without starting it again. */
 export async function placeSkills(fs: AgentFs, workDir: string, provider: ProviderId, skills: SkillFile[]): Promise<void> {
