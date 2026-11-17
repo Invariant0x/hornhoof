@@ -1965,6 +1965,33 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
   },
 ];
 
+/* The conveyor never stops: finished work joins the turn at once, a release takes the commit its whole run checked, and
+   nothing is committed only to record proof or a note. */
+describe('work joins the turn at once and leaves no record-only commits', () => {
+  const skill = (id: string) => templates.skills.get(id)!.body;
+
+  it('has a turnkey holder take its checked branch into the turn branch itself, waiting for no go-ahead and no release', () => {
+    expect(skill('dev-task-flow')).toMatch(/turnkey[\s\S]*take it into the turn branch yourself/);
+    expect(skill('dev-task-flow')).toMatch(/Wait for nobody's go-ahead, for no release to ship and for no next turn to open/);
+    expect(skill('dev-task-flow')).toMatch(/A clean merge of the turn branch needs no new checks/);
+  });
+
+  it('keeps the turn branch going while a release is checked and approved, in the lead and release skills', () => {
+    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/The turn branch never stops for a release/);
+    expect(skill('dev-lead')).toMatch(/never tell anyone to hold a finished result/);
+    expect(skill('dev-ci-release')).toMatch(/release_turn[^.]*the commit of the turn branch its whole run checked/);
+  });
+
+  it('gives the proof of checks in the report, never as files committed for it', () => {
+    expect(skill('hh-task-flow')).toMatch(/Logs and other proof of checks are no result/);
+    expect(skill('hh-task-flow')).toMatch(/never commit them, and make no commit only to record proof or a note/);
+  });
+
+  it('writes the release notes once per release, with no note committed per task', () => {
+    expect(skill('dev-release-notes')).toMatch(/once, as the release is prepared, in one commit: nobody adds a note per task/);
+  });
+});
+
 describe('every test together once per release', () => {
   const bundle = (): SingleReleaseRunSkills => ({
     leadTasks: templates.skills.get('hh-lead-tasks')!.body,
