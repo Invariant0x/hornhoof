@@ -336,12 +336,23 @@ export async function callsView(ctx: Ctx, job: ToolJob, input: { batch?: string;
   return input.batch ? batches[0]! : { task: task.number, batches };
 }
 
+/* A call its node has not started yet: the node is told to drop it, and it ends here at once. */
+async function stopUnstarted(ctx: Ctx, job: Job): Promise<void> {
+  const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
+  const node = sub ? identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config)) : null;
+  if (node) ctx.hub.send(node, { type: 'job.cancel', jobId: job.id });
+  const [stopped] = await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued'))).returning({ id: jobs.id });
+  /* One that started meanwhile is stopped as any running one is. */
+  if (stopped) await callEnded(ctx, job.id);
+  else await cancelJob(ctx, job.id);
+}
+
 /* Stops every call of a batch that waits or runs. */
 export async function stopCalls(ctx: Ctx, job: ToolJob, batch: string): Promise<string> {
   const rows = await ctx.db.select({ call: oneShotCalls, job: jobs }).from(oneShotCalls).innerJoin(jobs, eq(jobs.id, oneShotCalls.jobId)).where(and(eq(oneShotCalls.batch, batch), eq(oneShotCalls.companyId, job.companyId)));
   if (!rows.length) throw refuse(404, 'task_unknown', `There is no batch ${batch}.`);
   const open = rows.filter(r => !ended(r.job));
-  for (const r of open) await cancelJob(ctx, r.job.id);
+  for (const r of open) await (r.job.status === 'running' ? cancelJob(ctx, r.job.id) : stopUnstarted(ctx, r.job));
   return open.length ? `Stopping ${open.length} ${open.length === 1 ? 'call' : 'calls'} of batch ${batch}.` : `Every call of batch ${batch} has ended already.`;
 }
 

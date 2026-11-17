@@ -108,6 +108,22 @@ describe('one-shot calls', () => {
     expect(JSON.parse((await call('calls', { batch })).text)).toMatchObject({ calls: [{ number: 1, status: 'failed', error: 'agent_failed', startedAt: expect.any(String), finishedAt: expect.any(String) }] });
   });
 
+  it('stop with stop_calls, both one that runs and one that has not started yet, and the caller hears it', async () => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    const call = await callerOn(c, c.bruno, mac);
+    const batch = /batch ([0-9a-f-]{36})/.exec((await call('start_calls', { brief: 'Check the links.', count: 2 })).text)![1]!;
+    const one = await nextOf(mac.node, 'job.run'), two = await nextOf(mac.node, 'job.run');
+    mac.node.send({ type: 'job.started', jobId: one.jobId });
+    await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, one.jobId)))[0]!.status === 'running');
+    expect(await call('stop_calls', { batch })).toEqual({ error: false, text: `Stopping 2 calls of batch ${batch}.` });
+    const stopped = [(await nextOf(mac.node, 'job.cancel')).jobId, (await nextOf(mac.node, 'job.cancel')).jobId];
+    expect(stopped.sort()).toEqual([one.jobId, two.jobId].sort());
+    mac.node.send({ type: 'job.done', jobId: one.jobId, ok: false, sessionId: null, result: '', tail: 'Stopped.', error: 'cancelled' });
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Call 1 failed \(cancelled\)[\s\S]*Call 2 failed \(cancelled\)/);
+  });
+
   it('end at once, and the caller hears why, when no machine of its plan is online', async () => {
     const c = await company();
     const mac = await c.machine(c.ceo, 'dev-mac');
