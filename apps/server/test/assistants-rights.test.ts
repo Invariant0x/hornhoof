@@ -41,12 +41,21 @@ describe("an assistant's key", () => {
         telegram: { username: null, id: null },
       },
       company: { name: 'Acme' },
-      contract: 2,
+      contract: 3,
     });
     for (const url of ['/api/people', '/api/me', '/api/subscriptions', '/api/machines', '/api/link', '/api/updates', '/api/requests', `/api/agents/${c.crew.owned.id}/events`]) {
       expect((await asAssistant(c, key, url)).statusCode, url).toBe(401);
     }
     expect((await c.app.inject({ method: 'POST', url: '/api/people/invite', ...bearer(key), payload: { name: 'X', email: 'x@acme.com', access: { whole: true } } })).statusCode).toBe(401);
+  });
+
+  it("does not open the CEO's marks of an employee's letters", async () => {
+    const c = await aclCompany();
+    const { key } = await assistantOf(c, 'ceo');
+    const res = await c.app.inject({ method: 'POST', url: `/api/agents/${c.crew.owned.id}/inbox/mark`, ...bearer(key), payload: { status: 'done', receivedBefore: '2100-01-01T00:00:00.000Z', reason: 'Stale.' } });
+    expect(res.statusCode).toBe(401);
+    /* The same marks open to the CEO's own session. */
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${c.crew.owned.id}/inbox/mark`, ...as(c.tokens.ceo), payload: { status: 'done', receivedBefore: '2100-01-01T00:00:00.000Z', reason: 'Stale.' } })).statusCode).toBe(200);
   });
 
   it("names the owner's Telegram as it is now, so a program can tell its owner from another person", async () => {
@@ -106,6 +115,9 @@ describe('whom an assistant may write to', () => {
     expect(refused.statusCode).toBe(403);
     expect(refused.json().error.reason).toBe('assistant_agent_refused');
     expect((await asAssistant(c, key, '/api/assistant/messages', 'POST', { agentId: c.crew.far.id, text: 'Hi.' })).statusCode).toBe(403);
+    const file = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=plan.pdf&agentId=${c.orchestrator.id}`, headers: { ...bearer(key).headers, 'content-type': 'application/pdf' }, payload: Buffer.from('%PDF-1.7') });
+    expect(file.statusCode).toBe(403);
+    expect(file.json().error.reason).toBe('assistant_agent_refused');
   });
 
   it("a listed person's: the employees on their plan where they work, as their window has it", async () => {

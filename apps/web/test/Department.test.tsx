@@ -1,4 +1,5 @@
 import { taskRoute } from './task-route';
+import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -52,6 +53,20 @@ async function flyIn(user: ReturnType<typeof userEvent.setup>) {
 const drawer = (user: ReturnType<typeof userEvent.setup>, name: 'Department tasks' | 'About the department') => user.click(screen.getByRole('button', { name }));
 
 describe('Department view', () => {
+  /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
+  it('keeps the words of a department with no head and no employees in their own direction', () => {
+    mockApi({});
+    const { container } = render(<LanguageProvider><DepartmentView me={ME} department={{ ...DEV_ORG.departments[0]!, employees: [] }} deputies={[]} selected={null} selectedTask={null}
+      panel="task" onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const head = container.querySelector<HTMLElement>('.shead.empty')!;
+    expect(head).toHaveTextContent('No head yet.');
+    const hint = screen.getByText('No employees yet. Hire them through the orchestrator.');
+    expect([...unisolated(head), ...unisolated(hint)]).toEqual([]);
+    /* Its count of agents and roles is one phrase in its own direction, the numbers inside it (Design #1201). */
+    const counts = within(head).getByText(/^0 of 0 agents working, \d+ roles?$/);
+    expect(counts).toHaveAttribute('dir', 'auto');
+  });
+
   it.each(['task', 'window'] as const)('fits the schema clear of the %s panel on its own side', panel => {
     mockApi({});
     render(<LanguageProvider><DepartmentView me={ME} department={DEV_ORG.departments[0]!} deputies={[]} selected={null} selectedTask={null}
@@ -151,6 +166,44 @@ describe('Department view', () => {
     await drawer(user, 'About the department');
     const people = screen.getByRole('region', { name: 'People with access' });
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
+  });
+
+  it('opens the department\'s own External messaging from its screen for a person given several departments, and About leads to the same panel', async () => {
+    const user = userEvent.setup();
+    const max = { id: 'p7', name: 'Max', email: 'max@acme.com', title: 'CMO', status: 'active' as const, isOwner: false, deputy: true, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }, { id: 'd8', name: 'Sales' }], teams: [] } };
+    const channel = { id: 'ch1', departmentId: 'd2', name: 'B2C Email Outreach', adapter: 'smtp', purpose: 'newsletter', audience: 'direct', status: 'active', canManage: true, policy: null, accounts: [] };
+    const overview = { channels: [channel], messages: [], escalations: [], approvals: [], departments: [{ id: 'd2', name: 'Development', templateKey: null }] };
+    const calls = shell({
+      'GET /api/outbound?department=d2': [200, overview],
+      'GET /api/outbound/catalog?department=d2': [200, { departmentId: 'd2', entries: [] }],
+      'GET /api/outbound/setup-log?department=d2': [200, { departmentId: 'd2', entries: [] }],
+      'GET /api/outbound/contacts?department=d2': [200, { departmentId: 'd2', contacts: [] }],
+    }, { ...DEV_ORG, people: [...DEV_ORG.people, max] }, listed('p7', 'Max'));
+    await flyIn(user);
+    await user.click(await screen.findByRole('button', { name: 'External messaging' }));
+    const panel = screen.getByRole('complementary', { name: 'External messaging' });
+    expect(await within(panel).findByRole('heading', { name: 'B2C Email Outreach' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Add an address' })).toBeInTheDocument();
+
+    await drawer(user, 'About the department');
+    const about = screen.getByRole('complementary', { name: 'About the department' });
+    const pointer = within(about).getByRole('region', { name: 'External messaging' });
+    expect(within(pointer).queryByRole('heading', { name: 'B2C Email Outreach' })).toBeNull();
+    expect(calls.filter(c => c.path === '/api/outbound/catalog?department=d2')).toHaveLength(1);
+    /* Its words keep their own direction right to left (Design #1176, M1). */
+    expect(unisolated(pointer)).toEqual([]);
+    await user.click(within(pointer).getByRole('button', { name: 'Open External messaging' }));
+    expect(await within(screen.getByRole('complementary', { name: 'External messaging' })).findByRole('heading', { name: 'B2C Email Outreach' })).toBeInTheDocument();
+  });
+
+  it('shows no External messaging to a person the server does not let run the department\'s messages', async () => {
+    const user = userEvent.setup();
+    const calls = shell({ 'GET /api/outbound?department=d2': [200, { channels: [], messages: [], escalations: [], approvals: [], departments: [] }] });
+    await flyIn(user);
+    await waitFor(() => expect(calls.some(c => c.path === '/api/outbound?department=d2')).toBe(true));
+    expect(screen.queryByRole('button', { name: 'External messaging' })).toBeNull();
+    await drawer(user, 'About the department');
+    expect(within(screen.getByRole('complementary', { name: 'About the department' })).queryByRole('region', { name: 'External messaging' })).toBeNull();
   });
 
   it("opens a person's decisions from their card in the department, which shows the same count as the map", async () => {

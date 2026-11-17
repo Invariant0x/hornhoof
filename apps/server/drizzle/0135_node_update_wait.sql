@@ -1,0 +1,1 @@
+ALTER TABLE "nodes" ADD COLUMN "update_wait_since" timestamp with time zone;

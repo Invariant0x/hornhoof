@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { agentEvents, agents, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { appendEvent } from '../src/modules/events/store.js';
@@ -133,7 +134,7 @@ describe('words left unsent in a program\'s input', () => {
     await typeAs(zed, 'a draft');
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'An assignment of the CEO.' }, ...as(ceo) });
     const [turn] = await db.select().from(jobs).where(eq(jobs.agentId, agentId));
-    const [{ id: ceoId } = { id: '' }] = await db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+    const [{ id: ceoId } = { id: '' }] = await db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
     expect(turn!.createdBy).toBe(ceoId);
     builtin.send(left(agentId, { typed: true, jobId: turn!.id }));
     await next(builtin, 'agent.input_kept');

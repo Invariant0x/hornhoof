@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { CatalogValue, UtcTime, type GateCode } from '@hornhoof/protocol';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt, notExists, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { departments, outboundCatalogRevisions, outboundChannels } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf, scanText, unsafeLink } from './checks.js';
@@ -28,7 +29,7 @@ const wordsIn = (value: CatalogValue): string[] => {
 const linkIn = (value: CatalogValue): string | null => (value.kind === 'link' ? value.url : value.kind === 'audience' ? value.destination : null);
 
 /* What a revision carries that it may not, by the code that would refuse it at the last look. */
-export function catalogReasons(value: CatalogValue): GateCode[] {
+function catalogReasons(value: CatalogValue): GateCode[] {
   const link = linkIn(value);
   return [...new Set([...wordsIn(value).flatMap(scanText), ...(link !== null && unsafeLink(link) ? (['link_unapproved'] as const) : [])])];
 }
@@ -52,7 +53,7 @@ const samePlace = (a: Place, b: Place): boolean => a.departmentId === b.departme
 /* A product named here is of this department and company. */
 export async function requireProductOf(db: Pick<Db, 'select'>, at: { companyId: string; departmentId: string; productId?: string | undefined }): Promise<void> {
   if (!at.productId) return;
-  const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, at.productId), eq(departments.parentId, at.departmentId), eq(departments.companyId, at.companyId)));
+  const [product] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, at.productId), eq(departments.parentId, at.departmentId), eq(departments.companyId, at.companyId)));
   if (!product) throw noSuch('product');
 }
 
@@ -60,7 +61,7 @@ export async function requireProductOf(db: Pick<Db, 'select'>, at: { companyId: 
 async function placeOf(tx: Tx, p: Proposal): Promise<Place> {
   await requireProductOf(tx, p);
   if (!p.channelId) return { departmentId: p.departmentId, productId: p.productId ?? null, channelId: null };
-  const [channel] = await tx.select({ productId: outboundChannels.productId }).from(outboundChannels).where(and(eq(outboundChannels.id, p.channelId), eq(outboundChannels.companyId, p.companyId), eq(outboundChannels.departmentId, p.departmentId)));
+  const [channel] = await tx.select(only(outboundChannels, 'productId')).from(outboundChannels).where(and(eq(outboundChannels.id, p.channelId), eq(outboundChannels.companyId, p.companyId), eq(outboundChannels.departmentId, p.departmentId)));
   if (!channel || (p.productId && channel.productId !== p.productId)) throw noSuch('channel');
   return { departmentId: p.departmentId, productId: channel.productId, channelId: p.channelId };
 }
@@ -104,16 +105,38 @@ export async function catalogRow(db: Pick<Db, 'select'>, companyId: string, id: 
   return row;
 }
 
-/* A person's yes to this revision. Once only: it goes as it was proposed or not at all. */
-export async function publishRevision(db: Pick<Db, 'update'>, row: Pick<Row, 'id'>, personId: string, now = new Date()): Promise<Proposed> {
-  const [published] = await db.update(outboundCatalogRevisions).set({ status: 'published', publishedBy: personId, publishedAt: now }).where(and(eq(outboundCatalogRevisions.id, row.id), eq(outboundCatalogRevisions.status, 'proposed'))).returning();
-  if (!published) throw conflict('This revision is not waiting to be published.');
+/* The version a screen showed: its number, and the newest one of its entry then. A move by id alone, as a head's tool
+   makes one, names its revision exactly and says nothing of the entry. */
+export const ShownRevision = z.strictObject({ revision: z.number().int().positive().optional(), newest: z.number().int().positive().optional() });
+export type ShownRevision = z.infer<typeof ShownRevision>;
+type Moved = Pick<Row, 'id' | 'companyId' | 'entryId' | 'revision'>;
+
+const changed = (move: string) => new ApiError(409, 'conflict', `This entry changed after you looked at it: it has another version now. Look at it again before you ${move}.`, 'outbound_changed');
+
+/* A version of the entry newer than the newest one shown. */
+const newerThanShown = (db: Pick<Db, 'select'>, row: Moved, newest: number) =>
+  db.select({ one: sql`1` }).from(outboundCatalogRevisions).where(and(eq(outboundCatalogRevisions.companyId, row.companyId), eq(outboundCatalogRevisions.entryId, row.entryId), gt(outboundCatalogRevisions.revision, newest)));
+
+/* In the same statement as the move, so that a version proposed meanwhile stops it. */
+const asShown = (db: Pick<Db, 'select'>, row: Moved, shown: ShownRevision) => (shown.newest === undefined ? undefined : notExists(newerThanShown(db, row, shown.newest)));
+
+async function refusal(db: Pick<Db, 'select'>, row: Moved, shown: ShownRevision, move: string, otherwise: ApiError): Promise<ApiError> {
+  if (shown.newest === undefined) return otherwise;
+  return (await newerThanShown(db, row, shown.newest)).length ? changed(move) : otherwise;
+}
+
+/* A person's yes to the revision they were shown. Once only: it goes as it was proposed or not at all. */
+export async function publishRevision(db: Pick<Db, 'select' | 'update'>, row: Moved, personId: string, shown: ShownRevision = {}, now = new Date()): Promise<Proposed> {
+  if (shown.revision !== undefined && shown.revision !== row.revision) throw changed('publish it');
+  const [published] = await db.update(outboundCatalogRevisions).set({ status: 'published', publishedBy: personId, publishedAt: now }).where(and(eq(outboundCatalogRevisions.id, row.id), eq(outboundCatalogRevisions.status, 'proposed'), asShown(db, row, shown))).returning();
+  if (!published) throw await refusal(db, row, shown, 'publish it', conflict('This revision is not waiting to be published.'));
   return proposedOf(published);
 }
 
-/* Takes back what was published: what would use it stops at its last look. */
-export async function revokeRevision(db: Pick<Db, 'update'>, row: Pick<Row, 'id'>, now = new Date()): Promise<Proposed> {
-  const [revoked] = await db.update(outboundCatalogRevisions).set({ status: 'revoked', revokedAt: now }).where(and(eq(outboundCatalogRevisions.id, row.id), eq(outboundCatalogRevisions.status, 'published'))).returning();
-  if (!revoked) throw conflict('Only a published revision can be taken back.');
+/* Takes back what was published, the version shown: what would use it stops at its last look. */
+export async function revokeRevision(db: Pick<Db, 'select' | 'update'>, row: Moved, shown: ShownRevision = {}, now = new Date()): Promise<Proposed> {
+  if (shown.revision !== undefined && shown.revision !== row.revision) throw changed('take it back');
+  const [revoked] = await db.update(outboundCatalogRevisions).set({ status: 'revoked', revokedAt: now }).where(and(eq(outboundCatalogRevisions.id, row.id), eq(outboundCatalogRevisions.status, 'published'), asShown(db, row, shown))).returning();
+  if (!revoked) throw await refusal(db, row, shown, 'take it back', conflict('Only a published revision can be taken back.'));
   return proposedOf(revoked);
 }

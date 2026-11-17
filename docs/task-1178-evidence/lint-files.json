@@ -1,0 +1,50 @@
+{
+  "server": [
+    "src/modules/assistants/mcp.ts",
+    "src/modules/computer/tools.ts",
+    "src/modules/conversation/queue.ts",
+    "src/modules/events/store.ts",
+    "src/modules/nodes/messages.ts",
+    "src/modules/phones/recording.ts",
+    "src/modules/phones/tools.ts",
+    "src/modules/tasks/attachments.ts",
+    "src/modules/tasks/wake.ts",
+    "src/modules/tools/calls.ts",
+    "src/modules/tools/mcp.ts",
+    "src/modules/tools/outside.ts",
+    "src/modules/tools/privacy.ts",
+    "src/modules/tools/private-turns.ts",
+    "src/modules/tools/private-upload.ts",
+    "src/modules/tools/shelf.ts",
+    "src/modules/vault/tools.ts",
+    "test/assistant-agent.test.ts",
+    "test/events.test.ts",
+    "test/helpers-db.ts",
+    "test/node-messages.test.ts",
+    "test/phone-fixture.ts",
+    "test/private-upload.test.ts",
+    "test/read-tools.test.ts",
+    "test/task-files.test.ts",
+    "test/tool-calls.test.ts",
+    "test/vault-fixture.ts",
+    "test/vault-phone-privacy.test.ts",
+    "test/vault-tools.test.ts"
+  ],
+  "node": [
+    "src/runner.ts",
+    "src/terminal/bridge.ts",
+    "src/terminal/host.ts",
+    "src/terminal/recordings.ts",
+    "src/terminal/tmux.ts",
+    "test/runner.test.ts",
+    "test/terminal-bridge.test.ts",
+    "test/terminal-host-live-helpers.ts",
+    "test/terminal-host-secrets.test.ts",
+    "test/terminal-tmux.test.ts"
+  ],
+  "protocol": [
+    "src/index.ts",
+    "src/tool-privacy.ts",
+    "test/tool-privacy.test.ts"
+  ]
+}

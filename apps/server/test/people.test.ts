@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, invites, people, personKeys, sessions, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { sessionFrom, setUpCompany, testApp } from './helpers.js';
 
 const as = (token: string) => ({ cookies: { hh_session: token } });
@@ -218,7 +219,7 @@ describe('PATCH /api/people/:id', () => {
     for (const name of ['   ', 'x'.repeat(81)]) {
       expect((await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name }, ...as(olga.token) })).statusCode).toBe(400);
     }
-    expect((await db.select({ name: people.name }).from(people).where(eq(people.id, owner!.id)))[0]!.name).toBe('Ivan');
+    expect((await db.select(only(people, 'name')).from(people).where(eq(people.id, owner!.id)))[0]!.name).toBe('Ivan');
 
     const { agentParty, personParty } = await import('../src/modules/events/parties.js');
     const { messageHeading } = await import('../src/modules/conversation/prompt.js');
@@ -422,7 +423,7 @@ describe('PUT /api/people/:id/ceo-delegate', () => {
     expect((await mark(app, ceo, nina.json().person.id, false)).statusCode).toBe(200);
   });
 
-  it('is the real CEO\'s alone: not a person of the whole company, not the delegate, not the orchestrator, not for the CEO', async () => {
+  it('is the real CEO\'s alone, by himself or through the orchestrator: not a person of the whole company, not the delegate, not for the CEO', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
@@ -434,12 +435,13 @@ describe('PUT /api/people/:id/ceo-delegate', () => {
     expect((await mark(app, maria.token, olga.id, true)).statusCode).toBe(403);
     expect((await mark(app, ceo, owner!.id, true)).json().error.reason).toBe('owner_locked');
     const { orchestratorHeaders } = await import('../src/auth/internal.js');
-    const viaOrchestrator = await app.inject({ method: 'PUT', url: `/api/people/${olga.id}/ceo-delegate`, payload: { isCeoDelegate: true }, headers: orchestratorHeaders(owner!.id, '00000000-0000-4000-8000-000000000009') });
-    expect(viaOrchestrator.statusCode).toBe(403);
     expect((await mark(app, ceo, '00000000-0000-4000-8000-000000000000', true)).statusCode).toBe(404);
     expect((await app.inject({ method: 'PUT', url: `/api/people/${olga.id}/ceo-delegate`, payload: { isCeoDelegate: true, isOwner: true }, ...as(ceo) })).statusCode).toBe(400);
     const [still] = await db.select().from(people).where(eq(people.id, olga.id));
     expect(still!.isCeoDelegate).toBe(false);
+    const viaOrchestrator = await app.inject({ method: 'PUT', url: `/api/people/${maria.id}/ceo-delegate`, payload: { isCeoDelegate: false }, headers: orchestratorHeaders(owner!.id, '00000000-0000-4000-8000-000000000009') });
+    expect(viaOrchestrator.statusCode).toBe(200);
+    expect((await db.select().from(people).where(eq(people.id, maria.id)))[0]!.isCeoDelegate).toBe(false);
   });
 
   it('takes the mark off for good when the delegate is disabled, sent a new invite or loses the whole company', async () => {

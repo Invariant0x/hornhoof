@@ -1,4 +1,4 @@
-import { taskActor, type TreeAgent, type TreeFacts, type TreeLine } from './tree.js';
+import type { FactTask, TreeAgent, TreeFacts, TreeLine } from './tree.js';
 import { countedSegments, turnSegments, type FactTurn } from './tree-programs.js';
 
 export type TreeWait = { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string };
@@ -6,6 +6,11 @@ type WaitTask = Pick<TreeLine, 'taskId' | 'number' | 'title'>;
 
 export type WaitSpan = TreeWait & { to: string | null };
 type Window = { from: number; to: number | null };
+
+/* Who acts on a task: whoever holds it, else whoever carries it out. */
+export function taskActor(task: Pick<FactTask, 'assigneeAgentId' | 'executorAgentId'>): string | null {
+  return task.assigneeAgentId ?? task.executorAgentId ?? null;
+}
 
 function externalStart(facts: TreeFacts, agentId: string, now: Date): number {
   const waits = facts.tasks.filter(t => taskActor(t) === agentId && t.externalWait && t.externalWait.until > now.toISOString());

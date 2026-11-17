@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
@@ -569,7 +570,7 @@ describe('the orchestrator\'s conversation', () => {
     expect((await state(app, ceo)).limitUntil).toBe(new Date(now + 15 * 60_000).toISOString());
     expect(await quiet(mac)).toBe(0);
     expect((await state(app, ceo)).queued).toBe(1);
-    const [sub] = await app.ctx.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.provider, 'kimi'));
+    const [sub] = await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'kimi'));
     expect(sub!.limits).toMatchObject({ status: 'rejected', windows: [{ name: 'five_hour', utilization: 1 }] });
   });
 
@@ -593,7 +594,7 @@ describe('the orchestrator\'s conversation', () => {
   it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
-    const [company] = await app.ctx.db.select({ id: companies.id }).from(companies);
+    const [company] = await app.ctx.db.select(idOnly(companies)).from(companies);
     const heard: string[] = [];
     app.ctx.bus.subscribe(company!.id, m => heard.push(m.type));
     await say(app, ceo, 'First');
@@ -638,7 +639,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     const plan = () => app.ctx.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() - 1000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.provider, 'kimi'));
-    const stored = async () => (await app.ctx.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!.limits;
+    const stored = async () => (await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!.limits;
     const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }], complete: true };
     mac.send({ type: 'status', loggedIn: true, limits: reading });
     await until(async () => (await stored())?.status === 'allowed');

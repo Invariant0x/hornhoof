@@ -1,4 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { PRIVATE_COMMAND_REFUSED, PRIVATE_TURN_LOST, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -11,6 +13,7 @@ import { toolCalls } from '../../db/schema.js';
 import { listed, outsideSources, sources, toolSource, touch, withSource } from '../../db/sources.js';
 import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
 import { INVOCATION, UUID } from '../../net/proxy.js';
+import { READ_TOOLS } from './read-tools.js';
 
 export { INVOCATION };
 
@@ -55,7 +58,14 @@ export const MAY_HAVE_RUN = 'Hornhoof could not confirm this change. The call ma
 export const TOO_LARGE = 'This call ran, but its answer was too large to keep. Look at its result again.';
 export const ID_TAKEN = 'This call id belongs to another job, so the call did not run. Send it again.';
 
-type Answer = { content: { type: 'text'; text: string }[]; isError?: boolean; [more: string]: unknown };
+type Answer = CallToolResult;
+export type ToolProtection = {
+  lost?: boolean;
+  sensitive(name: string, policy: ToolPrivacyPolicy, input: unknown, answer?: Answer): Promise<void>;
+  input<T>(value: T): T;
+  hide<T>(value: T): T;
+  execution(name: string, input: unknown): boolean;
+};
 const say = (text: string): Answer => ({ content: [{ type: 'text', text }], isError: true });
 
 /* The id of the tool call running now, when front gave it one. */
@@ -127,9 +137,53 @@ async function once(call: Call, run: () => Promise<Answer>): Promise<Answer> {
 /* Wraps every tool the modules register after it. With an invocation id a call runs once: its work runs in a source of
    that id, its answer is kept under it for its job, and the same id sent again gets that answer, hears that the call is
    still running, or hears that it ran. Without an id a call runs as it always did. */
-export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: string }, invocation: string | null): void {
-  if (!invocation) return;
-  const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (...given: unknown[]) => Promise<Answer>) => unknown;
-  server.registerTool = ((name: string, config: unknown, handler: (...given: unknown[]) => Promise<Answer>) =>
-    register(name, config, (...given) => once({ db: ctx.db, jobId: job.id, id: invocation, name }, async () => handler(...given)))) as McpServer['registerTool'];
+type Handler = (...given: unknown[]) => Promise<Answer>;
+type ToolConfig = { _meta?: ToolPrivacyPolicy };
+type Register = (name: string, config: ToolConfig, handler: Handler) => unknown;
+
+function privateHandler(name: string, policy: ToolPrivacyPolicy, handler: Handler, protection?: ToolProtection): Handler {
+  return async (...given) => {
+    await protection?.sensitive(name, policy, given.length > 1 ? given[0] : undefined);
+    /* No tool source or replay state; unexpected errors must not carry the raw input or answer. */
+    try {
+      const answer = await handler(...given);
+      await protection?.sensitive(name, policy, undefined, answer);
+      return answer;
+    } catch { return say('The sensitive tool could not complete. Its details are hidden.'); }
+  };
+}
+
+function maskedHandler(config: ToolConfig, handler: Handler, protection?: ToolProtection): Handler {
+  return async (...given) => {
+    if (given.length > 1 && protection) {
+      const hidden = protection.input(given[0]);
+      if (config._meta?.secretCommand && JSON.stringify(hidden) !== JSON.stringify(given[0])) return say(PRIVATE_COMMAND_REFUSED);
+      given[0] = hidden;
+    }
+    const answer = await handler(...given);
+    return protection?.hide(answer) ?? answer;
+  };
+}
+
+function privateCall(config: ToolConfig, name: string, input: unknown, protection?: ToolProtection): boolean {
+  return config._meta?.sensitive === true || (config._meta?.secretExecution === true && protection?.execution(name, input) === true);
+}
+
+function lostHandler(name: string, handler: Handler): Handler {
+  return READ_TOOLS.has(name) && name !== 'database' ? handler : async () => say(PRIVATE_TURN_LOST);
+}
+
+function registerProtected(register: Register, call: Omit<Call, 'name'>, name: string, config: ToolConfig, handler: Handler, protection?: ToolProtection): unknown {
+  if (protection?.lost) return register(name, config, lostHandler(name, handler));
+  const sensitive = privateHandler(name, config._meta!, handler, protection);
+  const run = maskedHandler(config, handler, protection);
+  return register(name, config, (...given) => {
+    if (privateCall(config, name, given.length > 1 ? given[0] : undefined, protection)) return sensitive(...given);
+    return call.id ? once({ ...call, name }, () => run(...given)) : run(...given);
+  });
+}
+
+export function guardTools(server: McpServer, ctx: Pick<Ctx, 'db'>, job: { id: string }, invocation: string | null, protection?: ToolProtection): void {
+  const register = server.registerTool.bind(server) as Register;
+  server.registerTool = ((name: string, config: ToolConfig, handler: Handler) => registerProtected(register, { db: ctx.db, jobId: job.id, id: invocation ?? '' }, name, config, handler, protection)) as McpServer['registerTool'];
 }

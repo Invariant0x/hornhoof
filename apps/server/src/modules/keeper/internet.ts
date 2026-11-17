@@ -6,19 +6,19 @@ import { z } from 'zod';
 import { writePrivately } from './machine-keys.js';
 import { RoundTrips } from './round-trips.js';
 
-export const INTERNET_EVERY_MS = 600_000;
-export const PING_TIMEOUT_MS = 5_000;
+const INTERNET_EVERY_MS = 600_000;
+const PING_TIMEOUT_MS = 5_000;
 export const DOWNLOAD_FIRST_MS = 600_000;
-export const DOWNLOAD_TIMEOUT_MS = 60_000;
-export const DOWNLOAD_REDIRECTS = 3;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+const DOWNLOAD_REDIRECTS = 3;
 /* In the keeper's folder: the last good rate with its time, and the time of the last try. */
 export const INTERNET_FILE = 'internet.json';
 export const DOWNLOAD_EVERY_MS = 86_400_000;
 export const DOWNLOAD_BYTES = 4 * 2 ** 20;
-export const DOWNLOAD_MIN_BYTES = 2 ** 20;
-export const PING_URL = 'https://github.com/';
+const DOWNLOAD_MIN_BYTES = 2 ** 20;
+const PING_URL = 'https://github.com/';
 /* A file every install already takes from there, so no new host is asked. */
-export const DOWNLOAD_URL = 'https://github.com/fatedier/frp/releases/download/v0.71.1/frp_0.71.1_linux_amd64.tar.gz';
+const DOWNLOAD_URL = 'https://github.com/fatedier/frp/releases/download/v0.71.1/frp_0.71.1_linux_amd64.tar.gz';
 const FIRST_PING_MS = 60_000;
 const CHECK_EVERY_MS = 60_000;
 /* The most a report takes for a rate. */
@@ -26,7 +26,7 @@ const MBPS_MAX = 600_000;
 
 const Kept = z.object({ mbps: z.number().int().min(0).nullable(), mbpsAt: z.string().nullable(), triedAt: z.string().nullable() });
 
-export type InternetMeasuresOptions = {
+type InternetMeasuresOptions = {
   /* The keeper's own folder. */
   dir: string;
   pingUrl?: string;

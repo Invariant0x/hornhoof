@@ -490,8 +490,7 @@
         "apps/server/src/modules/outbound/checks.ts",
         "apps/server/src/modules/outbound/delivery.ts",
         "apps/server/src/modules/outbound/render.ts",
-        "apps/server/src/modules/tasks/echelons-policy.ts",
-        "apps/server/src/modules/tasks/review-verdict.ts"
+        "apps/server/src/modules/tasks/echelons-policy.ts"
       ],
       "run": {
         "program": "node",
@@ -582,6 +581,7 @@
         "globs": [
           "apps/web/playwright.config.ts",
           "apps/web/vite.config.ts",
+          "apps/web/linked-packages.config.ts",
           "apps/web/index.html",
           "apps/web/package.json",
           "apps/web/tsconfig.json",
@@ -639,6 +639,7 @@
           "apps/server/test/agents.test.ts",
           "apps/server/test/api-connections.test.ts",
           "apps/server/test/composable-skills.test.ts",
+          "apps/server/test/computer.test.ts",
           "apps/server/test/conversation.test.ts",
           "apps/server/test/credentials.test.ts",
           "apps/server/test/department-echelons-template.test.ts",
@@ -670,6 +671,7 @@
           "apps/server/test/skill-independence.test.ts",
           "apps/server/test/staff.test.ts",
           "apps/server/test/stuck-policy.test.ts",
+          "apps/server/test/submit-starts-no-run.test.ts",
           "apps/server/test/task-urgency.test.ts",
           "apps/server/test/tasks-after.test.ts",
           "apps/server/test/tasks-engine.test.ts",
@@ -733,8 +735,7 @@
       "apps/server/src/modules/outbound/checks.ts",
       "apps/server/src/modules/outbound/delivery.ts",
       "apps/server/src/modules/outbound/render.ts",
-      "apps/server/src/modules/tasks/echelons-policy.ts",
-      "apps/server/src/modules/tasks/review-verdict.ts"
+      "apps/server/src/modules/tasks/echelons-policy.ts"
     ],
     "fastTestPaths": [
       "apps/node/test/redact.test.ts",
@@ -745,8 +746,7 @@
       "apps/server/test/outbound-checks.test.ts",
       "apps/server/test/outbound-delivery.test.ts",
       "apps/server/test/outbound-render.test.ts",
-      "apps/server/test/echelons-policy.test.ts",
-      "apps/server/test/review-verdict.test.ts"
+      "apps/server/test/echelons-policy.test.ts"
     ],
     "coverageCommands": [
       {
@@ -805,10 +805,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "packages/protocol/tsconfig.json",
             "--noEmit"
@@ -816,10 +816,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/server/tsconfig.eslint.json",
             "--noEmit"
@@ -827,10 +827,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/node/tsconfig.eslint.json",
             "--noEmit"
@@ -838,10 +838,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "packages/protocol/tsconfig.eslint.json",
             "--noEmit"
@@ -849,10 +849,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/node/tsconfig.json",
             "--noEmit"
@@ -860,10 +860,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/server/tsconfig.json",
             "--noEmit"
@@ -871,10 +871,10 @@
           "cwd": "."
         },
         {
-          "program": "node",
+          "program": "npx",
           "args": [
-            "--max-old-space-size=4096",
-            "node_modules/typescript/bin/tsc",
+            "--no-install",
+            "tsc",
             "-p",
             "apps/web/tsconfig.json",
             "--noEmit"

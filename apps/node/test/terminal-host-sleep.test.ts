@@ -52,6 +52,65 @@ describe('a program that sleeps between turns', () => {
     expect(launched.command.join(' ')).toContain(SESSION);
   });
 
+  /* Seen on a Kimi node on 16.11: the turn after a sleep read the program's log again from its start, took the turns it
+     told of for one the program still ran, and waited for that one to end. The program never started again, and every
+     later turn of the agent waited too, for hours, until a person stopped each. Kimi logs each turn's words as turn.prompt,
+     Codex logs task_started. */
+  it.each(['codex', 'kimi'] as const)('starts %s again at once for the turn after its sleep, whatever turns its log tells of', async kind => {
+    const c = await atWorkThatSleeps(kind);
+    if (kind === 'kimi') c.record({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'HANG' }] });
+    c.finish();
+    await c.on(c.running);
+    await c.until(() => c.stop.mock.calls.length > 0);
+    const before = c.launch.mock.calls.length;
+    void c.run();
+    await c.pass(1000);
+    expect(c.launch.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  /* The turns a program's log tells of are over, whatever the node did with the program since: after a sleep, a node
+     restart, which forgets all it knew of the agent, and sleep after sleep, each turn starts the program again at once, and
+     no turn of a person opens from what the log said before. Each logs the turns it takes: Kimi as turn.prompt, Codex the
+     words it took, Claude the person's line. */
+  it.each(['claude', 'codex', 'kimi'] as const)('starts %s at once for each turn across a node restart and sleeps in a row, and opens no turn from its log', async kind => {
+    const c = await atWorkThatSleeps(kind);
+    const logsTurn = () => c.record(kind === 'kimi' ? { type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'HANG' }] }
+      : kind === 'codex' ? userMessage('HANG', c.turnId()) : { type: 'user', message: { role: 'user', content: 'HANG' } });
+    let turn = c.running;
+    for (const between of ['sleep', 'restart', 'sleep', 'sleep'] as const) {
+      logsTurn();
+      const slept = c.stop.mock.calls.length;
+      c.finish();
+      expect(await c.on(turn)).toMatchObject({ ok: true });
+      await c.until(() => c.stop.mock.calls.length > slept);
+      /* The node that starts again has no program running: they went with the machine's tmux. */
+      if (between === 'restart') c.host['agents'].delete('receipt');
+      const before = c.launch.mock.calls.length;
+      turn = c.run();
+      await c.pass(1000);
+      expect(c.launch.mock.calls.length).toBe(before + 1);
+      await c.until(() => c.host['agents'].get('receipt')!.busy);
+    }
+    c.finish();
+    expect(await c.on(turn)).toMatchObject({ ok: true, sessionId: SESSION });
+    expect(c.sent.filter(m => m.type === 'turn.open')).toEqual([]);
+  });
+
+  /* So with a program closed for a plan the agent left, when the agent comes back to this node's plan. */
+  it('starts codex again at once for a turn after its node closed it for a plan the agent left', async () => {
+    const c = await atWorkThatSleeps('codex');
+    const has = vi.spyOn(c.tmux, 'has').mockResolvedValue(true);
+    c.kill.mockImplementation(async () => { c.alive.mockResolvedValue(false); has.mockResolvedValue(false); });
+    void c.host.release('receipt', 'job-receipt');
+    c.finish();
+    await c.on(c.running);
+    await c.until(() => c.kill.mock.calls.length > 0);
+    const before = c.launch.mock.calls.length;
+    void c.run();
+    await c.pass(1000);
+    expect(c.launch.mock.calls.length).toBeGreaterThan(before);
+  });
+
   it('gives the turn after its sleep the answer of the program started again in its session', async () => {
     const c = await atWorkThatSleeps('claude');
     c.finish();
@@ -231,6 +290,26 @@ describe('a turn a program begins as it is about to sleep', () => {
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
     await c.pass(2000);
     await endsGoneAndStartsAgain(c);
+  });
+
+  it.each(['sleep', 'close'] as const)('starts kimi again at once for the next turn when it logged words it took as its node let it %s, with no word from its hook', async end => {
+    const c = await atWorkThatSleeps('kimi');
+    const ends = end === 'sleep' ? c.stop : c.kill;
+    const has = end === 'close' ? vi.spyOn(c.tmux, 'has').mockResolvedValue(true) : null;
+    ends.mockImplementation(async () => {
+      if (ends.mock.calls.length === 1) c.record({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'Words it queued.' }] });
+      c.alive.mockResolvedValue(false);
+      has?.mockResolvedValue(false);
+    });
+    if (end === 'close') void c.host.release('receipt', 'job-receipt');
+    c.finish();
+    await c.on(c.running);
+    await c.until(() => ends.mock.calls.length > 0);
+    await c.pass(1000);
+    const before = c.launch.mock.calls.length;
+    void c.run();
+    await c.pass(1000);
+    expect(c.launch.mock.calls.length).toBeGreaterThan(before);
   });
 
   /* Seen on the same Mac: a turn of Kimi opened 16 s after its program went to sleep, and stood with no program as well. */

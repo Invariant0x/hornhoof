@@ -12,6 +12,9 @@ import { nodeDrainHello } from '../updates/node-drain.js';
 import { acceptOperatorEvidence } from '../program-operator/evidence.js';
 import { receiveOperatorReply } from '../program-operator/rpc.js';
 import { restoreOperatorNode } from '../program-operator/health.js';
+import { phoneNodeMessage } from '../phones/rpc.js';
+import { nodeLogArrived } from '../tools/logs.js';
+import { recordPhoneFrame } from '../phones/recording.js';
 
 async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'node.stopping' }>): Promise<void> {
   if (msg.exit.kind !== 'planned' || msg.exit.startedAt !== msg.startedAt) return;
@@ -32,6 +35,12 @@ async function receiveOperatorFrame(ctx: Ctx, id: NodeIdentity, msg: OperatorNod
 }
 
 async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>): Promise<void> {
+  if ((msg.type === 'hello' || msg.type === 'phone.reply') && await hasCurrentKey(ctx, id) && phoneNodeMessage(ctx, id, msg)) return;
+  if (nodeLogArrived(id, msg)) return;
+  if (msg.type === 'phone.frame') {
+    if (await hasCurrentKey(ctx, id)) await recordPhoneFrame(ctx, id, msg);
+    return;
+  }
   if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);

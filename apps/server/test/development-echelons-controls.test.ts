@@ -9,9 +9,11 @@ const pass = { pass: true, comment: 'Checked the assigned candidate.', reviewedC
 describe('stage decisions without a return to the author', () => {
   it('records the Architecture plan before opening Development', async () => {
     const f = await fixture({ small: false });
-    const moved = await report(f.ctx, f.author.id, f.task.id, { done: true, summary: 'Change logic/totals.ts and prove the boundary case with a focused test.' });
+    const architect = await f.hire('Architect', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    const { task } = await f.create({ small: false, architectAgentId: architect.id, assigneeAgentId: f.author.id });
+    const moved = await report(f.ctx, architect.id, task.id, { done: true, summary: 'Change logic/totals.ts and prove the boundary case with a focused test.' });
     expect(moved.task.status).not.toBe('done');
-    expect(await f.detail()).toMatchObject({ echelons: { stage: 'development', ownerAgentId: f.author.id, stages: expect.arrayContaining([expect.objectContaining({ stage: 'architecture', status: 'complete' })]) } });
+    expect(await f.detail(task.id)).toMatchObject({ echelons: { stage: 'development', ownerAgentId: f.author.id, stages: expect.arrayContaining([expect.objectContaining({ stage: 'architecture', status: 'complete' })]) } });
   });
   it('lets Review add Security when it discovers a risk', async () => {
     const f = await fixture();

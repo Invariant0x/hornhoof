@@ -4,7 +4,7 @@ import type { Decision } from './score.js';
 
 export type BindingPart = Exclude<InvalidationCode, 'evaluation_failed'>;
 export type CheckState = { status: 'on' | 'off'; bindingDigest: string | null; validUntil: Date | null };
-export type DueRun = { bindingDigest: string; trigger: 'change' | 'weekly'; parts: BindingPart[]; dedupKey: string };
+type DueRun = { bindingDigest: string; trigger: 'change' | 'weekly'; parts: BindingPart[]; dedupKey: string };
 export type Signal = { dedupKey: string; problems: Decision['problems'] };
 
 const WEEK_MS = 7 * 24 * 3_600_000;

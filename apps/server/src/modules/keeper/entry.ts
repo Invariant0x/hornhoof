@@ -10,7 +10,7 @@ import { above, nextEntryStep, nextWindow, NO_WINDOW, UNREACHED_MS, type EntrySa
    registers the name when that copy is silent and the name was its own and free long enough, takes its lease on
    either, or follows when anything says another machine led since. */
 
-export type ReentryOptions = {
+type ReentryOptions = {
   /* This keeper's own network id. */
   self: string;
   /* Whether a lease takes a proof now; null while that cannot be told. */

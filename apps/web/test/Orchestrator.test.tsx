@@ -6,6 +6,7 @@ import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerAccessView, EventView, Me, Org, ShownCommand } from '../src/types';
 import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { commandCode } from './command-code';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
 vi.mock('../src/ui/AgentTerminal', () => ({
@@ -250,12 +251,6 @@ describe('AgentWindow', () => {
     expect(screen.queryByText(/free memory/)).not.toBeInTheDocument();
   });
 
-  it('says nothing of the machine when its update was put off, since turns go out then', async () => {
-    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
-    await screen.findByRole('textbox');
-    expect(screen.queryByText(/before an update/)).not.toBeInTheDocument();
-  });
-
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
     expect(await screen.findByText(/^The plan is at its limit\. Turns wait until .+ and go on by themselves then\.$/)).toBeInTheDocument();
@@ -323,12 +318,12 @@ describe('AgentWindow', () => {
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
     const card = await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' });
-    expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
+    expect(await within(card).findByText(commandCode(withKey(command)))).toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(command)).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByText(commandCode(command))).not.toBeInTheDocument());
   });
 
   it('names each kind of machine command in Russian', async () => {
