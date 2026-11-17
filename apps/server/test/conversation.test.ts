@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -9,15 +9,17 @@ import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
-import { as, connectNode, invitePerson, listen, openStream, sessionFrom, SETUP, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
+import { textHash } from '../src/modules/templates/load.js';
+import { as, connectNode, invitePerson, listen, openStream, prepareApp, sessionFrom, SETUP, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
+await prepareApp({ NODE_KEY });
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
 const IVAN_TO_BRUNO = 'From Ivan (CEO) to Bruno (Backend engineer, Development):\n\n';
 /* Below a person's words to an employee: what that person is to it. */
 const IVAN_IS = "\n\nIvan is the company's owner (the CEO).";
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number; skills?: { name: string }[] };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number; skills?: SkillFile[] };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -38,6 +40,26 @@ async function nextRun(node: FakeNode): Promise<Run> {
   const m = await node.next();
   if (m.type !== 'job.run') throw new Error(`Expected job.run, got ${m.type}`);
   return m as Run;
+}
+
+/* A refused job sends no run, so report its reason instead of waiting for a message that cannot come. */
+async function nextRunOrFailed(app: FastifyInstance, node: FakeNode, jobId: string): Promise<Run> {
+  await until(async () => {
+    const [job] = await app.ctx.db.select({ status: jobs.status, error: jobs.error, result: jobs.result }).from(jobs).where(eq(jobs.id, jobId));
+    if (job?.status === 'failed') throw new Error(`${job.error}: ${job.result}`);
+    return node.queued() > 0;
+  });
+  const run = await nextRun(node);
+  expect(run.jobId).toBe(jobId);
+  return run;
+}
+
+/* Transport behavior uses its own complete bodies, independent of edits to the shipped procedures. */
+function sampleSkillBodies(app: FastifyInstance): void {
+  for (const skill of app.ctx.templates.skills.values()) {
+    skill.body = `Follow ${skill.id}.\n\nKeep this second paragraph whole, including its sample: полный текст.`;
+    skill.hash = textHash(skill.body);
+  }
 }
 
 /* The node takes the job, then finishes it with a session id. */
@@ -443,27 +465,36 @@ describe('the orchestrator\'s conversation', () => {
     expect((await nextRun(mac)).effort).toBe('xhigh');
   });
 
-  /* dev-worktrees, not dev-tdd: DEV-BE with dev-tdd passes OLD_NODE_INSTRUCTIONS once hh-web-pages and hh-tables are core, and
-     a real old node gets node_too_old anyway, as no role with its default skills fits there, even on 0.23.5. */
   it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
-    const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    stillClock();
+    const { app, url, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    sampleSkillBodies(app);
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
     const [acme] = await db.select().from(companies);
     const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-worktrees'] }).returning();
-    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
-    const old = await nextRun(mac);
-    expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-worktrees')!.body);
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-worktrees', 'dev-tdd'] }).returning();
+    const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
+    expect(posted.statusCode).toBe(202);
+    const old = await nextRunOrFailed(app, mac, posted.json().jobId);
+    for (const id of ['hh-hornhoof', 'dev-worktrees', 'dev-tdd']) expect(old.instructions).toContain(app.ctx.templates.skills.get(id)!.body);
     expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
     expect(old.skills).toBeUndefined();
-    const fresh = await onMac('0.5.0');
-    await until(async () => (await state(fresh.app, fresh.ceo)).ready);
-    await say(fresh.app, fresh.ceo, 'Hello');
-    const run = await nextRun(fresh.mac);
-    const plan = fresh.app.ctx.templates.skills.get('orch-plan-turn')!.body;
-    expect(run.instructions).not.toContain(plan);
+    await finish(mac, old);
+    await marked(mac);
+    mac.close();
+    await mac.closed;
+    const updated = await connectNode(url, node.key);
+    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true });
+    await until(async () => (await state(app, ceo)).ready);
+    const message = await say(app, ceo, 'Hello');
+    expect(message.statusCode).toBe(202);
+    const run = await nextRunOrFailed(app, updated, message.json().jobId);
+    const plan = app.ctx.templates.skills.get('orch-plan-turn')!;
+    expect(run.instructions).not.toContain(plan.body);
+    expect(run.instructions).toContain(app.ctx.templates.skills.get('hh-hornhoof')!.body);
     expect(run.skills?.map(s => s.name)).toContain('orch-plan-turn');
+    expect(run.skills?.find(s => s.name === 'orch-plan-turn')?.body).toBe(`# ${plan.title.en}\n\n${plan.body}`);
   });
 
   it("ends the orchestrator's turn at once on a machine that writes no skill files, as his skills come whole there and take more than it does", async () => {
@@ -481,6 +512,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it("ends a turn too long for a machine from before skill files at once, saying its node needs an update", async () => {
+    stillClock();
     const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
@@ -488,11 +520,13 @@ describe('the orchestrator\'s conversation', () => {
     const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
     const base = 'x'.repeat(OLD_NODE_INSTRUCTIONS);
     const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', overrides: { base } }).returning();
-    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
-    await until(async () => (await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id)))[0]?.status === 'failed');
+    const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
+    expect(posted.statusCode).toBe(202);
+    await expect(nextRunOrFailed(app, mac, posted.json().jobId)).rejects.toThrow(/^node_too_old: This machine's node is too old for these instructions; update it\./);
     const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id));
-    expect(job!.error).toBe('node_too_old');
+    expect(job).toMatchObject({ status: 'failed', error: 'node_too_old' });
     expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
+    expect(job!.result).toContain(`more than the ${OLD_NODE_INSTRUCTIONS} it takes`);
     expect(await quiet(mac)).toBe(0);
   });
 
