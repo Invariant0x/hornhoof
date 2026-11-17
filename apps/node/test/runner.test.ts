@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ownFs } from '../src/agent-fs.js';
-import { jobDone, runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
+import { jobDone, ProgramNotStarted, runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import type { Worktree } from '../src/tests.js';
 import { readSessions } from '../src/state.js';
 import { deferred } from '../../../test-support/deferred.mjs';
@@ -146,6 +146,7 @@ describe('runJob', () => {
     const done = await runJob(adapter, job(), dir);
     expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(done.tail).toContain('[hidden]');
+    expect(done.unstarted).toBeUndefined();
   });
 
   it('hides what the program held before the run and after it, and the node key', async () => {
@@ -215,6 +216,31 @@ describe('runJob', () => {
     writeFileSync(join(dir, 'work'), 'not a folder');
     const done = await runJob(fakeAdapter(async () => ok()), job(), dir);
     expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+  });
+
+  it('says a turn ended before its program started when its folders could not be made ready', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    writeFileSync(join(dir, 'work'), 'not a folder');
+    const adapter = fakeAdapter(async () => ok());
+    const done = await runJob(adapter, job({ workspace: { key: 'a1', repo: null } }), dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed', unstarted: true });
+    expect(adapter.inputs).toEqual([]);
+  });
+
+  it('says a turn ended before its program started when the program could not even be launched', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const done = await runJob(fakeAdapter(async () => { throw new ProgramNotStarted(new Error('EIO: i/o error, write')); }), job(), dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed', unstarted: true, tail: 'EIO: i/o error, write' });
+  });
+
+  it('says nothing of a start for a turn called off before its program started', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    writeFileSync(join(dir, 'work'), 'not a folder');
+    const stop = new AbortController();
+    stop.abort();
+    const done = await runJob(fakeAdapter(async () => ok()), job(), dir, { signal: stop.signal });
+    expect(done).toMatchObject({ error: 'cancelled' });
+    expect(done.unstarted).toBeUndefined();
   });
 
   it('passes the Hornhoof tools only when the job has a token and the node knows the address', async () => {

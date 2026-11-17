@@ -32,6 +32,7 @@ import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-s
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { privateTurn } from '../tools/private-turns.js';
+import { holdNotStarted, noteWorkFolder } from '../program-operator/not-started.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
@@ -262,6 +263,7 @@ async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessa
 
 async function handleNodeStatus(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   const unblocked = ctx.hub.noteStatus(id, msg.noRuns, msg.browserError);
+  if (id.kind === 'node') await noteWorkFolder(ctx, id.nodeId, msg.workError);
   const ready = id.kind === 'node' ? await updatePlanStatus(ctx, id.nodeId, msg, now) : false;
   if (ready) await pumpWaiting(ctx);
   if (testStatusReady(unblocked, msg)) await pumpTests(ctx);
@@ -392,6 +394,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (msg.publicKey && row.node.publicKey && msg.publicKey !== row.node.publicKey) await db.delete(planCredentials).where(eq(planCredentials.nodeId, id.nodeId));
         cut = nodeCut(ctx, id.nodeId, row, msg, now);
         await db.update(nodes).set(helloRow(msg, now)).where(and(eq(nodes.id, id.nodeId), liveNode));
+        await noteWorkFolder(ctx, id.nodeId, msg.workError);
         const plan = row.node.subscriptionId;
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settleAndPlace(ctx, plan);
@@ -471,6 +474,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           refused = sub.id;
         }
       }
+      /* A turn that ended before its program started holds the turns that would end the same way, until Operations looks. */
+      if (finished.length && msg.unstarted && id.kind === 'node') await holdNotStarted(ctx, id.nodeId, msg.jobId, msg.tail, now);
       if (finished.length) await afterJob(ctx, msg.jobId);
       /* Everyone on the plan goes on to a fallback, not only the one whose turn it refused. */
       await fallBackIfHeld(ctx, refused);

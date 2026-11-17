@@ -10,6 +10,7 @@ import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
+import { keptBeforeStart } from '../program-operator/not-started.js';
 import { keepUnheardWords, operatorHandledFailure, sayAgain, tellAgainWentAlong, unheardWords } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
@@ -191,6 +192,7 @@ async function retryUnheardWords(ctx: Ctx, job: Job, failure: Failure): Promise<
 /* True means this named failure decided the follow-up. Old nodes and crashes on tasks keep the existing path. */
 export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (job?.status === 'failed' && await keptBeforeStart(ctx, jobId)) return true;
   if (job?.status !== 'failed' || !job.failure || !job.agentId) return false;
   if (await operatorHandledFailure(ctx, jobId)) return true;
   const taskTurn = await failureTaskTurn(ctx, job);

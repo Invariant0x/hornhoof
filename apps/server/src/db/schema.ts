@@ -1610,7 +1610,11 @@ export const programDeliveries = pgTable('program_deliveries', {
   createdAt: createdAt(),
 }, t => [unique('program_deliveries_ordinal').on(t.agentId, t.ordinal), unique('program_deliveries_reference').on(t.agentId, t.reference), index('program_deliveries_job_id').on(t.jobId)]);
 
-export type OperatorCaseEvidence = { reason: OperatorReason; evidenceKey: string; deliveryId: string | null; input?: OperatorInputLine };
+/* Besides what a node sees of a program: a turn that ended before its program started holds its agent, and one that ended so
+   on a node that cannot write its work folder holds every agent of that node. */
+export const START_REASONS = ['not_started', 'node_cannot_work'] as const;
+export type CaseReason = OperatorReason | (typeof START_REASONS)[number];
+export type OperatorCaseEvidence = { reason: CaseReason; evidenceKey: string; deliveryId: string | null; input?: OperatorInputLine };
 
 /* One investigation per physical program; its original deadline never moves after a read or key. */
 export const programOperatorCases = pgTable('program_operator_cases', {
@@ -1620,7 +1624,7 @@ export const programOperatorCases = pgTable('program_operator_cases', {
   jobId: uuid('job_id').notNull().references(() => jobs.id),
   nodeId: uuid('node_id').notNull().references(() => nodes.id),
   instance: uuid('program_instance_id').notNull().references(() => programInstances.id),
-  reason: text('reason').$type<OperatorReason>().notNull(),
+  reason: text('reason').$type<CaseReason>().notNull(),
   evidenceKey: text('evidence_key').notNull(),
   deliveryId: uuid('delivery_id').references(() => programDeliveries.id),
   evidence: jsonb('evidence').$type<OperatorCaseEvidence[]>().notNull().default([]),

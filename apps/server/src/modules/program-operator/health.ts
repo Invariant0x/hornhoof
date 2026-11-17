@@ -7,6 +7,7 @@ import { limitUntil } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
 import { callOperationsOnHold } from './hold-watch.js';
+import { fromStart, notStartedWords } from './not-started.js';
 import { acceptOperatorRecovery, settleOperatorHold } from './recovery.js';
 import { operatorTransaction } from './transactions.js';
 import { reconcileOperatorFallbacks } from './requeue.js';
@@ -46,7 +47,7 @@ async function watchHold(ctx: Ctx, id: string, now: Date): Promise<void> {
   const held = await stillHeld();
   if (held) await settleOperatorHold(ctx, held);
   const waiting = await stillHeld();
-  if (waiting) await callOperationsOnHold(ctx, waiting, now);
+  if (waiting) await callOperationsOnHold(ctx, waiting, now, fromStart(waiting) ? notStartedWords : undefined);
 }
 
 async function operatorAvailable(ctx: Ctx, row: typeof programOperatorCases.$inferSelect): Promise<boolean> {
