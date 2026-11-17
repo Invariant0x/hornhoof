@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PRIVATE_TOOL_NOTE, type NodeMessage } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
@@ -153,7 +154,7 @@ describe('the vault for agents', () => {
     expect(uploaded.body).not.toContain(PASSWORD);
   });
 
-  it('fails closed after a restart loses the temporary masks of an issued secret', async () => {
+  it.each([false, true])('fails closed after a restart loses the temporary masks, including completion; failed: %s', async failed => {
     const c = await setUp();
     const { token, job } = await c.startTurn(c.nora.id, c.task.id);
     await replay(c, token, 'vault_entry', { entry: 'Partner site' }, randomUUID());
@@ -165,6 +166,14 @@ describe('the vault for agents', () => {
     expect(JSON.stringify(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id)))).not.toContain('Report with');
     expect(JSON.stringify(await c.db.select().from(agentEvents))).not.toContain(PASSWORD);
     expect(JSON.stringify(await c.db.select().from(toolCalls))).not.toContain(PASSWORD);
+    const completion: Extract<NodeMessage, { type: 'job.done' }> = { type: 'job.done', jobId: job.id, ok: !failed, sessionId: null, result: PASSWORD, tail: PASSWORD, error: failed ? 'agent_failed' : null,
+      failure: failed ? { kind: 'unknown', text: PASSWORD, retryable: false } : undefined };
+    await handleNodeMessage(c.app.ctx, { kind: 'builtin', machine: ownMachine(c.config) }, completion);
+    const [ended] = await c.db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(JSON.stringify(ended)).not.toContain(PASSWORD);
+    expect(ended!.tail).toBe(PRIVATE_TOOL_NOTE);
+    if (failed) expect(ended!.failure?.text).toBe(PRIVATE_TOOL_NOTE);
+    else expect(ended!.result).toBe(PRIVATE_TOOL_NOTE);
   });
 
   it.each(['cancelled', 'node lost'])('drops temporary values when a turn ends as %s without a node receipt', async ending => {
