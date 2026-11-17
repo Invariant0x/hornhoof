@@ -974,6 +974,13 @@
       "when": 1794922068981,
       "tag": "0140_people_removed",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794922068982,
+      "tag": "0141_machine_access_scope",
+      "breakpoints": true
     }
   ]
 }

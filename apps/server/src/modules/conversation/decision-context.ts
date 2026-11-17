@@ -1,11 +1,11 @@
-import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agentInbox, agents, jobs, machineAccess, machines, people, requests, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
@@ -40,13 +40,13 @@ const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orches
 
 /* The running turn of the orchestrator or a head and its incoming words, newest first; null for any other turn, or while
    words are on their way into it. */
-async function turnWords(db: Reader, jobId: string) {
+async function turnWords(db: Reader, jobId: string, kinds = ANSWERS_PEOPLE) {
   const [job] = await db
     .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind, companyId: agents.companyId })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
-  if (!job || job.status !== 'running' || job.kind !== 'conversation' || !ANSWERS_PEOPLE.includes(job.agentKind) || job.pending) return null;
+  if (!job || job.status !== 'running' || job.kind !== 'conversation' || !kinds.includes(job.agentKind) || job.pending) return null;
   return { job, said: await wordsForTurn({ db }, job.agentId!, jobId) };
 }
 
@@ -169,9 +169,18 @@ async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: 
    name, with no person, no sender or a notice of a kind it does not know, take it away too. A turn no words came into goes
    by whoever started it. Who the commands go for: that person, or the owner. A click answers no question, so this takes
    no decision and asks for nothing else. */
-export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string): Promise<string | null> {
-  const turn = await turnWords(db, jobId);
+async function machineTurnAllowed(db: Reader, turn: Words, ownerPersonId: string, machineId: string | undefined): Promise<boolean> {
+  if (turn.job.agentKind !== 'worker') return true;
+  if (!machineId) return false;
+  const [opened] = await db.select(idOnly(machines)).from(machines).innerJoin(machineAccess, eq(machineAccess.machineId, machines.id))
+    .where(and(eq(machines.id, machineId), eq(machines.companyId, turn.job.companyId), eq(machines.personId, ownerPersonId), isNull(machines.revokedAt), eq(machineAccess.scope, 'all_agents'), gt(machineAccess.until, new Date())));
+  return Boolean(opened);
+}
+
+export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string, machineId?: string): Promise<string | null> {
+  const turn = await turnWords(db, jobId, [...ANSWERS_PEOPLE, 'worker']);
   if (!turn) return null;
+  if (!(await machineTurnAllowed(db, turn, ownerPersonId, machineId))) return null;
   const said = turn.said.map(machineSpeaker).find(speaker => speaker !== undefined);
   const spoke = said !== undefined ? said : await lettersSpeaker(db, turn.job);
   if (spoke === null) return null;

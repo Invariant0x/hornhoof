@@ -5,15 +5,15 @@ import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
-import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
-import { appendEvent } from '../events/store.js';
+import { enqueueTurn, NoSubscription } from '../conversation/queue.js';
+import { computerLine } from './expiry.js';
 import { canViewComputer, logName, onMachine, type AccessMachine, type AccessView } from './access.js';
 import { seenAccess } from './seen.js';
 import { STARTS_FIRST } from '../sources/requests.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const Signed = z.string().min(1).max(4096);
-const OpenBody = z.object({ grant: z.object({ payload: Signed, signature: Signed }).optional() });
+const OpenBody = z.object({ scope: z.enum(['orchestrator', 'all_agents']).default('orchestrator'), duration: z.enum(['1h', '8h', '24h']).default('1h'), confirm: z.boolean().optional(), grant: z.object({ payload: Signed, signature: Signed }).optional() });
 
 /* Who opened it, as the orchestrator is told. */
 const opener = (by: Person): string => (by.isOwner ? 'The CEO' : actsAsCeo(by) ? `The CEO delegate ${by.name}` : by.name);
@@ -38,13 +38,6 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return view;
   }
 
-  /* A line in the orchestrator's window, by the person who did it. */
-  async function line(companyId: string, data: Record<string, string>, personId: string | null) {
-    const orchestrator = await orchestratorOf(ctx, companyId);
-    if (orchestrator) await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'computer', data, personId });
-    return orchestrator;
-  }
-
   /* Nothing of the server's own machine is changed before this app has taken over what an app from before left of its
      access. Every other machine is served meanwhile. */
   async function served(machineId: string): Promise<void> {
@@ -56,9 +49,9 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   async function open(me: Person, machineId: string, body: unknown): Promise<AccessView> {
     await served(machineId);
-    const { machine, until, asked } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}).grant);
+    const { machine, until, asked, scope } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}));
     changed(me.companyId);
-    const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(logName(machine)) }, me.id);
+    const orchestrator = await computerLine(ctx, me.companyId, { state: 'opened', until, scope, ...(scope === 'all_agents' ? { confirm: true } : {}), ...onMachine(logName(machine)) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
       const note = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: { personId: me.id } });
@@ -74,7 +67,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await served(machineId);
     const machine = await ctx.computer.close(me, machineId);
     changed(me.companyId);
-    await line(me.companyId, { state: 'closed', ...onMachine(logName(machine)) }, me.id);
+    await computerLine(ctx, me.companyId, { state: 'closed', ...onMachine(logName(machine)) }, me.id);
     return seenOne(me, machineId);
   }
 
@@ -83,7 +76,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const machine = await ctx.computer.decline(me, machineId);
     if (machine) {
       changed(me.companyId);
-      await line(me.companyId, { state: 'declined', ...onMachine(logName(machine)) }, me.id);
+      await computerLine(ctx, me.companyId, { state: 'declined', ...onMachine(logName(machine)) }, me.id);
     }
     return seenOne(me, machineId);
   }
