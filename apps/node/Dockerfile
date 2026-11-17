@@ -139,6 +139,11 @@ RUN apt-get update \
   && tar -xzf /tmp/shellcheck.tar.gz --no-same-owner -C /usr/local/bin --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" \
   && rm -f /tmp/shellcheck.tar.gz \
   && shellcheck --version
+# Wireless pairing needs a newer adb than bookworm's default. Debian's signed backport supplies native amd64 and arm64.
+RUN printf '%s\n' 'deb https://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/hornhoof-adb.list \
+  && apt-get update -o APT::Update::Error-Mode=any \
+  && apt-get install -y --no-install-recommends adb=1:34.0.5-12~bpo12+1 \
+  && rm -rf /var/lib/apt/lists/*
 ENV PATH=/usr/lib/postgresql/17/bin:$PATH
 COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mjs
 RUN node /app/apps/node/service-runtime-smoke.mjs
