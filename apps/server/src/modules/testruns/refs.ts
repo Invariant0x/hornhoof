@@ -12,7 +12,8 @@ const HEADS = 'refs/heads/';
 export type RepoAddress = { url: string; token: string };
 /* A branch or tag by name, or the branch of a task. */
 export type CommitWanted = { branch: string } | { task: number };
-export type CommitAt = { branch: string; commitSha: string } | { problem: string };
+/* tag: the name is no branch of the repository but one of its tags, which git clone --branch takes as well. */
+export type CommitAt = { branch: string; commitSha: string; tag?: true } | { problem: string };
 export type CommitReader = (repo: RepoAddress, want: CommitWanted, timeoutMs?: number) => Promise<CommitAt>;
 /* Every branch of a repository with the commit it is at now, by name. */
 export type BranchesAt = { heads: Record<string, string> } | { problem: string };
@@ -41,8 +42,10 @@ function commitIn(refs: Map<string, string>, want: CommitWanted): CommitAt {
   const found = 'branch' in want ? want : ownBranch(names(), want.task);
   if ('problem' in found) return found;
   const { branch } = found;
-  const commitSha = refs.get(`${HEADS}${branch}`) ?? refs.get(`refs/tags/${branch}^{}`) ?? refs.get(`refs/tags/${branch}`);
-  return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}. Push it, or name the branch to test.` };
+  const head = refs.get(`${HEADS}${branch}`);
+  if (head) return { branch, commitSha: head };
+  const tagged = refs.get(`refs/tags/${branch}^{}`) ?? refs.get(`refs/tags/${branch}`);
+  return tagged ? { branch, commitSha: tagged, tag: true } : { problem: `The repository has no branch ${branch}. Push it, or name the branch to test.` };
 }
 
 /* An address of git's smart HTTP beside the repository: the refs it advertises for a service, or where a push goes. */

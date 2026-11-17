@@ -88,10 +88,10 @@ describe('who repairs a finding', () => {
     }
   });
 
-  it('lets Tests take the main line into a candidate whose own change passed and check it again there', () => {
+  it('lets Tests take the main line or the turn of its own department into a candidate whose own change passed and check it again there', () => {
     for (const id of ['dev-task-flow', 'dev-gates']) {
-      expect(body(id), id).toMatch(/own change passed[^.]*main line[^.]*stays at Tests/);
-      expect(body(id), id).toMatch(/"submit"[^.]*review\.baseCommit[^.]*main/);
+      expect(body(id), id).toMatch(/own change passed[^.]*main line or the open turn branch of its own department[^.]*stays at Tests/);
+      expect(body(id), id).toMatch(/"submit"[^.]*review\.baseCommit naming the commit (you took|taken) in/);
     }
   });
 });

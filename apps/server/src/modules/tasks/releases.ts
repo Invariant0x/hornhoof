@@ -12,6 +12,7 @@ import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
+import { wholeProductRun } from './autonomous-release.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R of
    turn-<number>, its head or one the branch went past while R was checked, main under it, the full run on R, the results R
@@ -40,16 +41,19 @@ export function newerVersion(a: string, b: string): boolean {
   return false;
 }
 
-/* A whole run of R's release: of the turn branch at R, with no one suite, every part passed, taking only what its release proved, and
-   no newer run of R failed since. */
+/* A whole run of R's release: of the turn branch at R, asked for by an agent of the department or the orchestrator, of the product's
+   tests in the full profile its manifest names, with no one suite, every part passed with its receipt on R, taking only what its
+   release proved, and no newer run of R failed since. A run of a command of its own proves no release. */
 async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<void> {
   const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
   if (!run) throw notFull('there is no such run');
-  const problem = placeProblem(run, branch, departmentId, commit) ?? endProblem(run);
+  const problem = placeProblem(run, branch, departmentId, commit) ?? endProblem(run) ?? await starterProblem(db, run, departmentId);
   if (problem) throw notFull(problem);
   const parts = await db.select(only(testParts, 'status')).from(testParts).where(eq(testParts.runId, run.id));
   if (!allPartsPassed(run, parts)) throw notFull('not every part of it passed');
+  if (run.command !== '') throw notFull(`it ran the command ${run.command} rather than the product's tests`);
+  if (!(await wholeProductRun(db, run, turn.companyId, departmentId, commit))) throw notFull("it is no run of the product's full profile with a passed receipt of every part on this commit");
   const [newer] = await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }
@@ -58,6 +62,14 @@ type ReleaseRun = typeof testRuns.$inferSelect;
 /* Why a run checked another place than R's release on the turn branch, or null. */
 const placeProblem = (run: ReleaseRun, branch: string, departmentId: string, commit: string): string | null =>
   run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit ? `it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}` : null;
+/* Why who asked for a run does not stand for the release, or null: an agent of the department whose turn it is, of a part of it, or
+   the orchestrator, who runs every department. */
+async function starterProblem(db: Ctx['db'] | Tx, run: ReleaseRun, departmentId: string): Promise<string | null> {
+  const [starter] = await db.select({ kind: agents.kind, departmentId: agents.departmentId, parentId: departments.parentId }).from(agents)
+    .leftJoin(departments, eq(departments.id, agents.departmentId)).where(and(eq(agents.id, run.agentId), eq(agents.companyId, run.companyId)));
+  if (starter && (starter.kind === 'orchestrator' || starter.departmentId === departmentId || starter.parentId === departmentId)) return null;
+  return 'an agent of another department started it';
+}
 /* Why the way a run ended does not check its release whole, or null. */
 function endProblem(run: ReleaseRun): string | null {
   if (run.status !== 'passed') return `it ${run.status === 'running' ? 'is still running' : run.status}`;

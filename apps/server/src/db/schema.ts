@@ -4,6 +4,7 @@ import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
+import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -1709,6 +1710,26 @@ export const harnessProducts = pgTable('harness_products', {
   machines: jsonb('machines').$type<Record<string, HarnessMachine>>().notNull().default({}),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* handed_over: the updater has it. called_off: it went to nobody, for its reason. replaced: a later request took its place. */
+export const UPDATE_WAIT_OUTCOMES = ['handed_over', 'called_off', 'replaced'] as const;
+/* An update that waits for a company's agents to finish before it goes to the updater, and how that wait ended. It is
+   kept here and not only in the server's memory, so a restart or a step-down of the machine that leads never loses it:
+   the next lead picks it up again. One waits at a time; ended is empty while it waits. */
+export const updateWaits = pgTable('update_waits', {
+  /* The request's own id, as the updater gets it. */
+  id: uuid('id').primaryKey(),
+  companyId: companyId(),
+  request: jsonb('request').$type<UpdateRequest>().notNull(),
+  since: timestamp('since', { withTimezone: true }).notNull(),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  outcome: text('outcome', { enum: UPDATE_WAIT_OUTCOMES }),
+  reason: text('reason').$type<UpdateCalledOff['reason']>(),
+  /* The turns that still ran when it was called off, and what went wrong when it failed. */
+  turns: jsonb('turns').$type<NamedTurn[]>(),
+  error: text('error'),
+}, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
