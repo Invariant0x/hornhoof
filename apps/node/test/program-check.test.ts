@@ -93,6 +93,14 @@ describe('a program the node installs', () => {
     expect(said).toEqual([{ state: 'reinstalling' }, { state: 'reinstalling' }, null]);
   });
 
+  it('still installs an update asked for while the first check of the program runs', async () => {
+    working();
+    const { install, count } = installs(working);
+    const checked = new CheckedInstalls();
+    await Promise.all([checked.ensure(bin, install, () => {}), checked.update(bin, install, () => {})]);
+    expect(count()).toBe(1);
+  });
+
   it('shares one install between two that need the program at once', async () => {
     broken();
     const { install, count } = installs(working);

@@ -32,30 +32,31 @@ export class CheckedInstalls {
 
   constructor(private readonly starts: (bin: string) => Promise<Started> = startsCheck) {}
 
-  /* The first time something needs the program: installed when it is missing, then checked. */
+  /* The first time something needs the program: installed when it is missing, then checked. One that is being installed
+     or checked already waits for that. */
   ensure(bin: string, install: () => Promise<void>, repair: (r: Repair) => void): Promise<void> {
     if (this.started.has(bin)) return Promise.resolve();
-    return this.once(bin, async () => {
+    return this.pending.get(bin) ?? this.hold(bin, (async () => {
       if (!existsSync(bin)) await install();
       await this.untilStarts(bin, install, repair);
-    });
+    })());
   }
 
-  /* An update: installed anew, then checked the same way. */
+  /* An update: after what runs for the program now, installed anew and checked the same way. */
   update(bin: string, install: () => Promise<void>, repair: (r: Repair) => void): Promise<void> {
-    return this.once(bin, async () => {
+    const before = (this.pending.get(bin) ?? Promise.resolve()).catch(() => {});
+    return this.hold(bin, before.then(async () => {
       this.started.delete(bin);
       await install();
       await this.untilStarts(bin, install, repair);
-    });
+    }));
   }
 
-  private once(bin: string, work: () => Promise<void>): Promise<void> {
-    let pending = this.pending.get(bin);
-    if (!pending) {
-      pending = work().finally(() => this.pending.delete(bin));
-      this.pending.set(bin, pending);
-    }
+  private hold(bin: string, work: Promise<void>): Promise<void> {
+    const pending: Promise<void> = work.finally(() => {
+      if (this.pending.get(bin) === pending) this.pending.delete(bin);
+    });
+    this.pending.set(bin, pending);
     return pending;
   }
 

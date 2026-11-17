@@ -18,6 +18,11 @@ const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WOR
 
 export function run(name) {
   const argv = process.argv.slice(2);
+  /* It tells its version and ends, as the real programs do: the node asks after every install whether it starts. */
+  if (argv.length === 1 && argv[0] === '--version') {
+    process.stdout.write(`2.0.0 (fake ${name})\n`);
+    process.exit(0);
+  }
   const message = name === 'agy' ? (argv.find(a => a.startsWith('--print=')) ?? '').slice('--print='.length) : '';
   const mode = process.env.FAKE_MODE ?? AGY_ASKS[message.split(' ')[0]] ?? '';
   const log = entry => process.env.FAKE_LOG && appendFileSync(process.env.FAKE_LOG, JSON.stringify(entry) + '\n');
