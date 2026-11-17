@@ -620,4 +620,28 @@ describe('contact template fields', () => {
     expect(form).not.toHaveTextContent('Private skipped cell');
     await waitFor(() => expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({ channelId: 'ch1', filename: 'contacts.csv', source: 'Signup sheet' }));
   });
+
+  it('focuses missing import inputs and keeps server diagnostics out of the form', async () => {
+    const calls = mockApi({ ...routes([CHANNEL]), 'POST /api/outbound/contacts/import': [400, { error: { message: 'Private parser cell: Ann', code: 'validation' } }] });
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole('button', { name: 'Import addresses' }));
+    const form = screen.getByRole('form', { name: 'Import addresses' });
+    const submit = within(form).getByRole('button', { name: 'Import' });
+    const file = within(form).getByLabelText('CSV or XLSX file');
+    await user.click(submit);
+    expect(file).toHaveFocus();
+    expect(file).toHaveAttribute('aria-invalid', 'true');
+    await user.upload(file, new File(['address,consent,name\nann@shop.example,yes,Ann'], 'contacts.csv', { type: 'text/csv' }));
+    await user.click(submit);
+    expect(within(form).getByLabelText('Where they agreed')).toHaveFocus();
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup sheet');
+    await user.click(submit);
+    expect(within(form).getByLabelText('Proof of their consent')).toHaveFocus();
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Recorded consent');
+    await user.click(submit);
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Could not import the table.');
+    expect(form).not.toHaveTextContent('Private parser cell');
+  });
 });

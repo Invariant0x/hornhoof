@@ -35,7 +35,7 @@ const each = (names: readonly string[], rule: TableRule): Record<string, TableRu
 /* The gateway that sends for the company, and the support desk it answers: its payloads and contacts are private, and a
    row of it stands for an approval, a receipt, a consent or a day's count. */
 const OUTBOUND = [
-  'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions',
+  'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_contact_fields', 'outbound_permissions',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];

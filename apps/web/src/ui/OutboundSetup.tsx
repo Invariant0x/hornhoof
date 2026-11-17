@@ -410,6 +410,15 @@ function contactRefusal(t: Messages, email: boolean, err: unknown): { problems: 
   return { problems: {}, alert: Array.isArray(codes) && codes.includes('contact_suppressed') ? c.suppressed : errorOf(t, err) };
 }
 
+/* Base contact inputs come before its optional named values when choosing the first problem to focus. */
+function focusContactProblem(found: ContactProblems, refs: Record<ContactField, { current: { focus(): void } | null }>, values: Record<string, HTMLInputElement | null>): boolean {
+  const first = CONTACT_FIELDS.find(f => found[f]);
+  if (first) { refs[first].current?.focus(); return true; }
+  const value = Object.keys(found).find(key => found[key]);
+  if (value) values[value]?.focus();
+  return value !== undefined;
+}
+
 /* The address form's state and its sending: each problem at its field with the focus on the first of them, the
    server's refusal where it belongs, and what was added once it was. */
 function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
@@ -425,11 +434,7 @@ function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
   /* The problems at their fields, and the focus on the first of them; true when there is one. */
   const show = (found: ContactProblems): boolean => {
     setProblems(found);
-    const first = CONTACT_FIELDS.find(f => found[f]);
-    if (first) { refs[first].current?.focus(); return true; }
-    const value = Object.keys(found).find(key => found[key]);
-    if (value) valueRefs.current[value]?.focus();
-    return value !== undefined;
+    return focusContactProblem(found, refs, valueRefs.current);
   };
   async function save(e: FormEvent) {
     e.preventDefault();

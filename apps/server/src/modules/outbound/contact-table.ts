@@ -37,21 +37,30 @@ function checkCoordinate(value: string, cell: boolean): void {
   if (Number(match[2]) > MAX_ROWS + 1 || column > MAX_COLUMNS) throw invalid();
 }
 
+type SheetSize = { rows: number; cells: number };
+function countSheetTag(size: SheetSize, tag: string | undefined): void {
+  if (tag === 'f') throw invalid();
+  if (tag === 'row') { size.rows++; size.cells = 0; }
+  if (tag === 'c') size.cells++;
+  if (size.rows > MAX_ROWS + 1 || size.cells > MAX_COLUMNS) throw invalid();
+}
+
+function checkXmlReference(tag: string | undefined, attributes: () => Record<string, string>, decode: (text: string) => string): void {
+  if (tag !== 'row' && tag !== 'c') return;
+  const ref = attributes()['r'];
+  if (ref !== undefined) checkCoordinate(decode(ref), tag === 'c');
+}
+
 function checkXml(xml: string): void {
   const parser = new Parser();
-  let rows = 0;
-  let cells = 0;
+  const size = { rows: 0, cells: 0 };
   parser.on('error', () => { throw invalid(); });
   parser.on('warn', () => { throw invalid(); });
   parser.on('attention', () => { throw invalid(); });
   parser.on('openTag', (name, attributes, decode) => {
     const tag = name.split(':').at(-1);
-    if (tag === 'f') throw invalid();
-    if (tag === 'row') { if (++rows > MAX_ROWS + 1) throw invalid(); cells = 0; }
-    if (tag === 'c' && ++cells > MAX_COLUMNS) throw invalid();
-    if (tag !== 'row' && tag !== 'c') return;
-    const ref = attributes()['r'];
-    if (ref !== undefined) checkCoordinate(decode(ref), tag === 'c');
+    countSheetTag(size, tag);
+    checkXmlReference(tag, attributes, decode);
   });
   if (parser.parse(xml)) throw invalid();
 }
@@ -63,24 +72,32 @@ async function rowsOf(filename: string, bytes: Buffer): Promise<unknown[][]> {
   throw invalid();
 }
 
-function columnsOf(row: unknown[] | undefined): string[] {
+const isMetadata = (name: string): boolean => name === 'address' || name === 'consent';
+function trimmedColumns(row: unknown[] | undefined): unknown[] {
   const values = [...row ?? []];
   while (values.length && (values.at(-1) === null || values.at(-1) === '')) values.pop();
+  return values;
+}
+
+function columnsOf(row: unknown[] | undefined): string[] {
+  const values = trimmedColumns(row);
   if (values.length > MAX_COLUMNS || values.some(v => typeof v !== 'string')) throw invalid();
   const names = values as string[];
   if (new Set(names).size !== names.length || !names.includes('address') || !names.includes('consent')) throw invalid();
-  if (names.some(name => name !== 'address' && name !== 'consent' && !ContactFieldName.safeParse(name).success)) throw invalid();
+  if (names.some(name => !isMetadata(name) && !ContactFieldName.safeParse(name).success)) throw invalid();
   return names;
 }
 
 const cellText = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '');
+const valuesOfRow = (columns: string[], cells: unknown[]) => Object.fromEntries(columns.flatMap((name, i) =>
+  isMetadata(name) || cells[i] === null || cells[i] === undefined || cells[i] === '' ? [] : [[name, cellText(cells[i])]]));
+
 function readRow(columns: string[], cells: unknown[], row: number): ImportRow | SkippedRow {
   const address = cellText(cells[columns.indexOf('address')]).trim();
   if (!address) return { row, reason: 'address_missing' };
   if (!['true', 'yes', '1'].includes(cellText(cells[columns.indexOf('consent')]).trim().toLowerCase())) return { row, reason: 'consent_missing' };
   if (cells.slice(columns.length).some(v => v !== null && v !== '')) return { row, reason: 'extra_columns' };
-  const values = Object.fromEntries(columns.flatMap((name, i) => name === 'address' || name === 'consent' || cells[i] === null || cells[i] === undefined || cells[i] === '' ? [] : [[name, cellText(cells[i])]]));
-  const parsed = ContactFields.safeParse(values);
+  const parsed = ContactFields.safeParse(valuesOfRow(columns, cells));
   return parsed.success ? { row, address, fields: parsed.data } : { row, reason: 'field_invalid' };
 }
 

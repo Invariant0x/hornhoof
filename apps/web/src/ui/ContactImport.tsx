@@ -5,6 +5,7 @@ import type { Messages } from '../i18n/en';
 import { Field } from './Field';
 import type { SetupChannel } from './OutboundSetup';
 
+type Words = Messages['outboundSetup']['contact'];
 type ImportReason = keyof Messages['outboundSetup']['contact']['importReasons'];
 type Report = { added: number; updated: number; skipped: { row: number; reason: ImportReason }[] };
 const MAX_FILE = 2 * 1024 * 1024;
@@ -19,9 +20,11 @@ function encoded(file: File): Promise<string> {
   });
 }
 
-export function ContactImport({ channel, onChanged, onCancel }: { channel: SetupChannel; onChanged(): void; onCancel(): void }) {
-  const t = useT();
-  const c = t.outboundSetup.contact;
+function importProblems(c: Words, file: File | null, source: string, evidence: string): Record<string, string | undefined> {
+  return { file: !file || file.size > MAX_FILE || !/\.(csv|xlsx)$/i.test(file.name) ? c.fileInvalid : undefined, source: source.trim() ? undefined : c.sourceMissing, evidence: evidence.trim() ? undefined : c.evidenceMissing };
+}
+
+function useContactImport(channel: SetupChannel, onChanged: () => void, c: Words) {
   const [file, setFile] = useState<File | null>(null);
   const [source, setSource] = useState('');
   const [evidence, setEvidence] = useState('');
@@ -34,7 +37,7 @@ export function ContactImport({ channel, onChanged, onCancel }: { channel: Setup
     event.preventDefault();
     setFailed(false);
     setReport(null);
-    const found = { file: !file || file.size > MAX_FILE || !/\.(csv|xlsx)$/i.test(file.name) ? c.fileInvalid : undefined, source: source.trim() ? undefined : c.sourceMissing, evidence: evidence.trim() ? undefined : c.evidenceMissing };
+    const found = importProblems(c, file, source, evidence);
     setProblems(found);
     const first = (['file', 'source', 'evidence'] as const).find(key => found[key]);
     if (first) { refs[first].current?.focus(); return; }
@@ -46,6 +49,13 @@ export function ContactImport({ channel, onChanged, onCancel }: { channel: Setup
     } catch { setFailed(true); }
     finally { setBusy(false); }
   }
+  return { file, setFile, source, setSource, evidence, setEvidence, problems, busy, failed, setFailed, report, setReport, refs, save };
+}
+
+export function ContactImport({ channel, onChanged, onCancel }: { channel: SetupChannel; onChanged(): void; onCancel(): void }) {
+  const t = useT();
+  const c = t.outboundSetup.contact;
+  const { file, setFile, source, setSource, evidence, setEvidence, problems, busy, failed, setFailed, report, setReport, refs, save } = useContactImport(channel, onChanged, c);
   return (
     <form className="repo-form contact-import" aria-label={c.importAddresses} noValidate onSubmit={event => void save(event)}>
       <p className="muted" dir="auto">{c.importHint}</p>
