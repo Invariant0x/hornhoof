@@ -18,7 +18,7 @@ async function fixture(once = true, native = true) {
   const [task] = await db.insert(tasks).values({ companyId, departmentId: department!.id, number: 1, title: 'Batch fixture', status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id }).returning();
   const [job] = await db.insert(jobs).values({ companyId, subscriptionId: agent!.subscriptionId!, agentId: agent!.id, taskId: task!.id, prompt: 'Fixture', timeoutMs: 10_000, status: 'running' }).returning();
   const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number: 1, command: '', commitSha: TEST_COMMIT, timeoutMs: 10_000,
-    environmentRequest: newEnvironmentRequest(repositoryScope(companyId, department!.id, department!.repoUrl!), { mode: 'product', profile: 'fast' }) }).returning();
+    environmentRequest: newEnvironmentRequest(repositoryScope(companyId, department!.id, department!.repoUrl!), { mode: 'product' }) }).returning();
   const node = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], tests: [], load: { cpus: 8, load: 0.1, memFree: 16 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 0, jobs: 0 }, testEnvironmentVersion: 1, testRuntimes: native ? runtimes : runtimes.slice(0, 2) });
   await until(() => testCapabilities(app.ctx, BUILTIN).testEnvironmentVersion === 1);

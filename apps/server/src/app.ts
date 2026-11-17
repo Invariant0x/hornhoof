@@ -53,6 +53,7 @@ import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
 import { keptDatabases } from './modules/merge/kept.js';
 import { Ranking } from './modules/copies/order.js';
 import { copiesRoutes } from './modules/copies/routes.js';
+import { LeftSlots } from './modules/copies/left-slots.js';
 import { replicationOf, type Replication } from './modules/copies/slots.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
@@ -98,6 +99,9 @@ import { RELEASED, type Released } from './modules/feedback/released.js';
 import { feedbackRoutes } from './modules/feedback/routes.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 import { googleSheetsRoutes } from './modules/google/routes.js';
+import { vaultRoutes } from './modules/vault/routes.js';
+import { phoneRoutes } from './modules/phones/routes.js';
+import { closePhoneRequests } from './modules/phones/rpc.js';
 import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
 import { modelsReader, type ModelsReader } from './modules/subscriptions/api-models.js';
 
@@ -148,6 +152,8 @@ export type Ctx = Deps & {
   agentSqlPending?: boolean;
   /* The network ids of the machines whose database a merge is to read: the keeper opens a door to each. */
   doorsWanted: () => Promise<string[]>;
+  /* The leader's slots of tables whose first copy broke off, as the copies named them, for this machine's keeper to drop. */
+  leftSlots: LeftSlots;
   /* Applies what nodes said of jobs whose rows were on a machine the server was taken from, once those rows are
      here; how many messages it applied. */
   applyParked: () => Promise<number>;
@@ -290,6 +296,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.ranking = new Ranking(ctx);
   ctx.replication = replicationOf(deps.db);
   ctx.doorsWanted = () => ctx.merger.doors();
+  ctx.leftSlots = new LeftSlots();
   ctx.applyParked = () => applyParkedMessages(ctx);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
@@ -450,6 +457,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   challengeRoutes(app, ctx.challenges);
   telegramRoutes(app, ctx);
   googleSheetsRoutes(app, ctx);
+  vaultRoutes(app, ctx);
+  phoneRoutes(app, ctx);
+  app.addHook('onClose', async () => { closePhoneRequests(ctx); });
   assistantRoutes(app, ctx);
   assistantMcpRoutes(app, ctx);
   return app;

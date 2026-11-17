@@ -1,3 +1,4 @@
+import { idOnly } from '../../db/selections.js';
 import { ensureOpenTurn } from '../tasks/turn-department.js';
 import { and, asc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -19,7 +20,7 @@ const CHECK_MS = 5 * 60_000;
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */
 const HORNHOOF: HiredBy = { personId: null, byOrchestrator: false };
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('update');
 
 const operationsOf = async (tx: Tx, companyId: string) =>
   (await tx.select().from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations'), isNull(departments.parentId))).orderBy(asc(departments.position)))[0];
@@ -99,7 +100,7 @@ type Operator = typeof agents.$inferSelect;
 async function staysOnPlan(tx: Tx, operator: Operator, plans: Serving[]): Promise<boolean> {
   if (!operator.subscriptionId) return false;
   if (plans.some(p => p.id === operator.subscriptionId)) return true;
-  const [running] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'), notStep)).limit(1);
+  const [running] = await tx.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'), notStep)).limit(1);
   return Boolean(running);
 }
 
@@ -140,7 +141,7 @@ export async function placeOperator(ctx: Ctx, companyId: string): Promise<void> 
 
 /* Each operator stands on a machine of its plan from the start, so it is on the machine the next call for it finds. */
 async function settleOperators(ctx: Ctx, companyId: string): Promise<void> {
-  const operators = await ctx.db.select({ id: agents.id }).from(agents)
+  const operators = await ctx.db.select(idOnly(agents)).from(agents)
     .where(and(eq(agents.companyId, companyId), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), isNull(agents.removedAt), isNull(agents.switchedOffAt), isNotNull(agents.subscriptionId)));
   for (const { id } of operators) await windowNode(ctx, id);
 }
@@ -163,7 +164,7 @@ export async function ensureOperations(ctx: Ctx, companyId: string): Promise<voi
 /* One company's trouble does not keep the others from their check. */
 export async function checkOperations(ctx: Ctx, failed: (err: unknown) => void): Promise<void> {
   try {
-    for (const { id } of await ctx.db.select({ id: companies.id }).from(companies)) await ensureOperations(ctx, id).catch(failed);
+    for (const { id } of await ctx.db.select(idOnly(companies)).from(companies)) await ensureOperations(ctx, id).catch(failed);
   } catch (err) {
     failed(err);
   }

@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
@@ -23,7 +24,7 @@ const MINUTE = 60_000;
 
 /* Whom Hornhoof answers for: the person the words of a turn stand for, who has that turn's rights. */
 const principalOf = async (c: { db: Awaited<ReturnType<typeof operatorCompany>>['db'] }, jobId: string) =>
-  (await c.db.select({ personId: agentEvents.personId }).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed'])))).map(word => word.personId);
+  (await c.db.select(only(agentEvents, 'personId')).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed'])))).map(word => word.personId);
 
 /* Words the program never recorded: their case escalated at once with nobody to take it, and they wait on a hold. */
 async function held(options: { before?: (c: Awaited<ReturnType<typeof operatorCompany>>) => Promise<void>; failed?: boolean } = {}) {
@@ -644,7 +645,7 @@ it('keeps queue, start and deadline apart for one operator of two nodes: no acti
   expect(await c.jobOf(children[0]!.id)).toMatchObject({ nodeId: a.identity.nodeId, sessionId: 'session-a' });
   expect(await c.jobOf(others[0]!.id)).toMatchObject({ nodeId: b.node.id, sessionId: 'session-b' });
   for (const side of [a, b]) {
-    const running = await c.db.select({ id: jobs.id }).from(jobs).where(sql`${jobs.agentId} = ${side.agent.id} and ${jobs.status} = 'running'`);
+    const running = await c.db.select(idOnly(jobs)).from(jobs).where(sql`${jobs.agentId} = ${side.agent.id} and ${jobs.status} = 'running'`);
     expect(running.length).toBeLessThanOrEqual(1);
   }
 });

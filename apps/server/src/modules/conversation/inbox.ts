@@ -1,9 +1,10 @@
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
-import { and, asc, count, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentInbox, agents, companies, departments, jobs, type InboxMode, type LetterKind } from '../../db/schema.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import type { MessageParty } from '../events/parties.js';
 import { appendEvent } from '../events/store.js';
 
@@ -75,7 +76,7 @@ const HORNHOOF: Sender = { senderKind: 'hornhoof', senderAgentId: null, senderPe
 async function senderOf(db: Reader, companyId: string, m: MailMessage): Promise<Sender> {
   if (m.from === 'agent' && m.by) return { senderKind: 'agent', senderAgentId: m.by, senderPersonId: null, senderName: m.name ?? 'Employee' };
   if (m.from === 'orchestrator') {
-    const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
+    const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
     return { senderKind: 'agent', senderAgentId: orchestrator?.id ?? null, senderPersonId: null, senderName: 'Orchestrator' };
   }
   const actor = m.actor;
@@ -190,7 +191,7 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
   if (filter.task !== undefined) where.push(eq(agentInbox.taskNumber, filter.task));
   if (filter.sender) where.push(eq(agentInbox.senderAgentId, filter.sender));
   if (filter.before) {
-    const [cursor] = await db.select({ seq: agentInbox.seq }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, filter.before)));
+    const [cursor] = await db.select(only(agentInbox, 'seq')).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, filter.before)));
     if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
   }
   const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(Math.min(filter.limit ?? 50, 200));
@@ -202,7 +203,7 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
 export async function lettersPage(db: Reader, agentId: string, { before, limit }: { before?: string; limit: number }): Promise<{ letters: InboxRow[]; more: boolean }> {
   const where: (SQL | undefined)[] = [eq(agentInbox.agentId, agentId)];
   if (before) {
-    const [cursor] = await db.select({ seq: agentInbox.seq }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, before)));
+    const [cursor] = await db.select(only(agentInbox, 'seq')).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, before)));
     if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
   }
   const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(limit + 1);
@@ -210,18 +211,18 @@ export async function lettersPage(db: Reader, agentId: string, { before, limit }
 }
 
 export async function letterTotal(db: Reader, agentId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(agentInbox).where(eq(agentInbox.agentId, agentId));
+  const [row] = await db.select(countOnly()).from(agentInbox).where(eq(agentInbox.agentId, agentId));
   return row?.n ?? 0;
 }
 
 /* How many of the employee's letters nobody marked yet. */
 export async function unreadCount(db: Reader, agentId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));
+  const [row] = await db.select(countOnly()).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));
   return row?.n ?? 0;
 }
 
 async function detachQueuedWake(db: Pick<Db, 'select' | 'update'>, agentId: string, picked: SQL | undefined): Promise<void> {
-  const queued = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true)));
+  const queued = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true)));
   if (!queued.length) return;
   await db.update(agentInbox).set({ jobId: null }).where(and(picked, eq(agentInbox.status, 'unread'), inArray(agentInbox.jobId, queued.map(j => j.id))));
 }
@@ -231,7 +232,7 @@ async function detachQueuedWake(db: Pick<Db, 'select' | 'update'>, agentId: stri
 export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: string, which: string[] | 'all'): Promise<number | null> {
   const mine = eq(agentInbox.agentId, agentId);
   if (which !== 'all') {
-    const found = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(mine, inArray(agentInbox.id, which)));
+    const found = await db.select(idOnly(agentInbox)).from(agentInbox).where(and(mine, inArray(agentInbox.id, which)));
     if (found.length !== new Set(which).size) return null;
   }
   const picked = which === 'all' ? mine : and(mine, inArray(agentInbox.id, which));
@@ -263,7 +264,7 @@ function pickedBy(agentId: string, pick: LetterPick): SQL {
    inbox refuses the mark whole. How many letters it changed, or null. */
 export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, pick: LetterPick, status: 'read' | 'done'): Promise<number | null> {
   if (pick.ids) {
-    const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, pick.ids)));
+    const mine = await db.select(idOnly(agentInbox)).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, pick.ids)));
     if (mine.length !== new Set(pick.ids).size) return null;
   }
   const picked = and(pickedBy(agentId, pick), inArray(agentInbox.status, status === 'read' ? ['unread'] : ['unread', 'read']));

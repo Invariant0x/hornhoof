@@ -197,6 +197,7 @@ export const assistantReplies = pgTable(
     assistantId: uuid('assistant_id').notNull().references(() => people.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     messageId: uuid('message_id').notNull(),
+    byOwnAgent: boolean('by_own_agent').notNull().default(false),
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
@@ -563,6 +564,9 @@ export const subscriptions = pgTable(
     budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* The plans its employees go on to, in this order, when it reaches its limit or the share set for tasks, each with the
+       model to run there or none for the one their role asks for. Empty: any plan of the company that may serve them. */
+    fallbacks: jsonb('fallbacks').$type<PlanFallback[]>().notNull().default([]),
     /* Where a compatible API answers, which a person named; null for every other subscription, whose address is known. */
     baseUrl: text('base_url'),
     /* The protocol an API connection's program talks to it in: OpenRouter's choice, a compatible API's own. */
@@ -576,6 +580,9 @@ export const subscriptions = pgTable(
   },
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
+
+/* One plan a plan's employees go on to at its limit: model null runs the one their role asks for there. */
+export type PlanFallback = { subscription: string; model: string | null };
 
 export const NODE_STATUSES = ['needs_login', 'needs_setup', 'ready'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
@@ -600,6 +607,8 @@ export const nodes = pgTable(
     account: jsonb('account').$type<Account>(),
     /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
     boot: jsonb('boot').$type<Boot & { stopped?: NodeExit }>(),
+    /* Since when it waits for an update: it takes no new turn until it is back from it. Empty when it does not wait. */
+    updateWaitSince: timestamp('update_wait_since', { withTimezone: true }),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
@@ -700,6 +709,18 @@ export const agents = pgTable(
 );
 
 export type AgentKind = (typeof agents.$inferSelect)['kind'];
+
+/* An employee Hornhoof put on a fallback plan while its own was at its limit: the plan, model and effort it goes back to
+   between turns once that limit starts over, and the fallback it went to. A person who moves it by hand ends it. */
+export const agentFallbacks = pgTable('agent_fallbacks', {
+  agentId: uuid('agent_id').primaryKey().references(() => agents.id),
+  companyId: companyId(),
+  homeSubscriptionId: uuid('home_subscription_id').notNull().references(() => subscriptions.id),
+  homeModel: text('home_model').notNull(),
+  homeEffort: text('home_effort'),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  createdAt: createdAt(),
+});
 
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
@@ -1347,6 +1368,37 @@ export const attachments = pgTable(
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
 );
 
+/* A phone is lent independently of its host computer's root access and compute pool. */
+export const companyPhones = pgTable('company_phones', {
+  id: id(), companyId: companyId(), personId: uuid('person_id').notNull().references(() => people.id),
+  machineId: uuid('machine_id').notNull().references(() => machines.id), nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  /* The phone's address on the network, as adb names it. */
+  serial: text('serial').notNull(), hardwareKey: text('hardware_key').notNull(),
+  name: text('name').notNull(), lending: boolean('lending').notNull().default(true), generation: integer('generation').notNull().default(0),
+  createdAt: createdAt(), removedAt: timestamp('removed_at', { withTimezone: true }),
+}, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), uniqueIndex('company_phones_hardware').on(t.hardwareKey).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
+
+export const phoneSessions = pgTable('phone_sessions', {
+  id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),
+  order: bigserial('queue_order', { mode: 'number' }).notNull(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id), jobId: uuid('job_id').notNull().references(() => jobs.id),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  status: text('status', { enum: ['queued', 'starting', 'active', 'revoking', 'ended', 'cancelled'] }).notNull().default('queued'),
+  generation: integer('generation'), leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), endedAt: timestamp('ended_at', { withTimezone: true }),
+  reason: text('reason', { enum: ['completed', 'cancelled', 'lost', 'stopped', 'offline', 'recording_limit', 'failed'] }),
+}, t => [
+  index('phone_sessions_task').on(t.taskId), index('phone_sessions_job').on(t.jobId), index('phone_sessions_queue').on(t.phoneId, t.order),
+  uniqueIndex('phone_sessions_active').on(t.phoneId).where(sql`${t.status} in ('starting', 'active', 'revoking')`),
+  uniqueIndex('phone_sessions_borrower').on(t.phoneId, t.jobId).where(sql`${t.status} in ('queued', 'starting', 'active', 'revoking')`),
+]);
+
+/* A session's screens, in order, each picture an attachment of its task. */
+export const phoneFrames = pgTable('phone_frames', {
+  id: id(), companyId: companyId(), sessionId: uuid('session_id').notNull().references(() => phoneSessions.id), sequence: integer('sequence').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull(), attachmentId: uuid('attachment_id').references(() => attachments.id, { onDelete: 'cascade' }),
+}, t => [unique('phone_frames_sequence').on(t.sessionId, t.sequence), index('phone_frames_session').on(t.sessionId)]);
+
 /* A physical agent program, distinct from the provider session it resumes. */
 export const programInstances = pgTable('program_instances', {
   id: uuid('id').primaryKey(),
@@ -1426,7 +1478,7 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
-  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  version: 1; repositoryScope: RepositoryScope; suite?: string;
   /* The time limit of a part the run asked for, when it asked for one. */
   minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
@@ -1440,10 +1492,9 @@ export type TestEnvironmentSelection = { selection: TestExecution['selection']; 
 export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
-export type ReusedTestUnit = UnitFingerprint & { runId: string; commitSha: string };
 export type TestRunFileCache = {
-  mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  reusedUnits?: ReusedTestUnit[];
+  /* release: the release the run checks, whose results it may take; none on a run from before releases were kept. */
+  mode: 'cached' | 'full' | 'off'; release?: string; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
   verifiedFingerprints?: UnitFingerprint[];
   /* How many green results the run kept for later, once it ended. */
   kept?: number;
@@ -1614,7 +1665,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
+    /* No longer read: every shared run checks a release now. It stays until a migration drops it. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },
@@ -2769,3 +2820,36 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
 ]);
+
+/* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves
+   them; the password and the code secret are kept encrypted with the server's key, and every agent of the company takes
+   them as text to sign in. Who added an entry is a person or an agent. */
+export const vaultEntries = pgTable('vault_entries', {
+  id: id(),
+  companyId: companyId(),
+  name: text('name').notNull(),
+  site: text('site').notNull(),
+  login: text('login').notNull(),
+  passwordEnc: text('password_enc').notNull(),
+  /* The one-time code's secret, digits, period and algorithm, as JSON; none when the site asks for no code. */
+  totpEnc: text('totp_enc'),
+  createdBy: uuid('created_by').references(() => people.id),
+  createdByAgent: uuid('created_by_agent').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [uniqueIndex('vault_entries_company_name').on(t.companyId, sql`lower(${t.name})`)]);
+
+/* Who added, changed, removed or took which entry, when, and for which task; never a value. The name and site stay as they
+   were, so the log still reads after the entry is gone. */
+const VAULT_LOG_KINDS = ['created', 'changed', 'removed', 'taken'] as const;
+export const vaultLog = pgTable('vault_log', {
+  id: id(),
+  companyId: companyId(),
+  entryId: uuid('entry_id').references(() => vaultEntries.id, { onDelete: 'set null' }),
+  entryName: text('entry_name').notNull(),
+  site: text('site').notNull(),
+  kind: text('kind', { enum: VAULT_LOG_KINDS }).notNull(),
+  personId: uuid('person_id').references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  at: createdAt(),
+}, t => [index('vault_log_entry_at').on(t.entryId, t.at), index('vault_log_company_at').on(t.companyId, t.at)]);

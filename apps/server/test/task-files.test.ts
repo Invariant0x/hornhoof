@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
 import { dropOldFiles, FILE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
@@ -143,7 +144,7 @@ describe('the room for task files', () => {
       files.push(await counted(copy!.id, 10));
     }
     expect(await dropOldFiles(db, now)).toBe(1);
-    expect((await db.select({ id: attachments.id }).from(attachments)).map(a => a.id).sort()).toEqual([files[1]!.id, files[2]!.id].sort());
+    expect((await db.select(idOnly(attachments)).from(attachments)).map(a => a.id).sort()).toEqual([files[1]!.id, files[2]!.id].sort());
   });
 });
 
