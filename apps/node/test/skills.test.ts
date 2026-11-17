@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { agyRules } from '../src/providers/antigravity.js';
-import { placeSkills, skillPaths, skillsFolder } from '../src/skills.js';
+import { placeSkills, skillsFolder } from '../src/skills.js';
 
 const TDD = { name: 'dev-tdd', description: 'Test-driven development. Writes the test: then the code.', body: '# Test-driven development\n\nWrite the test first.' };
 const DOCS = { name: 'dev-docs', description: 'Docs. Keeps the docs true.', body: '# Docs\n\nUpdate the README.' };
@@ -70,7 +70,6 @@ describe('skills as files', () => {
   it("gives every program only the agent's own skills, and takes away the superpowers skills an earlier node copied", async () => {
     for (const provider of ['claude', 'anthropic_api', 'glm', 'codex', 'openai_api', 'kimi', 'antigravity'] as const) {
       const folder = skillsFolder(provider);
-      expect(skillPaths(provider, [TDD, DOCS]), provider).toEqual([`${folder}/dev-tdd`, `${folder}/dev-docs`, '.hh-skills.json']);
       const dir = work();
       mkdirSync(join(dir, folder, 'brainstorming'), { recursive: true });
       writeFileSync(join(dir, folder, 'brainstorming', 'SKILL.md'), 'Word for word.');

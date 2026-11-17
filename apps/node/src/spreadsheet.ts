@@ -10,11 +10,6 @@ export type SpreadsheetSheet = {
   rows: SpreadsheetCell[][];
 };
 
-export type SpreadsheetInput =
-  | Record<string, unknown>[]
-  | SpreadsheetCell[][]
-  | { sheets: (SpreadsheetSheet | { name?: string; rows: Record<string, unknown>[] })[] };
-
 const USAGE = 'Usage: hh-xlsx <input.json|input.csv|input.tsv|-> <output.xlsx|output.csv>';
 
 const XML_ESCAPES: Readonly<Record<string, string>> = {

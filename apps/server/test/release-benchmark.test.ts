@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { timingLine } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { compareSnapshots, improvementCard, requestStats, Snapshot, testTimings } from '../src/benchmark/report.js';
+import { compareSnapshots, requestStats, Snapshot, testTimings } from '../src/benchmark/report.js';
 
 const snapshot = (coldReadyMs = 100) => ({ version: 1 as const, measuredAt: '2026-11-05T14:00:00.000Z', commit: 'c'.repeat(40), environment: { node: 'v22', platform: 'linux', arch: 'x64', cpus: 2, database: 'pglite', samples: 3 }, coldReadyMs, appReadyMs: 30, dbSetupMs: 50, memory: { rss: 1000, heapUsed: 500 }, requests: [{ method: 'GET', url: '/api/org', statusCode: 200 as const, errors: 0 as const, samples: 3, medianMs: 2, p95Ms: 3 }], tests: testTimings([{ name: 'part-1', log: timingLine({ kind: 'file', package: 'fixture', file: 'a.test.ts', totalMs: 1, setupMs: 0, testsMs: 1, teardownMs: 0, slowest: [] }) }]) });
 
@@ -34,14 +34,6 @@ describe('release benchmark report', () => {
     expect(tests.parts.map(p => [p.name, p.totalMs])).toEqual([['part-2', 200], ['part-1', 130]]);
     expect(tests.totalMs).toBe(330);
     expect(testTimings([])).toMatchObject({ status: 'missing', totalMs: null });
-  });
-
-  it('creates a nonblocking next-turn task with before and target-after numbers, retaining unknown acceptance time', () => {
-    const card = improvementCard({ turn: 7, source: 'baseline measurement, approximate', wait: 'test waits', beforeSeconds: 21600, events: 11, acceptanceSeconds: null }, 30);
-    expect(card).toMatchObject({ blocking: false, before: { seconds: 21600, percentOfBaseline: 100 }, targetAfter: { percentOfBaseline: 70, reductionPercent: 30 }, acceptance: { beforeSeconds: null, targetReductionPercent: 30 } });
-    expect(card.measurementBecomesTest).toBe(true);
-    expect(card.text).toContain('issue-to-acceptance');
-    expect(() => improvementCard({ turn: 7, source: 'fixture', wait: 'tests', beforeSeconds: 21600, events: 11, acceptanceSeconds: 100 }, 29)).toThrow();
   });
 });
 
