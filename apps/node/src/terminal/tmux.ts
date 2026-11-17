@@ -4,6 +4,7 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PRIVATE_TOOL_NOTE } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import { agentEnv, RESET_AGENT_ENV } from '../agent-env.js';
 import { withProgramExit, type ProgramExit } from '../program-exit.js';
@@ -95,6 +96,31 @@ export class Tmux {
     return this.recordings.privateDir();
   }
 
+  outputPrivate(name: string): boolean {
+    if (!this.recordings.isPrivate(name)) return false;
+    /* A node may have stopped between marking privacy and removing a recorder. Recover by unlinking its raw files. */
+    this.recordings.remove(name);
+    return true;
+  }
+
+  privateJob(name: string): string | null {
+    return this.recordings.privateJob(name);
+  }
+
+  async protectOutput(name: string, jobId: string | null = null): Promise<void> {
+    try {
+      this.recordings.protect(name, jobId);
+      await this.stopPrivateRecorder(name);
+    } finally {
+      this.recordings.remove(name);
+    }
+  }
+
+  private async stopPrivateRecorder(name: string): Promise<void> {
+    try { await this.run(['pipe-pane', '-t', name]); }
+    catch { if (await this.has(name)) throw new Error('Sensitive terminal recording could not be stopped.'); }
+  }
+
   /* The arguments that reach this server; viewers attach with them too. */
   base(): string[] {
     return ['-u', '-f', '/dev/null', '-L', this.socket];
@@ -130,7 +156,8 @@ export class Tmux {
     /* tmux starts the program on an empty screen: what the last one showed goes above it first, with what it printed before. */
     if (has) await this.screenAbove(name);
     /* The program starts only after its recorder is listening, including programs that exit immediately. */
-    const gated = outputDir ? ['sh', '-c', WAIT_FOR_CAPTURE, 'hh-start', ...argv] : argv;
+    const recording = outputDir && !this.outputPrivate(name);
+    const gated = recording ? ['sh', '-c', WAIT_FOR_CAPTURE, 'hh-start', ...argv] : argv;
     const start = has
       ? ['respawn-pane', '-k', '-c', cwd, '-t', name, ...gated]
       : ['new-session', '-d', '-s', name, '-x', String(cols), '-y', String(rows), '-c', cwd, ...gated];
@@ -140,7 +167,7 @@ export class Tmux {
     const keys = KEYS.flatMap(c => [';', ...c]);
     await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start, ...keys]);
     await this.clearRecording(name);
-    if (outputDir) {
+    if (recording) {
       await this.capture(name, outputDir);
       await this.keys(name, 'Enter');
     }
@@ -156,6 +183,7 @@ export class Tmux {
   }
 
   private async startRecorder(name: string, dir: string): Promise<boolean> {
+    if (this.outputPrivate(name)) return true;
     const recording = this.recordings.create(name, dir);
     const command = [process.execPath, CAPTURE, recording.file, recording.ready, recording.flush, String(KEEP_BYTES), this.socket, name, recording.position].map(quote).join(' ');
     await this.run(['pipe-pane', '-t', name, `exec ${command}`]);
@@ -173,16 +201,24 @@ export class Tmux {
   }
 
   exitSnapshot(name: string): Promise<ExitSnapshot | null> {
+    if (this.outputPrivate(name)) return this.privateExit(name);
     return this.recordings.snapshot(name, () => this.readEnd(name));
+  }
+
+  private async privateExit(name: string): Promise<ExitSnapshot | null> {
+    const exit = await this.paneExit(name);
+    return exit ? { ...withProgramExit(PRIVATE_TOOL_NOTE, exit, true), complete: true } : null;
   }
 
   /* Local evidence while a program runs, including stderr its next screen redraw erased. */
   programOutput(name: string, after?: RecordingCursor): string | null {
+    if (this.outputPrivate(name)) return PRIVATE_TOOL_NOTE;
     const recording = this.recordings.get(name);
     return recording ? after ? recordedAfter(recording, after) : recorded(recording.file) : null;
   }
 
   async programCursor(name: string): Promise<RecordingCursor | null> {
+    if (this.outputPrivate(name)) return null;
     const recording = this.recordings.get(name);
     if (!recording) return null;
     for (const deadline = Date.now() + 1000;; await new Promise(resolve => setTimeout(resolve, 10))) {
@@ -287,6 +323,7 @@ export class Tmux {
 
   /* What the pane shows, in its colours, without the line tmux puts under a program that ended. */
   private async shown(name: string): Promise<string> {
+    if (this.outputPrivate(name)) return `${PRIVATE_TOOL_NOTE}\n`;
     const lines = (await this.run(['capture-pane', '-p', '-e', '-t', name]).catch(() => '')).split('\n').filter(line => !/^Pane is dead/.test(stripEscapes(line)));
     while (lines.length && !stripEscapes(lines.at(-1)!).trim()) lines.pop();
     return lines.length ? `${lines.join('\n')}\x1b[0m` : '';
@@ -305,8 +342,14 @@ export class Tmux {
 
   async kill(name: string): Promise<void> {
     await this.ended(name);
-    await this.run(['kill-session', '-t', `=${name}`]).catch(() => {});
+    const removed = await this.removeSession(name);
     this.recordings.remove(name);
+    if (removed) this.recordings.release(name);
+  }
+
+  private async removeSession(name: string): Promise<boolean> {
+    try { await this.run(['kill-session', '-t', `=${name}`]); return true; }
+    catch { return !(await this.has(name)); }
   }
 
   async stopAll(): Promise<void> {

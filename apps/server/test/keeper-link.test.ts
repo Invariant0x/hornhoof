@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import tls, { type TLSSocket } from 'node:tls';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { loadConfig, type Config } from '../src/config.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
@@ -437,10 +437,12 @@ describe("the link's TLS door", () => {
     const secure = await overTls(ports.linkTls);
     const answered = await askOver(secure, { headers: { connection: 'keep-alive' } });
     expect(answered.status).toBe(200);
-    const started = performance.now();
+    /* The grace for what is still in flight is 5 s, on a clock that from here never moves: a stop that waited for it would
+       never end. A timer set before is cleared as ever. The test database keeps timers of its own on this clock, so their
+       count says nothing about the keeper's. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldClearNativeTimers: true });
+    onTestFinished(() => void vi.useRealTimers());
     await keeper.stop();
-    /* The grace for what is still in flight is 5 s. */
-    expect(performance.now() - started).toBeLessThan(4000);
   });
 
   it('takes this traffic as over the link, and counts sign-ins by the visitor', async () => {

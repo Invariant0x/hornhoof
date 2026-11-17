@@ -1,0 +1,541 @@
+=== server-named.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+      Coverage enabled with v8
+
+ ✓ test/assistant-agent.test.ts (35 tests) 203602ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 15316ms
+     ✓ runs only on a personal plan of its owner, which its owner alone picks, and waits with none 7786ms
+     ✓ is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant 4785ms
+     ✓ is the CEO's own when the CEO owns it, still out of the orchestrator's reach 4191ms
+     ✓ works with its owner's assistant tools, the company's vault and phones, not with the rest of the company's 4812ms
+   ✓ the sender of an assistant message (2)
+     ✓ marks replies and their end when the own agent sent the message, and keeps the origin after a restart 10910ms
+     ✓ marks replies and their end false for a message from the program, even when its own agent answers 12450ms
+   ✓ an assistant's own agent, for the company (2)
+     ✓ is changed on its assistant's card, not as an employee: its own card neither edits nor removes it 6768ms
+     ✓ is no employee: no task takes it or waits for it, and no plan comes to it by itself 4057ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 6758ms
+     ✓ is nobody at the other end of a message for the CEO and the orchestrator, as an agent they do not see 2923ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 5978ms
+     ✓ lets go of its plan when the assistant is switched off, and takes none until it is on again 7481ms
+     ✓ is made once when its owner picks a plan from several screens at the same moment 5260ms
+   ✓ persona_call (6)
+     ✓ is among its tools only while the assistant has a skills address, as the address is at each list, and a call by name without one says so 7227ms
+     ✓ is in its instructions only while there is a skills address, and a change of that starts its program anew 8985ms
+     ✓ is not in the instructions of an own agent whose assistant is gone, which speaks for its owner with no names 3145ms
+     ✓ asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer 5088ms
+     ✓ says so when the assistant has no skills address, or the program refuses, and never follows a redirect 4489ms
+     ✓ says so when the program breaks off in the middle of its answer 4208ms
+   ✓ GET /api/assistant/attachments/:id (6)
+     ✓ gives a file its own agent put with hh-attach --chat, by the id hh-attach printed, its exact bytes under its type and name, as often as asked 7744ms
+     ✓ names a file of any letters as UTF-8 in filename*, and in plain ASCII in filename 4640ms
+     ✓ keeps a name with quotes, a backslash or line breaks inside its one header, so no other header comes of it 6288ms
+     ✓ opens with the assistant's own key alone, as every assistant call: 401 with none, a wrong one, a turn's token or a revoked key 4336ms
+     ✓ answers a file its owner may not have exactly as one that is not there: of another owner's assistant, another company, or no id at all 7511ms
+     ✓ keeps operator case files closed even when they are named files of its own agent and visible to its owner 4468ms
+   ✓ tell_owner (3)
+     ✓ passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program 5416ms
+     ✓ wakes OpenClaw's model for them at once, as words its owner waits for 2901ms
+     ✓ passes on no empty words, and nothing of an assistant that is switched off 4111ms
+   ✓ freshText (6)
+     ✓ takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused 3500ms
+     ✓ takes a body near 2 MiB, as a program that escapes every letter in its JSON sends it, and refuses a bigger one 3270ms
+     ✓ goes in place of the text and of Hornhoof's catch-up when the own agent's turn starts a new session, and the window shows only the text 5102ms
+     ✓ goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew 3182ms
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 3296ms
+     ✓ is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session 3950ms
+ ✓ test/task-files.test.ts (11 tests) 27069ms
+   ✓ a task file (5)
+     ✓ is attached by an agent on the task and downloaded by any agent of the company by its name or id 4271ms
+     ✓ keeps the newest of two files with one name, and only the name, never a folder 1475ms
+     ✓ is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there 1327ms
+     ✓ still takes only pictures, up to 3 MB, without a task 720ms
+     ✓ downloads a file of several megabytes whole 7599ms
+   ✓ the room for task files (3)
+     ✓ holds 500 MB on one task and says so plainly past it 1136ms
+     ✓ holds the company's setting across its tasks, 2 GB unless TASK_FILES_MB says otherwise 5032ms
+     ✓ lets go of the files of a turn closed 30 days ago, and keeps the rest 601ms
+   ✓ a task file over 50 MB (1)
+     ✓ lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open 1532ms
+   ✓ cross-department hh-fetch and attachment boundaries (2)
+     ✓ lets Development and Design employees read each other task files, full-text reviews and request pictures via hh-fetch 1307ms
+     ✓ refuses another company, personal assistants, private secrets, message pictures, cross-department writes and deletes, and empty uploads 1562ms
+ ✓ test/tools-outside-turn.test.ts (15 tests) 11348ms
+   ✓ an agent's tools with no turn of it running (8)
+     ✓ answer the program of an agent as it connects, before any turn and with nothing kept on its node, as a turn answers it 5425ms
+     ✓ answer the program of an head as it connects, before any turn and with nothing kept on its node, as a turn answers it 1511ms
+     ✓ answer the program of an orchestrator as it connects, before any turn and with nothing kept on its node, as a turn answers it 473ms
+     ✓ give a switched-off employee its tools as it connects, and refuse its calls until it is on again 375ms
+   ✓ a running turn's tools (3)
+     ✓ stop at once when a person stops the turn, while its program still winds down 312ms
+     ✓ stop at once, with its calls with no turn, when its machine is disconnected 481ms
+   ✓ a step of the tools (1)
+     ✓ is no work that holds an employee: one in a step is removed, and one switched off hands its work on 332ms
+   ✓ a check command its program runs with no turn running (3)
+     ✓ runs in a step of its own, open while it runs, that the machine's check slot goes to, and ends as the node says it did 482ms
+     ✓ may not run for one switched off, one that left the company, or one whose program another node runs 309ms
+     ✓ stops at once when the employee is removed, and when its machine is disconnected 314ms
+ ✓ test/vault-tools.test.ts (18 tests) 7999ms
+   ✓ the vault for agents (18)
+     ✓ keeps no secret answer in replay storage or the journal 1266ms
+     ✓ checks the entry again when the same invocation is repeated after deletion 738ms
+     ✓ keeps the orchestrator shelf outside replay for a sensitive target 378ms
+     ✓ does not retain a secret tool input or result reported by a node, delegated: false 466ms
+     ✓ does not retain a secret tool input or result reported by a node, delegated: true 837ms
+     ✓ hides raw completion output even when the node never reported the sensitive call 1051ms
+     ✓ keeps vault_save arguments out of replay storage and error responses 531ms
+     ✓ lists every entry of the company to each of its agents, with no password 321ms
+ ✓ test/tool-calls.test.ts (16 tests) 6289ms
+   ✓ a tool call with an invocation id (8)
+     ✓ answers a retried call from what it kept, and runs it once 1262ms
+     ✓ runs two calls with two ids, and a call without an id as before 508ms
+     ✓ tells a retry that the answer was lost, and does not run it again 318ms
+     ✓ takes an invocation id from the keeper alone with {"TUNNEL_HOST":"keeper.invalid"} 425ms
+     ✓ takes an invocation id from the keeper alone with {} 459ms
+   ✓ the database tool with an invocation id (1)
+     ✓ keeps its answer in the change's own commit, and answers a retry from it 1210ms
+ ✓ test/node-messages.test.ts (12 tests) 4384ms
+   ✓ each machine's built-in node (3)
+     ✓ keeps each built-in node's jobs apart 1166ms
+     ✓ keeps a turn across a planned switch 545ms
+     ✓ keeps an agent on its machine's built-in node 440ms
+   ✓ numbered messages of a node (6)
+     ✓ applies a numbered message once, and confirms it each time it comes 335ms
+     ✓ handles a job's end again when it is listed, and goes on from the steps it had 443ms
+     ✓ takes a message again after a failure that passes, and nothing that came after it 306ms
+     ✓ talks to a node of the build before as it always did 448ms
+     ✓ tells its nodes that the server is stopping, once what they sent is handled 345ms
+ ✓ test/read-tools.test.ts (6 tests) 9513ms
+   ✓ the tools of an agent on a machine that only reads (6)
+     ✓ lists the same tools in every mode, and answers the ones that read 1911ms
+     ✓ tells an agent on a machine that is cut off to wrap up, and asks one whose machine still has the internet to wait 1691ms
+     ✓ writes nothing in read, with or without the id of a call 1251ms
+     ✓ lets the orchestrator read the database, and nothing more 3043ms
+     ✓ keeps maintenance shut 1303ms
+ ✓ test/events.test.ts (10 tests) 9400ms
+   ✓ GET /api/stream (10)
+     ✓ refuses a signed-out request 898ms
+     ✓ sends the orchestrator's conversation to people who see the whole company 1331ms
+     ✓ keeps no machine command in a conversation, only the command with its code hidden 316ms
+     ✓ keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream 1228ms
+     ✓ keeps the conversation from a department head but tells them the org changed 1350ms
+     ✓ ends open streams first when the server shuts down, so it does not wait for them 527ms
+     ✓ ends the stream of a person who was disabled, at the next ping 468ms
+     ✓ ends the stream of a person who was disabled at once, without waiting for the ping 418ms
+     ✓ stops sending a department's news to a person at once when they no longer reach it 1295ms
+     ✓ counts an agent with a running conversation as working, on the map and in the stream 1405ms
+ ✓ test/vault.test.ts (8 tests) 2007ms
+   ✓ the company vault for people (8)
+     ✓ keeps the password and the code secret encrypted and never gives them back 519ms
+     ✓ takes an entry from the orchestrator acting for a person, as added by the orchestrator 332ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 9159ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 5532ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 1292ms
+     ✓ says what a call lacks, and which tools there are when the name is wrong 379ms
+     ✓ runs a tool of a department's own for the department it names, and without one names the departments 307ms
+     ✓ sets a worker's assignment and reads the briefing in the department it names 401ms
+     ✓ calls any route of the API as the owner, one that refused it too 352ms
+     ✓ is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key 448ms
+ ✓ test/vault-phone-privacy.test.ts (1 test) 3389ms
+   ✓ keeps phone execution private after a vault value, while ordinary replay and recordings still work 3048ms
+ ✓ test/phone-tools.test.ts (2 tests) 3606ms
+   ✓ gives one agent the phone and queues the next until the first session ends 2372ms
+   ✓ lets the agent type a login and password it holds as text, with no tool that signs in for it 1024ms
+ ✓ test/phone-lifecycle.test.ts (2 tests) 4463ms
+   ✓ owner Stop revokes before acknowledgement, cancels the queue and keeps owner control 1837ms
+   ✓ cancellation and a lost lease release the phone and promote the next live job on virtual time 1810ms
+ ✓ test/phone-recording.test.ts (1 test) 6721ms
+   ✓ keeps the session recording on the task and shows the owner its live frame 5670ms
+ ✓ test/private-upload.test.ts (3 tests) 12ms
+ ✓ test/vault-totp.test.ts (7 tests) 3ms
+
+ Test Files  16 passed (16)
+      Tests  155 passed (155)
+   Start at  03:33:16
+   Duration  552.18s (tests 68%, import 23%, transform 9%)
+
+
+
+=== server-completion-delta.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+      Coverage enabled with v8
+
+ ✓ test/vault-tools.test.ts (19 tests) 3042ms
+   ✓ the vault for agents (19)
+     ✓ keeps no secret answer in replay storage or the journal 360ms
+ ✓ test/node-messages.test.ts (12 tests) 2003ms
+   ✓ each machine's built-in node (3)
+     ✓ keeps each built-in node's jobs apart 483ms
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  03:52:28
+   Duration  16.11s (tests 53%, import 38%, transform 9%)
+
+
+
+=== node-named.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+      Coverage enabled with v8
+
+ ✓ test/terminal-bridge.test.ts (28 tests) 732ms
+   ✓ the node's bridge to Hornhoof's tools (21)
+     ✓ hands on a task's files both ways, with their names and of any size, and nothing else under the picture address 583ms
+ ✓ test/terminal-host-live-review-returns.test.ts (30 tests) 293ms
+ ✓ test/terminal-host-secrets.test.ts (19 tests) 233ms
+ ✓ test/terminal-host-live-review.test.ts (30 tests) 286ms
+ ✓ test/terminal-host-operator.test.ts (6 tests) 180ms
+ ✓ test/terminal-bridge-outside.test.ts (14 tests) 62ms
+ ✓ test/runner.test.ts (32 tests) 62ms
+ ✓ test/terminal-tmux.test.ts (25 tests) 51ms
+ ✓ test/capture-position.test.ts (14 tests) 33ms
+ ✓ test/recording-cursor.test.ts (9 tests) 22ms
+ ✓ test/capture-tail.test.ts (4 tests) 9ms
+
+ Test Files  11 passed (11)
+      Tests  211 passed (211)
+   Start at  03:52:28
+   Duration  5.11s (tests 52%, import 32%, transform 13%, worker 3%)
+
+    Isolate  11 workers spawned · ~68ms startup each (spawn + environment, per file)
+             at least ~676ms faster with isolate: false — reuses workers across files instead of one per file
+
+
+
+=== node-attach.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+
+ ✓ test/attach.test.ts (10 tests) 18546ms
+   ✓ hh-attach (6)
+     ✓ uses the node link for Kimi's terminal when the bridge has lost the turn token, and refuses once the turn ends 956ms
+     ✓ gives a file over 50 MB through the bridge as it reads it, whole and with its length, and fetches it back the same way 9434ms
+     ✓ sends each file with the turn token and prints the id to pass on 1196ms
+     ✓ keeps the headless Kimi runner, its MCP configuration and hh-attach on the direct turn token 1080ms
+     ✓ says what went wrong: no turn, no file, or Hornhoof's refusal 2083ms
+     ✓ puts files of any kind on a task under their own names 347ms
+   ✓ hh-fetch (4)
+     ✓ downloads a task's file by its name into the folder it runs in, never above it 380ms
+     ✓ downloads a picture that came with a message, as the message says 728ms
+     ✓ saves it where it is told, into a folder or as a file 1583ms
+     ✓ says what went wrong: no turn, no task and file, or Hornhoof's refusal 684ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  03:35:30
+   Duration  25.08s (tests 76%, transform 17%, import 7%)
+
+
+
+=== protocol.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/packages/protocol
+      Coverage enabled with v8
+
+ ✓ test/tool-privacy.test.ts (12 tests) 202ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  03:36:34
+   Duration  5.54s (transform 64%, import 19%, tests 9%, worker 9%)
+
+
+
+=== helper-tests.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+
+ ✓ test/shared-test-database.test.ts (42 tests) 12492ms
+   ✓ the tests of one file (6)
+     ✓ have a database of their own to write in 2133ms
+     ✓ find in it the same rows as in a new copy of the migrated database 1147ms
+     ✓ can ask for a second database in one test, and it is another one 545ms
+   ✓ agent SQL in a test (2)
+     ✓ finds its roles and rights in the database already, so it changes nothing beyond rows 547ms
+     ✓ leaves the rights and roles of a new copy to the next test 409ms
+   ✓ what a test changes beyond rows (7)
+     ✓ leaves the next test a new copy once its file was told 561ms
+     ✓ fails its file as a right taken away 342ms
+     ✓ fails its file when a schema change prevents emptying the database 766ms
+     ✓ does not hide a schema change by replacing a database that cannot be emptied 900ms
+     ✓ does not fail its file when it gave the same rights again, in another order 789ms
+   ✓ a setting of the connection (4)
+     ✓ does not reach the next test as that setting 594ms
+   ✓ what a test leaves for the planner (5)
+     ✓ is gone for the next test, as on a new copy 756ms
+     ✓ does not reach the next test as statistics 732ms
+   ✓ after a test fails (2)
+     ✓ so the next test gets a new one 750ms
+   ✓ rows a test was still making when it ended (3)
+     ✓ are kept for the next test whole, with those it went on to, and it does not make them again 664ms
+ ✓ test/test-database-parsers.test.ts (3 tests) 2520ms
+   ✓ a test database (3)
+     ✓ reads values of Postgres's own types back as PGlite reads them with all its parsers 1657ms
+     ✓ reads an array of a type of its schema back as PGlite does 773ms
+
+ Test Files  2 passed (2)
+      Tests  43 passed | 2 expected fail (45)
+   Start at  03:47:08
+   Duration  40.38s (tests 49%, transform 40%, import 11%)
+
+
+
+=== integrated-server.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+
+ ✓ test/read-tools.test.ts (6 tests) 6817ms
+   ✓ the tools of an agent on a machine that only reads (6)
+     ✓ lists the same tools in every mode, and answers the ones that read 1287ms
+     ✓ tells an agent on a machine that is cut off to wrap up, and asks one whose machine still has the internet to wait 1295ms
+     ✓ writes nothing in read, with or without the id of a call 1234ms
+     ✓ lets the orchestrator read the database, and nothing more 1837ms
+     ✓ keeps maintenance shut 1094ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 3727ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 1837ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 499ms
+     ✓ is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key 492ms
+ ✓ test/tool-calls.test.ts (16 tests) 2765ms
+   ✓ a tool call with an invocation id (8)
+     ✓ answers a retried call from what it kept, and runs it once 427ms
+     ✓ takes an invocation id from the keeper alone with {} 325ms
+   ✓ the database tool with an invocation id (1)
+     ✓ keeps its answer in the change's own commit, and answers a retry from it 534ms
+ ✓ test/vault-tools.test.ts (19 tests) 3633ms
+   ✓ the vault for agents (19)
+     ✓ keeps no secret answer in replay storage or the journal 302ms
+     ✓ checks the entry again when the same invocation is repeated after deletion 338ms
+     ✓ gives the agent that asks the login, the password and the code of this moment as text, and never the code secret 330ms
+
+ Test Files  4 passed (4)
+      Tests  49 passed (49)
+   Start at  04:11:39
+   Duration  29.33s (tests 69%, import 28%, transform 3%)
+
+
+
+=== integrated-node.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+
+ ✓ test/terminal-bridge.test.ts (28 tests) 441ms
+   ✓ the node's bridge to Hornhoof's tools (21)
+     ✓ hands on a task's files both ways, with their names and of any size, and nothing else under the picture address 310ms
+ ✓ test/terminal-host-secrets.test.ts (19 tests) 190ms
+ ✓ test/runner.test.ts (32 tests) 69ms
+
+ Test Files  3 passed (3)
+      Tests  79 passed (79)
+   Start at  04:11:37
+   Duration  1.94s (tests 40%, transform 36%, import 24%)
+
+
+
+=== integrated-protocol.log ===
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/packages/protocol
+      Coverage enabled with v8
+
+ ✓ test/tool-privacy.test.ts (13 tests) 4ms
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  04:10:58
+   Duration  131ms (transform 54%, worker 21%, import 15%, tests 10%)
+
+
+
+=== mutation.log ===
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:73 === -> !==
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:83 === -> !==
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:114 === -> !==
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:123 === -> !==
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:142 true -> false
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+packages/protocol/src/tool-privacy.ts:147 true -> false
++ (/data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/target/mutation-workers/run-6578e338-3e57-45cd-a5f3-2ee8ff2061b6/worker-0) npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root packages/protocol test/tool-privacy.test.ts
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/mutate/tool-privacy.edn
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/mutate/tool-privacy.PrivateValues.edn
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/mutate/tool-privacy.ToolPrivacy.edn
+KILLED    packages/protocol/src/tool-privacy.ts:73 === -> !==
+KILLED    packages/protocol/src/tool-privacy.ts:83 === -> !==
+KILLED    packages/protocol/src/tool-privacy.ts:114 === -> !==
+KILLED    packages/protocol/src/tool-privacy.ts:123 === -> !==
+KILLED    packages/protocol/src/tool-privacy.ts:142 true -> false
+KILLED    packages/protocol/src/tool-privacy.ts:147 true -> false
+Function         Namespace                   Killed  Survived  Uncovered CompileError  Timeout  Sites   Score
+-------------------------------------------------------------------------------------------------------------
+event            tool-privacy.ToolPrivacy         0         0          0            0        0      0    n/a
+hiddenString     tool-privacy.PrivateValues       0         0          0            0        0      0    n/a
+input            tool-privacy.PrivateValues       0         0          0            0        0      2    n/a
+isSensitiveTool  tool-privacy                     0         0          0            0        0      3    n/a
+observe          tool-privacy.ToolPrivacy         0         0          0            0        0      3    n/a
+observeTool      tool-privacy.ToolPrivacy         0         0          0            0        0      5    n/a
+opaqueMedia      tool-privacy                     0         0          0            0        0      7    n/a
+parsed           tool-privacy                     0         0          0            0        0      0    n/a
+privateToolCall  tool-privacy                     0         0          0            0        0      7    n/a
+remember         tool-privacy.PrivateValues       0         0          0            0        0      4    n/a
+rememberFields   tool-privacy.PrivateValues       0         0          0            0        0      2    n/a
+rememberText     tool-privacy.PrivateValues       0         0          0            0        0      5    n/a
+result           tool-privacy.ToolPrivacy         0         0          0            0        0      2    n/a
+retainedBytes    tool-privacy.PrivateValues       0         0          0            0        0      2    n/a
+sensitiveEvent   tool-privacy                     0         0          0            0        0      8    n/a
+text             tool-privacy.PrivateValues       0         0          0            0        0      1    n/a
+toolPrivacy      tool-privacy                     0         0          0            0        0      4    n/a
+contains         tool-privacy.PrivateValues       1         0          0            0        0      6 100.0%
+execution        tool-privacy.ToolPrivacy         1         0          0            0        0      6 100.0%
+hiddenText       tool-privacy                     1         0          0            0        0      2 100.0%
+hide             tool-privacy.PrivateValues       1         0          0            0        0      3 100.0%
+input            tool-privacy.ToolPrivacy         1         0          0            0        0      5 100.0%
+privateToolEvent tool-privacy                     1         0          0            0        0      7 100.0%
+-------------------------------------------------------------------------------------------------------------
+Total                                             6         0          0            0        0     84  100.0%
+
+
+=== static-checks.txt ===
+dependencies
+cwd: .
+command: npm run -s deps
+exit: 0
+$ npm ci --ignore-scripts
+$ npm run -s prepare
+$ npm run -s build -w @hornhoof/protocol
+$ npm run -s build -w @hornhoof/node
+
+
+server build
+cwd: apps/server
+command: npm run build
+exit: 0
+
+> @hornhoof/server@0.29.3 build
+> tsc -p tsconfig.json && node -e "require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })"
+
+
+
+server types including tests
+cwd: apps/server
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+node build
+cwd: apps/node
+command: npm run build
+exit: 0
+
+> @hornhoof/node@0.29.3 build
+> tsc -p tsconfig.json
+
+
+
+node types including tests
+cwd: apps/node
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+protocol build
+cwd: packages/protocol
+command: npm run build
+exit: 0
+
+> @hornhoof/protocol@0.29.3 build
+> tsc -p tsconfig.json
+
+
+
+protocol types including tests
+cwd: packages/protocol
+command: npx tsc -p tsconfig.eslint.json --noEmit
+exit: 0
+(no output)
+
+web types
+cwd: apps/web
+command: npx tsc -p tsconfig.json --noEmit
+exit: 0
+(no output)
+
+server changed-file lint
+cwd: apps/server
+command: npx --no-install eslint src/modules/assistants/mcp.ts src/modules/computer/tools.ts src/modules/conversation/queue.ts src/modules/events/store.ts src/modules/nodes/messages.ts src/modules/phones/recording.ts src/modules/phones/tools.ts src/modules/tasks/attachments.ts src/modules/tasks/wake.ts src/modules/tools/calls.ts src/modules/tools/mcp.ts src/modules/tools/outside.ts src/modules/tools/privacy.ts src/modules/tools/private-turns.ts src/modules/tools/private-upload.ts src/modules/tools/shelf.ts src/modules/vault/tools.ts test/assistant-agent.test.ts test/events.test.ts test/helpers-db.ts test/node-messages.test.ts test/phone-fixture.ts test/private-upload.test.ts test/read-tools.test.ts test/task-files.test.ts test/tool-calls.test.ts test/vault-fixture.ts test/vault-phone-privacy.test.ts test/vault-tools.test.ts
+exit: 0
+(no output)
+
+node changed-file lint
+cwd: apps/node
+command: npx --no-install eslint src/runner.ts src/terminal/bridge.ts src/terminal/host.ts src/terminal/recordings.ts src/terminal/tmux.ts test/runner.test.ts test/terminal-bridge.test.ts test/terminal-host-live-helpers.ts test/terminal-host-secrets.test.ts test/terminal-tmux.test.ts
+exit: 0
+(no output)
+
+protocol changed-file lint
+cwd: packages/protocol
+command: npx --no-install eslint src/index.ts src/tool-privacy.ts test/tool-privacy.test.ts
+exit: 0
+(no output)
+
+
+=== quality.json ===
+{
+  "base": "a27bc368b1e027af70883d06d1da9ba2b07985ab",
+  "codeCommit": "792ca47fb44b2d26155b26574181efd9551c2b07",
+  "rule": "CRAP >= 10 blocks a new function or one whose complexity grew",
+  "areas": [
+    {
+      "area": "node",
+      "failures": [],
+      "unchangedHighScores": 113
+    },
+    {
+      "area": "server",
+      "failures": [],
+      "unchangedHighScores": 105
+    },
+    {
+      "area": "completion",
+      "failures": [],
+      "unchangedHighScores": 17
+    },
+    {
+      "area": "protocol",
+      "failures": [],
+      "unchangedHighScores": 0
+    }
+  ],
+  "finalCodeCommit": "beb379fa907715580128324e0d84ccf6834b36fe",
+  "finalIntegrationBase": "c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6",
+  "comparisonReuse": "The two base commits have identical contents for every production path changed by this repair. Node and server functions are identical to the recorded coverage run. Final protocol coverage and metric were regenerated; max CRAP 9.0.",
+  "mutation": {
+    "sampled": 6,
+    "killed": 6,
+    "survived": 0,
+    "uncovered": 0,
+    "compileError": 0,
+    "timeout": 0
+  }
+}
+
+
+=== dryer.log ===
+Wrote /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/.metrics/dry.edn
+DUPLICATE score=1.00
+  apps/server/src/modules/assistants/mcp.ts:27-35
+  apps/server/src/modules/vault/tools.ts:20-28
+
+DUPLICATE score=0.85
+  apps/server/src/modules/computer/tools.ts:36-39
+  apps/server/src/modules/conversation/queue.ts:325-328
