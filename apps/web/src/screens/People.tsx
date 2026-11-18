@@ -6,6 +6,8 @@ import type { AccessInput, Me, Org, PersonView } from '../types';
 import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
+import { LoadFailure } from '../ui/LoadFailure';
+import { latestAnswers, useStream } from '../live';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
 import { BusyLabel } from '../ui/BusyLabel';
@@ -469,22 +471,31 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [org, setOrg] = useState<Org | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [askPeople] = useState(latestAnswers);
   const canManage = me.person.scopeKind === 'company';
   const tableHost = usePeopleTable(people);
 
   const load = useCallback(async () => {
+    const fresh = askPeople();
     try {
       const [list, structure] = await Promise.all([api.get<{ people: PersonView[] }>('/api/people'), api.get<Org>('/api/org')]);
+      if (!fresh()) return;
       setPeople(list.people);
       setOrg(structure);
+      setLoadFailure(null);
     } catch (err) {
-      setFailure(err);
+      if (fresh()) setLoadFailure(err);
     }
-  }, []);
+  }, [askPeople]);
 
   useEffect(() => {
     void load();
   }, [load]);
+  /* After a break, an update among them, the list is read again. */
+  useStream(m => {
+    if (m.type === 'reconnected') void load();
+  });
 
   useOwnName(me, setPeople);
 
@@ -532,7 +543,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       setPanel({ kind: 'link', name: res.person.name, url: res.inviteUrl });
     });
 
-  if (peopleUnavailable(failure, selected, people, person)) return <RouteUnavailable onHome={onHome} />;
+  if (unavailableFailure(loadFailure) || peopleUnavailable(failure, selected, people, person)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people">
@@ -563,6 +574,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         onClose={closePerson}
       />
       {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
+      <LoadFailure failure={loadFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (

@@ -9,6 +9,7 @@ import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
+import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -215,9 +216,10 @@ function useDecisionsView() {
 function AgentWindowError({ shown, org, failure }: { shown: string | null; org: Org | null; failure: unknown }) {
   const t = useT();
   const message = useRef<HTMLParagraphElement>(null);
-  useEffect(() => { message.current?.focus(); }, [shown, org, failure]);
-  if (!shown || org || failure === null) return null;
-  return <p ref={message} tabIndex={-1} className="alert agent-window-error" role="alert">{errorText(t, failure)}</p>;
+  const said = useLoadFailure(failure);
+  useEffect(() => { message.current?.focus(); }, [shown, org, said]);
+  if (!shown || org || said === null) return null;
+  return <p ref={message} tabIndex={-1} className="alert" role="alert">{errorText(t, said)}</p>;
 }
 
 type Department = Org['departments'][number];
@@ -244,8 +246,10 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
-function departmentFallback(deptId: string | null, org: Org | null, orgFailure: unknown) {
-  return deptId && !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
+/* A department still loading, or one whose load the update holds: the panel says so, and the load asks again after it. */
+function DepartmentFallback({ deptId, org, orgFailure }: { deptId: string | null; org: Org | null; orgFailure: unknown }) {
+  const failure = useLoadFailure(orgFailure);
+  return deptId && !org && failure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
 }
 
 function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, openDepartment, onHire }: MapRouteProps & {
@@ -253,7 +257,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
   openTask: (id: string) => void; openTracker: (departmentId: string) => void; openDepartment: (id: string) => void; onHire: (dept: Department) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
-  if (!dept) return departmentFallback(deptId, org, orgFailure);
+  if (!dept) return <DepartmentFallback deptId={deptId} org={org} orgFailure={orgFailure} />;
   return (
     <DepartmentView
       key={dept.id}
@@ -321,6 +325,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
   const updates = useUpdates(company);
+  const [updateSaysIt, setUpdateSaysIt] = useState(false);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
@@ -362,6 +367,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
 
   return (
     <AgentWindowContext value={openAgent}>
+    <UpdateSaysIt value={updateSaysIt}>
     <div className="shell">
       <header className="topbar">
         <div className="tb-brand glass">
@@ -371,14 +377,16 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
-      <SwitchBanner>
-        {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} />}
-        <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
-      </SwitchBanner>
+      {/* The bars of the shell stand first in the page, each in its own row under the header, and what the page shows
+          comes after them. */}
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
+        <SwitchBanner>
+          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
+          <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
+        </SwitchBanner>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
+        {deptId && !unavailableFailure(orgFailure) && <LoadFailure failure={orgFailure} />}
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
-        {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
         <GuardBoundary block="map" reset={deptId}>
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
@@ -446,6 +454,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       <AccountDialog route={!accountDialog || (!company && accountDialog === 'versions') ? null : route} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onGroup={group => switchOverlay(group ? { kind: 'settings', group } : { kind: 'settings' })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
+    </UpdateSaysIt>
     </AgentWindowContext>
   );
 }

@@ -55,14 +55,22 @@ describe('Shell', () => {
     }
     await user.click(tab('Map'));
     expect(screen.getByRole('main')).not.toHaveClass('page');
-    /* A band in the page's own color stays at the top of what scrolls, as tall as the bar and the gap above it, and
-       takes no room from the page. */
-    const band = (property: string) => decl('.body.page::before', property);
-    expect(band('position')).toBe('sticky');
-    expect(band('top')).toBe('0');
-    expect(band('background')).toBe('var(--bg)');
-    expect(px(band('height'))).toBeGreaterThanOrEqual(px(decl('.topbar', 'top')) + px(decl('.tabs', 'height')));
-    expect(px(band('margin-bottom'))).toBe(-px(band('height')));
+    /* The header's room heads what scrolls on every tab, as tall as the bar and the gap above it, said once on the shell;
+       on a page it is a band in the page's own color that stays at the top, and on the map it lets touches through to
+       the canvas. The bars of the shell and the page start under it, so it takes its room from the page. */
+    const room = (property: string) => decl('.body::before', property);
+    expect(room('position')).toBe('sticky');
+    expect(room('top')).toBe('0');
+    expect(room('pointer-events')).toBe('none');
+    expect(room('block-size')).toBe('var(--header-room)');
+    expect(room('margin-bottom')).toBeUndefined();
+    expect(decl('.body.page::before', 'background')).toBe('var(--bg)');
+    /* What scrolled under the band is out of sight, so a click there reaches the band, not what is under it. */
+    expect(decl('.body.page::before', 'pointer-events')).toBe('auto');
+    expect(decl('.shell', '--header-room')).toBe('calc(2 * var(--bar-top) + var(--bar-size))');
+    expect(decl('.topbar', 'inset-block-start')).toBe('var(--bar-top)');
+    expect(decl('.tabs', 'height')).toBe('var(--bar-size)');
+    expect(px(decl('.shell', '--bar-top'))).toBeGreaterThan(0);
   });
 
   it('opens the machines of the company from their own tab', async () => {

@@ -4,6 +4,7 @@ import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
 import { everyVisible } from './guard';
+import { heardAgain, latestAnswers } from './live';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -87,24 +88,38 @@ export function useUpdates(enabled: boolean): Updates {
   const boot = useRef<string | null>(null);
   const busyNow = useRef(false);
   const askingNow = useRef(false);
+  const wasRunning = useRef(false);
+  const hadOutage = useRef(false);
+  const [askPoll] = useState(latestAnswers);
 
   const take = useCallback((next: UpdatesView) => {
     boot.current ??= next.current.commit;
     if (next.current.commit !== boot.current) return page.reload();
+    const running = next.updater.status?.state === 'running';
+    const recovered = hadOutage.current || (wasRunning.current && !running);
+    wasRunning.current = running;
+    hadOutage.current = false;
     setView(next);
+    setOutage('none');
+    if (recovered) heardAgain();
   }, []);
 
   const load = useCallback(async () => {
+    const fresh = askPoll();
     try {
-      take(await api.get<UpdatesView>('/api/updates'));
+      const next = await api.get<UpdatesView>('/api/updates');
+      if (!fresh()) return;
+      take(next);
       setFailure(null);
-      setOutage('none');
     } catch (err) {
+      if (!fresh()) return;
       setFailure(err);
       /* The server restarts during an update; the next poll asks again. */
-      setOutage(outageOf(err, busyNow.current));
+      const next = outageOf(err, busyNow.current);
+      hadOutage.current ||= next !== 'none';
+      setOutage(next);
     }
-  }, [take]);
+  }, [askPoll, take]);
 
   const status = view?.updater.status;
   /* A sent request counts until the updater reports on it. */
@@ -112,7 +127,7 @@ export function useUpdates(enabled: boolean): Updates {
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
   const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;
-  const pollMs = updatesPollMs(busy, view?.nodeWaits);
+  const pollMs = updatesPollMs(busy || outage === 'maintenance', view?.nodeWaits);
 
   useEffect(() => {
     if (answered) setSent(null);
@@ -154,7 +169,11 @@ export function useUpdates(enabled: boolean): Updates {
     maintenance: outage === 'maintenance',
     asking,
     cut,
-    check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
+    check: async () => {
+      const fresh = askPoll();
+      const next = await api.post<UpdatesView>('/api/updates/check');
+      if (fresh()) take(next);
+    },
     update: (version, whenIdle) => ask(version, whenIdle),
     callOff: async () => {
       await api.del('/api/updates');
