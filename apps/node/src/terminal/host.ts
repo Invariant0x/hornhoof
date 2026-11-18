@@ -404,9 +404,11 @@ export class TerminalHost {
   private readonly rows: number;
 
   constructor(private readonly opts: Options) {
-    const owner = ownership(opts, key => this.panes(key));
+    const owner = ownership(opts, (key, signal) => this.panes(key, signal));
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
+      ownerRejected: (key, event, reason) => this.logHookRejection(key, event, reason),
+      ownerReported: (key, event, reason) => this.reportHookRejection(key, event, reason),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
       sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
@@ -561,7 +563,15 @@ export class TerminalHost {
   }
 
   private hookRejected(key: string | null, event: string, reason: string): void {
+    this.logHookRejection(key, event, reason);
+    this.reportHookRejection(key, event, reason);
+  }
+
+  private logHookRejection(key: string | null, event: string, reason: string): void {
     (this.opts.log ?? console.log)(`Hook ${event} rejected: ${reason}${key ? ` (agent ${key})` : ''}`);
+  }
+
+  private reportHookRejection(key: string | null, event: string, reason: string): void {
     if (key) this.opts.send({ type: 'agent.hook_rejected', agentKey: key, event, reason });
   }
 
@@ -597,9 +607,14 @@ export class TerminalHost {
   }
 
   /* The processes an agent's session starts its program in. */
-  private async panes(key: string): Promise<number[]> {
+  private async panes(key: string, signal?: AbortSignal): Promise<number[]> {
+    signal?.throwIfAborted();
     const command = ['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}'];
-    const out = await this.opts.tmux.run(command).catch(() => this.opts.tmux.run(command));
+    const lookup = () => this.opts.tmux.run(command, undefined, signal);
+    const out = await lookup().catch(() => {
+      signal?.throwIfAborted();
+      return lookup();
+    });
     return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 

@@ -33,7 +33,7 @@ const timedOut = (file: string) => Object.assign(new Error(`Command failed: ${fi
 /* Stands in for lsof and ps. The client end of each connection belongs to one process, 55 unless the mode says otherwise,
    and the bridge's own end lists the pair the other way round under the node, 999. lsof asked with -p shows that process
    only, as lsof does; ps answers for one process with -p, or with the whole table. */
-async function opened(mode = 'own', roots = [10], beforeCommand?: (file: string) => Promise<void>) {
+async function opened(mode = 'own', roots = [10], beforeCommand?: Command) {
   let url = '';
   let current = mode;
   const commands: { file: string; args: string[]; timeout: number }[] = [];
@@ -41,12 +41,13 @@ async function opened(mode = 'own', roots = [10], beforeCommand?: (file: string)
   const rejected: Rejection[] = [];
   const run: Command = async (file, args, options) => {
     commands.push({ file, args, timeout: options.timeout });
-    await beforeCommand?.(file);
+    await beforeCommand?.(file, args, options);
     const only = args.includes('-p') ? Number(args[args.indexOf('-p') + 1]) : null;
     if (file === '/bin/ps') {
       if (current === 'ps-timeout') throw timedOut(file);
       if (current === 'ps-error') throw new Error('spawn /bin/ps EAGAIN');
       if (current === 'ps-empty') return '';
+      if (current === 'ps-incomplete') return '   55    66\n   10    1\n    1    0\n';
       if (only === null) return TABLE;
       if (!PARENTS.has(only)) throw Object.assign(new Error('Command failed: /bin/ps'), { code: 1, killed: false });
       return `${PARENTS.get(only)}\n`;
@@ -77,12 +78,13 @@ async function opened(mode = 'own', roots = [10], beforeCommand?: (file: string)
 }
 
 describe('macOS hook ownership without proc', () => {
-  it('asks lsof only about the hinted process and reads its lineage from one ps table', async () => {
+  it('checks the hinted process first, confirms a single holder and reads one ps table', async () => {
     const c = await opened();
     expect(await post(c.url, c.agent, 55, 'tool')).toBe(200);
     expect(c.heard).toEqual(['agent-1']);
     expect(c.commands).toEqual([
       { file: '/usr/sbin/lsof', args: ['-nP', '-a', '-p', '55', expect.stringMatching(/^-iTCP:\d+$/), '-sTCP:ESTABLISHED', '-Fpn'], timeout: 2000 },
+      { file: '/usr/sbin/lsof', args: ['-nP', '-a', expect.stringMatching(/^-iTCP:\d+$/), '-sTCP:ESTABLISHED', '-Fpn'], timeout: 2000 },
       { file: '/bin/ps', args: ['-A', '-o', 'pid=', '-o', 'ppid='], timeout: 2000 },
     ]);
   });
@@ -105,8 +107,25 @@ describe('macOS hook ownership without proc', () => {
     expect(c.heard).toEqual([]);
   });
 
+  it('requires independent socket confirmation before checking a hinted caller’s ancestry', async () => {
+    const c = await opened('own', [10], async (file, args) => {
+      if (file === '/usr/sbin/lsof' && !args.includes('-p')) throw new Error('socket confirmation unavailable');
+      return '';
+    });
+    expect(await post(c.url, c.agent, 55)).toBe(502);
+    expect(c.commands.map(command => command.file)).toEqual(['/usr/sbin/lsof', '/usr/sbin/lsof']);
+    expect(c.heard).toEqual([]);
+  });
+
+  it('refuses a hinted connection when the independent listing has multiple holders', async () => {
+    const c = await opened('ambiguous');
+    expect(await post(c.url, c.agent, 55)).toBe(403);
+    expect(c.rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'owner check failed: no single process holds the connection' }]);
+    expect(c.heard).toEqual([]);
+  });
+
   it('recognizes only the live check roots of the authenticated agent', async () => {
-    const run: Command = async (file, args) => file === '/bin/ps' ? TABLE : `p${args[args.indexOf('-p') + 1]}\nn127.0.0.1:1->127.0.0.1:2\n`;
+    const run: Command = async file => file === '/bin/ps' ? TABLE : 'p77\nn127.0.0.1:1->127.0.0.1:2\n';
     const owner = macOwner(run)(async () => []);
     const forget = trackCheckProcess('agent-1', 77); cleanups.push(forget);
     const peer = { port: 1, bridgePort: 2, pid: 77 };
@@ -127,7 +146,7 @@ describe('macOS hook ownership without proc', () => {
     expect(c.heard).toEqual([]);
   });
 
-  it.each(['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error', 'ps-empty'])("answers a genuine owner's tool hooks with a retryable 502 when the lookup gives no answer (%s), and keeps none of it", async mode => {
+  it.each(['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error', 'ps-empty', 'ps-incomplete'])("answers a genuine owner's tool hooks with a retryable 502 when the lookup gives no answer (%s), and keeps none of it", async mode => {
     const c = await opened(mode);
     expect(await post(c.url, c.agent, 55, 'tool')).toBe(502);
     expect(await post(c.url, c.agent, 55, 'tooldone')).toBe(502);
@@ -156,11 +175,12 @@ describe('macOS hook ownership without proc', () => {
     let readingPs!: () => void;
     const enteredPs = new Promise<void>(resolve => { readingPs = resolve; });
     let slow = true;
-    const c = await opened('own', [10], async file => {
-      if (!slow) return;
+    const c = await opened('own', [10], async (file, args) => {
+      if (!slow || (file === '/usr/sbin/lsof' && !args.includes('-p'))) return '';
       if (file === '/usr/sbin/lsof') started();
       else readingPs();
       await new Promise<void>(resolve => setTimeout(resolve, 1_750));
+      return '';
     });
     const first = post(c.url, c.agent, 55, 'tool');
     void first.catch(() => {});
@@ -179,6 +199,48 @@ describe('macOS hook ownership without proc', () => {
     expect(c.heard).toEqual(['agent-1']);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(c.heard).toEqual(['agent-1']);
+  });
+
+  it('cancels slow socket confirmation at the aggregate deadline and starts no further lookup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let entered!: () => void;
+    const checkingHint = new Promise<void>(resolve => { entered = resolve; });
+    let finish!: () => void;
+    const late = new Promise<void>(resolve => { finish = resolve; });
+    let cancelled = false;
+    let confirming = false;
+    let slow = true;
+    const c = await opened('own', [10], async (file, args, options) => {
+      if (file === '/usr/sbin/lsof' && slow) {
+        if (args.includes('-p')) {
+          entered();
+          await new Promise<void>(resolve => setTimeout(resolve, 1_750));
+        }
+        else {
+          options.signal?.addEventListener('abort', () => { cancelled = true; }, { once: true });
+          confirming = true;
+          await late;
+        }
+      }
+      return '';
+    });
+    const first = post(c.url, c.agent, 55, 'tool');
+    void first.catch(() => {});
+    await checkingHint;
+    await vi.advanceTimersByTimeAsync(1_750);
+    expect(confirming).toBe(true);
+    await vi.advanceTimersByTimeAsync(749);
+    expect(cancelled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await first).toBe(502);
+    expect(cancelled).toBe(true);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.commands.map(command => command.file)).toEqual(['/usr/sbin/lsof', '/usr/sbin/lsof']);
+    expect(c.heard).toEqual([]);
+    slow = false;
+    expect(await post(c.url, c.agent, 55, 'tool')).toBe(200);
+    expect(c.sockets.size).toBe(1);
   });
 
   it('says in the log why it refused a call or asks for it again, and names no secret of the address', async () => {
@@ -208,21 +270,26 @@ describe('macOS hook ownership without proc', () => {
     expect(await post(c.url, c.agent)).toBe(200);
     expect(await post(c.url, c.agent)).toBe(200);
     expect(await post(c.url, c.agent, 77)).toBe(403);
-    expect(c.commands.filter(command => command.file === '/usr/sbin/lsof')).toHaveLength(2);
+    expect(c.commands.filter(command => command.file === '/usr/sbin/lsof')).toHaveLength(3);
     c.mode('foreign');
     c.agent.destroy();
     expect(await post(c.url, c.agent, 77)).toBe(403);
-    expect(c.commands.filter(command => command.file === '/usr/sbin/lsof')).toHaveLength(3);
+    expect(c.commands.filter(command => command.file === '/usr/sbin/lsof')).toHaveLength(5);
   });
 
-  it("walks the ps table up to launchd, never to the kernel's 0, and stops at a loop in it", async () => {
+  it("walks the ps table up to launchd, never to the kernel's 0, and gives no answer for a loop", async () => {
     const table = (text: string): Command => async file => file === '/bin/ps' ? text : 'p55\nn127.0.0.1:1->127.0.0.1:2\n';
     const peer = { port: 1, bridgePort: 2, pid: 55 };
     expect(await macOwner(table(TABLE))(async () => [1]).owns!('agent-1', peer)).toBe(true);
     expect(await macOwner(table(TABLE))(async () => [0]).owns!('agent-1', peer)).toBe(false);
     const loop = '   55    10\n   10    55\n';
-    expect(await macOwner(table(loop))(async () => [10]).owns!('agent-1', peer)).toBe(true);
-    expect(await macOwner(table(loop))(async () => [77]).owns!('agent-1', peer)).toBe(false);
+    await expect(macOwner(table(loop))(async () => [10]).owns!('agent-1', peer)).rejects.toThrow('ps gave an inconsistent process lineage');
+  });
+
+  it.each(['55 10 truncated', '55 10\n55 1', '9007199254740993 10', '55 9007199254740993'])('gives no ownership answer for an invalid process table (%s)', async table => {
+    const run: Command = async file => file === '/bin/ps' ? `1 0\n10 1\n${table}\n` : 'p55\nn127.0.0.1:1->127.0.0.1:2\n';
+    const owner = macOwner(run)(async () => [10]);
+    await expect(owner.owns!('agent-1', { port: 1, bridgePort: 2, pid: 55 })).rejects.toThrow('ps gave an invalid process table');
   });
 
   it("refuses a call that reaches a native macOS node from a container through Docker's proxy", async () => {

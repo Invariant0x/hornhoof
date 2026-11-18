@@ -176,6 +176,52 @@ describe('hook delivery through the bridge', () => {
     expect(heard).toEqual(['tool']);
   });
 
+  it('refreshes a missing Linux capture and logs each owner decision on a kept connection', async () => {
+    let inode: string | null = null;
+    let adopted = false;
+    let unavailable = false;
+    const handled = vi.fn();
+    const local = vi.fn();
+    const reported = vi.fn();
+    const bridge = new Bridge('http://127.0.0.1:9', handled, async (_key, peer, why) => {
+      if (unavailable) throw new OwnerUnknown('tmux pane lookup failed');
+      if (peer.acceptedInode === null) why?.('the connection is not in the socket table');
+      else if (!adopted) why?.("the caller is not under the agent's pane");
+      return peer.acceptedInode === '7' && adopted;
+    }, { capture: async () => ({ acceptedInode: inode }), ownerRejected: local, ownerReported: reported });
+    await bridge.start();close.push(() => bridge.stop());
+    const { hookUrl } = bridge.agent('agent-1');
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    close.push(() => agent.destroy());
+    const sockets = new Set<Socket>();
+    bridge['server']!.on('connection', socket => sockets.add(socket));
+    const send = () => new Promise<number>((resolve, reject) => {
+      const call = request(hookUrl + '/tool', { agent, method: 'POST' }, res => {
+        res.resume().on('end', () => resolve(res.statusCode!));
+      });
+      call.on('error', reject).end('{}');
+    });
+    expect(await send()).toBe(403);
+    expect(await send()).toBe(403);
+    const absent = ['agent-1', 'tool', 'owner check failed: the connection is not in the socket table'];
+    const unowned = ['agent-1', 'tool', "owner check failed: the caller is not under the agent's pane"];
+    const retry = ['agent-1', 'tool', 'owner check unavailable: tmux pane lookup failed'];
+    expect(local.mock.calls).toEqual([absent, absent]);
+    expect(reported.mock.calls).toEqual([absent]);
+    inode = '7';
+    expect(await send()).toBe(403);
+    unavailable = true;
+    expect(await send()).toBe(502);
+    expect(await send()).toBe(502);
+    unavailable = false;
+    adopted = true;
+    expect(await send()).toBe(200);
+    expect(sockets.size).toBe(1);
+    expect(local.mock.calls).toEqual([absent, absent, unowned, retry, retry]);
+    expect(reported.mock.calls).toEqual([absent, unowned, retry]);
+    expect(handled).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a refused check command and tools call with the check's reason, as it does a hook", async () => {
     const b = await opened(() => { throw Error('must not run'); }, async (_key, _peer, why) => { why?.("the caller is not under the agent's pane");return false; });
     const check = b.url.replace('/hook/', '/check/');

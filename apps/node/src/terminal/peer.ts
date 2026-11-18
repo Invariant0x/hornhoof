@@ -8,7 +8,7 @@ export type Peer = { port: number; bridgePort: number; pid?: number; acceptedIno
    no answer throws OwnerUnknown instead. */
 export type Owns = (key: string, peer: Peer, why?: (reason: string) => void) => Promise<boolean>;
 export type Capture = (peer: Peer) => Promise<Pick<Peer, 'acceptedInode'>>;
-export type Panes = (key: string) => Promise<number[]>;
+export type Panes = (key: string, signal?: AbortSignal) => Promise<number[]>;
 export type Ownership = { owns: Owns | null; capture?: Capture };
 export type OwnerFactory = (panes: Panes) => Ownership;
 
@@ -23,9 +23,16 @@ export function refuse(why: (reason: string) => void, reason: string): false {
 }
 
 /* The processes an agent's calls come from: its panes', and the check commands the bridge started for it. */
-export async function agentRoots(panes: Panes, key: string): Promise<number[]> {
-  const found = await panes(key).catch(() => { throw new OwnerUnknown('tmux pane lookup failed'); });
-  return [...found, ...checkProcesses(key)];
+export async function agentRoots(panes: Panes, key: string, signal?: AbortSignal): Promise<number[]> {
+  signal?.throwIfAborted();
+  try {
+    const found = await panes(key, signal);
+    signal?.throwIfAborted();
+    return [...found, ...checkProcesses(key)];
+  } catch {
+    signal?.throwIfAborted();
+    throw new OwnerUnknown('tmux pane lookup failed');
+  }
 }
 
 export function procOwner(proc: string): OwnerFactory {
@@ -36,8 +43,16 @@ const LOCAL = '0100007F';
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
 type TerminalSession = { session: number; tty: number };
 
+function disappeared(reason: string): (error: NodeJS.ErrnoException) => undefined {
+  return error => {
+    if (error.code === 'ENOENT' || error.code === 'ESRCH') return undefined;
+    throw new OwnerUnknown(reason);
+  };
+}
+
 async function terminalSession(proc: string, pid: number): Promise<TerminalSession | null> {
-  const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8').catch(() => '');
+  const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8').catch(disappeared('Linux terminal session lookup failed'));
+  if (!stat) return null;
   const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
   const session = Number(fields[3]), tty = Number(fields[4]);
   return Number.isSafeInteger(session) && session > 0 && Number.isSafeInteger(tty) && tty > 0 ? { session, tty } : null;
@@ -64,9 +79,10 @@ export async function socketOf(proc: string, { port, bridgePort }: Peer): Promis
 /* Each process with the processes it started. The name in stat may hold spaces and brackets, so the parent comes after the last one. */
 async function children(proc: string): Promise<Map<number, number[]>> {
   const out = new Map<number, number[]>();
-  for (const name of await readdir(proc).catch(() => [])) {
+  for (const name of await readdir(proc).catch(() => { throw new OwnerUnknown('Linux process directory read failed'); })) {
     if (!/^\d+$/.test(name)) continue;
-    const stat = await readFile(join(proc, name, 'stat'), 'utf8').catch(() => '');
+    const stat = await readFile(join(proc, name, 'stat'), 'utf8').catch(disappeared('Linux process tree lookup failed'));
+    if (!stat) continue;
     const parent = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
     if (!Number.isInteger(parent)) continue;
     out.set(parent, [...(out.get(parent) ?? []), Number(name)]);
@@ -75,8 +91,10 @@ async function children(proc: string): Promise<Map<number, number[]>> {
 }
 
 async function holds(proc: string, pid: number, link: string): Promise<boolean> {
-  const fds = await readdir(join(proc, String(pid), 'fd')).catch(() => []);
-  for (const fd of fds) if ((await readlink(join(proc, String(pid), 'fd', fd)).catch(() => '')) === link) return true;
+  const path = join(proc, String(pid), 'fd');
+  const unavailable = disappeared('Linux file descriptor lookup failed');
+  const fds = await readdir(path).catch(unavailable);
+  for (const fd of fds ?? []) if ((await readlink(join(path, fd)).catch(unavailable)) === link) return true;
   return false;
 }
 
@@ -98,7 +116,7 @@ export function fromAgent(panes: Panes, proc = '/proc'): Owns {
    the exact inode captured for this connection, never a socket named by the caller. */
 async function hintedOwner(proc: string, pid: number, link: string, panes: () => Promise<number[]>, why: (reason: string) => void): Promise<boolean> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return refuse(why, 'malformed pid hint');
-  if (!(await stat(join(proc, String(pid))).then(() => true, () => false))) return refuse(why, 'the hinted process is gone, as a caller that gave up before its check is');
+  if (!(await stat(join(proc, String(pid))).catch(disappeared('Linux hinted process lookup failed')))) return refuse(why, 'the hinted process is gone, as a caller that gave up before its check is');
   if (!(await holds(proc, pid, link))) return refuse(why, 'the hinted process does not hold the connection');
   const lineage = await ancestors(proc, pid);
   const caller = await terminalSession(proc, pid);
@@ -109,8 +127,9 @@ async function hintedOwner(proc: string, pid: number, link: string, panes: () =>
 async function ancestors(proc: string, pid: number): Promise<Set<number>> {
   const seen = new Set<number>();
   while (pid > 0 && !seen.has(pid)) {
+    const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8').catch(disappeared('Linux process ancestry lookup failed'));
+    if (!stat) break;
     seen.add(pid);
-    const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8').catch(() => '');
     pid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
   }
   return seen;

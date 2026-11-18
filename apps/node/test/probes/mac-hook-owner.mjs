@@ -9,11 +9,12 @@ import { terminalOwner } from '../../dist/main.js';
 import { answered } from '../../dist/terminal/mac-peer.js';
 
 /* The node's own lookup commands, timed: how long lsof and ps take on this Mac is what a hook waits for. */
-const took = { lsof: [], ps: [] };
+const took = { hinted: [], confirmed: [], ps: [] };
 function timed(file, args, options) {
   const started = performance.now();
   return new Promise((resolve, reject) => execFile(file, args, options, (error, output, diagnostic) => {
-    took[file.endsWith('lsof') ? 'lsof' : 'ps'].push(performance.now() - started);
+    const phase = file.endsWith('lsof') ? (args.includes('-p') ? 'hinted' : 'confirmed') : 'ps';
+    took[phase].push(performance.now() - started);
     try { resolve(answered(error, output, file, diagnostic)); } catch (failed) { reject(failed); }
   }));
 }
@@ -62,9 +63,11 @@ async function main() {
     const url = bridge.agent('probe').hookUrl;
     for (let n = 0; n < 20; n++) assert.equal(await call(own, url), 200, 'own agent hook must be accepted');
     assert.equal(await call(foreign, url), 403, 'foreign process hook must be rejected');
-    assert.equal(took.lsof.length, 21, 'every connection must run its own lookup');
+    assert.equal(took.hinted.length, 21, 'every connection must check its PID hint');
+    assert.equal(took.confirmed.length, 21, 'every matching PID hint must have an independent confirmation');
+    assert.equal(took.ps.length, 21, 'every confirmed connection must read one process table');
     assert.deepEqual(rejected, ["owner check failed: the caller is not under the agent's pane"]);
-    console.log(`Own hooks: 20/20 accepted. Foreign hook: 403, refused as not under the pane. Every connection ran its own lsof lookup; slowest lsof ${slowest(took.lsof)}, slowest ps ${slowest(took.ps)}.`);
+    console.log(`Own hooks: 20/20 accepted. Foreign hook: 403, refused as not under the pane. Slowest hinted lsof ${slowest(took.hinted)}, all-holder confirmation ${slowest(took.confirmed)}, and ps ${slowest(took.ps)}.`);
   } finally {
     bridge.stop();
     own.kill();

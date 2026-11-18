@@ -72,12 +72,13 @@ export class Bridge {
   /* Share pending checks and keep successful checks for the connection. A refusal can change when a pane is adopted. */
   private readonly checked = new WeakMap<Socket, Map<string, Promise<Verdict>>>();
 
-  private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
+  private readonly accepted = new WeakMap<Socket, { captured: ReturnType<Capture>; atAccept: boolean }>();
   private readonly calls = new HookCalls();
   private readonly checkStops = new Map<string, Set<AbortController>>();
   /* Check commands that run in a step of their own, with no turn: a turn's token does not stop them. */
   private readonly stepStops = new Map<string, Set<AbortController>>();
   private readonly failures: HookFailures;
+  private readonly ownerFailures: HookFailures;
   /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
   private readonly refusals: HookFailures;
   private readonly memory = new ToolsMemory();
@@ -87,9 +88,10 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; ownerRejected?: HookRejected; ownerReported?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
+    this.ownerFailures = options.ownerReported ? new HookFailures(options.ownerReported) : this.failures;
     this.refusals = new HookFailures(options.refused);
   }
 
@@ -98,7 +100,7 @@ export class Bridge {
     server.on('connection', socket => {
       if (!this.owns) return;
       const captured = this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 });
-      this.accepted.set(socket, captured);
+      this.accepted.set(socket, { captured, atAccept: true });
       /* The first request observes the outcome. A socket can close without sending one. */
       void captured.catch(() => {});
     });
@@ -228,7 +230,8 @@ export class Bridge {
   /* Use only recognized event and call names in rejection logs. */
   private notOwned(res: ServerResponse, key: string, kind: string, event: string | undefined, status: number, reason: string): false {
     const label = kind === 'hook' ? hookEvent(event) : bridgeCallKind(kind);
-    this.failures.reject(key, label, reason);
+    this.options.ownerRejected?.(key, label, reason);
+    this.ownerFailures.reject(key, label, reason);
     reply(res, status, '');
     return false;
   }
@@ -241,13 +244,18 @@ export class Bridge {
   }
 
   private async capturePeer(socket: Socket, peer: Peer): Promise<Peer> {
-    const captured = this.accepted.get(socket) ?? this.capture(peer);
-    this.accepted.set(socket, captured);
+    const original = this.accepted.get(socket);
+    if (!original?.atAccept && socket.destroyed) return { ...peer, acceptedInode: null };
+    const entry = original ?? { captured: this.capture(peer), atAccept: false };
+    this.accepted.set(socket, entry);
+    let keep = false;
     try {
-      return { ...peer, ...await captured };
-    } catch (error) {
-      if (this.accepted.get(socket) === captured) this.accepted.delete(socket);
-      throw error;
+      const proof = await entry.captured;
+      if (!entry.atAccept && socket.destroyed) return { ...peer, acceptedInode: null };
+      keep = proof.acceptedInode !== null;
+      return { ...peer, ...proof };
+    } finally {
+      if (!keep && this.accepted.get(socket) === entry) this.accepted.delete(socket);
     }
   }
 

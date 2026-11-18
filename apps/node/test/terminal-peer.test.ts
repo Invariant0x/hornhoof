@@ -110,4 +110,21 @@ describe('which agent a connection to the bridge comes from', () => {
     await expect(socketOf(proc, socket)).rejects.toThrow(new OwnerUnknown('Linux TCP table read failed'));
     await expect(fromAgent(panes, proc)('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
   });
+
+  it('distinguishes an unavailable Linux process lookup from a process that disappeared', async () => {
+    const proc = fakeProc(socket, 12);
+    const owns = fromAgent(panes, proc);
+    await expect(owns('agent-1', { ...socket, pid: 12 })).resolves.toBe(true);
+
+    const stat = join(proc, '12', 'stat');
+    rmSync(stat);
+    mkdirSync(stat);
+    await expect(owns('agent-1', { ...socket, pid: 12 })).rejects.toThrow(new OwnerUnknown('Linux process ancestry lookup failed'));
+    await expect(owns('agent-1', socket)).rejects.toThrow(new OwnerUnknown('Linux process tree lookup failed'));
+
+    rmSync(join(proc, '12'), { recursive: true });
+    await expect(owns('agent-1', { ...socket, pid: 12 })).resolves.toBe(false);
+    symlinkSync('12', join(proc, '12'));
+    await expect(owns('agent-1', { ...socket, pid: 12 })).rejects.toThrow(new OwnerUnknown('Linux hinted process lookup failed'));
+  });
 });

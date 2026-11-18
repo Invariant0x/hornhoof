@@ -2,7 +2,7 @@ import { execFile, type ExecFileException } from 'node:child_process';
 import { basename } from 'node:path';
 import { agentRoots, OwnerUnknown, refuse, type OwnerFactory, type Peer } from './peer.js';
 
-export type Command = (file: string, args: string[], options: { timeout: number }) => Promise<string>;
+export type Command = (file: string, args: string[], options: { timeout: number; signal?: AbortSignal }) => Promise<string>;
 const LOOKUP_MS = 2_000;
 /* Leave room for the bridge to reply inside the shortest hook sender's 3 s wait. This covers the pane lookup too. */
 const OWNER_LOOKUP_MS = 2_500;
@@ -20,20 +20,29 @@ const command: Command = (file, args, options) => new Promise((resolve, reject) 
   });
 });
 
-async function beforeDeadline<T>(read: () => Promise<T>): Promise<T> {
+async function beforeDeadline<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const cancellation = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new OwnerUnknown('macOS owner lookup timed out')), OWNER_LOOKUP_MS);
+    timer = setTimeout(() => {
+      const reason = new OwnerUnknown('macOS owner lookup timed out');
+      cancellation.abort(reason);
+      reject(reason);
+    }, OWNER_LOOKUP_MS);
   });
-  try { return await Promise.race([read(), expired]); }
+  try { return await Promise.race([read(cancellation.signal), expired]); }
   finally { clearTimeout(timer); }
 }
 
 /* A command's output, or OwnerUnknown when it gave none. */
-async function lookup(run: Command, file: string, args: string[]): Promise<string> {
+async function lookup(run: Command, file: string, args: string[], signal: AbortSignal): Promise<string> {
+  signal.throwIfAborted();
   try {
-    return await run(file, args, { timeout: LOOKUP_MS });
+    const output = await run(file, args, { timeout: LOOKUP_MS, signal });
+    signal.throwIfAborted();
+    return output;
   } catch (error) {
+    signal.throwIfAborted();
     throw new OwnerUnknown(`${basename(file)} ${(error as { killed?: boolean }).killed ? 'timed out' : 'failed'}`);
   }
 }
@@ -55,28 +64,31 @@ function processField(field: string): number | null {
   return /^p[1-9]\d*$/.test(field) && Number.isSafeInteger(pid) ? pid : null;
 }
 
-/* The process that holds the caller's end. A call that names its process has lsof look at that one only: a look through
-   every process's files outlasted a tool hook's wait on a busy Mac. A call that names none, as MCP and attach calls do, is
-   looked for among them all. */
-async function socketOwner(peer: Peer, run: Command): Promise<number | null> {
-  const only = peer.pid === undefined ? [] : ['-p', String(peer.pid)];
-  const owner = ownerOf(await lookup(run, '/usr/sbin/lsof', ['-nP', '-a', ...only, `-iTCP:${peer.port}`, '-sTCP:ESTABLISHED', '-Fpn']), peer);
-  return peer.pid === undefined || owner === peer.pid ? owner : null;
+/* Check the known process first when possible. A match in that process still needs a check for other holders. */
+async function socketOwner(peer: Peer, run: Command, signal: AbortSignal, pid?: number): Promise<number | null> {
+  const only = pid === undefined ? [] : ['-p', String(pid)];
+  return ownerOf(await lookup(run, '/usr/sbin/lsof', ['-nP', '-a', ...only, `-iTCP:${peer.port}`, '-sTCP:ESTABLISHED', '-Fpn'], signal), peer);
 }
 
-/* The caller and its ancestors, from one look at the process table taken before a pane lookup can outlast the caller,
-   as the Linux inode check does. A caller gone by then has none, and a line that is no pair of numbers leads nowhere: the
-   walk stops at anything that is not a process. */
-async function lineageOf(pid: number, run: Command): Promise<Set<number>> {
+/* Use only observed process rows, from the caller through launchd. A partial snapshot gives no answer. */
+function processLineage(table: string, pid: number): Set<number> {
+  const rows = table.trim();
+  if (!rows) throw new OwnerUnknown('ps gave no process table');
   const parents = new Map<number, number>();
-  const table = await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
-  if (!table.trim()) throw new OwnerUnknown('ps gave no process table');
-  for (const line of table.split('\n')) {
-    const [child, parent] = line.trim().split(/\s+/).map(Number);
-    parents.set(child!, parent!);
+  for (const line of rows.split('\n')) {
+    const fields = /^([1-9]\d*)\s+(0|[1-9]\d*)$/.exec(line.trim());
+    if (!fields) throw new OwnerUnknown('ps gave an invalid process table');
+    const child = Number(fields[1]), parent = Number(fields[2]);
+    if (!Number.isSafeInteger(child) || !Number.isSafeInteger(parent) || parents.has(child)) throw new OwnerUnknown('ps gave an invalid process table');
+    parents.set(child, parent);
   }
   const seen = new Set<number>();
-  for (let at: number | undefined = pid; at !== undefined && at > 0 && !seen.has(at); at = parents.get(at)) seen.add(at);
+  for (let at = pid; at > 0;) {
+    const parent = parents.get(at);
+    if (parent === undefined || seen.has(at)) throw new OwnerUnknown('ps gave an inconsistent process lineage');
+    seen.add(at);
+    at = parent;
+  }
   return seen;
 }
 
@@ -84,12 +96,17 @@ export function macOwner(run: Command = command): OwnerFactory {
   return panes => ({
     /* Nothing is looked up as a connection opens: the call says which process it comes from. */
     capture: async () => ({}),
-    owns: (key, peer, why = () => {}) => beforeDeadline(async () => {
+    owns: (key, peer, why = () => {}) => beforeDeadline(async signal => {
       if (peer.pid !== undefined && !(Number.isSafeInteger(peer.pid) && peer.pid > 0)) return refuse(why, 'malformed pid hint');
-      const pid = await socketOwner(peer, run);
-      if (!pid) return refuse(why, peer.pid === undefined ? 'no single process holds the connection' : 'the hinted process does not hold the connection');
-      const lineage = await lineageOf(pid, run);
-      return (await agentRoots(panes, key)).some(root => lineage.has(root)) || refuse(why, "the caller is not under the agent's pane");
+      if (peer.pid !== undefined && (await socketOwner(peer, run, signal, peer.pid)) !== peer.pid) {
+        return refuse(why, 'the hinted process does not hold the connection');
+      }
+      const pid = await socketOwner(peer, run, signal);
+      if (pid === null) return refuse(why, 'no single process holds the connection');
+      if (peer.pid !== undefined && pid !== peer.pid) return refuse(why, 'the hinted process does not hold the connection');
+      const table = await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid='], signal);
+      const lineage = processLineage(table, pid);
+      return (await agentRoots(panes, key, signal)).some(root => lineage.has(root)) || refuse(why, "the caller is not under the agent's pane");
     }),
   });
 }
