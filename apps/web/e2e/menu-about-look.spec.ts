@@ -152,8 +152,8 @@ function checkMenu(found: Awaited<ReturnType<typeof menuLayout>>, width: number,
   expect(found.broken, `${look}: no word broken that fits a line`).toEqual([]);
 }
 
-const WHOLE_ORDER = (t: Messages) => ['head', '—', t.window.computerHere('kostya-workstation-01'), '—', t.settings.menu, '—', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '—', t.about.menu, t.shell.logOut];
-const LISTED_ORDER = (t: Messages) => ['head', '—', t.settings.menu, '—', t.about.menu, t.shell.logOut];
+const WHOLE_ORDER = (t: Messages) => ['head', '—', t.window.computerHere('kostya-workstation-01'), '—', t.firstContact.title, t.settings.menu, '—', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '—', t.about.menu, t.shell.logOut];
+const LISTED_ORDER = (t: Messages) => ['head', '—', t.firstContact.title, t.settings.menu, '—', t.about.menu, t.shell.logOut];
 
 const LOOKS: Look[] = [
   ...SKINS.flatMap(skin => (['en', 'ru'] as const).flatMap(lang => WIDTHS.map(width => ({ lang, skin, width })))),
@@ -319,7 +319,10 @@ for (const skin of SKINS) for (const width of WIDTHS) {
     const menu = await openMenu(page, t);
     const settings = menu.getByRole('button', { name: t.settings.menu, exact: true });
     await expect(menu.getByRole('button', { name: t.window.computerHere('kostya-workstation-01'), exact: true })).toBeVisible();
+    /* Access to this machine, then Talk to the orchestrator, then Settings. */
     await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(menu.getByRole('button', { name: t.firstContact.title, exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(settings).toBeFocused();
     expect(await ring(settings), `${name}: the menu row`).toBe('true solid 2px 2px');

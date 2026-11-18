@@ -69,13 +69,28 @@ async function scrollTo(page: Page, n: number) {
   await expect.poll(() => pageScroll(page)).toBeGreaterThan(0);
 }
 
+/* Where something on the page starts and how wide it is. */
+type Place = { x: number; width: number };
+const placeOf = async (locator: Locator): Promise<Place> => {
+  const { x, width } = await box(locator);
+  return { x, width };
+};
+
 /* Each panel that opens over a page: the page, what on it must keep its width and place, and how the panel opens. */
-const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page: Page) => Locator; open: (page: Page) => Promise<Locator> }[] = [
+const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page: Page) => Promise<Place>; open: (page: Page) => Promise<Locator> }[] = [
   {
     name: 'a task from the list',
     go: openTasks,
-    /* The tracker's view tabs keep their place and width; its work beside them narrows for the card. */
-    content: page => page.locator('.tr-views'),
+    /* The tracker's view tabs keep their place and width, from the first view to Add view; the line under them belongs to the
+       work beside them, which narrows for the card. */
+    content: async page => {
+      await expect(page.locator('.tr-add-view')).toBeVisible();
+      return page.locator('.tr-views').evaluate(views => {
+        const boxes = [...views.querySelectorAll(':scope > label, :scope > .tr-add-view')].map(tab => tab.getBoundingClientRect());
+        const x = Math.min(...boxes.map(b => b.left));
+        return { x, width: Math.max(...boxes.map(b => b.right)) - x };
+      });
+    },
     open: async page => {
       await openTask(page, 1);
       await expect(panelOf(page, 1).getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
@@ -85,7 +100,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: "the orchestrator's window",
     go: openTasks,
-    content: page => row(page, 1),
+    content: page => placeOf(row(page, 1)),
     open: async page => {
       await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
       const panel = page.getByRole('complementary', { name: 'Orchestrator' });
@@ -96,7 +111,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: 'a task from an improvement',
     go: openImprovements,
-    content: page => page.getByRole('article', { name: 'Check card numbers before sending them' }),
+    content: page => placeOf(page.getByRole('article', { name: 'Check card numbers before sending them' })),
     open: async page => {
       await page.getByRole('button', { name: '#3 Checkout step 3' }).click();
       await expect(panelOf(page, 3).getByRole('heading', { name: 'Checkout step 3' })).toBeVisible();
@@ -112,10 +127,9 @@ for (const size of SIZES) {
     for (const panel of PANELS) {
       test(`${panel.name} leaves the page as wide and where it was`, async ({ page }) => {
         await panel.go(page);
-        const before = await box(panel.content(page));
+        const before = await panel.content(page);
         await panel.open(page);
-        const after = await box(panel.content(page));
-        expect({ x: after.x, width: after.width }).toEqual({ x: before.x, width: before.width });
+        expect(await panel.content(page)).toEqual(before);
       });
 
       test(`${panel.name} runs to the bottom of the window`, async ({ page }) => {
