@@ -162,7 +162,7 @@ function SetupLines({ program, setup }: { program: AssistantProgram; setup: Setu
   );
 }
 
-/* The signing secret goes into the text for an AvaClone assistant that Hornhoof calls, at its events or skills address:
+/* The signing secret goes into the text for a compatible assistant that Hornhoof calls, at its events or skills address:
    the program checks those calls with it. */
 const secretFor = (assistant: AssistantView | null | undefined, secret: string): string | undefined =>
   assistant?.program === 'avaclone' && (assistant.eventsUrl || assistant.skillsUrl) ? secret : undefined;

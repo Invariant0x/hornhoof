@@ -8,7 +8,7 @@ import { decl } from './css';
 import { taskRoute } from './task-route';
 
 const department = { id: 'marketing', name: 'Marketing' };
-const executor = { id: 'luisa', name: 'Luisa Rivera', kind: 'worker' as const, role: null };
+const executor = { id: 'juno', name: 'Juno Vale', kind: 'worker' as const, role: null };
 const responsible = { id: 'max', name: 'Max' };
 const goal = { id: 'goal', number: 1, title: '500 subscribers' };
 const since = '2026-11-14T12:00:00.000Z';
@@ -80,7 +80,7 @@ it('shows typed waits for tasks and people and the other department that needs t
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   expect(within(row).getByText('Waits for Max, 3 days')).toHaveClass('tr-wait');
   expect(within(row).getByText('needed for #413 Sales')).toBeInTheDocument();
-  expect(row).not.toHaveTextContent('waits for Luisa');
+  expect(row).not.toHaveTextContent('waits for Juno');
   expect(within(screen.getByRole('listitem', { name: '#413 Send' })).getByText('After #267')).toHaveClass('tr-relation');
   expect(screen.getByRole('button', { name: 'Waits for a person: 1' })).toBeInTheDocument();
 });
@@ -94,7 +94,7 @@ it('uses status shapes, stable identity marks and a colored priority arrow', () 
   ];
   render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  expect(within(row).getByRole('img', { name: 'Luisa Rivera' })).toHaveAttribute('data-program', 'claude');
+  expect(within(row).getByRole('img', { name: 'Juno Vale' })).toHaveAttribute('data-program', 'claude');
   expect(within(row).getByRole('img', { name: 'Max' })).toHaveClass('tr-avatar');
   expect(within(row).getByText('Urgent')).toHaveClass('tr-priority', 'urgent');
   expect(within(row).getByText('Urgent').querySelector('.tr-priority-arrow')).toBeInTheDocument();
@@ -199,7 +199,7 @@ it('keeps complete names and labels with long task text in the stacked row', () 
   list([task({ title: longTitle, dueAt: '2020-01-01T00:00:00.000Z' })]);
   const row = screen.getByRole('listitem', { name: `#267 ${longTitle}` });
   expect(within(row).getByRole('button', { name: longTitle })).toBeInTheDocument();
-  expect(within(row).getByText('Luisa Rivera')).toHaveClass('tr-id-name');
+  expect(within(row).getByText('Juno Vale')).toHaveClass('tr-id-name');
   expect(within(row).getByText('Max')).toHaveClass('tr-id-name');
   const facts = [...row.querySelectorAll('.tr-k')].map(label => label.textContent);
   expect(facts).toEqual(['Executor', 'Responsible', 'Priority', 'Goal', 'Due']);
@@ -214,7 +214,7 @@ it('groups person waits, active work, timers and failures by what each task need
     task({ id, number, title: id, status: 'waiting', externalWait: { since, until, reason: 'Publish the draft', on, ...extra } });
   const examples = [
     external('Approval', 1, { kind: 'external', event: 'ceo' }),
-    external('Employee', 2, { kind: 'employee', employee: 'trinity', name: 'Trinity' }),
+    external('Employee', 2, { kind: 'employee', employee: 'abel', name: 'Abel' }),
     external('Checks', 3, undefined, { run: 'test' }),
     external('Scheduled', 4, { kind: 'external', event: 'time' }),
     external('Unavailable', 5, { kind: 'external', event: 'machine' }),
@@ -225,7 +225,7 @@ it('groups person waits, active work, timers and failures by what each task need
   ];
   list(examples);
   const work = screen.getByRole('region', { name: 'In work: 5' });
-  expect(work).toHaveTextContent('Trinity is on it');
+  expect(work).toHaveTextContent('Abel is on it');
   expect(work).toHaveTextContent('Test running');
   expect(within(work).getByText(/Fires at 14:00, 18 Nov/)).toHaveClass('scheduled');
   expect(work).toHaveTextContent('After #1317');

@@ -23,12 +23,11 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
     <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/openai-dark.svg" /><img src=".github/assets/logos/openai.svg" width="32" height="32" alt="OpenAI API" /></picture><br/><sub>OpenAI<br/>API</sub></td>
   </tr></tbody>
   <tbody><tr>
-    <td align="center" colspan="3"><strong>Personal assistants</strong></td>
+    <td align="center" colspan="2"><strong>Personal assistants</strong></td>
     <td align="center"><strong>Chat</strong></td>
     <td align="center" colspan="3"><strong>Computers</strong></td>
   </tr></tbody>
   <tbody><tr>
-    <td align="center" valign="top"><img src=".github/assets/logos/avaclone.svg" width="32" height="32" alt="AvaClone" /><br/><sub>AvaClone</sub></td>
     <td align="center" valign="top"><img src=".github/assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw" /><br/><sub>OpenClaw</sub></td>
     <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/hermes-agent-dark.svg" /><img src=".github/assets/logos/hermes-agent.svg" width="32" height="32" alt="Hermes Agent" /></picture><br/><sub>Hermes<br/>Agent</sub></td>
     <td align="center" valign="top"><img src=".github/assets/logos/telegram.svg" width="32" height="32" alt="Telegram" /><br/><sub>Telegram</sub></td>
@@ -128,7 +127,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 - **Routes of stages.** A task passes from owner to owner: written, reviewed by an agent of another maker, tested. A stage can hand in a document instead of code. *An article goes from its writer to an editor.*
 - **One-shot calls.** Any agent runs its program once per piece, like `claude -p` or `codex exec`, whatever the program. Each call starts fresh, answers and ends, and a judge call can weigh all the answers. Thousands can queue: as many run at once as free memory holds, within the plan's limits. *Thirty plant care pages are written side by side, then one judge reads them all.*
 - **Pipelines of calls.** Calls in steps, spread out and brought together, driven by the agent who holds the task or by a one-shot stage of the route. *Five calls chase five causes of a bug, and one more checks the cause that held.*
-- **Personal assistants.** Your own assistant, such as AvaClone, OpenClaw or Hermes Agent, works in the company with your rights. *From your chat you ask how the beta is going.*
+- **Personal assistants.** Your own assistant, such as OpenClaw or Hermes Agent, works in the company with your rights. *From your chat you ask how the beta is going.*
 
 ![One-shot calls on the map and in the task's history](.github/assets/calls.gif)
 

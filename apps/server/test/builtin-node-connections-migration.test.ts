@@ -20,7 +20,7 @@ describe('the built-in node connections migration', { timeout: 60_000 }, () => {
     await client.exec(`
       INSERT INTO companies(id, name) VALUES ('${ACME}', 'Acme');
       INSERT INTO people(id, company_id, name, email, scope_kind, status) VALUES ('${IVAN}', '${ACME}', 'Ivan', 'ivan@test', 'company', 'active');
-      INSERT INTO machines(id, company_id, person_id, machine_key, hostname) VALUES ('${MAC}', '${ACME}', '${IVAN}', 'mac-key', 'home-api');
+      INSERT INTO machines(id, company_id, person_id, machine_key, hostname) VALUES ('${MAC}', '${ACME}', '${IVAN}', 'mac-key', 'test-server');
       INSERT INTO nodes(id, company_id, machine_id) VALUES ('${NODE}', '${ACME}', '${MAC}');
       INSERT INTO node_connections(id, company_id, machine_id, node_id, connected_at, disconnected_at, cause, close_code)
         VALUES ('${LINK}', '${ACME}', '${MAC}', '${NODE}', '2026-11-15T22:13:23Z', '2026-11-16T01:00:00Z', 'node_closed', 1000);

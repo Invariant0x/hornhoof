@@ -107,7 +107,7 @@ describe('physical machine admission across subscription nodes', () => {
   });
 });
 
-/* #1060: home-api sent its load every 20 s, but the server handled the frames late, one by one in the node's queue and
+/* #1060: test-server sent its load every 20 s, but the server handled the frames late, one by one in the node's queue and
    behind the shared pump of test runs, and ended the leases of a machine it heard all along. A lease counts from the
    last frame that came from the machine; one that truly says nothing for 90 s still loses its leases. */
 describe('a lease counts from when the machine was last heard', () => {

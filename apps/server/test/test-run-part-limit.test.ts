@@ -1,53 +1,58 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { planTestParts, type TestPartPlan, type TestPartPlanInput } from '../src/modules/testruns/plan.js';
 import { partTimes } from '../src/modules/testruns/plan-measured.js';
 import { partSpread } from '../src/modules/testruns/plan-product.js';
 
-/* What each file of the one batch of run 109 took on home-api, in the time of its part: the wall time of each suite as the log printed
-   it, shared out by what each of its files took there. Mutation and the release scripts printed no time of their files, so they share
-   the rest of the part's command time. The part had every file of the release and ran into its limit of 90 minutes. */
-type Table = { commandMs: number; setupMs: number; files: Record<string, Record<string, number>> };
-const table = JSON.parse(readFileSync(new URL('./fixtures/part-times-run-109.json', import.meta.url), 'utf8')) as Table;
+/* A synthetic release with suites of different sizes and costs. Each suite's time is spread over its files. */
 const MINUTE = 60_000;
-const units = Object.entries(table.files).flatMap(([suiteId, files]) => Object.keys(files).map(file => ({ suiteId, file, selectionUnit: file })));
-const durations = Object.entries(table.files).flatMap(([suiteId, files]) => Object.entries(files).map(([file, ms]) => ({ suiteId, file, ms })));
+const setupMs = 6500;
+const commandMs = 90 * MINUTE;
+const workloads = {
+  browser: [128, 960_000],
+  'browser-matrix': [128, 1_890_000],
+  mutation: [7, 73_000],
+  node: [167, 65_000],
+  'release-scripts': [19, 198_000],
+  server: [572, 2_007_000],
+  'server-postgres': [13, 17_000],
+  'server-slow': [3, 25_000],
+  web: [144, 165_000],
+} as const;
+const durations = Object.entries(workloads).flatMap(([suiteId, [count, total]]) =>
+  Array.from({ length: count }, (_, index) => ({
+    suiteId, file: `test/file-${index + 1}.test.ts`, ms: Math.floor((index + 1) * total / count) - Math.floor(index * total / count),
+  })));
+const units = durations.map(({ suiteId, file }) => ({ suiteId, file, selectionUnit: file }));
 
-function run109(limitMinutes: number, full: boolean, availableMachines = 1): TestPartPlanInput {
-  return { units, durations, availableMachines, costs: { setupMs: table.setupMs, collectMs: 1000 }, unknownFileMs: 30_000, ...partSpread(full, limitMinutes * MINUTE) };
+function releasePlan(limitMinutes: number, full: boolean, availableMachines = 1): TestPartPlanInput {
+  return { units, durations, availableMachines, costs: { setupMs, collectMs: 1000 }, unknownFileMs: 30_000, ...partSpread(full, limitMinutes * MINUTE) };
 }
 /* How long a part should take on the machine it goes to, with its setup. */
-const partMs = (part: TestPartPlan['parts'][number]): number => table.setupMs + (part.machine?.ms ?? part.testMs);
+const partMs = (part: TestPartPlan['parts'][number]): number => setupMs + (part.machine?.ms ?? part.testMs);
 const planned = (plan: TestPartPlan) => plan.parts.flatMap(part => part.units.map(unit => `${unit.suiteId}:${unit.file}`)).sort();
 const all = units.map(unit => `${unit.suiteId}:${unit.file}`).sort();
 
-describe('the parts of a run of the whole release, by what its files took in run 109', () => {
-  it('holds the time the part of run 109 ran, file by file', () => {
-    /* Each file's time is rounded to the millisecond. */
-    expect(Math.abs(durations.reduce((sum, duration) => sum + duration.ms, 0) - table.commandMs)).toBeLessThanOrEqual(units.length / 2);
-    expect(units).toHaveLength(1181);
-  });
-
+describe('parts of a large release', () => {
   it.each([
-    ['a run that takes only what its release proved, with 90 minutes a part, as 109 had', 90, false],
+    ['a run that takes only what its release proved, with 90 minutes a part', 90, false],
     ['a run that takes only what its release proved, with the default 30 minutes', 30, false],
     ['the first run of a release, with its hour a part', 60, true],
   ])('%s keeps every part within three quarters of its limit on the one free machine', (_name, limit, full) => {
-    const plan = planTestParts(run109(limit, full));
+    const plan = planTestParts(releasePlan(limit, full));
     expect(plan.parts.map(partMs).filter(ms => ms > 0.75 * limit * MINUTE)).toEqual([]);
     expect(plan.parts.length).toBeGreaterThan(1);
     expect(planned(plan)).toEqual(all);
   });
 
   it('runs the parts at once on several free machines, each within three quarters of its limit', () => {
-    const plan = planTestParts(run109(30, false, 3)), one = planTestParts(run109(30, false, 1));
+    const plan = planTestParts(releasePlan(30, false, 3)), one = planTestParts(releasePlan(30, false, 1));
     expect(plan.parts.map(partMs).filter(ms => ms > 0.75 * 30 * MINUTE)).toEqual([]);
     expect(plan.estimatedWallMs).toBeLessThan(one.estimatedWallMs / 2);
     expect(planned(plan)).toEqual(all);
   });
 
   it('keeps a run that fits in one part in one part', () => {
-    const plan = planTestParts({ ...run109(30, false), units: units.filter(unit => unit.suiteId === 'node') });
+    const plan = planTestParts({ ...releasePlan(30, false), units: units.filter(unit => unit.suiteId === 'node') });
     expect(plan.parts).toHaveLength(1);
   });
 });
@@ -56,8 +61,8 @@ describe('the parts of a run of the whole release, by what its files took in run
    every part may still run into its limit, but the fewest files with it. */
 describe('a run that no count of parts fits', () => {
   it('takes as many parts as its budget when even that many run past three quarters of the limit, and loses no file', () => {
-    /* At 5 minutes a part, ten parts of the 90 minutes of 109 would still take 9 each. */
-    const plan = planTestParts(run109(5, false));
+    /* At 5 minutes a part, ten parts of the 90-minute suite would still take 9 each. */
+    const plan = planTestParts(releasePlan(5, false));
     expect(plan.parts).toHaveLength(10);
     expect(Math.min(...plan.parts.map(partMs))).toBeGreaterThan(0.75 * 5 * MINUTE);
     expect(plan.reason).toContain('no count fits');
@@ -74,13 +79,12 @@ describe('a run that no count of parts fits', () => {
   });
 });
 
-/* Run 109's part ran 90 minutes and was stopped before its last files: what it ran in that time is less than all its files take. */
 describe('the pace of a machine, from parts that ran all their files', () => {
-  const row = (error: string | null) => ({ computer: 'host:home-api', files: [], error,
-    receipt: { phases: { commandMs: table.commandMs } }, selection: { selection: { kind: 'batch', selections: [{ suiteId: 'web', files: ['apps/web/test/a.test.ts'] }] } } }) as unknown as Parameters<typeof partTimes>[0][number];
+  const row = (error: string | null) => ({ computer: 'host:test-server', files: [], error,
+    receipt: { phases: { commandMs: commandMs } }, selection: { selection: { kind: 'batch', selections: [{ suiteId: 'web', files: ['apps/web/test/a.test.ts'] }] } } }) as unknown as Parameters<typeof partTimes>[0][number];
 
   it('takes the time of a part that passed or whose tests failed', () => {
-    expect(partTimes([row(null), row('failed')]).map(part => part.ms)).toEqual([table.commandMs, table.commandMs]);
+    expect(partTimes([row(null), row('failed')]).map(part => part.ms)).toEqual([commandMs, commandMs]);
   });
   it.each(['timeout', 'cancelled', 'prerequisite_failed', 'machine_offline'])('takes no time of a part that ended by %s', error => {
     expect(partTimes([row(error)])).toEqual([]);

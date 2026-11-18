@@ -217,7 +217,7 @@ it('retires replaced physical programs without a startup incident or a stale fir
   expect(c.sent.filter(f => f.type === 'program.operator_needed')).toEqual([]);
 });
 
-/* Neo's turn b559a00c on 17.11: its assignment (delivery 268) got no receipt, as the node refused the program's hooks, yet
+/* An assignment got no receipt because the node refused the program's hooks, yet
    the program took the live words that came after it (delivery 269) at 01:50:48. The operator's case closed as failed at
    02:06:13, and the turn ended with it although the program worked on. */
 const unrecordedCase = (c: ReturnType<typeof fixture>) => ({ type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, disposition: 'open' as const, revision: 1, reason: 'assignment_unrecorded' as const });

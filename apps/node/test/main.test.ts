@@ -1320,7 +1320,7 @@ describe('runNode', () => {
     expect(server.received.findIndex(m => m.type === 'check.release')).toBeGreaterThan(server.received.findIndex(m => m.type === 'tests.started'));
   });
 
-  /* #1060: a socket that drops for a moment, as home-api's did while it took 125 MB of dependencies, stops no part. Its
+  /* #1060: a socket that drops for a moment, as test-server's did while it took 125 MB of dependencies, stops no part. Its
      slot is claimed again once the node is back, the part goes on, and its end goes out on the new connection. */
   it('keeps a part running under its slot through a short drop and sends its end once back', async () => {
     fakeClock();

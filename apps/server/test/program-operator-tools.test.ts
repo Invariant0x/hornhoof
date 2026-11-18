@@ -21,7 +21,7 @@ type Caller = { id: string; companyId: string; agentId: string; agentKind: Agent
 const SECRET = 'sk-live-0123456789abcdef-???';
 /* Another machine's network id, whose built-in node an API key's turn can go out to. */
 const MACHINE = 'b'.repeat(32);
-/* Claude Code's own safety check asking before a removal on a variable that may be empty, as Neo's program showed it on 17 Nov
+/* Claude Code's own safety check asking before a removal on a variable that may be empty, as a turn showed it
    at 09:30 (the picture of that operator case). Unanswered, Claude Code blocks the call by itself two minutes later. */
 const RM_PERMISSION = readFileSync(new URL('./fixtures/claude-rm-permission-screen.txt', import.meta.url), 'utf8');
 
@@ -110,7 +110,7 @@ it("asks the node of a busy employee's running turn for its screen, not a newer 
 
 it("shows Claude Code's own permission question of a busy employee whose next turns wait in its queue on no node, and takes the operator's answer", async () => {
   const c = await fixture();
-  /* Turns of two other tasks wait behind the running one on no node yet, as Neo's did while the question stood. */
+  /* Turns of two other tasks wait behind the running turn while the question is open. */
   await queuedAfter(c, c.agent.id);
   await queuedAfter(c, c.agent.id);
   const command = 'S=/tmp/claude-1000/-data-work-agents-f7863b74-d43d-49db-9d48-774326e62283/afa1c2a5-7295-4766-9871-e26f97aca11e/scratchpad/t1152; rm -f $S/*.zip; python3 -I - "$S" <<\'EOF\'';
