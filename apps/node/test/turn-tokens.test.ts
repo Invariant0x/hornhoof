@@ -10,7 +10,10 @@ import { jobDone } from '../src/runner.js';
    claude-new.jsonl, codex-new.jsonl and agy-new.jsonl are the programs' own headless output. claude-transcript-usage.jsonl
    keeps the shape of a Claude Code 2.1 session log as it lies on disk, with the words taken out: each content block of a
    message is a line of its own that repeats the message's usage. codex-rollout-usage.jsonl is a Codex session log written
-   from the token counts Codex's turn.completed reports and the token_count events its rollout carries. */
+   from the token counts Codex's turn.completed reports and the token_count events its rollout carries.
+   codex-turn-context.jsonl is the turn context line a Codex rollout carries, as Codex's own tests write it
+   (openai/codex 89feadf3, codex-rs/history/src/tests.rs) and its RolloutLine wraps it: the time, then type and payload;
+   the permission profile, which those tests build in Rust, is left out. */
 
 const fixture = (name: string) => readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
 
@@ -72,9 +75,9 @@ describe("the tokens of a turn in a live terminal", () => {
   it('takes the model a Codex turn ran on from its turn context', () => {
     const tally = new TurnTally();
     tally.begin();
-    tally.codexLine({ type: 'turn_context', payload: { cwd: '/work', model: 'gpt-6.1-sol' } });
+    for (const line of fixture('codex-turn-context.jsonl')) tally.codexLine(line);
     for (const line of fixture('codex-rollout-usage.jsonl')) tally.codexLine(line);
-    expect(tally.tokens()).toMatchObject({ total: 37660, model: 'gpt-6.1-sol' });
+    expect(tally.tokens()).toMatchObject({ total: 37660, model: 'gpt-5' });
     tally.begin();
     tally.codexLine({ type: 'turn_context', payload: { cwd: '/work', model: '' } });
     expect(tally.tokens()).toBeNull();
