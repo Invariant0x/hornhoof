@@ -1525,7 +1525,7 @@ export const en = {
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
     schema: 'Department schema',
-    status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'no subscription' },
+    status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'No subscription yet' },
     statusSummary: (counts: StatusCounts) => summary(counts, { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'needs a decision', idle: 'free', off: 'no subscription' }),
     waitsForTask: 'Waiting for a new task',
     onTimer: (every: string) => `On a timer, ${every.toLowerCase()}`,
