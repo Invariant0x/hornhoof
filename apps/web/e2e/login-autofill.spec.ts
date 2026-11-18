@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chromium, expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { detail, serveApi, TASKS } from './api';
+import { openTaskAction, detail, serveApi, TASKS } from './api';
 
 /* Hornhoof's own sign-in is filled only where a person signs in or sets their Hornhoof password (#1320). Everywhere a form
    holds a secret for somewhere else, no browser and no password manager may put the saved Hornhoof login into it.
@@ -120,7 +120,7 @@ const FORMS: Secret[] = [
       await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...detail(TASKS[0]!), body: 'token=abc123456789', mayHideSecret: true } } }));
       await page.goto('/tasks/t1');
       const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-      await panel.getByRole('button', { name: en.tasks.hideSecret.action, exact: true }).click();
+      await openTaskAction(panel, en, en.tasks.hideSecret.action);
       return panel.getByRole('form', { name: en.tasks.hideSecret.action, exact: true });
     },
   },

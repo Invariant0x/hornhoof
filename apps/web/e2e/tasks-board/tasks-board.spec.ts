@@ -5,6 +5,7 @@ import { ru } from '../../src/i18n/ru';
 import { BUILTIN_SKINS } from '../../src/skins/registry';
 import { NODE } from '../../src/tracker';
 import { captureWith } from '../capture';
+import { openTaskAction } from '../api';
 import { DEV, GOAL_NOTE, GOALS, QUESTION, serveGoalHistory, serveOutsideWork, serveShortNames, serveTasksBoard, SHORT, TASKS } from './api';
 
 /* The tracker as a person meets it: the left panel of lists, where the person is, views of the same work with their
@@ -149,7 +150,7 @@ test('pans and zooms the graph with a drag and the zoom bar, and opens a card fr
   await canvas.getByRole('button', { name: new RegExp(`^#${payments.number} Take card payments`) }).click();
   await expect(page).toHaveURL(new RegExp(`/tasks/${payments.id}$`));
   const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-  await card.getByRole('button', { name: t.tracker.card.graphFromHere, exact: true }).click();
+  await openTaskAction(card, t, t.tracker.card.graphFromHere);
   await expect(page).toHaveURL(new RegExp(`/tasks\\?root=${payments.id}&view=graph$`));
   const crumbs = page.getByRole('navigation', { name: t.tracker.graph.path });
   await expect(crumbs.locator('[aria-current]')).toHaveText(named('Take card payments'));
@@ -167,6 +168,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     await row.locator('.tr-title').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
     await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[0]!.title);
+    await openTaskAction(card, t, t.tasks.details);
     await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
     const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
     if (dir === 'ltr') {
@@ -222,6 +224,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     expect(await card.locator('.tr-card-facts li').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
     await card.locator('.tr-card-title .linkish').click();
     const panel = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await openTaskAction(panel, t, t.tasks.details);
     await expect(panel.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
     await shot('card');
   });
@@ -324,12 +327,13 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await touchable(page, `board ${look}`);
     await payments.locator('.tr-card-title .linkish').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await openTaskAction(card, t, t.tasks.details);
     await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
     await expect(page.locator('.tr-card.on')).toHaveCount(1);
     expect(await borderContrast(page.locator('.tr-card.on')), `chosen card ${look}`).toBeGreaterThanOrEqual(3);
     expect(await page.locator('.tr-card.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await cyanInk());
     if (width === 1440) await closeUp(page.locator('.tr-card.on'), 'card-chosen');
-    await inOrder(card.locator('.tp-facts dd'), '20 Nov', `task card ${look}`);
+    await inOrder(card.locator('.tp-facts bdi'), '20 Nov', `task card ${look}`);
     await cardWords(page, `task card ${look}`);
     await shot('board-card');
 
@@ -374,6 +378,7 @@ for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ wid
     await shot('crumbs');
     await visit(`/tasks/${refunds.id}`);
     const refundsCard = page.getByRole('complementary', { name: named('Refunds on request'), exact: true });
+    await openTaskAction(refundsCard, t, t.tasks.details);
     await expect(refundsCard.getByRole('navigation', { name: t.tracker.card.path }).getByRole('button', { name: SHORT, exact: true })).toBeVisible();
     await touchable(page, `card path ${look}`);
     await shot('card-path');

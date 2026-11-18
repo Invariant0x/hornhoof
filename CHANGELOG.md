@@ -27,6 +27,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Removed computer access details from agent windows, including the orchestrator's window.
+### Changed
+
+- Task cards show the title, key facts and links to related tasks together at the top.
+- The long task description opens with More when it is too long to show at once.
+- The task log shows the latest four steps, including waits, and lets you open earlier steps.
+- A question appears below the log when you can answer it from the card.
+- The title menu holds task actions, details, materials and the full log.
 
 ## [0.34.0] - 2026-11-18
 

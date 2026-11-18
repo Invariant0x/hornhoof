@@ -8,7 +8,7 @@ import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Org, WaitingRequest } from '../src/types';
-import { box, ME, openTaskCard, serveApi, TASKS } from './api';
+import { openTaskAction, box, ME, openTaskCard, serveApi, TASKS } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -482,9 +482,11 @@ async function assertRequestCardsFit(cards: Locator, rightLimit: number) {
     expect(cardOverflows, 'request card has no internal horizontal overflow').toBe(false);
 
     const term = card.locator('.req-term');
-    const termBox = await box(term);
-    expect(termBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
-    expect(termBox.x + termBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    if (await term.count()) {
+      const termBox = await box(term);
+      expect(termBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+      expect(termBox.x + termBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    }
 
     const commit = card.locator('.req-commit');
     if ((await commit.count()) > 0) {
@@ -577,11 +579,11 @@ for (const lang of CHECKED_LOCALES) {
         expect(mainOverflow.width, JSON.stringify(mainOverflow.offenders)).toBeLessThanOrEqual(width);
         await assertRequestCardsFit(mainCards, width);
 
-        /* Open TaskPanel (aside) on #1 so the exact same 3 request cards render inside the narrow side panel. */
+        /* Only requests this person can answer appear on the card face. */
         await mainCards.first().locator('header button.linkish').click();
         const aside = page.locator('aside');
-        const panelCards = aside.locator('.tp-wait article.req');
-        await expect(panelCards).toHaveCount(3);
+        const panelCards = aside.locator('.tp-question article.req');
+        await expect(panelCards).toHaveCount(2);
 
         const asideOverflow = await aside.evaluate((el: HTMLElement) => {
           const body = el.querySelector<HTMLElement>('.ac-body');
@@ -605,7 +607,7 @@ for (const lang of CHECKED_LOCALES) {
             lang,
             theme,
             width,
-            surface: 'TaskPanel aside .tp-wait (approval + stuck + read-only choice)',
+            surface: 'TaskPanel with the approval and stuck question this person can answer',
           },
           theme === 'dark',
         );
@@ -984,6 +986,7 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     /* Open the first task's detail panel in the real UI and verify neutral answered state and text. */
     await openTaskCard(page, srv.freeTaskNumber);
     const panel = page.locator('aside');
+    await openTaskAction(panel, ru, ru.tasks.details);
     await expect(panel).toContainText(freeFeedback);
     await expect(panel).toContainText(ru.tasks.requestStates.answered);
     await expect(panel).not.toContainText(/Picked \d|Approved|Declined/);

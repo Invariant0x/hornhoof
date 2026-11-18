@@ -31,8 +31,8 @@ it('opens the running orchestrator task instead of a newer assigned task', async
   await until(() => screen.queryByTitle('Task'));
   await user.click(screen.getByRole('button', { name: 'Task' }));
   await until(() => screen.queryByRole('heading', { name: /Checkout API|Later work/ }));
-  /* The running task alone, with the phone recordings its panel asks for; the newer t99 is never opened. */
-  expect(calls.filter(c => c.path.startsWith('/api/tasks/')).map(c => c.path)).toEqual(['/api/tasks/t12', '/api/tasks/t12/phone-recordings']);
+  /* The running task alone. The newer t99 is never opened. */
+  expect(calls.filter(c => c.path.startsWith('/api/tasks/')).map(c => c.path)).toEqual(['/api/tasks/t12']);
 });
 
 it('opens a product employee task without a map employee', async () => {

@@ -1873,6 +1873,12 @@ export const en = {
     waitsFor: (tasks: string) => `waits for ${tasks}`,
     givenBy: (name: string) => `Given by ${name}`,
     details: 'Details',
+    moreDescription: 'More',
+    earlierSteps: 'Earlier steps',
+    fullLog: 'Full log',
+    taskActions: 'Task actions',
+    backToActions: 'Back to actions',
+    waitStep: (who: string, wait: string) => `${who}: ${wait}`,
     subtasks: 'Subtasks',
     independentPart: 'Can start now',
     files: 'Files',
@@ -2382,7 +2388,7 @@ export const en = {
     /* The card of a task or a goal. */
     card: {
       path: 'Where it belongs',
-      kinds: { task: 'Task', subtask: 'Subtask', companyGoal: 'Company goal', goal: (department: string) => `Goal of ${department}` },
+      kinds: { companyGoal: 'Company goal', goal: (department: string) => `Goal of ${department}` },
       why: 'Why',
       facts: 'Facts',
       responsible: 'Responsible',

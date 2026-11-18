@@ -6,14 +6,14 @@ import { Field } from './Field';
 import { SecretInput } from './SecretInput';
 import './hide-secret.css';
 
-export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: () => void }) {
+export function HideSecret({ taskId, onChanged, onClose, initialValue = '' }: { taskId: string; onChanged: () => void; onClose?: () => void; initialValue?: string }) {
   const t = useT();
   const words = t.tasks.hideSecret;
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState('');
+  const [open, setOpen] = useState(!!onClose);
+  const [value, setValue] = useState(initialValue);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const close = () => { setOpen(false); setValue(''); setFailed(false); };
+  const close = () => { setOpen(false); setValue(''); setFailed(false); onClose?.(); };
   const ready = !!value.trim() && [...value].length >= MIN_SECRET_LENGTH;
 
   async function submit(event: FormEvent) {

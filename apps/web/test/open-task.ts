@@ -13,3 +13,11 @@ export async function openFromTracker(user: ReturnType<typeof userEvent.setup>, 
   const row = await within(await screen.findByRole('region', { name: FOUND })).findByRole('listitem', { name: new RegExp(`^#${number} `) });
   await user.click(within(row).getAllByRole('button')[0]!);
 }
+
+export async function openTaskAction(user: ReturnType<typeof userEvent.setup>, panel: HTMLElement, action?: string): Promise<void> {
+  const card = within(panel);
+  const trigger = await card.findByRole('button', { name: new RegExp(`^(${en.tasks.taskActions}|${ru.tasks.taskActions})$`) });
+  if (trigger.getAttribute('aria-expanded') === 'false') await user.click(trigger);
+  else await user.click(card.getByRole('button', { name: new RegExp(`^(${en.tasks.backToActions}|${ru.tasks.backToActions})$`) }));
+  if (action) await user.click(card.getByRole('button', { name: action }));
+}

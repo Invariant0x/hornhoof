@@ -35,7 +35,7 @@ function storeRequestDraft(requestId: string, value: string): void {
 const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
-type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string };
+type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean };
 
 /* An approval names a commit, or under a department's policy the work its words say. */
 const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
@@ -127,7 +127,7 @@ function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defa
   );
 }
 
-function RequestWords({ request, said }: { request: WaitingRequest; said: string }) {
+function RequestWords({ request, said, inline }: { request: WaitingRequest; said: string; inline?: boolean }) {
   const t = useT();
   if (request.explained) {
     return (
@@ -135,10 +135,10 @@ function RequestWords({ request, said }: { request: WaitingRequest; said: string
         <div className="req-explained">
           <Markdown text={request.explained} />
         </div>
-        <details className="req-more">
+        {!inline && <details className="req-more">
           <summary>{t.tasks.inDetail}</summary>
           <p className="req-text">{said}</p>
-        </details>
+        </details>}
       </>
     );
   }
@@ -229,15 +229,14 @@ function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, o
 }
 
 type QuestionProps = {
-  stuck: boolean;
   text: string;
   busy: boolean;
   onText: (value: string) => void;
   onSubmit: (e: FormEvent) => void;
-  onCancel: () => void;
+  onCancel?: () => void;
 };
 
-function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: QuestionProps) {
+function QuestionForm({ text, busy, onText, onSubmit, onCancel }: QuestionProps) {
   const t = useT();
   return (
     <form className="req-form" onSubmit={onSubmit}>
@@ -248,7 +247,7 @@ function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: Questio
         <button className="btn" type="submit" disabled={busy || !text.trim()}>
           {t.tasks.sendAnswer}
         </button>
-        {stuck && (
+        {onCancel && (
           <button className="btn ghost" type="button" disabled={busy} onClick={onCancel}>
             {t.tasks.cancelTask}
           </button>
@@ -292,7 +291,7 @@ type FormActions = {
   onAnswer: (e: FormEvent) => void;
   onPick: (index: number) => void;
   onDecide: (approve: boolean) => void;
-  onCancel: () => void;
+  onCancel?: () => void;
   onOpenMaterial: (id: string, opener: HTMLElement | null) => void;
 };
 
@@ -313,7 +312,7 @@ function RequestForm({ request, manifest, text, busy, onText, onAnswer, onPick, 
     );
   }
   if (request.kind === 'approval') return <ApprovalForm request={request} text={text} busy={busy} onText={onText} onDecide={onDecide} />;
-  return <QuestionForm stuck={request.kind === 'stuck'} text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={onCancel} />;
+  return <QuestionForm text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={request.kind === 'stuck' ? onCancel : undefined} />;
 }
 
 function useRequestSend(requestId: string, onDone: () => void) {
@@ -361,7 +360,7 @@ function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown })
 
 /* One thing an agent waits for: a question to answer, a choice to answer or pick, a commit to approve, or a stuck task.
    Its answers show only to a person the server lets take it; anyone else reads who takes it. */
-function RequestItem({ request, onDone, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestItem({ request, onDone, inline, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState(() => draftsByRequest.get(request.id) ?? '');
   const { busy, failure, send } = useRequestSend(request.id, onDone);
@@ -382,10 +381,11 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
 
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
+  const who = whoAsked(t, request);
   return (
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      <RequestHeader who={whoAsked(t, request)} request={request} {...shared} />
-      <RequestWords request={request} said={said} />
+      {inline ? <header><b>{who}</b></header> : <RequestHeader who={who} request={request} {...shared} />}
+      <RequestWords request={request} said={said} inline={inline} />
       <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} />
       <RequestForm
         request={request}
@@ -396,7 +396,7 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
         onAnswer={answer}
         onPick={i => reply(pickBody(i, text))}
         onDecide={approve => reply(approvalBody(approve, text))}
-        onCancel={() => void send(`/api/tasks/${task.id}/cancel`, {})}
+        onCancel={inline ? undefined : () => void send(`/api/tasks/${task.id}/cancel`, {})}
         onOpenMaterial={openViewer}
       />
       <RequestFeedback busy={busy} failure={failure} />

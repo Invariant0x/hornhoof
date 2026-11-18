@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { Shell } from '../src/screens/Shell';
 import { CARD, DEV_ORG, MACHINES, ME, mockApi, PEOPLE, signedOut, SUBS, TASK_DETAIL, TASKS } from './api-mock';
+import { openTaskAction } from './open-task';
 
 function fixture(extra: Parameters<typeof mockApi>[0] = {}) {
   return mockApi({
@@ -83,6 +84,7 @@ describe('shareable workspace', () => {
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     expect(location.pathname).toBe('/tasks/t12');
     expect(department).toBeVisible();
+    await openTaskAction(user, panel, 'Comment');
     const comment = within(panel).getByRole('textbox', { name: 'Comment' });
     await user.type(comment, 'Keep this task draft');
     await user.click(screen.getByRole('button', { name: 'Account' }));
@@ -103,8 +105,8 @@ describe('shareable workspace', () => {
     });
     expect(location.pathname).toBe('/tasks/t12');
     expect(department).toBeVisible();
-    const path = await within(await screen.findByRole('complementary', { name: '#12 Checkout API' })).findByRole('navigation', { name: 'Where it belongs' });
-    await user.click(within(path).getByRole('button', { name: '#10 Payments' }));
+    const reopened = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    await user.click(within(reopened).getByRole('link', { name: '#10 Payments' }));
     const parent = await screen.findByRole('complementary', { name: '#10 Payments' });
     expect(department).toBeVisible();
     await user.click(within(parent).getByRole('button', { name: 'Close' }));
