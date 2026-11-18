@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, PARTS, refs, runOnce, runOnceFrom, SCRIPT, SQL, stand, tempUpdaterDir, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 describe('updater', () => {
   beforeAll(() => {
@@ -44,6 +44,23 @@ describe('updater', () => {
     expect(swap).toBeGreaterThan(install);
     expect(r.calls[swap]).toContain(`--entrypoint docker ${APP}-updater@${UPDATER_DIGESTS['0.4.1']} compose up -d --no-build updater`);
     expect(existsSync(join(s.control, 'alive'))).toBe(true);
+  });
+
+  /* Its image keeps updater.sh as a program of its own, and the parts beside the statements of a restore. */
+  it('finds its parts where its image keeps them', async () => {
+    const dockerfile = readFileSync(new URL('../../updater/Dockerfile', import.meta.url), 'utf8');
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/updater\.sh \/usr\/local\/bin\/hornhoof-updater$/m);
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/lib\/ \/usr\/local\/share\/hornhoof-updater\/lib\/$/m);
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/cutover\.sql apps\/updater\/carry\.sql apps\/updater\/adopt\.sql \/usr\/local\/share\/hornhoof-updater\/$/m);
+    expect(readFileSync(SCRIPT, 'utf8')).toContain('SQL_DIR="${HORNHOOF_SQL_DIR:-/usr/local/share/hornhoof-updater}"');
+    const image = tempUpdaterDir('hh-updater-image-');
+    mkdirSync(join(image, 'bin'));
+    cpSync(SCRIPT, join(image, 'bin', 'hornhoof-updater'));
+    cpSync(PARTS, join(image, 'share', 'lib'), { recursive: true });
+    for (const sql of ['cutover.sql', 'carry.sql', 'adopt.sql']) cpSync(join(SQL, sql), join(image, 'share', sql));
+    const s = stand();
+    const r = await runOnceFrom(join(image, 'bin', 'hornhoof-updater'), s, ask('i1'), { HORNHOOF_SQL_DIR: join(image, 'share') });
+    expect(r.status).toMatchObject({ id: 'i1', version: '0.4.1', state: 'done', step: 'finished' });
   });
 
   it('skips pulling the node image when the node container runs that exact digest already', async () => {
