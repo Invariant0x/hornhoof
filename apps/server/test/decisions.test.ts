@@ -90,13 +90,13 @@ describe('decisions waiting for people', () => {
       [c.structure.id, 'structure', c.ids.ivan],
       [c.staff.id, 'staff', c.ids.ivan],
     ]);
-    expect(all.machineAccess).toMatchObject([{ kind: 'computer_access', id: c.machine, ownerPersonId: c.ids.ivan, canAnswer: true, view: { asked: { reason: 'Inspect disk space.' } } }]);
+    expect(all.machineAccess).toEqual([]);
     /* A page loaded before machines had access of their own reads the old key, which held one request or none: it gets
        none, and goes on. */
     expect((await c.app.inject({ url: '/api/requests', ...as(c.tokens.ceo) })).json()).toMatchObject({ computerAccess: null });
-    expect(all.counts.byPerson).toEqual({ [c.ids.ivan]: 8, [c.ids.dan]: 1 });
-    expect(all.counts.byAgent).toEqual({ [c.workers.dev.id]: 4, [c.workers.sales.id]: 1, [c.workers.mkt.id]: 1, [c.orchestrator.id]: 3 });
-    expect(all.counts.total).toBe(9);
+    expect(all.counts.byPerson).toEqual({ [c.ids.ivan]: 7, [c.ids.dan]: 1 });
+    expect(all.counts.byAgent).toEqual({ [c.workers.dev.id]: 4, [c.workers.sales.id]: 1, [c.workers.mkt.id]: 1, [c.orchestrator.id]: 2 });
+    expect(all.counts.total).toBe(8);
   });
 
   it("take in the orchestrator's own question and a release confirmation as the requests they are, both the CEO's", async () => {
@@ -169,9 +169,9 @@ describe('decisions waiting for people', () => {
       [c.structure.id, false, { kind: 'ceo_and_delegate', department: null }],
       [c.staff.id, false, { kind: 'ceo_and_delegate', department: null }],
     ]);
-    expect(his.machineAccess).toMatchObject([{ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } }]);
-    expect(his.counts.total).toBe(7);
-    expect(his.counts.byPerson[c.ids.ivan]).toBe(6);
+    expect(his.machineAccess).toEqual([]);
+    expect(his.counts.total).toBe(6);
+    expect(his.counts.byPerson[c.ids.ivan]).toBe(5);
   });
 
   it('let the CEO and the CEO delegate take every decision they see', async () => {
@@ -180,7 +180,7 @@ describe('decisions waiting for people', () => {
     for (const token of [c.tokens.ceo, c.tokens.zed]) {
       const v = await c.view(token);
       expect(v.requests).toHaveLength(6);
-      expect(v.machineAccess).toHaveLength(1);
+      expect(v.machineAccess).toEqual([]);
       expect([...v.requests, ...v.proposals, ...v.machineAccess].every(d => d.canAnswer)).toBe(true);
     }
   });
@@ -191,11 +191,11 @@ describe('decisions waiting for people', () => {
     expect(mine.requests.map(r => r.id)).toEqual([c.devQuestion.request.id]);
     expect(mine.proposals).toEqual([]);
     expect(mine.machineAccess).toEqual([]);
-    expect(mine.counts.total).toBe(9);
+    expect(mine.counts.total).toBe(8);
     const ceos = await c.view(c.tokens.ceo, `?person=${c.ids.ivan}`);
     expect(ceos.requests).toHaveLength(5);
     expect(ceos.proposals).toHaveLength(2);
-    expect(ceos.machineAccess).toHaveLength(1);
+    expect(ceos.machineAccess).toEqual([]);
     /* The filter is no key: someone else's decisions stay out of sight, and a stranger's filter shows nothing. */
     await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     const sarasForDan = await c.view(c.tokens.dan, `?person=${c.ids.ivan}`);
@@ -241,7 +241,7 @@ describe('decisions on the map', () => {
   it("show each person's own count, a viewer's count of what they see, and nothing for totals they cannot see", async () => {
     const c = await everyKind();
     const org = async (token: string): Promise<OrgView> => (await c.app.inject({ url: '/api/org', ...as(token) })).json();
-    expect(cards(await org(c.tokens.ceo))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
+    expect(cards(await org(c.tokens.ceo))).toEqual({ [c.ids.ivan]: 7, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
     expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 0, [c.ids.zed]: 0, [c.ids.dan]: 0, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
     expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: 3, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
     expect(cards(await org(c.tokens.sara))).toEqual({ [c.ids.ivan]: 1, [c.ids.zed]: null, [c.ids.dan]: null, [c.ids.sara]: 0, [c.ids.olga]: null, [c.ids.tia]: null });
@@ -254,8 +254,7 @@ describe('telling screens that decisions changed', () => {
     await listen(c.app);
     /* A stream hears from its headers on: the server listens to the bus in the same step as it sends them. */
     const streams = { ceo: await openStream(c.app, c.tokens.ceo), zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
-    await c.askComputer('Inspect disk space.');
-    expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
+    expect((await c.app.inject({ method: 'POST', url: '/api/computer/close', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => streams.ceo.messages.some(m => m.type === 'computer'));
     expect(streams.ceo.messages.filter(m => m.type === 'computer')).toEqual([{ type: 'computer' }]);
     await until(() => streams.zed.messages.some(m => m.type === 'computer'));
@@ -263,14 +262,13 @@ describe('telling screens that decisions changed', () => {
     await until(() => streams.dan.messages.some(m => m.type === 'computer'));
   });
 
-  it('tells the orchestrator acting for the CEO of the request for the computer on its stream, as it sees what the CEO sees', async () => {
+  it('tells the orchestrator acting for the CEO of a machine access change on its stream, as it sees what the CEO sees', async () => {
     const c = await company();
     await listen(c.app);
     const headers = orchestratorHeaders(c.ids.ivan, c.orchestrator.id);
     const inside = await openStream(c.app, undefined, headers);
     expect(inside.res.status).toBe(200);
-    await c.askComputer('Inspect disk space.');
-    expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
+    expect((await c.app.inject({ method: 'POST', url: '/api/computer/close', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => inside.messages.some(m => m.type === 'computer'));
   });
 

@@ -78,19 +78,14 @@ describe('the lab', () => {
     expect(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper sh -c 'printf "%s|%s" "$HORNHOOF_SECRET" "$NODE_KEY"'`), 'the keeper env')).toBe('|');
     expect(coreEnv).not.toMatch(/^(HORNHOOF_SECRET|NODE_KEY|POSTGRES_PASSWORD|PUBLIC_URL)=/m);
 
-    /* 5. Its owner opens its computer with what their key signs, and a command runs there as root. Commands are written
-       into the server's database as the orchestrator's tool writes them. */
+    /* 5. The connected machine has standing access even though it holds its owner's key. */
     const machine = status.machine!;
-    const networkId = await sql(m1, `SELECT network_id FROM machines WHERE id = '${machine}'`);
-    type Views = { views: { machine: { id: string }; reachable: boolean; key: string; until: string | null }[] };
+    type Views = { views: { machine: { id: string }; reachable: boolean; open: boolean }[] };
     const viewOf = async () => (await http(m1, 'GET', `${server}/api/machines/access`)).json<Views>().views.find(view => view.machine.id === machine);
     await until(async () => {
       const view = await viewOf();
-      return view?.reachable && view.key === 'held';
+      return view?.reachable && view.open;
     });
-    const grant = await key.grant(networkId);
-    const opened = await http(m1, 'POST', `${server}/api/machines/${machine}/access/open`, { body: { grant } });
-    expect(opened.status, opened.body).toBe(200);
     const run = async (command: string): Promise<string> =>
       (await sql(m1, `INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) SELECT company_id, id, ${literal(command)}, 60 FROM machines WHERE id = '${machine}' RETURNING id`)).split('\n')[0]!;
     const ended = (id: string) =>
@@ -101,20 +96,15 @@ describe('the lab', () => {
     /* The machine's own files are at /host: the name it reads there is its own. */
     expect(await ended(await run('cat /host/etc/hostname'))).toBe('done|0|m2');
     const settings = async () => JSON.parse(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper cat /control/computer.json`), 'computer.json')) as { untilSec: number | null; by: string };
-    expect(await settings()).toMatchObject({ untilSec: (JSON.parse(grant.payload) as { until: number }).until, by: 'keeper' });
+    expect(await settings()).toMatchObject({ untilSec: expect.any(Number), by: 'keeper' });
 
     /* Closed by its owner, nothing runs there: a command that comes then never starts. */
     expect((await http(m1, 'POST', `${server}/api/machines/${machine}/access/close`)).status).toBe(200);
     await until(async () => (await settings()).untilSec === null);
     expect(await ended(await run('touch /host/root/ran-while-closed'))).toMatch(/^done\|126\|/);
-    /* A row written past the app says open again, with the grant that was closed: the machine's keeper takes no such
-       word, so it stays closed, and a command sent then is answered by its updater as closed. */
-    await sql(m1, `UPDATE machine_access SET until = now() + interval '1 hour', "grant" = ${literal(JSON.stringify(grant))}::jsonb WHERE machine_id = '${machine}'`);
-    const refused = await ended(await run('touch /host/root/ran-on-a-forged-row'));
-    expect(refused).toMatch(/^done\|126\|/);
-    expect((await settings()).untilSec).toBeNull();
-    expect((await m2.exec('ls /root/ran-while-closed /root/ran-on-a-forged-row')).code).not.toBe(0);
-    await sql(m1, `UPDATE machine_access SET until = NULL, "grant" = NULL WHERE machine_id = '${machine}'`);
+    expect((await m2.exec('ls /root/ran-while-closed')).code).not.toBe(0);
+    expect((await http(m1, 'POST', `${server}/api/machines/${machine}/access/open`)).status).toBe(200);
+    expect(await ended(await run('cat /host/etc/hostname'))).toBe('done|0|m2');
 
     /* 6. Disconnect cuts it off: it says so itself, and its certificate is on the server's list. */
     const serial = await sql(m1, `SELECT serial FROM certificates WHERE machine_id = '${status.machine}' AND revoked_at IS NULL`);

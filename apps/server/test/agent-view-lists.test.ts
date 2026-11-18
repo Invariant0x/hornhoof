@@ -162,10 +162,10 @@ describe('what waits for people', () => {
     expect(JSON.stringify(olga)).not.toContain('Shared work');
   });
 
-  it("keeps the orchestrator's cards and his ask for the computer from anyone who does not see him", async () => {
+  it("keeps the orchestrator's cards from anyone who does not see him", async () => {
     const c = await aclCompany(SERVER_MACHINE_ENV);
     await c.db.insert(proposals).values({ companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', brief: 'Hire Zed', items: [], departmentId: c.dev.id });
-    await c.app.ctx.computer.ask(c.companyId, await serverMachine(c.app), 'Fix the disk');
+    await serverMachine(c.app);
     const wes = await c.get('/api/requests', c.tokens.wes);
     expect(wes.json().proposals).toEqual([]);
     expect(wes.json().machineAccess).toEqual([]);
@@ -174,7 +174,7 @@ describe('what waits for people', () => {
     for (const viewer of ['ceo', 'clara'] as const) {
       const full = (await c.get('/api/requests', c.tokens[viewer])).json();
       expect(full.proposals).toHaveLength(1);
-      expect(full.machineAccess[0].view.asked.reason).toBe('Fix the disk');
+      expect(full.machineAccess).toEqual([]);
     }
   });
 });
@@ -472,13 +472,13 @@ describe('the events of a seen agent', () => {
 });
 
 describe('the computer', () => {
-  it("shows its state and keeps the orchestrator's ask from whoever does not see him", async () => {
+  it("shows standing access without any request", async () => {
     const c = await aclCompany(SERVER_MACHINE_ENV);
-    await c.app.ctx.computer.ask(c.companyId, await serverMachine(c.app), 'Fix the disk');
+    await serverMachine(c.app);
     const wes = await c.get('/api/computer', c.tokens.wes);
     expect(wes.statusCode).toBe(200);
     expect(wes.json().asked).toBeNull();
     expect(wes.body).not.toContain('Fix the disk');
-    expect((await c.get('/api/computer', c.tokens.clara)).json().asked.reason).toBe('Fix the disk');
+    expect((await c.get('/api/computer', c.tokens.clara)).json()).toMatchObject({ open: true, asked: null });
   });
 });

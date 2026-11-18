@@ -1,18 +1,18 @@
 import { inLane } from '@hornhoof/protocol';
-import { and, eq, gt, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agentInbox, agents, departments, jobs, machineAccess, machines, people } from '../../db/schema.js';
-import { idOnly, only } from '../../db/selections.js';
+import { agentEvents, agents, departments, jobs, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { activeClickGrants, answeredWords, machineSpeaker, wordsForTurn } from './turn-words.js';
+import { answeredWords, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
@@ -33,13 +33,13 @@ const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orches
 
 /* The running turn of the orchestrator or a head and its incoming words, newest first; null for any other turn, or while
    words are on their way into it. */
-async function turnWords(db: Reader, jobId: string, kinds = ANSWERS_PEOPLE) {
+async function turnWords(db: Reader, jobId: string) {
   const [job] = await db
-    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind, companyId: agents.companyId, departmentId: agents.departmentId })
+    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, agentKind: agents.kind, companyId: agents.companyId, departmentId: agents.departmentId })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
-  if (!job || job.status !== 'running' || job.kind !== 'conversation' || !kinds.includes(job.agentKind) || job.pending) return null;
+  if (!job || job.status !== 'running' || job.kind !== 'conversation' || !ANSWERS_PEOPLE.includes(job.agentKind) || job.pending) return null;
   return { job, said: await wordsForTurn({ db }, job.agentId!, jobId) };
 }
 
@@ -136,48 +136,6 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
   if (!principal) return null;
   const [p] = await db.select().from(people).where(eq(people.id, principal.personId));
   return p && (await runsDepartment(db, p, departmentId)) ? p.id : null;
-}
-
-/* Who may direct commands on a machine: the CEO or the CEO delegate, who direct the orchestrator, or the machine's own
-   owner while active. */
-async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
-  if (personId !== ownerPersonId) return actingCeo(db, personId);
-  const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, personId));
-  return owner?.status === 'active' ? personId : null;
-}
-
-/* For workers the machine's grant must cover every agent. The current speaker check below is for workers and heads. */
-async function machineTurnAllowed(db: Reader, turn: Words, ownerPersonId: string, machineId: string | undefined): Promise<boolean> {
-  if (turn.job.agentKind !== 'worker') return true;
-  if (!machineId) return false;
-  const [opened] = await db.select(idOnly(machines)).from(machines).innerJoin(machineAccess, eq(machineAccess.machineId, machines.id))
-    .where(and(eq(machines.id, machineId), eq(machines.companyId, turn.job.companyId), eq(machines.personId, ownerPersonId), isNull(machines.revokedAt), eq(machineAccess.scope, 'all_agents'), gt(machineAccess.until, new Date())));
-  return Boolean(opened);
-}
-
-export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string, machineId?: string): Promise<string | null> {
-  const turn = await turnWords(db, jobId, ['head', 'worker']);
-  if (!turn) return null;
-  if (!(await machineTurnAllowed(db, turn, ownerPersonId, machineId))) return null;
-  const said = turn.said.map(machineSpeaker).find(speaker => speaker !== undefined);
-  const spoke = said !== undefined ? said : await lettersSpeaker(db, turn.job);
-  if (spoke === null) return null;
-  const starter = turn.said.length === 0 ? turn.job.createdBy : null;
-  return activeMachinePerson(db, spoke ?? starter ?? ownerPersonId, ownerPersonId);
-}
-
-/* Who wrote the letters that woke an inbox turn, before any words came into it: a person who sent one, as a notice of what
-   they did; nobody when only employees and Hornhoof did, or a click opened a machine; not known when several people did. */
-async function lettersSpeaker(db: Reader, job: { id: string; agentId: string | null; inboxWake: boolean }): Promise<string | null | undefined> {
-  if (!job.inboxWake || !job.agentId) return undefined;
-  const letters = await db
-    .select({ personId: agentInbox.senderPersonId })
-    .from(agentInbox)
-    .where(and(eq(agentInbox.agentId, job.agentId), eq(agentInbox.jobId, job.id), eq(agentInbox.senderKind, 'person'), or(isNull(agentInbox.source), ne(agentInbox.source, 'computer_access'))));
-  const people = new Set(letters.map(letter => letter.personId));
-  if (!people.size) return undefined;
-  const [only] = people;
-  return people.size === 1 && only ? only : null;
 }
 
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
@@ -291,11 +249,6 @@ async function turnWithWords(db: Reader, where: SQL) {
 
 type Turn = NonNullable<Awaited<ReturnType<typeof turnWithWords>>>;
 
-async function hasClickGrant(db: Reader, jobId: string): Promise<boolean> {
-  const turn = await turnWords(db, jobId);
-  return Boolean(turn && (await activeClickGrants(db, turn.job, turn.said)).length);
-}
-
 /* The turn of the orchestrator or a head answers this person from now on, or nobody: marked once as long as it does. The
    mark goes by the words of the turn, not by the owner the orchestrator acts as when no CEO wrote. */
 async function keepSpeaker(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
@@ -306,7 +259,7 @@ async function answersFromNow(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: 
   if (turn.agentKind === 'worker') return keepSpeaker(ctx, turn, personId);
   if (!ANSWERS_PEOPLE.includes(turn.agentKind)) return;
   const current = (await wordsPrincipal(ctx.db, turn.id))?.personId ?? null;
-  if (current === personId && (personId !== null || !(await hasClickGrant(ctx.db, turn.id)))) return;
+  if (current === personId) return;
   await keepSpeaker(ctx, turn, personId);
 }
 

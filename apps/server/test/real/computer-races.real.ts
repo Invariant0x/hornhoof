@@ -85,7 +85,7 @@ const start = async (machine: string) => ((await mine.start(job, machine, 'true'
 describe("a machine's access between requests that come at once", () => {
   it('gives each command to one of two asks of its keeper', async () => {
     const machine = await ownMachine();
-    await mine.open(ceo, machine);
+    await mine.setOpen(ceo, machine, true);
     await start(machine);
     const holder = await holdingRow(machine);
     const asks = [mine.take(machine, []), theirs.take(machine, [])];
@@ -98,11 +98,11 @@ describe("a machine's access between requests that come at once", () => {
 
   it('never hands a command out once the close is kept', async () => {
     const machine = await ownMachine();
-    await mine.open(ceo, machine);
+    await mine.setOpen(ceo, machine, true);
     const id = await start(machine);
     const holder = await holdingRow(machine);
     /* The close stands in line first, the keeper's ask behind it. */
-    const closing = mine.close(ceo, machine);
+    const closing = mine.setOpen(ceo, machine, false);
     await untilWaiting(1);
     const asking = theirs.take(machine, []);
     await untilWaiting(2);
@@ -114,9 +114,9 @@ describe("a machine's access between requests that come at once", () => {
 
   it('starts no command on a machine that is being closed', async () => {
     const machine = await ownMachine();
-    await mine.open(ceo, machine);
+    await mine.setOpen(ceo, machine, true);
     const holder = await holdingRow(machine);
-    const closing = mine.close(ceo, machine);
+    const closing = mine.setOpen(ceo, machine, false);
     await untilWaiting(1);
     const starting = theirs.start(job, machine, 'true', 300);
     await untilWaiting(2);
@@ -132,7 +132,7 @@ describe("a machine's access between requests that come at once", () => {
     mine.seen(machine, true);
     const holder = await holdingRow(machine);
     /* The open waits for the row; Disconnect, which marks the row and drops its access, is let through first. */
-    const opening = mine.open(ceo, machine).then(() => 'opened', (err: { reason?: string }) => err.reason ?? 'failed');
+    const opening = mine.setOpen(ceo, machine, true).then(() => 'opened', (err: { reason?: string }) => err.reason ?? 'failed');
     await untilWaiting(1);
     await holder.query('UPDATE machines SET revoked_at = now() WHERE id = $1', [machine]);
     await holder.query('COMMIT');
@@ -146,7 +146,7 @@ describe("a machine's access between requests that come at once", () => {
     await db.update(people).set({ status: 'disabled' }).where(eq(people.id, ceo.id));
     onTestFinished(async () => void (await db.update(people).set({ status: 'active' }).where(eq(people.id, ceo.id))));
     /* The session still says active: the open reads the person again, under the hold a Disable waits for. */
-    expect(await mine.open(ceo, machine).then(() => 'opened', (err: { reason?: string }) => err.reason ?? 'failed')).toBe('not_machine_owner');
+    expect(await mine.setOpen(ceo, machine, true).then(() => 'opened', (err: { reason?: string }) => err.reason ?? 'failed')).toBe('not_machine_owner');
     expect(await db.select().from(machineAccess).where(eq(machineAccess.machineId, machine))).toEqual([]);
   });
 });

@@ -1,26 +1,46 @@
-import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, gt, inArray, isNotNull, lte, isNull, lt, ne, notExists, or } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, inArray, isNotNull, isNull, lt, notExists, notInArray, or, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
-import { actsAsCeo } from '../../auth/decisions.js';
-import { personOf, viaOrchestrator, type Person } from '../../auth/session.js';
+import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, jobs, computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
+import { agentInbox, agents, jobs, computerRuns, machineAccess, machines, people, tasks, type MachineRole } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { askerOf, KEEPER_MARK } from '../network/via.js';
-import { readGrant, type Grant } from './grant.js';
-import { keyPrint } from './owner-key.js';
+import { taskByRef } from '../tasks/lookup.js';
+import { CLOSED } from '../tasks/state.js';
 
-/* How long one click keeps access to a machine open where no grant says so: the server's own machine with no key. */
-export const ACCESS_DURATIONS = { '1h': 3600, '8h': 28800, '24h': 86400 } as const;
-export type AccessDuration = keyof typeof ACCESS_DURATIONS;
-export type AccessScope = 'orchestrator' | 'all_agents';
 type AgentKind = (typeof agents.$inferSelect)['kind'];
-const scopeAllows = (kind: AgentKind, scope: AccessScope): boolean => kind !== 'assistant' && (kind === 'orchestrator' || scope === 'all_agents');
+type Delegation = { allAgents: true } | { employee: string; task: string | number };
+type Access = Pick<typeof machineAccess.$inferSelect, 'scope' | 'employees'>;
+type RunJob = { id: string; agentId: string; companyId: string };
+
+const orchestratorOnly = (): Access => ({ scope: 'orchestrator', employees: [] });
+const isEmployee = (kind: AgentKind): boolean => kind === 'head' || kind === 'worker';
+
+type RunAgent = { id: string; kind: AgentKind; taskId: string | null; jobId: string | null };
+
+async function allows(tx: Db, companyId: string, access: Access, agent: RunAgent): Promise<boolean> {
+  if (agent.kind === 'orchestrator') return true;
+  if (!isEmployee(agent.kind)) return false;
+  if (access.scope === 'all_agents') return true;
+  const granted = access.employees.filter(grant => grant.employeeId === agent.id).map(grant => grant.taskId);
+  if (!granted.length) return false;
+  /* Inbox turns keep their tasks on the letters the turn took. */
+  const inbox = agent.jobId
+    ? exists(tx.select(idOnly(agentInbox)).from(agentInbox).where(and(
+      eq(agentInbox.jobId, agent.jobId), eq(agentInbox.agentId, agent.id), eq(agentInbox.companyId, companyId),
+      eq(agentInbox.taskId, tasks.id), inArray(agentInbox.status, ['read', 'done']),
+    )))
+    : undefined;
+  const source = or(agent.taskId ? eq(tasks.id, agent.taskId) : undefined, inbox);
+  if (!source) return false;
+  const [task] = await tx.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.companyId, companyId), inArray(tasks.id, granted), notInArray(tasks.status, [...CLOSED]), source)).limit(1);
+  return task !== undefined;
+}
+
 /* A command runs this many seconds unless the orchestrator gives its own time, never longer than the most. */
 export const RUN_DEFAULT_S = 300;
 export const RUN_MAX_S = 1800;
@@ -41,55 +61,30 @@ export const WAITING_MS = 10 * 60_000;
 const CLEAR_EVERY_MS = 3_600_000;
 /* The end of a command's output that is kept. */
 const OUTPUT_MAX = 30_000;
-/* What an app from before access was per machine left in the control folder, set aside until this app leads. */
-export const LEGACY_FILE = 'computer.legacy.json';
 const POLL_MS = 250;
 /* What a command that never ran answers, as the updater does for one on a closed computer. */
 const CLOSED_EXIT = 126;
 
-export type Asked = { reason: string; at: string };
 /* A machine of the company that has the company's core, and so can have its computer opened. */
 /* name: what it is called in the log and to the orchestrator. hostname: the name its computer told, or none, for a
    screen that names an unnamed machine in the reader's own language. */
 export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: MachineRole | null; os: 'linux' | 'darwin' | null; data: boolean };
-/* not_needed: the server's own machine while its keeper holds no key, which takes the app's word. held: the machine
-   holds the key its owner has now. not_held: it holds none, or another, so nothing its owner signs opens it. */
-type KeyState = 'not_needed' | 'held' | 'not_held';
-export type AccessState = { machine: AccessMachine; reachable: boolean; until: string | null; asked: Asked | null; key: KeyState; scope: AccessScope | null; openedBy: { id: string; name: string } | null; openedAt: string | null };
+export type AccessState = { machine: AccessMachine; reachable: boolean } & (
+  { open: false; scope: null; employees: [] } | ({ open: true } & Access)
+);
 export type AccessView = AccessState & { canOpen: boolean; canClose: boolean };
 export type RunResult = { exit: number; output: string };
 /* A command's answer, or that it still runs, that there is no such command, or that its machine's core lost it. */
 export type Waited = RunResult | 'running' | 'gone' | 'lost';
 /* forget: the commands the keeper named that are no longer out with it, whose files it lets go of. */
-export type Taken = { access: { untilSec: number; until: string; grant: Grant | null } | null; runs: { id: string; command: string; timeout: number }[]; forget: string[] };
-
-/* The last opening stays in storage; a closed or expired view shows no live grant or opener. */
-function opening(row: (typeof machineAccess.$inferSelect & { personName: string | null }) | undefined, now: Date): Pick<AccessState, 'until' | 'scope' | 'openedBy' | 'openedAt'> {
-  if (!row?.until || row.until <= now) return { until: null, scope: null, openedBy: null, openedAt: null };
-  return { until: row.until.toISOString(), scope: row.scope, openedBy: row.openedBy && row.personName ? { id: row.openedBy, name: row.personName } : null, openedAt: row.openedAt?.toISOString() ?? null };
-}
-
-type OpenOptions = { grant?: Grant; scope?: AccessScope; duration?: AccessDuration };
-function openingOptions(options: OpenOptions): { scope: AccessScope; seconds: number } {
-  return { scope: options.scope ?? 'orchestrator', seconds: ACCESS_DURATIONS[options.duration ?? '1h'] };
-}
+export type Taken = { access: { standing: true } | null; runs: { id: string; command: string; timeout: number }[]; forget: string[] };
 
 type Row = typeof machines.$inferSelect;
-type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via' | 'viaHead'>;
 
-/* People who see the whole company see each machine's access from their own screens, and the orchestrator acting for the
-   CEO: never a head. */
 export const canViewComputer = (me: { scopeKind: string; viaHead?: true }): boolean => me.scopeKind === 'company' && !me.viaHead;
 
-/* A machine's owner opens it, on their own screen, and the orchestrator, which acts as anyone; nobody else: not the CEO on
-   another person's machine, and not a head. The server's own machine while it needs no key is the company's, as before
-   machines had keys: the CEO, who owns it, or the CEO delegate opens it. A machine that needs a key opens only with its
-   owner's signature all the same. */
-export const canOpen = (me: Opener, machine: { personId: string }, key: KeyState): boolean =>
-  viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || (key === 'not_needed' && actsAsCeo(me))));
-
-/* Closing takes power away, so the CEO, the CEO delegate and the orchestrator close any machine besides its owner. */
-export const canClose = (me: Opener, machine: { personId: string }): boolean => viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || actsAsCeo(me)));
+const ownsComputer = (me: Pick<Person, 'id' | 'status' | 'via' | 'viaHead'>, machine: { personId: string }): boolean =>
+  !me.via && !me.viaHead && me.status === 'active' && me.id === machine.personId;
 
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
@@ -97,34 +92,17 @@ export const onMachine = (machine: string | null): Record<string, string> => (ma
    left unnamed there, and each screen names it in the reader's own language. */
 export const logName = (machine: Pick<AccessMachine, 'hostname' | 'name' | 'data'>): string | null => machine.hostname || (machine.data ? null : machine.name);
 
-const closedLine = (name: string): string => `Access to ${name} is closed.`;
+export const closedLine = (name: string): string => `The owner closed access to ${name}.`;
 const staleLine = (name: string): string => `${name} did not take this command in time, so it was not run.`;
-const notOwner = (name: string) => new ApiError(403, 'forbidden', `Only the owner of ${name} opens access to it.`, 'not_machine_owner');
-const noCore = () => new ApiError(404, 'not_found', "This machine has none of the company's core, so there is no access to open on it.", 'no_core');
-const unreachable = (name: string) => new ApiError(409, 'conflict', `Hornhoof cannot reach ${name} now: its core has not answered for a minute.`, 'machine_unreachable');
-const keyNotHeld = (name: string) =>
-  new ApiError(409, 'conflict', `${name} does not hold your key yet. Run a new command from Connect a machine on it: it takes your key only from there.`, 'key_not_held');
+const noCore = () => new ApiError(404, 'not_found', "This machine has none of the company's core, so there is no computer access on it.", 'no_core');
 
 const LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
-/* Ends the commands of machines whose access went: the ones nobody took never ran, and the ones a keeper took have an
-   outcome nobody will hear of. The machines' rows are held by the caller. */
-async function endRuns(tx: Db, machineIds: string[], names: Map<string, string>, now: Date, alsoSent: boolean): Promise<void> {
-  for (const id of machineIds) {
-    const waiting = and(eq(computerRuns.machineId, id), eq(computerRuns.state, 'waiting'));
-    await tx.update(computerRuns).set({ state: 'done', exit: CLOSED_EXIT, output: closedLine(names.get(id) ?? 'this machine'), doneAt: now }).where(waiting);
-    if (alsoSent) await tx.update(computerRuns).set({ state: 'lost', doneAt: now }).where(and(eq(computerRuns.machineId, id), eq(computerRuns.state, 'sent')));
-  }
-}
-
-/* The nonce of a grant as it was signed; none for one that is no grant. */
-function grantNonce(payload: string): string | null {
-  try {
-    const { nonce } = JSON.parse(payload) as { nonce?: unknown };
-    return typeof nonce === 'string' ? nonce : null;
-  } catch {
-    return null;
-  }
+/* The machine's row is held by the caller. A sent command is forgotten by its keeper on the next poll. */
+async function endRuns(tx: Db, machineId: string, output: string, now: Date, filter?: SQL): Promise<void> {
+  const run = and(eq(computerRuns.machineId, machineId), filter);
+  await tx.update(computerRuns).set({ state: 'done', exit: CLOSED_EXIT, output, doneAt: now }).where(and(run, eq(computerRuns.state, 'waiting')));
+  await tx.update(computerRuns).set({ state: 'lost', doneAt: now }).where(and(run, eq(computerRuns.state, 'sent')));
 }
 
 /* Disconnect's part for computer access, in its transaction, with the machines' rows held: their access goes with
@@ -133,7 +111,7 @@ export async function dropAccess(tx: Db, machineIds: string[], now: Date): Promi
   if (machineIds.length === 0) return;
   const rows = await tx.select({ id: machines.id, hostname: machines.hostname }).from(machines).where(inArray(machines.id, machineIds));
   await tx.delete(machineAccess).where(inArray(machineAccess.machineId, machineIds));
-  await endRuns(tx, machineIds, new Map(rows.map(row => [row.id, row.hostname || 'this machine'])), now, true);
+  for (const row of rows) await endRuns(tx, row.id, `Access to ${row.hostname || 'this machine'} ended when it was disconnected.`, now);
 }
 
 /* Computer access to each machine of the company that has its core. The state is rows only this app writes while it
@@ -143,7 +121,6 @@ export class Computers {
   private readonly now: () => Date;
   private readonly pause: (ms: number) => Promise<unknown>;
   private readonly seenAt = new Map<string, number>();
-  private legacyDone = false;
   private clearedAt = 0;
 
   constructor(
@@ -167,11 +144,6 @@ export class Computers {
   private machineOf(row: Row): AccessMachine {
     const os = row.os === 'linux' || row.os === 'darwin' ? row.os : null;
     return { id: row.id, networkId: row.networkId!, name: this.nameOf(row), hostname: row.hostname, personId: row.personId, role: row.role, os, data: row.role === 'data' };
-  }
-
-  private keyOf(row: Pick<Row, 'networkId' | 'ownerPin'>, ownerKey: string | undefined): KeyState {
-    if (!row.ownerPin) return this.own(row) ? 'not_needed' : 'not_held';
-    return ownerKey !== undefined && keyPrint(ownerKey) === row.ownerPin ? 'held' : 'not_held';
   }
 
   private rows(companyId: string, db: Pick<Db, 'select'> = this.ctx.db): Promise<Row[]> {
@@ -208,36 +180,28 @@ export class Computers {
     return at !== undefined && this.now().getTime() - at < SEEN_MS;
   }
 
-  /* Until when the machine's access is open, or null when it is closed or its day is over. */
-  async openUntil(machineId: string, kind: AgentKind = 'orchestrator'): Promise<string | null> {
-    const [row] = await this.ctx.db.select({ until: machineAccess.until, scope: machineAccess.scope }).from(machineAccess).where(eq(machineAccess.machineId, machineId));
-    return row?.until && row.until > this.now() && scopeAllows(kind, row.scope) ? row.until.toISOString() : null;
-  }
-
-  /* Every machine with a core and its access, as it is for anyone. */
+  /* Every connected machine and the access it offers. */
   async states(companyId: string): Promise<AccessState[]> {
     const rows = await this.rows(companyId);
     if (rows.length === 0) return [];
-    const ids = rows.map(row => row.id);
-    const access = new Map((await this.ctx.db.select({ access: machineAccess, personName: people.name }).from(machineAccess).leftJoin(people, eq(people.id, machineAccess.openedBy)).where(inArray(machineAccess.machineId, ids))).map(row => [row.access.machineId, { ...row.access, personName: row.personName }]));
-    const owners = [...new Set(rows.map(row => row.personId))];
-    const keys = new Map((await this.ctx.db.select({ personId: personKeys.personId, publicKey: personKeys.publicKey }).from(personKeys).where(inArray(personKeys.personId, owners))).map(row => [row.personId, row.publicKey]));
-    const now = this.now();
+    const grants = await this.ctx.db.select().from(machineAccess).where(inArray(machineAccess.machineId, rows.map(row => row.id)));
+    const taskIds = [...new Set(grants.flatMap(row => row.employees.map(grant => grant.taskId)))];
+    const openTasks = new Set(taskIds.length ? (await this.ctx.db.select(idOnly(tasks)).from(tasks)
+      .where(and(eq(tasks.companyId, companyId), inArray(tasks.id, taskIds), notInArray(tasks.status, [...CLOSED])))).map(row => row.id) : []);
+    const access = new Map(grants.map(row => [row.machineId, { scope: row.scope, employees: row.employees.filter(grant => openTasks.has(grant.taskId)) }]));
     return rows.map(row => {
-      const held = access.get(row.id);
-      return {
-        machine: this.machineOf(row),
-        reachable: this.reachable(row.id),
-        ...opening(held, now),
-        asked: held?.askedReason && held.askedAt ? { reason: held.askedReason, at: held.askedAt.toISOString() } : null,
-        key: this.keyOf(row, keys.get(row.personId)),
-      };
+      const machine = this.machineOf(row);
+      const reachable = this.reachable(row.id);
+      return row.computerClosed ? { machine, reachable, open: false, scope: null, employees: [] }
+        : { machine, reachable, open: true, ...(access.get(row.id) ?? orchestratorOnly()) };
     });
   }
 
-  /* The same as this person sees it: whether they may open or close each comes with it. */
   async views(me: Person): Promise<AccessView[]> {
-    return (await this.states(me.companyId)).map(state => ({ ...state, canOpen: canOpen(me, state.machine, state.key), canClose: canClose(me, state.machine) }));
+    return (await this.states(me.companyId)).map(state => {
+      const own = ownsComputer(me, state.machine);
+      return { ...state, canOpen: own, canClose: own };
+    });
   }
 
   async view(me: Person, machineId: string): Promise<AccessView | null> {
@@ -250,118 +214,92 @@ export class Computers {
     return row && !row.revokedAt && row.networkId ? row : null;
   }
 
-  /* The orchestrator's request for a machine, which its owner sees. */
-  async ask(companyId: string, machineId: string, reason: string): Promise<void> {
+  /* The owner can take access away even while the machine is offline. Reopening restores standing access alone. */
+  async setOpen(me: Person, machineId: string, open: boolean): Promise<{ machine: AccessMachine; changed: boolean }> {
+    return this.ctx.db.transaction(async tx => {
+      const [person] = await tx.select({ id: people.id, status: people.status }).from(people).where(and(eq(people.id, me.id), eq(people.companyId, me.companyId))).for('share');
+      const row = await this.held(tx, me.companyId, machineId);
+      if (!row) throw noCore();
+      const machine = this.machineOf(row);
+      if (!person || !ownsComputer({ ...me, ...person }, machine)) {
+        throw new ApiError(403, 'forbidden', `Only the owner of ${machine.name} can close or reopen its computer access.`, 'not_machine_owner');
+      }
+      const changed = open === row.computerClosed;
+      if (changed) {
+        await tx.update(machines).set({ computerClosed: !open }).where(eq(machines.id, machineId));
+        if (!open) {
+          await tx.delete(machineAccess).where(eq(machineAccess.machineId, machineId));
+          await endRuns(tx, machineId, closedLine(machine.name), this.now());
+        }
+      }
+      return { machine, changed };
+    });
+  }
+
+  private async accessOf(tx: Db, machineId: string): Promise<Access> {
+    const [access] = await tx.select({ scope: machineAccess.scope, employees: machineAccess.employees }).from(machineAccess).where(eq(machineAccess.machineId, machineId));
+    return access ?? orchestratorOnly();
+  }
+
+  async delegate(job: RunJob, machineId: string, to: Delegation, revoke: boolean): Promise<void> {
     await this.ctx.db.transaction(async tx => {
-      const row = await this.held(tx, companyId, machineId);
+      const row = await this.held(tx, job.companyId, machineId);
       if (!row) throw noCore();
-      const asked = { askedReason: reason, askedAt: this.now() };
-      await tx.insert(machineAccess).values({ machineId, companyId, ...asked }).onConflictDoUpdate({ target: machineAccess.machineId, set: asked });
-    });
-  }
-
-  /* Until when the opener's word opens the machine: where the machine holds a key, or is not the server's own, only
-     what its owner signed with that key, which the machine's keeper checks again by itself. */
-  private async untilOf(tx: Db, me: Opener, row: Row, grant: Grant | undefined, now: Date, seconds: number): Promise<{ until: Date; grant: Grant | null }> {
-    if (!row.ownerPin && this.own(row)) return { until: new Date(now.getTime() + seconds * 1000), grant: null };
-    const name = this.nameOf(row);
-    if (!grant) throw new ApiError(400, 'validation', `Opening ${name} takes its owner's signature, and this request brought none.`, 'grant_needed');
-    const [mine] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, me.id));
-    if (!mine) throw new ApiError(409, 'conflict', 'You have no key yet. Get a command under Connect a machine: Hornhoof makes your key then.', 'no_key');
-    const facts = readGrant(grant, mine.publicKey, row.networkId!, Math.floor(now.getTime() / 1000));
-    if (!facts || facts.until - facts.at !== seconds) throw new ApiError(400, 'validation', `This is no signature of yours that opens ${name} now.`, 'bad_grant');
-    if (keyPrint(mine.publicKey) !== row.ownerPin) throw keyNotHeld(name);
-    return { until: new Date(facts.until * 1000), grant };
-  }
-
-  /* Opens the machine for its owner and answers what the orchestrator had asked it for. Everything is looked at again
-     inside one transaction, under the rows Disable and Disconnect take, in their order: the person, then the machine. */
-  async open(me: Person, machineId: string, options: OpenOptions = {}): Promise<{ machine: AccessMachine; until: string; asked: Asked | null; scope: AccessScope }> {
-    return this.ctx.db.transaction(async tx => {
-      const [person] = await tx.select().from(people).where(eq(people.id, me.id)).for('share');
-      const row = await this.held(tx, me.companyId, machineId);
-      if (!row) throw noCore();
-      const machine = this.machineOf(row);
-      const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
-      const opener = person ? { ...person, via: me.via, viaHead: me.viaHead } : null;
-      if (!opener || !canOpen(opener, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
-      if (!this.reachable(machineId)) throw unreachable(machine.name);
-      const now = this.now();
-      const { scope, seconds } = openingOptions(options);
-      const opened = await this.untilOf(tx, opener, row, options.grant, now, seconds);
-      const [before] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
-      await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);
-      /* The orchestrator opening for the owner is no person's opening, and names none. */
-      const set = { scope, until: opened.until, grant: opened.grant, openedBy: personOf(me), openedAt: now, askedReason: null, askedAt: null };
-      await tx.insert(machineAccess).values({ machineId, companyId: me.companyId, ...set }).onConflictDoUpdate({ target: machineAccess.machineId, set });
-      const asked = before?.askedReason && before.askedAt ? { reason: before.askedReason, at: before.askedAt.toISOString() } : null;
-      return { machine, until: opened.until.toISOString(), asked, scope };
-    });
-  }
-
-  /* Takes the access away, and with it the commands no keeper took yet. One a keeper took is stopped by its updater,
-     which hears of the close from its keeper. */
-  async close(me: Person, machineId: string): Promise<AccessMachine> {
-    return this.ctx.db.transaction(async tx => {
-      const row = await this.held(tx, me.companyId, machineId);
-      if (!row) throw noCore();
-      const machine = this.machineOf(row);
-      if (!canClose(me, machine)) throw new ApiError(403, 'forbidden', `Only the owner of ${machine.name}, the CEO or the CEO delegate closes access to it.`, 'not_machine_owner');
-      const now = this.now();
-      await tx.update(machineAccess).set({ until: null, grant: null }).where(eq(machineAccess.machineId, machineId));
-      await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);
-      return machine;
-    });
-  }
-
-  /* Takes the orchestrator's request away; null when there was none. */
-  async decline(me: Person, machineId: string): Promise<AccessMachine | null> {
-    return this.ctx.db.transaction(async tx => {
-      const row = await this.held(tx, me.companyId, machineId);
-      if (!row) throw noCore();
-      const machine = this.machineOf(row);
-      const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
-      if (!canOpen(me, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
-      const cleared = await tx.update(machineAccess).set({ askedReason: null, askedAt: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.askedAt))).returning({ id: machineAccess.machineId });
-      return cleared.length > 0 ? machine : null;
-    });
-  }
-
-  /* A command for the machine, which its keeper takes while its access is open: its id, or why there is none. */
-  async start(job: { id: string; agentId: string; companyId: string }, machineId: string, command: string, timeoutS: number): Promise<{ id: string } | 'closed' | 'none'> {
-    return this.ctx.db.transaction(async tx => {
-      const row = await this.held(tx, job.companyId, machineId, 'share');
-      if (!row) return 'none';
-      const [access] = await tx.select({ until: machineAccess.until, scope: machineAccess.scope }).from(machineAccess).where(eq(machineAccess.machineId, machineId));
-      if (!access?.until || access.until <= this.now()) return 'closed';
-      if (!(await this.agentMayStart(tx, job, access.scope))) return 'closed';
-      const [run] = await tx.insert(computerRuns).values({ companyId: job.companyId, machineId, jobId: job.id, agentId: job.agentId, command, timeoutS }).returning({ id: computerRuns.id });
-      return { id: run!.id };
+      if (row.computerClosed) throw new ApiError(409, 'conflict', closedLine(this.nameOf(row)));
+      const agent = await this.runAgent(tx, job);
+      if (agent?.kind !== 'orchestrator') throw new ApiError(403, 'forbidden', 'Only the orchestrator changes employee computer access.');
+      const access = await this.accessOf(tx, machineId);
+      if ('allAgents' in to) {
+        access.scope = revoke ? 'orchestrator' : 'all_agents';
+      } else {
+        const [employee] = await tx.select(only(agents, 'kind')).from(agents)
+          .where(and(eq(agents.id, to.employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('share');
+        const task = await taskByRef({ db: tx }, job.companyId, to.task);
+        if (!task || (!revoke && (!employee || !isEmployee(employee.kind) || CLOSED.includes(task.status)))) {
+          throw new ApiError(404, 'not_found', 'Name a company employee and an open company task.');
+        }
+        access.employees = access.employees.filter(grant => grant.employeeId !== to.employee || grant.taskId !== task.id);
+        if (!revoke) access.employees.push({ employeeId: to.employee, taskId: task.id });
+      }
+      await tx.insert(machineAccess).values({ machineId, companyId: job.companyId, ...access }).onConflictDoUpdate({ target: machineAccess.machineId, set: access });
+      if (revoke) await this.endUnpermitted(tx, row, access, this.now());
     });
   }
 
   /* Read the actual job and agent in the transaction; caller fields cannot invent a role or company. */
-  private async agentMayStart(tx: Db, job: { id: string; agentId: string; companyId: string }, scope: AccessScope): Promise<boolean> {
-    const [agent] = await tx.select({ kind: agents.kind }).from(jobs).innerJoin(agents, eq(agents.id, jobs.agentId))
-      .where(and(eq(jobs.id, job.id), eq(jobs.agentId, job.agentId), eq(jobs.companyId, job.companyId), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('share');
-    return Boolean(agent && scopeAllows(agent.kind, scope));
+  private async runAgent(tx: Db, job: RunJob) {
+    const [agent] = await tx.select({ id: agents.id, kind: agents.kind, taskId: jobs.taskId, jobId: jobs.id }).from(jobs)
+      .innerJoin(agents, eq(agents.id, jobs.agentId))
+      .where(and(eq(jobs.id, job.id), eq(jobs.agentId, job.agentId), eq(jobs.companyId, job.companyId), eq(agents.companyId, job.companyId), isNull(agents.removedAt)))
+      .for('share', { of: [jobs, agents] });
+    return agent;
   }
 
-  /* Clear expired access under the same machine locks as open and close, once per opening. */
-  async expire(): Promise<{ companyId: string; machine: AccessMachine }[]> {
+  /* A queued or running command loses its access when the employee's grant is withdrawn or their task ends. */
+  private async endUnpermitted(tx: Db, row: Row, access: Access, now: Date): Promise<void> {
+    const active = await tx.select({
+      runId: computerRuns.id, id: agents.id, kind: agents.kind, companyId: agents.companyId, removed: agents.removedAt,
+      taskId: jobs.taskId, jobId: jobs.id,
+    }).from(computerRuns)
+      .innerJoin(agents, eq(agents.id, computerRuns.agentId)).leftJoin(jobs, eq(jobs.id, computerRuns.jobId))
+      .where(and(eq(computerRuns.machineId, row.id), inArray(computerRuns.state, ['waiting', 'sent'])));
+    const ended: string[] = [];
+    for (const agent of active) {
+      if (agent.removed || agent.companyId !== row.companyId || !(await allows(tx, row.companyId, access, agent))) ended.push(agent.runId);
+    }
+    if (ended.length) await endRuns(tx, row.id, `Employee access to ${this.nameOf(row)} ended.`, now, inArray(computerRuns.id, ended));
+  }
+
+  async start(job: RunJob, machineId: string, command: string, timeoutS: number): Promise<{ id: string } | 'closed' | 'not_granted' | 'unreachable' | 'none'> {
     return this.ctx.db.transaction(async tx => {
-      const now = this.now();
-      const rows = await tx.select({ machine: machines }).from(machines).innerJoin(machineAccess, eq(machineAccess.machineId, machines.id))
-        .where(lte(machineAccess.until, now)).orderBy(asc(machines.id)).for('update', { of: machines });
-      const expired: { companyId: string; machine: AccessMachine }[] = [];
-      for (const { machine: row } of rows) {
-        const cleared = await tx.update(machineAccess).set({ until: null, grant: null }).where(and(eq(machineAccess.machineId, row.id), lte(machineAccess.until, now))).returning({ id: machineAccess.machineId });
-        if (!cleared.length) continue;
-        const machine = this.machineOf(row);
-        await endRuns(tx, [row.id], new Map([[row.id, machine.name]]), now, false);
-        expired.push({ companyId: row.companyId, machine });
-      }
-      return expired;
+      const row = await this.held(tx, job.companyId, machineId, 'share');
+      if (!row) return 'none';
+      if (row.computerClosed) return 'closed';
+      const agent = await this.runAgent(tx, job);
+      if (!agent || !(await allows(tx, row.companyId, await this.accessOf(tx, machineId), agent))) return 'not_granted';
+      if (!this.reachable(machineId)) return 'unreachable';
+      const [run] = await tx.insert(computerRuns).values({ companyId: job.companyId, machineId, jobId: job.id, agentId: job.agentId, command, timeoutS }).returning({ id: computerRuns.id });
+      return { id: run!.id };
     });
   }
 
@@ -424,6 +362,11 @@ export class Computers {
       const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
       if (!row || row.revokedAt || !row.networkId) return { access: null, runs: [], forget: held };
       const now = this.now();
+      if (row.computerClosed) {
+        await endRuns(tx, machineId, closedLine(this.nameOf(row)), now);
+        return { access: null, runs: [], forget: held };
+      }
+      await this.endUnpermitted(tx, row, await this.accessOf(tx, machineId), now);
       const out = await tx.select({ id: computerRuns.id, sentAt: computerRuns.sentAt, timeoutS: computerRuns.timeoutS }).from(computerRuns).where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'sent')));
       const since = (run: (typeof out)[number]) => (run.sentAt ? now.getTime() - run.sentAt.getTime() : 0);
       const lost = out.filter(run => (held.includes(run.id) ? since(run) >= (run.timeoutS + SENT_GRACE_S) * 1000 : since(run) >= HELD_GRACE_S * 1000)).map(run => run.id);
@@ -435,38 +378,12 @@ export class Computers {
         await tx.delete(computerRuns).where(and(eq(computerRuns.companyId, row.companyId), inArray(computerRuns.state, ['done', 'lost']), lt(computerRuns.doneAt, new Date(now.getTime() - RUN_KEEP_MS))));
       }
       await this.endStale(machineId, tx, row);
-      const [access] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
-      if (!access?.until || access.until <= now) {
-        await endRuns(tx, [machineId], new Map([[machineId, this.nameOf(row)]]), now, false);
-        return { access: null, runs: [], forget };
-      }
-      const opened = { untilSec: Math.floor(access.until.getTime() / 1000), until: access.until.toISOString(), grant: access.grant };
+      const opened = { standing: true } as const;
       if (stillOut.length > 0) return { access: opened, runs: [], forget };
       const [next] = await tx.select().from(computerRuns).where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'waiting'))).orderBy(asc(computerRuns.createdAt), asc(computerRuns.id)).limit(1);
       if (!next) return { access: opened, runs: [], forget };
       await tx.update(computerRuns).set({ state: 'sent', sentAt: now }).where(eq(computerRuns.id, next.id));
       return { access: opened, runs: [{ id: next.id, command: next.command, timeout: next.timeoutS }], forget };
-    });
-  }
-
-  /* The machine's keeper did not take the grant the app gave it: its clock is off, or it does not hold the key the app
-     thinks it holds. The machine is closed there whatever the row says, so the row says so too, and nobody is shown an
-     open machine that runs nothing. nonce: the grant the keeper means; one its owner signed since is another grant,
-     and stays. The machine, when that changed anything. */
-  async refused(machineId: string, nonce: string | null = null): Promise<AccessMachine | null> {
-    return this.ctx.db.transaction(async tx => {
-      const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
-      if (!row || row.revokedAt || !row.networkId) return null;
-      const now = this.now();
-      if (nonce !== null) {
-        const [open] = await tx.select(only(machineAccess, 'grant')).from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
-        if (!open?.grant || grantNonce(open.grant.payload) !== nonce) return null;
-      }
-      const closed = await tx.update(machineAccess).set({ until: null, grant: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.grant), gt(machineAccess.until, now))).returning({ id: machineAccess.machineId });
-      if (closed.length === 0) return null;
-      const machine = this.machineOf(row);
-      await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);
-      return machine;
     });
   }
 
@@ -483,75 +400,8 @@ export class Computers {
     });
   }
 
-  /* A new build leads the company, by its data keeper's report: no owner could close a machine while the leader
-     changed, so every other machine's access closes, and its commands nobody took end. */
-  async newBuild(tx: Db, serverMachineId: string): Promise<void> {
-    const [mine] = await tx.select(only(machines, 'companyId')).from(machines).where(eq(machines.id, serverMachineId));
-    if (!mine) return;
-    const others = (await this.rows(mine.companyId, tx)).filter(row => row.id !== serverMachineId);
-    if (others.length === 0) return;
-    const ids = others.map(row => row.id);
-    await tx.update(machineAccess).set({ until: null, grant: null }).where(and(inArray(machineAccess.machineId, ids), ne(machineAccess.machineId, serverMachineId)));
-    await endRuns(tx, ids, new Map(others.map(row => [row.id, this.nameOf(row)])), this.now(), false);
-  }
-
-  /* An app from before access was per machine wrote the server's own access into the control folder. That file is set
-     aside at start, by one rename and never over one set aside before, for the import below. */
-  moveLegacy(controlDir: string): void {
-    const file = join(controlDir, 'computer.json');
-    const aside = join(controlDir, LEGACY_FILE);
-    try {
-      const said = JSON.parse(readFileSync(file, 'utf8')) as { by?: unknown };
-      if (said.by === undefined && !existsSync(aside)) renameSync(file, aside);
-    } catch {
-      /* No such file, or the keeper moved it first. */
-    }
-    /* With nothing set aside there is nothing to take over. */
-    this.legacyDone = !existsSync(aside);
-  }
-
-  /* While this app leads: what the file set aside said becomes the row of the server's own machine, once that machine
-     has a row, and the file goes. It never writes over a row that is there: whatever was decided since the file was
-     written stands, so a file of before that turns up later opens nothing. Until it is done the access of the server's
-     own machine is not served. Whether it is done: false while the server's own machine has no row yet, to be tried
-     again. */
-  async importLegacy(controlDir: string): Promise<boolean> {
-    if (this.legacyDone) return true;
-    const aside = join(controlDir, LEGACY_FILE);
-    const { machineId } = this.ctx.config;
-    /* No file, or a server from before machines had ids, which has no machine of its own to open. */
-    if (!machineId || !existsSync(aside)) return (this.legacyDone = true);
-    const [mine] = await this.ctx.db.select().from(machines).where(and(eq(machines.networkId, machineId), isNull(machines.revokedAt)));
-    if (!mine) return false;
-    const said = JSON.parse(readFileSync(aside, 'utf8')) as { untilSec?: unknown; asked?: { reason?: unknown; at?: unknown } | null };
-    const now = this.now();
-    const until = typeof said.untilSec === 'number' && said.untilSec * 1000 > now.getTime() ? new Date(said.untilSec * 1000) : null;
-    const asked = said.asked && typeof said.asked.reason === 'string' && typeof said.asked.at === 'string' ? { askedReason: said.asked.reason.slice(0, 500), askedAt: new Date(said.asked.at) } : { askedReason: null, askedAt: null };
-    const taken = await this.ctx.db.transaction(async tx => {
-      await tx.select(idOnly(machines)).from(machines).where(eq(machines.id, mine.id)).for('update');
-      const row = { machineId: mine.id, companyId: mine.companyId, until, grant: null, openedBy: until ? mine.personId : null, openedAt: until ? now : null, ...asked };
-      return (await tx.insert(machineAccess).values(row).onConflictDoNothing().returning({ id: machineAccess.machineId })).length > 0;
-    });
-    rmSync(aside, { force: true });
-    this.ctx.log.info(taken ? `Took over the server's computer access as the build before left it: ${until ? `open until ${until.toISOString()}` : 'closed'}.` : "Left the server's computer access as it is: what the build before wrote is older than it.");
-    return (this.legacyDone = true);
-  }
-
-  ready(): boolean {
-    return this.legacyDone;
-  }
-
-  /* Whether this machine's access is served yet. Only the server's own machine waits for what an app from before left
-     of it: every other machine of the company has nothing to take over, and is served whatever becomes of that. */
-  async served(machineId: string): Promise<boolean> {
-    if (this.legacyDone) return true;
-    const [row] = await this.ctx.db.select(only(machines, 'networkId')).from(machines).where(eq(machines.id, machineId));
-    return !row || !this.own(row);
-  }
-
   /* The machine a person sits at: a request to localhost that did not come over the link came through the front door
-     of the machine it names, a worker's when the peer door named one, else the server's own. Sitting there gives no
-     right: opening still takes the owner's session. */
+     of the machine it names, a worker's when the peer door named one, else the server's own. */
   async here(req: FastifyRequest, companyId: string): Promise<AccessMachine | null> {
     const forwarded = req.headers['x-forwarded-host'];
     if (!LOCALHOST.test(req.headers.host ?? '') || (forwarded !== undefined && !LOCALHOST.test(String(forwarded))) || req.overLink) return null;

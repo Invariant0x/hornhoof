@@ -470,6 +470,8 @@ export const machines = pgTable(
     failedAt: timestamp('failed_at', { withTimezone: true }),
     /* The print of its owner's key as its keeper pinned it from the command the owner ran there. */
     ownerPin: text('owner_pin'),
+    /* The owner's switch for the computer tools. Connecting the machine leaves it open. */
+    computerClosed: boolean('computer_closed').notNull().default(false),
     /* Backups: the public half of the age key its keeper made, whether its owner lets it keep the company's bundles,
        and the bundles its keeper last said it holds. */
     ageKey: text('age_key'),
@@ -2340,8 +2342,9 @@ export const personKeys = pgTable(
   () => [check('person_keys_iterations', sql`iterations >= 600000`)],
 ).enableRLS();
 
-/* Computer access to one machine of the company: open while `until` is ahead, what the orchestrator asked it for, who
-   opened it, and the grant its owner signed, which the machine's keeper checks against the key it holds. */
+export type EmployeeComputerAccess = { employeeId: string; taskId: string };
+
+/* Access the orchestrator extends to company employees on one connected machine. */
 export const machineAccess = pgTable(
   'machine_access',
   {
@@ -2350,14 +2353,9 @@ export const machineAccess = pgTable(
       .references(() => machines.id),
     companyId: companyId(),
     scope: text('scope', { enum: ['orchestrator', 'all_agents'] }).notNull().default('orchestrator'),
-    until: timestamp('until', { withTimezone: true }),
-    askedReason: text('asked_reason'),
-    askedAt: timestamp('asked_at', { withTimezone: true }),
-    openedBy: uuid('opened_by').references(() => people.id),
-    openedAt: timestamp('opened_at', { withTimezone: true }),
-    grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
+    employees: jsonb('employees').$type<EmployeeComputerAccess[]>().notNull().default([]),
   },
-  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`), check('machine_access_scope', sql`scope IN ('orchestrator', 'all_agents')`)],
+  () => [check('machine_access_scope', sql`scope IN ('orchestrator', 'all_agents')`)],
 ).enableRLS();
 
 /* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO

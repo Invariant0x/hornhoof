@@ -583,31 +583,19 @@ describe('a merge applied', () => {
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
-  it('brings back a new machine with its access closed', async () => {
+  it('keeps a machine closed and imports no employee grants from a copy', async () => {
     const s = await stand();
-    const machine = async (side: Db, key: string) => (await side.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: key, hostname: key }).returning())[0]!;
-    const open = { until: new Date(Date.now() + 3_600_000), openedBy: s.owner.id, openedAt: new Date(), grant: { payload: 'p', signature: 's' } };
-    const known = await machine(s.db, 'known');
-    await s.db.insert(machineAccess).values({ ...s.on, machineId: known.id });
+    const [known] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'known', hostname: 'known', computerClosed: true }).returning();
     const fork = await s.sides.fork();
-    const added = await machine(fork.db, 'added');
-    await fork.db.insert(machineAccess).values({ ...s.on, machineId: added.id, ...open });
+    const [added] = await fork.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'added', hostname: 'added', computerClosed: true }).returning();
+    await fork.db.update(machines).set({ computerClosed: false }).where(eq(machines.id, known!.id));
+    await fork.db.insert(machineAccess).values([known!, added!].map(machine => ({ ...s.on, machineId: machine.id, scope: 'all_agents' as const })));
     const restored = await s.merge(fork, { kept: true });
-    expect((await s.db.select().from(machines).where(eq(machines.id, added.id)))[0]).toMatchObject({ hostname: 'added' });
-    expect((await s.db.select().from(machineAccess).where(eq(machineAccess.machineId, added.id)))[0]).toMatchObject({ until: null, openedBy: null, openedAt: null, grant: null });
-    expect((await s.kept(restored.id)).find(row => row.tbl === 'machine_access')).toMatchObject({ how: 'rewritten', cols: ['until', 'opened_by', 'opened_at', 'grant'] });
+    expect((await s.db.select().from(machines).where(eq(machines.id, added!.id)))[0]).toMatchObject({ computerClosed: true });
+    expect((await s.db.select().from(machines).where(eq(machines.id, known!.id)))[0]).toMatchObject({ computerClosed: true });
+    expect(await s.db.select().from(machineAccess)).toEqual([]);
+    expect(await s.conflicts(restored.id)).toMatchObject([{ tbl: 'machines', cols: ['computer_closed'] }]);
     expect(await s.checked(fork, restored.id)).toEqual({ ok: true, missing: [] });
-    /* By the journal, the source opening a machine both sides know: listed, and closed here until its owner opens it. */
-    const journal = await stand();
-    const mine = (await journal.db.insert(machines).values({ ...journal.on, personId: journal.owner.id, machineKey: 'known', hostname: 'known' }).returning())[0]!;
-    await journal.db.insert(machineAccess).values({ ...journal.on, machineId: mine.id });
-    const apart = await journal.sides.fork();
-    await apart.db.update(machineAccess).set({ ...open, openedBy: journal.owner.id }).where(eq(machineAccess.machineId, mine.id));
-    const merged = await journal.merge(apart);
-    expect((await journal.db.select().from(machineAccess).where(eq(machineAccess.machineId, mine.id)))[0]).toMatchObject({ until: null, grant: null });
-    const [conflict] = await journal.conflicts(merged.id);
-    expect(conflict).toMatchObject({ tbl: 'machine_access', kind: 'differs', topic: 'access', op: 'update' });
-    expect([...conflict!.cols].sort()).toEqual(['grant', 'opened_at', 'opened_by', 'until']);
   });
 
   it('finds a row the carry wrote anew', async () => {

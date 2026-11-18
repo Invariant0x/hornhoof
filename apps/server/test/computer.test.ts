@@ -6,9 +6,8 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { PglitePreparedQuery } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machines, people, requests, subscriptions } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
 import type { Computers } from '../src/modules/computer/access.js';
@@ -16,7 +15,7 @@ import { deliverLive, withInputLock } from '../src/modules/conversation/decision
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, onAgent, pump } from '../src/modules/conversation/queue.js';
 import { readMessage } from '../src/modules/events/parties.js';
-import { appendEvent, listEvents } from '../src/modules/events/store.js';
+import { appendEvent } from '../src/modules/events/store.js';
 import { hostIdOf } from '../src/modules/network/join.js';
 import { thisMachine } from '../src/modules/network/store.js';
 import { builtinOf, identityOf } from '../src/modules/nodes/hub.js';
@@ -28,7 +27,6 @@ await prepareSharedDatabase();
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
-const HOUR_MS = 60 * 60 * 1000;
 /* A wait for a command's answer that no test outlasts, for commands that are answered. */
 const NEVER_MS = 2_147_483_647;
 /* The server's own machine, with no name its keeper told yet, which the CEO owns. */
@@ -70,7 +68,6 @@ function withWait(c: Pick<Company, 'app' | 'machine'>, waitMs: number): Computer
   return computer;
 }
 
-const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
 /* The commands that wait for the machine's keeper or are out with it. */
 async function checkOpen(c: Company, client: Awaited<ReturnType<typeof mcp>>) {
   const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
@@ -104,13 +101,12 @@ async function retryTurnOn(c: Awaited<ReturnType<typeof company>>, failedJobId: 
   return msg;
 }
 
-async function openClickedRetry(c: Awaited<ReturnType<typeof company>>) {
-  await call(await mcp(c.app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
+async function startRetry(c: Company) {
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
-  await c.app.inject({ method: 'POST', url: '/api/computer/open', ...as(c.ceo) });
-  let note = await c.builtin.next();
-  while (note.type !== 'job.run') note = await c.builtin.next();
-  return retryTurnOn(c, note.jobId);
+  await enqueueTurn(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, prompt: 'Inspect service logs.', createdBy: null, message: { personId: null, text: 'Inspect service logs.', notification: { source: 'wait_ended', tasks: [] } } });
+  let opened = await c.builtin.next();
+  while (opened.type !== 'job.run') opened = await c.builtin.next();
+  return retryTurnOn(c, opened.jobId);
 }
 
 async function replaySavedWords(c: Awaited<ReturnType<typeof company>>, mode: 'unheard' | 'queued', jobId: string, replayText: string) {
@@ -168,44 +164,6 @@ function messageReader(next: () => Promise<ServerMessage>) {
 }
 
 describe('access to the computer the server runs on', () => {
-  it('keeps the access question as an outgoing message from the orchestrator to the CEO', async () => {
-    const c = await company();
-    const { app, db, orchestrator } = c;
-    const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
-    expect((await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' })).isError).toBeFalsy();
-    const outgoing = (await listEvents(db, orchestrator.id, 0)).find(e => e.message?.direction === 'out');
-    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Restart the nodes outside AppArmor.' }, message: { direction: 'out', from: { kind: 'agent', id: orchestrator.id, agentKind: 'orchestrator' }, to: { kind: 'person', id: ceo!.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
-  });
-
-  it('opens for one hour by default when the CEO clicks, and the orchestrator goes on by itself', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-17T12:00:00Z'));
-    onTestFinished(() => { vi.useRealTimers(); });
-    const c = await company();
-    const { app, db, ceo, orchestrator } = c;
-    const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
-    expect(asked.isError).toBeFalsy();
-    const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true, machineId: c.machine });
-
-    const before = Date.now();
-    const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
-    expect(opened.statusCode).toBe(200);
-    const until_ = Date.parse(opened.json().until);
-    expect(until_).toBe(before + HOUR_MS);
-    expect(await accessOf(c)).toMatchObject({ until: new Date(until_), askedReason: null, askedAt: null, grant: null });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true, machineId: c.machine });
-    /* The server's own machine told no name, so the log names none, and each screen names it in its reader's language. */
-    expect(await lines(db, orchestrator.id)).toEqual([
-      { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
-      { state: 'opened', scope: 'orchestrator', until: opened.json().until },
-    ]);
-    /* The note that it is open is the CEO's order, so the turn it starts may use the computer. */
-    const [note] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
-    expect(note!.answersCeo).toBe(true);
-    expect(note!.prompt).toContain('Restart the nodes outside AppArmor.');
-  });
-
   it("runs the orchestrator's command through the updater and gives back the exit code and output", async () => {
     const c = await company();
     const { app, ceo } = c;
@@ -246,28 +204,12 @@ describe('access to the computer the server runs on', () => {
     expect(gone.isError).toBe(true);
   });
 
-  it("queues the orchestrator's note while its machine is offline, so it goes on once the machine is back", async () => {
-    const c = await company();
-    const { app, db, ceo, orchestrator, builtin } = c;
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
-    builtin.close();
-    await until(async () => !(await app.inject({ method: 'GET', url: '/api/agents/orchestrator/events?after=0', ...as(ceo) })).json().state.ready);
-    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).statusCode).toBe(200);
-    const [note] = await db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator.id), eq(jobs.status, 'queued')));
-    expect(note).toMatchObject({ answersCeo: true });
-    expect(note!.prompt).toContain('Free disk space.');
-  });
-
-  it('refuses commands while access is closed and after its day, and runs them in any turn while it is open, including after an Enter in its terminal', async () => {
+  it('refuses commands while the owner keeps access closed and runs them in any turn after reopening, including after an Enter in its terminal', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, running } = c;
+    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
     const closed = await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' });
-    expect(closed.isError).toBe(true);
-    expect(text(closed)).toContain('ask_computer_access');
-    await db.insert(machineAccess).values({ machineId: c.machine, companyId: orchestrator.companyId, until: new Date(Date.now() - 1000) });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().until).toBeNull();
-    expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
-
+    expect(text(closed)).toBe('The owner closed access to the company server.');
     withWait(c, NEVER_MS);
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
@@ -292,13 +234,7 @@ describe('access to the computer the server runs on', () => {
     const c = await company();
     const { app, db, ceo, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean old images.' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
-    let note = await builtin.next();
-    while (note.type !== 'job.run') note = await builtin.next();
-    builtin.send({ type: 'job.done', jobId: note.jobId, ok: true, sessionId: 'session', result: 'Asked.', tail: '', error: null });
-    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, note.jobId)))[0]!.status === 'done');
 
     const [sub] = await db.select().from(subscriptions);
     const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
@@ -325,7 +261,7 @@ describe('access to the computer the server runs on', () => {
     expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
     const shut = await call(wakeClient, 'computer', { command: 'df -h' });
     expect(shut.isError).toBe(true);
-    expect(text(shut)).toContain('ask_computer_access');
+    expect(text(shut)).toBe('The owner closed access to the company server.');
     expect(await pending(c.db)).toEqual([]);
   });
 
@@ -335,15 +271,14 @@ describe('access to the computer the server runs on', () => {
     withWait(c, NEVER_MS);
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
+    await enqueueTurn(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'Free disk space.', createdBy: null, message: { personId: null, text: 'Free disk space.', notification: { source: 'wait_ended', tasks: [] } } });
     let note = await builtin.next();
     while (note.type !== 'job.run') note = await builtin.next();
     const client = await mcp(app, note.toolToken!);
     const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
-    /* What only the CEO may, the orchestrator does in any turn as the owner, the click or not. */
+    /* What only the CEO may, the orchestrator does in any turn as the owner, regardless of who started it. */
     const request = await approvalAsked(app);
     expect((await call(client, 'answer_request', { request: request.id, approve: true })).isError).toBeFalsy();
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'approved' });
@@ -361,11 +296,10 @@ describe('access to the computer the server runs on', () => {
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [] });
     await until(() => app.ctx.hub.hasTerminals(BUILTIN));
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
+    await enqueueTurn(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'Inspect service logs.', createdBy: null, message: { personId: null, text: 'Inspect service logs.', notification: { source: 'wait_ended', tasks: [] } } });
     let note = await builtin.next();
     while (note.type !== 'job.run') note = await builtin.next();
     const client = await mcp(app, note.toolToken!);
@@ -402,57 +336,13 @@ describe('access to the computer the server runs on', () => {
     await checkOpen(c, client);
   });
 
-  it('keeps the computer-opening click through retries, while a plain notice retry works on the open machine', async () => {
-    const c = await company();
-    const { app, db, ceo, orchestrator, builtin } = c;
-    withWait(c, NEVER_MS);
-    const retryRun = async (failedJobId: string) => {
-      builtin.send({ type: 'job.done', jobId: failedJobId, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Overloaded.', result: '', failure: { kind: 'overloaded', retryable: true, text: 'Provider overloaded.' } });
-      await until(async () => (await db.select().from(jobs).where(eq(jobs.continueOf, failedJobId))).length === 1);
-      await db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.continueOf, failedJobId));
-      await pump(app.ctx, orchestrator.id);
-      let msg = await builtin.next();
-      while (msg.type !== 'job.run') msg = await builtin.next();
-      return msg;
-    };
-
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
-    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
-    let note = await builtin.next();
-    while (note.type !== 'job.run') note = await builtin.next();
-
-    const retried = await retryRun(note.jobId);
-    const retryClient = await mcp(app, retried.toolToken!);
-    const answering = answerAs(c, 'Plenty.\n').catch(() => null);
-    const ran = await call(retryClient, 'computer', { command: 'df -h' });
-    expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
-    await answering;
-
-
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: retried.jobId, kind: 'typed', data: {}, personId: null });
-    const clearedRetry = await retryRun(retried.jobId);
-    await checkOpen(c, await mcp(app, clearedRetry.toolToken!));
-    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, clearedRetry.jobId));
-
-    const [filed] = await db.insert(improvements).values({ companyId: orchestrator.companyId, agentId: orchestrator.id, title: 'Fix logs', text: 'Case 1' }).returning();
-    expect((await app.inject({ method: 'POST', url: `/api/improvements/${filed!.id}/take`, ...as(ceo) })).statusCode).toBe(200);
-    let plain = await builtin.next();
-    while (plain.type !== 'job.run') plain = await builtin.next();
-    const plainRetry = await retryRun(plain.jobId);
-    const plainClient = await mcp(app, plainRetry.toolToken!);
-    /* The machine is open, and no person wrote into the notice's turn: its retry works there. */
-    const [plainRan] = await Promise.all([call(plainClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
-    expect(text(plainRan)).toBe('Exit code 0.\nPlenty.\n');
-  });
-
-  it('keeps computer access on a second retry after pending input was not kept on a click retry', async () => {
+  it('keeps computer access on a second retry after pending input was not kept on the first retry', async () => {
     const c = await company();
     withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
-    const retried = await openClickedRetry(c);
+    const retried = await startRetry(c);
     c.builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [retried.jobId] });
     await until(() => c.app.ctx.hub.hasTerminals(BUILTIN));
     const retryClient = await mcp(c.app, retried.toolToken!);
@@ -471,15 +361,14 @@ describe('access to the computer the server runs on', () => {
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it.each(['unheard', 'queued'] as const)('keeps computer access when saved marked words are replayed via %s after a non-CEO message', async mode => {
+  it.each(['unheard', 'queued'] as const)('keeps computer access when saved words are replayed via %s after a non-CEO message', async mode => {
     const c = await company();
     withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
-    const retried = await openClickedRetry(c);
+    const retried = await startRetry(c);
     const [marked] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, retried.jobId), eq(agentEvents.kind, 'typed')));
-    expect(marked!.data).toMatchObject({ computerClick: true });
     const { data, message } = readMessage(marked!.data);
     const replayText = addressed((data as { text: string }).text, message!);
 
@@ -499,7 +388,7 @@ describe('access to the computer the server runs on', () => {
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
-    const retried = await openClickedRetry(c);
+    const retried = await startRetry(c);
     c.builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [retried.jobId] });
     await until(() => c.app.ctx.hub.hasTerminals(BUILTIN));
     const [marked] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, retried.jobId), eq(agentEvents.kind, 'typed')));
@@ -541,69 +430,23 @@ describe('access to the computer the server runs on', () => {
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it('closes when the CEO takes it back, and the CEO can say no to a request', async () => {
-    const c = await company();
-    const { app, db, ceo, orchestrator } = c;
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
-    expect(await accessOf(c)).toMatchObject({ until: null });
-    expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
-
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/decline', ...as(ceo) })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().asked).toBeNull();
-    expect((await lines(db, orchestrator.id)).map(l => (l as { state: string }).state)).toEqual(['opened', 'closed', 'asked', 'declined']);
-  });
-
-  /* The server's computer joined as a machine too: the CEO sees which machine the access is to, wherever they look from. */
   it("names the machine by the name its keeper told, in what its owner sees and in the log", async () => {
     const c = await company();
     const { app, db, ceo, orchestrator } = c;
     await db.update(machines).set({ hostname: 'debian-box' }).where(eq(machines.id, c.machine));
-
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().machine).toBe('debian-box');
-    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).json().machine).toBe('debian-box');
     await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) });
+    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).json().machine).toBe('debian-box');
     expect(await lines(db, orchestrator.id)).toEqual([
-      { state: 'asked', reason: 'Clean Docker images.', machine: 'debian-box' },
-      { state: 'opened', scope: 'orchestrator', until: expect.any(String), machine: 'debian-box' },
-      { state: 'closed', machine: 'debian-box' },
+      { state: 'closed', machine: 'debian-box' }, { state: 'reopened', machine: 'debian-box' },
     ]);
-  });
-
-  it('is opened and closed by the CEO, the delegate and the orchestrator, never by another person', async () => {
-    const c = await company();
-    const { app, db, ceo, orchestrator } = c;
-    const lena = await invitePerson(app, ceo, { name: 'Lena', email: 'lena@example.com', access: { whole: true } });
-    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
-    for (const action of ['open', 'close', 'decline']) {
-      const byLena = await app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(lena) });
-      expect(byLena.statusCode).toBe(403);
-      expect(byLena.json().error.reason).toBe('not_machine_owner');
-    }
-    /* She sees it without the buttons. */
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(lena) })).json()).toMatchObject({ available: true, canAnswer: false });
-    expect(await accessOf(c)).toBeUndefined();
-    const inside = { headers: orchestratorHeaders(owner!.id, orchestrator.id) };
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...inside })).json()).toMatchObject({ available: true, canAnswer: true });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...inside })).json()).toMatchObject({ canAnswer: true, until: expect.any(String) });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...inside })).json()).toMatchObject({ until: null });
-
-    const [lenaRow] = await db.select().from(people).where(eq(people.name, 'Lena'));
-    await app.inject({ method: 'PUT', url: `/api/people/${lenaRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
-    const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(lena) });
-    expect(opened.statusCode).toBe(200);
-    expect(opened.json()).toMatchObject({ canAnswer: true, until: expect.any(String) });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(lena) })).statusCode).toBe(200);
   });
 
   it('is not offered on a server without an updater', async () => {
     const c = await company({ updater: false });
     const { app, ceo } = c;
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toMatchObject({ available: false });
-    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).statusCode).toBe(409);
-    const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Look at the disk.' });
+    const asked = await call(await mcp(app, TOKEN), 'computer', { command: 'uname' });
     expect(asked.isError).toBe(true);
     expect(text(asked)).toContain('cannot reach');
   });
@@ -612,20 +455,14 @@ describe('access to the computer the server runs on', () => {
 describe('a new installation', () => {
   it("lets the orchestrator clear another employee's inbox and work on the opened machine in a later turn, with nothing set up for it", async () => {
     const c = await company();
-    const { app, db, ceo, orchestrator, builtin } = c;
+    const { app, db, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
     const [sub] = await db.select().from(subscriptions);
     const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
     const [hana] = await db.insert(agents).values({ companyId: orchestrator.companyId, kind: 'head', name: 'Hana', model: 'claude-opus-5-5', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: sub!.id, skills: [] }).returning();
     await db.insert(agentInbox).values(['Bruno', 'Rita', 'Sara'].map(name => ({ companyId: orchestrator.companyId, agentId: hana!.id, senderKind: 'hornhoof' as const, senderName: 'Hornhoof', kind: 'notification' as const, source: 'program_alarm', text: `${name} has given no sign of life for 20 minutes.`, createdAt: new Date() })));
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
-    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
-    let note = await builtin.next();
-    while (note.type !== 'job.run') note = await builtin.next();
-    builtin.send({ type: 'job.done', jobId: note.jobId, ok: true, sessionId: 'session', result: 'Asked.', tail: '', error: null });
-    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, note.jobId)))[0]!.status === 'done');
 
     /* A later turn a wake started, with no word of the CEO in it. */
     await enqueueTurn(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'The wait for the alarms ended.', createdBy: null, message: { personId: null, text: 'The wait for the alarms ended.', notification: { source: 'wait_ended', tasks: [] } } });

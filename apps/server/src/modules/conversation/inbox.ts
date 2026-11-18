@@ -41,7 +41,6 @@ export type MailMessage = {
   notification?: { source: string };
   /* Who did what a notice of Hornhoof tells, as the notice names them. */
   actor?: { kind: 'person' | 'agent' | 'hornhoof'; id: string | null; name: string };
-  computerAccess?: { machineId: string; inboxId?: string };
 };
 export type MailTurn = { companyId: string; agentId: string; taskId?: string; repeated?: unknown; message?: MailMessage };
 

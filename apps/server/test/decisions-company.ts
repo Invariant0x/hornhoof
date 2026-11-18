@@ -25,7 +25,7 @@ export async function company() {
   const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
   const ceo = await setUpCompany(app);
   const ctx = app.ctx;
-  /* The machine the server runs on, which the CEO owns and the orchestrator asks access to. */
+  /* The machine the server runs on, which the CEO owns. */
   const machine = await serverMachine(app);
   const [acme] = await db.select().from(companies);
   const [sub] = await db.select().from(subscriptions);
@@ -54,13 +54,12 @@ export async function company() {
     return { task, request: (await ask(ctx, workers[where].id, task.id, q)).request };
   };
   const view = async (token: string, query = ''): Promise<View> => (await app.inject({ url: `/api/requests${query}`, ...as(token) })).json();
-  const askComputer = (reason: string) => ctx.computer.ask(acme!.id, machine, reason);
-  return { app, db, ctx, control, machine, askComputer, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
+  return { app, db, ctx, control, machine, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
 }
 
 /* Every kind of decision at once: a department question with its own person, an approval there, a question on a topic
    only the CEO decides, a question without a topic, a shared department's question, an unstaffed department's question,
-   both of the orchestrator's cards and the request for the computer. */
+   and both of the orchestrator's cards. */
 export async function everyKind() {
   const c = await company();
   const devQuestion = await c.asking('dev', { kind: 'question', text: 'Which cards do we take?', topic: 'task' });
@@ -74,7 +73,6 @@ export async function everyKind() {
   const at = Date.now();
   const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
   const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
-  await c.askComputer('Inspect disk space.');
   return { ...c, devQuestion, devApproval, devPeople, devPlain, salesQuestion, mktQuestion, structure: structure!, staff: staff! };
 }
 

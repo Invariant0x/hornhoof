@@ -43,8 +43,10 @@ export type ComputerCarrierOptions = {
 };
 
 const SignedGrant = z.object({ payload: z.string().min(1).max(4096), signature: z.string().min(1).max(4096) });
+const Standing = z.strictObject({ standing: z.literal(true) });
+const Timed = z.object({ untilSec: z.number().int().positive(), until: z.string(), grant: SignedGrant.nullable() });
 const Answer = z.object({
-  access: z.object({ untilSec: z.number().int().positive(), until: z.string(), grant: SignedGrant.nullable() }).nullable(),
+  access: z.union([Standing, Timed]).nullable(),
   runs: z.array(z.object({ id: z.string().regex(UUID), command: z.string().min(1), timeout: z.number().int().positive() })).max(HELD_MOST),
   /* The commands this keeper named that are no longer out with it. An app from before it said so names none. */
   forget: z.array(z.string().regex(UUID)).max(HELD_MOST).default([]),
@@ -71,8 +73,7 @@ const CLOSED: Settings = { untilSec: null, until: null, asked: null, by: 'keeper
 
 /* Carries a machine's computer access between the app that leads and the machine's own updater. It asks the app for the
    access and the next command, writes them where the updater reads them, and brings each answer back. The app never
-   calls it. What opens the machine is its owner's signed word, checked here against the key this keeper holds: an app
-   that says open without it opens nothing. Anything unclear closes. */
+   calls it. The authenticated leader can open standing access. Older replies still follow the owner grant checks. */
 export class ComputerCarrier {
   private readonly now: () => Date;
   private readonly hourly = new Hourly();
@@ -249,7 +250,7 @@ export class ComputerCarrier {
      this machine opens it, once, and no later than the grant says; what the keeper holds and what it spent is written
      down before the access changes, and while that cannot be written the machine is closed. Without a key, the
      server's own keeper takes its app's word, and any other stays closed. */
-  private openUntil(access: z.infer<typeof Answer>['access']): number | null {
+  private openUntil(access: z.infer<typeof Timed> | null): number | null {
     const nowS = Math.floor(this.now().getTime() / 1000);
     const pin = this.opts.pin();
     this.refusedGrant = null;
@@ -289,13 +290,18 @@ export class ComputerCarrier {
     /* The app hears once that the grant it gave opened nothing here, so nobody is shown an open machine that is closed. */
     const refused = this.refusedGrant ? `&refused=${this.refusedGrant}` : '';
     this.refusedGrant = null;
-    const path = `/api/network/computer?updater=${this.updaterAlive() ? 1 : 0}&held=${held.join(',')}${refused}`;
+    const path = `/api/network/computer?standing=1&updater=${this.updaterAlive() ? 1 : 0}&held=${held.join(',')}${refused}`;
     const res = await this.opts.ask('GET', path, undefined, this.bounded()).catch((err: unknown) => ({ status: 0, body: reasonOf(err) }));
     if (this.stopped) return;
     const said = res.status === 200 ? Answer.safeParse(res.body) : null;
     if (said?.success) {
       this.heardAt = this.now().getTime();
-      const until = this.openUntil(said.data.access);
+      const { access } = said.data;
+      /* Keep the updater's local setting fresh even if the keeper stops or loses its leader. The grant itself has no end. */
+      const until = access && 'standing' in access
+        ? Math.ceil((this.heardAt + (this.opts.deafMs ?? DEAF_MS)) / 1000)
+        : this.openUntil(access);
+      if (access && 'standing' in access && this.decided?.held) this.openUntil(null);
       this.wasOpen = until !== null;
       this.write(until === null ? CLOSED : { untilSec: until, until: new Date(until * 1000).toISOString(), asked: null, by: 'keeper' });
       for (const id of said.data.forget) this.letGo(id);

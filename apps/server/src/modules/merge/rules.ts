@@ -86,8 +86,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   person_keys: rows('people'),
 
   person_access: rows('access'),
-  /* Only a machine's owner opens computer access to it, so no merge does. */
-  machine_access: rows('access', { hereOnly: ['until', 'opened_by', 'opened_at', 'grant'] }),
+  /* A copy cannot extend the leader's computer access. */
+  machine_access: skip('access'),
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
   /* A bot's token is a way from outside to an agent of the company. */
   telegram_bots: rows('access'),
@@ -106,7 +106,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
 
   ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
-  machines: rows('machines'),
+  machines: rows('machines', { hereOnly: ['computer_closed'] }),
   computer_runs: rows('machines'),
 
   ...each(['requests', 'task_waits'], rows('protected', { task: 'task_id' })),

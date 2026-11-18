@@ -1,5 +1,5 @@
 import { candidates } from './decision-people.js';
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
@@ -7,9 +7,8 @@ import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from 
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, machineAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { agents, departments, proposals, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './state.js';
@@ -33,8 +32,6 @@ export type Decisions = {
   /* known: read with its task and agent; otherwise it shows only because it is this person's to answer. */
   requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; known: boolean }[];
   proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
-  /* The orchestrator's requests for machines: each is its machine's owner's to answer. */
-  computers: { view: AccessView; asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
   /* The merges that left the CEO something to settle, for the CEO alone. after: the time of the backup a restore went
      back to, when the merge is of the database that restore set aside. open: how many of its conflicts are his. */
   merges: { id: string; label: string; after: string | null; open: number; agentId: string; ownerPersonId: string }[];
@@ -72,21 +69,11 @@ export async function mayOpenRequest(db: Db, me: Person, request: Request, task:
 
 const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAnswer;
 
-/* What the orchestrator asks of people: his pending cards, for people who see the whole company and see him, and his
-   requests for machines. A request for a machine shows to its owner, whose it is to answer, whether they see him or
-   not, and to the people who see the whole company and see him. The orchestrator reads the same cards with the owner's rights. */
-async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ cards: ProposalRow[]; computers: Decisions['computers'] }> {
-  const { db } = ctx;
+/* Pending orchestrator proposals go to people who can see them. */
+async function orchestratorCards(db: Db, me: Person, viewer: AgentViewer): Promise<ProposalRow[]> {
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
-  if (!orchestrator || me.viaHead) return { cards: [], computers: [] };
-  const seesHim = seesAgentId(viewer, orchestrator.id);
-  const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
-  /* Most of the time no machine is asked for, and nothing of the machines is read. */
-  const [asked] = await db.select({ id: machineAccess.machineId }).from(machineAccess).where(and(eq(machineAccess.companyId, me.companyId), isNotNull(machineAccess.askedAt))).limit(1);
-  const computers = (asked ? await ctx.computer.views(me) : [])
-    .filter(view => view.asked && (view.canOpen || (seesHim && canViewComputer(me))))
-    .map(view => ({ view, asked: view.asked!, agentId: orchestrator.id, ownerPersonId: view.machine.personId, canAnswer: view.canOpen, decidedBy: machineDecidedBy(view) }));
-  return { cards, computers };
+  if (!orchestrator || me.viaHead || me.scopeKind !== 'company' || !seesAgentId(viewer, orchestrator.id)) return [];
+  return (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId);
 }
 
 /* The merges with open conflicts of the CEO's, for the CEO and the orchestrator acting for him; nobody else is told there
@@ -106,13 +93,10 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
   return found.rows.map(row => ({ id: row.id, label: row.label, after: row.after ? new Date(row.after).toISOString() : null, open: row.open, agentId: orchestrator?.id ?? '', ownerPersonId: owner }));
 }
 
-/* The server's own machine while it needs no key is the CEO's and the delegate's to open; any other only its owner's. */
-const machineDecidedBy = (view: AccessView): DecidedBy => ({ kind: view.key === 'not_needed' ? 'ceo_and_delegate' : 'machine_owner', departmentId: null });
-
 export const openPersonRequests = () => and(eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human')));
 
 /* Everything waiting for people that this person may see, each with whether they may take it. */
-export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
+export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
   const { access } = viewer;
@@ -129,7 +113,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     .filter(r => canReach(access, taskSpot(r.task)))
     .map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)), known: knowsRequest(viewer, r.request, r.task) }))
     .filter(shows);
-  const { cards, computers } = await orchestratorAsks(ctx, me, viewer);
+  const cards = await orchestratorCards(db, me, viewer);
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
   const merges = await mergesFor(ctx, me, everyone);
   const counts = counted(viewer, [
@@ -137,10 +121,9 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     ...merges.filter(merge => merge.agentId).map(merge => ({ ownerPersonId: merge.ownerPersonId, agentId: merge.agentId })),
     ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
-    ...computers.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.agentId })),
   ]);
   const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
-  return { requests: seen, proposals: shownCards, computers, merges, machines, counts };
+  return { requests: seen, proposals: shownCards, merges, machines, counts };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the

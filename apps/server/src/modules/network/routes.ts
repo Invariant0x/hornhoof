@@ -3,14 +3,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
-import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole, type UploadState } from '../../db/schema.js';
+import { companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole, type UploadState } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
-import { logName, onMachine, type AccessMachine } from '../computer/access.js';
 import { holdsData } from '../copies/holds.js';
 import { copyOrder } from '../copies/slots.js';
-import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
 import { UPLOAD_SPARE, type UploadAllowed } from '../keeper/uploads.js';
@@ -79,20 +77,11 @@ const ReportBody = z.object({
   internetMbps: Measure.optional(),
 });
 
-/* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */
-async function machineRefused(ctx: Ctx, companyId: string, machine: AccessMachine): Promise<void> {
-  ctx.bus.publish(companyId, { type: 'computer' });
-  const [orchestrator] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
-  if (orchestrator) await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'computer', data: { state: 'refused', ...onMachine(logName(machine)) } });
-}
-
 /* held: the commands whose files the keeper still has, a few at most, as its updater runs one at a time. */
 const ComputerQuery = z.object({
   updater: z.enum(['0', '1']).default('0'),
-  /* The keeper did not take the grant it was last given: its machine stayed closed. */
-  /* 0: nothing was refused. 1: the grant the app gave, as a keeper from before grants were named says it. Else the
-     nonce of the grant that opened nothing. */
-  refused: z.string().regex(/^(0|1|[A-Za-z0-9_-]{22})$/).default('0'),
+  /* Only an updated keeper can take standing access. */
+  standing: z.literal('1').optional(),
   held: z
     .string()
     .max(8 * 37)
@@ -266,23 +255,17 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
           [machine.id, 'The machine was wiped before its old copy was read.'],
         );
       }
-      /* The server's own keeper names another build than its row held: a new build leads, and the other machines close. */
-      const newBuild = who.own && said.commit !== undefined && Boolean(row?.commit) && row?.commit !== said.commit;
-      if (newBuild) await ctx.computer.newBuild(tx, machine.id);
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
-      return { installed: Boolean(row && after && installs(row, now) && !installs(after, now)), looked: newBuild || (pin !== undefined && pin !== row?.ownerPin), companyId: row?.companyId };
+      return { installed: Boolean(row && after && installs(row, now) && !installs(after, now)), looked: pin !== undefined && pin !== row?.ownerPin, companyId: row?.companyId };
     });
     if (installed.installed) void releaseHeld(ctx);
-    /* The screens load the machines' access again: a machine holds another key now, or the others were closed. */
+    /* The screens load the machine again when its pinned key changes. */
     if (installed.looked && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'computer' });
     return reply.code(204).send();
   });
 
-  /* Computer access of the asker's own machine is served only by an app that leads, and that of the server's own
-     machine only once the app has taken over what an older app left of it: anything else is no answer, and the keeper
-     keeps what it holds for a while and then closes. */
   async function computerOf(who: Asker): Promise<Holder> {
-    if (!leading() || (who.own && !ctx.computer.ready())) throw new ApiError(503, 'unavailable', 'This server does not serve computer access now.');
+    if (!leading()) throw new ApiError(503, 'unavailable', 'This server does not serve computer access now.');
     const machine = await machineOf(who);
     if (!machine) throw notAMachine();
     return machine;
@@ -292,10 +275,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      which commands it still holds. Asking is what makes the machine reachable. */
   app.get('/api/network/computer', async req => {
     const machine = await computerOf(await requireKeeper(req));
-    const { updater, held, refused } = ComputerQuery.parse(req.query);
+    const { updater, held, standing } = ComputerQuery.parse(req.query);
+    if (!standing) return { access: null, runs: [], forget: held };
     ctx.computer.seen(machine.id, updater === '1');
-    const closed = refused === '0' ? null : await ctx.computer.refused(machine.id, refused === '1' ? null : refused);
-    if (closed) await machineRefused(ctx, await companyId(), closed);
     return ctx.computer.take(machine.id, held);
   });
 

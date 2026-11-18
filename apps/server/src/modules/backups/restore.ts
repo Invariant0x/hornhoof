@@ -62,8 +62,8 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
 
 /* Who may get in now, put into a database that was restored from an earlier time: a restore never brings back a person
    who was disabled or removed since, a password that was changed, a machine that was disconnected or a recovery file that was
-   replaced. Removed accounts leave a record even if the backup predates them. Then computer access closes and every session
-   ends, so each owner opens their machine again and everyone signs in again. */
+   replaced. Removed accounts leave a record even if the backup predates them. Owners' machine settings carry forward;
+   employee computer grants and sessions end. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const { db } = ctx;
   const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
@@ -104,13 +104,18 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   await db.delete(invites).where(and(isNull(invites.usedAt), carry.invites.length > 0 ? notInArray(invites.tokenHash, carry.invites) : undefined));
   const live = new Set((await db.select(idOnly(machines)).from(machines).where(isNull(machines.revokedAt))).map(row => row.id));
   await disconnectMachines(ctx, carry.machines.filter(machine => machine.revoked && live.has(machine.id)).map(machine => machine.id));
-  for (const machine of carry.machines) await db.update(machines).set({ lendsTests: machine.lendsTests, keepsBackups: machine.keepsBackups, ...holdsNow(machine) }).where(eq(machines.id, machine.id));
+  for (const machine of carry.machines) await db.update(machines).set({
+    lendsTests: machine.lendsTests,
+    keepsBackups: machine.keepsBackups,
+    ...(typeof machine.computerClosed === 'boolean' ? { computerClosed: machine.computerClosed } : {}),
+    ...holdsNow(machine),
+  }).where(eq(machines.id, machine.id));
   await carryLink(db, company.id, carry);
   const now = new Date();
   if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
   await carryRecoveryKeys(db, company.id, carry, known, now);
   await db.transaction(async tx => {
-    await tx.update(machineAccess).set({ scope: 'orchestrator', until: null, grant: null, openedBy: null, openedAt: null, askedReason: null, askedAt: null });
+    await tx.delete(machineAccess);
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
     await tx.delete(sessions);
   });
