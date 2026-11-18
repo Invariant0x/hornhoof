@@ -53,6 +53,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A department that keeps no repository gets no turn, and a turn whose department's work is all done or cancelled, with no result accepted into it and nothing in its branch that main lacks, closes by itself with no version and says why; a turn holding accepted work still closes only by its release.
 - The `turns` tool lists a result accepted into a turn whose parent task is in no turn, such as a member of a coordination task.
 - A program operator who answers No to a protected question, such as Claude Code's check before a removal, can report it as `denied`, as on a permission question; a `denied` report with no denial recorded says so plainly instead of refusing access to the case.
+- A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back, and while its computer is offline. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
 
 ### Added
 

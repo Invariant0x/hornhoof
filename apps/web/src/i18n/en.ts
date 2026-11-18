@@ -28,10 +28,13 @@ export const en = {
     nameProblem: 'Give the phone a name.', computerProblem: 'Choose an online computer.', addressProblem: 'Enter the address and port shown on the phone.', codeProblem: 'Enter the six digits and the pairing address shown on the phone.',
     loading: 'Loading phones…', working: 'Connecting…', saving: 'Adding phone…', retry: 'Try again', empty: 'No phones yet.', emptyHint: 'Add a phone from a computer connected to your company.', noComputers: 'Connect a computer to the company first.', noDevices: 'No approved phone was found. Unlock the phone, check the connection and approve this computer, then try again.',
     device: (model: string | null, serial: string) => `${model ?? 'Android'} (${serial})`, owner: (name: string) => `Owner: ${name}`, waiting: (n: number) => `Waiting: ${n}`,
+    notConnected: { state: 'Phone not connected', hint: 'Plug the phone into this computer by USB, or turn on Wireless debugging on it and add it again with its address.' },
+    /* Why Watch screen is off: the computer does not see the phone, or the computer itself is offline. */
+    noScreen: { not_connected: 'The screen can be watched once the computer sees the phone.', computer_offline: 'The screen can be watched once the computer is online.' },
     devices: { device: 'Ready', unauthorized: 'Approve on the phone', offline: 'Not connected', unverified: 'Could not verify this phone' },
     states: { available: 'Available to assistants', busy: 'An assistant is using it', owner: 'In your hands', offline: 'Computer is offline' },
     readiness: {
-      checking: 'Checking phone settings.', connection: 'The phone did not answer. Check its connection and choose Always allow if it asks about this computer.',
+      checking: 'Checking phone settings.',
       nodeUpdate: 'Update the connected computer to check phone settings.', check: 'Could not finish checking phone settings. The computer will try again.',
       lock: 'The screen lock is still on. Turn off the PIN, pattern or password on the phone.',
       awake: 'The phone may still turn off or dim its screen. Check that it is plugged in.', brightness: 'Could not set a fixed screen brightness.',
@@ -2704,6 +2707,7 @@ export const en = {
     phone_unknown: 'This phone or recording is not available.',
     phone_not_allowed: 'You do not have access to this phone or recording.',
     phone_unavailable: 'The phone does not answer. Check its connection and the approval on its screen.',
+    phone_not_connected: 'The computer does not see this phone. Plug it in by USB, or turn on Wireless debugging on it and add it again with its address.',
     phone_busy: 'This phone is already registered and busy. End its session before changing its connection.',
     phone_session_gone: 'This phone session has ended or the owner took the phone back.',
     maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',

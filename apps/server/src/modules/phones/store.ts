@@ -8,6 +8,7 @@ import { companies, companyPhones, machines, nodes, people, phoneSessions } from
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
+import { phoneConnection, type PhoneConnection } from './presence.js';
 import { idOnly } from '../../db/selections.js';
 import { phoneReadiness } from './readiness.js';
 
@@ -16,6 +17,7 @@ export type PhoneSession = typeof phoneSessions.$inferSelect;
 export const phoneDenied = () => new ApiError(403, 'forbidden', 'This phone is not available to you.', 'phone_not_allowed');
 export const phoneMissing = () => new ApiError(404, 'not_found', 'There is no such phone.', 'phone_unknown');
 export const phoneOffline = () => new ApiError(503, 'unavailable', 'The phone does not answer. Check its connection and the approval on its screen.', 'phone_unavailable');
+export const phoneNotConnected = () => new ApiError(503, 'unavailable', 'The phone is not connected to its computer: adb there does not list it. Plug it in by USB, or turn on Wireless debugging on it and add it again with its address.', 'phone_not_connected');
 export const phoneGone = () => new ApiError(409, 'conflict', 'You do not hold an active session on this phone.', 'phone_session_gone');
 export const phoneInvalid = () => new ApiError(400, 'validation', 'Check the phone name, computer and address.', 'phone_invalid');
 const alreadyHeld = () => new ApiError(409, 'conflict', 'This phone is already registered and busy. End its session before changing its connection.', 'phone_busy');
@@ -53,14 +55,18 @@ export async function probePhone(ctx: Ctx, me: Person, input: z.infer<typeof Pro
   return { nodeId, devices: result.devices ?? [] };
 }
 
-export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person) {
+/* connection: what the node's adb lists now, when the caller asked for many phones at once. */
+export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person, known?: PhoneConnection) {
+  const connection = known ?? await phoneConnection(ctx, phone);
   const [owner] = await ctx.db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, phone.personId));
   const sessions = await ctx.db.select({ state: phoneSessions.status }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phone.id), isNull(phoneSessions.endedAt))).orderBy(asc(phoneSessions.order));
   const active = sessions.find(s => s.state !== 'queued');
   return {
     id: phone.id, name: phone.name, owner: owner!, machineId: phone.machineId, lending: phone.lending, stopping: active?.state === 'revoking',
-    online: phoneCapable(ctx, nodeIdentity(phone.nodeId)), state: !phone.lending ? 'owner' : active ? 'busy' : 'available', queued: sessions.filter(s => s.state === 'queued').length,
-    readiness: phoneReadiness(ctx, phone),
+    online: connection === 'ready', state: connection !== 'ready' ? 'offline' : !phone.lending ? 'owner' : active ? 'busy' : 'available', connection,
+    queued: sessions.filter(s => s.state === 'queued').length,
+    /* Settings are read only on a phone its computer lists now; one that is away has no reading to show. */
+    ...(connection === 'ready' ? { readiness: phoneReadiness(ctx, phone) } : {}),
     ...(me?.id === phone.personId ? { endpoint: phone.serial } : {}),
   };
 }
