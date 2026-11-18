@@ -12,7 +12,11 @@ const CAPABILITY: Readonly<Record<string, number>> = {
   'gpt-6.2-sol': 2,
   'gpt-6-astra': 2,
   'gpt-6.2-astra': 2,
+  'gemini-4-neon': 2,
+  'gemini-4-carbon': 2,
   'gemini-4-argon': 2,
+  'gemini-4-hydrogen': 1,
+  'gemini-3.8-flash': 0,
   'kimi-code/k3.1-pro': 2,
 };
 

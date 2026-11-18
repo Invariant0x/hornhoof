@@ -28,6 +28,10 @@ describe('pure checker policy', () => {
     expect(modelCapability(model, provider)).toBe(2);
   });
 
+  it.each([['gemini-4-neon', 2], ['gemini-4-carbon', 2], ['gemini-4-hydrogen', 1], ['gemini-3.8-flash', 0]] as const)('places the Antigravity model %s in its band', (model, capability) => {
+    expect(modelCapability(model, 'antigravity')).toBe(capability);
+  });
+
   it('does not classify Claude Default or an unknown alias from a catalog comment', () => {
     expect(modelCapability('', 'claude')).toBeNull();
     expect(modelCapability('default', 'claude')).toBeNull();
