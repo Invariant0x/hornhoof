@@ -10,10 +10,12 @@ import { eventually } from '../../../test-support/eventually.mjs';
 /* What the tests of the updater share: a server folder of its own, and one pass of updater.sh over it with stub docker and curl. */
 
 export const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
+/* The parts updater.sh is made of, in lib next to it. */
+export const PARTS = fileURLToPath(new URL('../../updater/lib/', import.meta.url));
 const REV1 = fileURLToPath(new URL('./updater-rev1.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
 /* The statements of a restore, which the updater's image keeps next to it. */
-const SQL = fileURLToPath(new URL('../../updater/', import.meta.url));
+export const SQL = fileURLToPath(new URL('../../updater/', import.meta.url));
 /* The updater reads and writes its files with jq, so these tests take the jq of this machine, wherever it is. */
 export const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
 const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
@@ -258,6 +260,11 @@ function pass(script: string, s: Stand, request: object | null, env: Record<stri
 }
 
 export const runOnce = (s: Stand, request: object | null, env: Record<string, string> = {}, opts: { keeper?: boolean } = {}) => pass(SCRIPT, s, request, env, opts);
+/* One pass of updater.sh from another place, as its image keeps it. */
+export const runOnceFrom = (script: string, s: Stand, request: object | null, env: Record<string, string> = {}) => pass(script, s, request, env);
+/* The text of updater.sh and of each of its parts. */
+export const updaterSource = () =>
+  [SCRIPT, ...readdirSync(PARTS).filter(name => name.endsWith('.sh')).sort().map(name => join(PARTS, name))].map(file => readFileSync(file, 'utf8')).join('\n');
 /* The updater from before revision 2, which starts the update that moves an install in. */
 export const runRev1 = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(REV1, s, request, env);
 /* The helper container this build's installer starts when an older updater runs it. */
