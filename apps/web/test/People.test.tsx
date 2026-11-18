@@ -614,9 +614,9 @@ describe("a person's assistant", () => {
   });
 
   it.each([
-    ['en', 'Edit Ava', 'Compatible assistant'],
-    ['ru', 'Изменить Ava', 'Совместимый ассистент'],
-  ])('shows a neutral name for the compatible assistant in %s', async (language, edit, option) => {
+    ['en', 'Edit Ava', 'AvaClone'],
+    ['ru', 'Изменить Ava', 'AvaClone'],
+  ])('names the AvaClone program in %s', async (language, edit, option) => {
     localStorage.setItem('hh-lang', language);
     try {
       mockApi(lists([...PEOPLE, AVA]));
