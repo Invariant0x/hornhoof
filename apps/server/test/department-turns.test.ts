@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, tasks, turns } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { ensureOpenTurn } from '../src/modules/tasks/turn-department.js';
 import { echelonsTurn } from './helpers.js';
 import { call, company, text, work } from './turns-company.js';
 
@@ -91,5 +92,34 @@ describe("a head's turns", () => {
     expect(listed.map(t => [t.number, t.status, t.version, t.department.id])).toEqual([[devTurn!.number, 'closed', 'v1.0.0', dev.id], [next!.number, 'open', null, dev.id]]);
     /* An employee who heads nothing gives no tasks to a department. */
     expect((await (await tools(bruno)).listTools()).tools.map(t => t.name)).not.toContain('add_tasks');
+  });
+});
+
+describe('turns only of departments that release', () => {
+  it('opens no turn for a department made without a repository, and opens one for a department that keeps one', async () => {
+    const { app, db, companyId, dev, ceoToken } = await company();
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'marketing' }] }, headers: { cookie: `hh_session=${ceoToken}` } });
+    expect(built.statusCode, built.body).toBe(201);
+    const [marketing] = await db.select().from(departments).where(eq(departments.templateKey, 'marketing'));
+    expect(await db.select().from(turns).where(eq(turns.departmentId, marketing!.id))).toEqual([]);
+    expect(await db.transaction(tx => ensureOpenTurn(tx, companyId, dev.id))).toBeNull();
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+    expect(await db.transaction(tx => ensureOpenTurn(tx, companyId, dev.id))).toMatchObject({ departmentId: dev.id, status: 'open', version: null });
+  });
+
+  it('lists in the turns tool every result accepted into a turn whose parent is in no turn, as #1323 is in turn 28, and a subtask under its parent in the same turn once', async () => {
+    const { db, ctx, companyId, ceo, dev, hana, bruno, orchestrator, tools } = await company();
+    const [turn] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 28, goal: 'The next release.', status: 'open', openedAt: new Date() }).returning();
+    const made = async (title: string, assigneeAgentId: string, parentId?: string) => (await createTask(ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId, parentId })).task;
+    const accepted = (id: string) => db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: turn!.id }).where(eq(tasks.id, id));
+    const coordination = await made('Coordinate', hana.id);
+    const member = await made('Change the repository', bruno.id, coordination.id);
+    await accepted(member.id);
+    const whole = await made('Checkout', hana.id);
+    const part = await made('Checkout totals', bruno.id, whole.id);
+    await accepted(whole.id);
+    await accepted(part.id);
+    const listed = JSON.parse(text(await call(await tools(orchestrator), 'turns', {}))) as { number: number; tasks: { number: number }[] }[];
+    expect(listed.find(t => t.number === 28)!.tasks.map(t => t.number)).toEqual([member.number, whole.number]);
   });
 });

@@ -5,6 +5,13 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- A department that keeps no repository gets no turn, and a turn whose department's work is all done or cancelled, with no result accepted into it and nothing in its branch that main lacks, closes by itself with no version and says why; a turn holding accepted work still closes only by its release.
+- The `turns` tool lists a result accepted into a turn whose parent task is in no turn, such as a member of a coordination task.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed
