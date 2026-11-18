@@ -5,6 +5,14 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
+- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
+- On phones, task details stack under the title and long text wraps within the list.
+
 ## [0.34.0] - 2026-11-18
 
 ### Fixed

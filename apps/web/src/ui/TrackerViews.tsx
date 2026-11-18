@@ -61,25 +61,25 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const ghostStage = route.phase === 'active' && route.stage && route.oneShot?.[route.stage];
   return (
     <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
-      <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`}>
-        <div className="tr-task-name" style={{ '--tr-depth': depth } as CSSProperties}>
+      <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`} style={{ '--tr-depth': depth } as CSSProperties}>
+        <div className="tr-task-name">
           <div className="tr-name">
-            {hasChildren && (
+            {hasChildren ? (
               <button className="tr-row-caret" type="button" aria-expanded={open} aria-controls={childrenId}
                 aria-label={words.subtasks(tree.done, tree.total)} title={words.subtasks(tree.done, tree.total)} onClick={() => setOpen(!open)}>
                 <TrackerIcon name="chevron" />
               </button>
-            )}
-            <span className="tr-task-title">
-              <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
-              <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-            </span>
+            ) : <span aria-hidden="true" />}
+            <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
+            <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+          </div>
+          <div className="tr-meta">
             {tree.total > 0 && <span className="tr-no tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}
             <span className="tr-no">#{task.number}</span>
+            {(asksYou || waits[0]?.kind !== 'after') && <WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} />}
             {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
             {[...prerequisites].map(ref => <span className="tr-relation" key={ref}>{t.tracker.wait.after(ref)}</span>)}
           </div>
-          {(asksYou || waits[0]?.kind !== 'after') && <WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} />}
           {asksYou && status !== 'done' && status !== 'cancelled' && <div className="entry-actions tr-question"><QuestionButton onOpen={() => rows.onOpenTask(task.id)} /></div>}
           {needed.map(other => {
             const department = other.department!;
@@ -118,7 +118,8 @@ function ListHead() {
   const words = t.tracker.list;
   return (
     <div className="tr-cells tr-head" aria-hidden="true">
-      <span>{words.task}</span><span>{words.executor}</span><span>{words.responsible}</span><span>{t.tracker.priority.label}</span><span>{words.goal}</span><span>{words.due}</span>
+      <span className="tr-head-name"><span>{words.task}</span></span>
+      <span>{words.executor}</span><span>{words.responsible}</span><span>{t.tracker.priority.label}</span><span>{words.goal}</span><span>{words.due}</span>
     </div>
   );
 }
@@ -154,8 +155,10 @@ export function TrackerFound({ tasks, all, rows }: { tasks: TaskLine[]; all: Tas
   const relations = relationsOf(all);
   return (
     <div className="tr-list">
-      <ListHead />
-      <ul className="tr-rows">{tasks.map(task => <ListRow key={task.id} tree={{ task, children: [], done: 0, total: 0, progress: 0 }} rows={rows} relations={relations} />)}</ul>
+      <div className="tr-list-grid">
+        <ListHead />
+        <ul className="tr-rows">{tasks.map(task => <ListRow key={task.id} tree={{ task, children: [], done: 0, total: 0, progress: 0 }} rows={rows} relations={relations} />)}</ul>
+      </div>
     </div>
   );
 }
@@ -167,10 +170,10 @@ export function TrackerList({ tasks, all, rows, empty, onAddTask, showSubtasks =
   return (
     <section className="tr-list" aria-label={t.tracker.views.list}>
       {groups.length ? (
-        <>
+        <div className="tr-list-grid">
           <ListHead />
           {groups.map(group => <Group key={group.status} group={group} rows={rows} relations={relations} onAddTask={onAddTask} showSubtasks={showSubtasks} />)}
-        </>
+        </div>
       ) : <p className="muted">{empty}</p>}
     </section>
   );

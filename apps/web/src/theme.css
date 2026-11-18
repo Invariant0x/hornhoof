@@ -1747,7 +1747,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
 /* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
    stays where the person scrolled it. */
-.body.tracker-page { inset-block-start: 56px; container-type: size; overflow-anchor: none; }
+.body.tracker-page { inset-block-start: 56px; container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
 .body.tracker-page::before { content: none; }
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
@@ -1910,8 +1910,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 }
 
 /* The list uses the same column tracks for the heading and every row, including work under another task. */
-.tr-list { container: tr-list / inline-size; display: grid; min-inline-size: 0; }
-.tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
+.tr-list { --row: var(--tracker-target-fine); container: tr-list / inline-size; display: grid; min-inline-size: 0; }
+.tr-list-grid, .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
 .tr-group { border-block-end: 1px solid var(--line); }
 .tr-group-head { margin: 0; padding-block-start: 8px; font-size: 14px; }
 .tr-group-toggle, .tr-add-task { display: flex; align-items: center; gap: 8px; min-block-size: 36px; max-inline-size: 100%; margin: 0; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
@@ -1925,21 +1925,24 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-group.done .tr-status-pill { --tr-tone: var(--tracker-palette-success); }
 .tr-group.review .tr-status-pill { --tr-tone: var(--tracker-palette-violet); }
 .tr-rows { display: grid; margin: 0; padding: 0; list-style: none; }
-.tr-row-line { min-block-size: 40px; padding: 8px; border-block-end: 1px solid var(--line); }
-.tr-row-line.on { border-inline-start: 3px solid var(--cyan); padding-inline-start: 5px; background: var(--glow); }
-.tr-cells { display: grid; grid-template-columns: minmax(0, 4fr) repeat(3, minmax(0, 1.15fr)) minmax(0, 1.6fr) minmax(0, .9fr); align-items: center; gap: 4px 12px; min-inline-size: 0; font-size: 13px; }
-.tr-head { padding: 8px; border-block-end: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--muted); }
-.tr-head > span { overflow-wrap: anywhere; }
-.tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
-.tr-task-title { display: inline-flex; align-items: baseline; gap: 8px; min-inline-size: 0; max-inline-size: 100%; }
-.tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
-.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: var(--tracker-target-fine); min-block-size: var(--tracker-target-fine); margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-cells { display: grid; align-items: start; row-gap: 4px; min-inline-size: 0; padding: 8px; border-inline-start: 3px solid transparent; border-block-end: 1px solid var(--line); font-size: 13px; }
+.tr-row-line.on { border-inline-start-color: var(--cyan); background: var(--glow); }
+.tr-head { font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+.tr-task-name, .tr-head-name { display: grid; grid-template-columns: var(--row) 14px minmax(0, 1fr); gap: 4px 8px; min-inline-size: 0; }
+.tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
+.tr-name { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: start; }
+.tr-head-name > span, .tr-task-name > :is(.tr-meta, .tr-question, .tr-relation) { grid-column: 3; }
+.tr-task-name > .tr-relation { justify-self: start; }
+.tr-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-inline-size: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tr-meta .tr-wait { font-size: inherit; }
+.tr-meta .badge { white-space: normal; }
+.tr-row-caret { display: grid; place-items: center; min-block-size: max(var(--row), 1lh); margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
 .tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
 [dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
 .tr-branch-count { display: inline-flex; align-items: center; gap: 4px; }
 .tr-rows[hidden] { display: none; }
-.tr-status-dot { flex: 0 0 auto; inline-size: 14px; block-size: 14px; border: 2px solid var(--muted); border-radius: 50%; }
+.tr-status-dot { inline-size: 14px; block-size: 14px; margin-block-start: calc((max(var(--row), 1lh) - 14px) / 2); border: 2px solid var(--muted); border-radius: 50%; }
 .tr-status-dot.working { border-color: var(--tracker-working-ring); }
 .tr-status-dot.waiting, .tr-status-dot.you { border-color: var(--tracker-waiting-ring); }
 .tr-status-dot:is(.blocked, .failure) { border-color: var(--pink-ink); }
@@ -1948,32 +1951,40 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
 .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-row-line .tr-title { min-block-size: var(--tracker-target-fine); }
-.tr-title { color: var(--ink); text-align: start; font-weight: 500; overflow-wrap: anywhere; }
+.tr-title, .tr-goal-link { display: block; min-inline-size: min(var(--row), 100%); min-block-size: var(--row); max-inline-size: 100%; }
+.tr-title, .tr-goal-link, .tr-v { padding-block: max(0px, calc((var(--row) - 1lh) / 2)); }
+.tr-title { justify-self: start; margin: 0; color: var(--ink); text-align: start; font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
-.tr-goal-link { display: inline-flex; align-items: center; min-block-size: var(--tracker-target-fine); text-decoration: none; }
+.tr-goal-link { inline-size: fit-content; text-align: inherit; text-decoration: none; overflow-wrap: anywhere; }
 .tr-goal-link:is(:hover, :focus-visible) { text-decoration: underline; }
-.tr-name .badge { white-space: normal; }
 .tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; padding: 2px 6px; border: 1px solid var(--line2); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .tr-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .tr-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.tr-v { color: var(--muted); }
+.tr-v { display: block; min-inline-size: 0; color: var(--muted); }
 .tr-id-name { display: none; }
+@container tr-list (width > 640px) {
+  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, fit-content(12%)) fit-content(20%) fit-content(12%); column-gap: 12px; }
+  .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+  .tr-group-head, .tr-add-task { grid-column: 1 / -1; }
+  .tr-add-task { justify-self: start; }
+  .tr-group > [hidden], .tr-rows[hidden] { display: none; }
+  .tr-v:has(> .tr-goal-link) { display: flex; padding-block: 0; }
+  .tr-v:has(> .tr-mark, > .tr-stage-ghost) { display: flex; flex-wrap: wrap; align-items: center; min-block-size: var(--row); padding-block: 0; }
+  .tr-cells:dir(rtl) > .tr-cell > .tr-v:dir(ltr), .tr-cells:dir(ltr) > .tr-cell > .tr-v:dir(rtl) { justify-content: flex-end; text-align: end; }
+}
 @container tr-list (max-width: 640px) {
   .tr-head { display: none; }
-  .tr-row-line { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 8px 12px; }
-  .tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 8px), 12%); }
-  .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; font-size: 13px; }
+  .tr-row-line { --row: var(--tracker-target-touch); grid-template-columns: var(--row) 14px minmax(0, 1fr); column-gap: 8px; padding-inline-start: calc(8px + min(var(--tr-depth) * 8px, 12%)); }
+  .tr-task-name { grid-column: 1 / -1; grid-template-columns: subgrid; padding-inline-start: 0; }
+  .tr-cell { display: flex; grid-column: 3; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
   /* A name and its value in their own direction stand where the page's words start, as an isolated phrase does. */
   .tr-cells:dir(rtl) > .tr-cell:dir(ltr) { justify-content: flex-end; }
   .tr-cell:has(.tr-v:empty) { display: none; }
   .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
-  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; color: var(--ink); }
+  .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; padding-block: 0; color: var(--ink); }
   .tr-id-name { display: inline; min-inline-size: 0; overflow-wrap: anywhere; }
-  .tr-title, .tr-name { font-size: 16px; }
-  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: 44px; }
-  .tr-goal-link { display: inline-flex; align-items: center; }
+  .tr-name { font-size: 16px; }
 }
 
 .tr-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; min-inline-size: 0; }
@@ -2012,7 +2023,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* A link that stands alone takes a finger: at least 44 px high and 44 px wide, even of two letters, its words at its start
    and in the middle of its height as before. Links inside a line of words keep the line's height. A board card's title has
    its own rule: the card's whole width and 44 px high. */
-:is(.tr-title, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-inline-size: 44px; min-block-size: 44px; }
+:is(.tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-inline-size: 44px; min-block-size: 44px; }
 .tr-crumbs [aria-current] { font-weight: 600; }
 .tr-modes { max-width: 420px; }
 .tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }
@@ -2054,8 +2065,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
    tracker's own, --tracker-target-touch and --tracker-target-fine. */
 @media (max-width: 760px), (pointer: coarse) {
   .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: var(--tracker-target-touch); }
-  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: var(--tracker-target-touch); }
-  .tr-row-caret { inline-size: var(--tracker-target-touch); }
+  .tr-list { --row: var(--tracker-target-touch); }
 }
 
 @media (max-width: 760px) {
