@@ -76,7 +76,10 @@ function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: st
 const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number]['who']) =>
   !who || (who.kind === 'agent' ? knowsAgentId(viewer, who.id) : who.id === viewer.personId) ? who : null;
 const shownTime = (viewer: AgentViewer, time: TaskLine['time'], externalWait: TaskLine['externalWait']): TaskLine['time'] => ({
-  ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who), reason: w.kind === 'external' && !externalWait ? null : w.reason })),
+  ...time, waitsOn: time.waitsOn.map(w => {
+    const hidden = !externalWait && (w.kind === 'external' || w.event === 'ceo' || w.until !== undefined);
+    return { ...w, who: shownWho(viewer, w.who), ...(hidden ? { reason: w.kind === 'run' || w.kind === 'work' ? w.reason : null, until: undefined } : {}) };
+  }),
 });
 
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {

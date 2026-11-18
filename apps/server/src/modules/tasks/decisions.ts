@@ -139,18 +139,9 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
 /* The server's own machine while it needs no key is the CEO's and the delegate's to open; any other only its owner's. */
 const machineDecidedBy = (view: AccessView): DecidedBy => ({ kind: view.key === 'not_needed' ? 'ceo_and_delegate' : 'machine_owner', departmentId: null });
 
-/* A machine still away waits for each of its people, on each one's card as this person sees them. */
-function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
-  const byPerson = { ...counts.byPerson };
-  for (const card of away) {
-    for (const id of new Set([me.id, card.owner?.id ?? me.id])) byPerson[id] = (byPerson[id] ?? 0) + 1;
-  }
-  return { ...counts, byPerson, total: counts.total + away.length };
-}
+export const openPersonRequests = () => and(eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human')));
 
-/* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
-   by an agent they see, or that are theirs to answer, the orchestrator's pending cards for people who see the whole
-   company and see him, and its requests for machines for their owners and for those people. */
+/* Everything waiting for people that this person may see, each with whether they may take it. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
@@ -160,7 +151,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     .select({ request: requests, task: tasks })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
+    .where(and(eq(requests.companyId, me.companyId), openPersonRequests()))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
@@ -179,7 +170,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     ...computers.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.agentId })),
   ]);
   const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
-  return { requests: seen, proposals: shownCards, computers, merges, machines, counts: withMachines(counts, machines.filter(card => !card.back), me) };
+  return { requests: seen, proposals: shownCards, computers, merges, machines, counts };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the

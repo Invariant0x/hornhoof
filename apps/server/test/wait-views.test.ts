@@ -31,7 +31,7 @@ const waitsOn = async (c: AclCompany, task: Pick<Task, 'id'>, token: string): Pr
 const timeWaits = async (c: AclCompany, task: Task, token = c.tokens.ceo) =>
   (await c.get(`/api/tasks/${task.id}`, token)).json().task.time.waitsOn;
 const SINCE = '2026-11-17T21:45:00.000Z';
-const UNTIL = '2026-11-17T22:35:00.000Z';
+const UNTIL = '2099-11-17T22:35:00.000Z';
 
 async function keepExternal(c: AclCompany, task: Task, extra: Partial<NonNullable<Task['externalWait']>> = {}) {
   const externalWait = { operation: randomUUID(), reason: 'Check the deployment', since: SINCE, until: UNTIL, ...extra };
@@ -44,7 +44,7 @@ describe('what a task is waiting for', () => {
     const c = await aclCompany();
     const task = await c.work('Deploy', c.crew.owned);
     await keepExternal(c, task);
-    expect(await timeWaits(c, task)).toEqual([{ kind: 'external', reason: 'Check the deployment', who: null, since: SINCE }]);
+    expect(await timeWaits(c, task)).toEqual([{ kind: 'external', reason: 'Check the deployment', who: null, since: SINCE, until: UNTIL }]);
     expect(await timeWaits(c, task, c.tokens.wes)).toEqual([{ kind: 'external', reason: null, who: null, since: SINCE }]);
   });
 
@@ -82,9 +82,10 @@ describe('what a task is waiting for', () => {
     const expected = [{ kind: shownKind, reason: '108', who: null, since: SINCE }];
     expect(await timeWaits(c, task)).toEqual(expected);
     await keepExternal(c, task, { run: run!.id, reason: 'Rerun 108 on turn-32 9900330a, then release_turn' });
-    expect(await timeWaits(c, task)).toEqual(expected);
+    const bound = [{ ...expected[0], until: UNTIL }];
+    expect(await timeWaits(c, task)).toEqual(bound);
     const list = await c.get('/api/tasks?status=all', c.tokens.ceo);
-    expect(list.json().tasks.find((row: Task) => row.id === task.id).time.waitsOn).toEqual(expected);
+    expect(list.json().tasks.find((row: Task) => row.id === task.id).time.waitsOn).toEqual(bound);
   });
 });
 

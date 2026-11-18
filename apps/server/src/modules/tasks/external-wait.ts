@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
+import { externalWaitFact, WaitOnInput, WaitPlan, type WaitFailure, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { and, desc, eq, gt, gte, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -323,14 +323,15 @@ async function taskTurn(ctx: Ctx, task: Task, agentId: string, message: TurnMess
 const waitEndedWake = (task: Task, agentId: string, reason: string, unavailable?: string): Wake =>
   ({ agentId, taskId: task.id, why: 'wait_ended', text: reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 });
 
-const waitEndedFact = (agentId: string, reason: string, unavailable?: string) =>
-  ({ kind: 'updated' as const, actor: { agentId }, text: unavailable ?? `The wait for "${reason}" ended.`, data: { externalWait: null, reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) });
+const waitEndedFact = (agentId: string, reason: string, unavailable?: string, failure?: WaitFailure) =>
+  ({ kind: 'updated' as const, actor: { agentId }, text: unavailable ?? `The wait for "${reason}" ended.`, data: { externalWait: null, reason, ...(failure ? { waitFailure: failure } : {}) }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) });
 
-export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {
+export async function expireWait(ctx: Ctx, task: Task, unavailable?: string, now = new Date()): Promise<boolean> {
   if (!task.externalWait || !task.assigneeAgentId) return false;
   const wakes = [waitEndedWake(task, task.assigneeAgentId, task.externalWait.reason, unavailable)];
+  const failure = unavailable ? 'unavailable' : externalWaitFact(task.externalWait, now.getTime()).failure;
   try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable), markRecord(task.externalWait, 'check_back'), wakes);
+    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable, failure), markRecord(task.externalWait, 'check_back'), wakes);
   } catch (error) {
     if (error instanceof ApiError && error.reason === 'task_changed') return false;
     throw error;
@@ -367,6 +368,6 @@ export async function checkExternalWaits(ctx: Ctx, now = new Date()): Promise<nu
     notInArray(tasks.status, ['done', 'cancelled']),
   ));
   let ended = 0;
-  for (const task of due) if (await expireWait(ctx, task)) ended++;
+  for (const task of due) if (await expireWait(ctx, task, undefined, now)) ended++;
   return ended;
 }

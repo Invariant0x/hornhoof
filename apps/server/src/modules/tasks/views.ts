@@ -127,9 +127,10 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t:
   const independent = await independentViews(ctx.db, rows.map(t => t.id));
   const partExecutors = [...independent.values()].flatMap(record => record.kind === 'part' ? [record.part.executor] : []);
   const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
-  const reviewers = [...waits.values()].flat().map(reviewerOf);
+  const waitAgents = [...waits.values()].flat().map(wait =>
+    wait.kind === 'external' && wait.sourceKey.startsWith('question:') ? wait.ownerAgentId : reviewerOf(wait));
   const employees = rows.flatMap(t => t.externalWait?.on?.kind === 'employee' ? [t.externalWait.on.employee] : []);
-  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...reviewers, ...employees, ...more].filter((x): x is string => Boolean(x)))];
+  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...waitAgents, ...employees, ...more].filter((x): x is string => Boolean(x)))];
   const placeIds = [...new Set(rows.flatMap(t => [t.departmentId, t.productId]).filter((x): x is string => Boolean(x)))];
   const turnIds = [...new Set(rows.map(t => t.turnId).filter((x): x is string => Boolean(x)))];
   const agentRows = agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(inArray(agents.id, agentIds)) : [];
