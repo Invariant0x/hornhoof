@@ -7,7 +7,8 @@ import { attachments } from '../../db/schema.js';
 import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { identify } from '../nodes/socket.js';
-import { checkRoom, FILE_BYTES, sendFile } from '../tasks/attachments.js';
+import { checkRoom, FILE_BYTES } from '../tasks/file-policy.js';
+import { sendFile } from '../tasks/attachments.js';
 import { madeName, workPartOn } from './runs.js';
 
 const FileParams = z.object({ id: z.string().max(64), name: RunFile });

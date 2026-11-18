@@ -83,7 +83,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept;
                 {[...shown, ...(all ? more : [])].map(e => (
                   <li key={e.id}>
                     <span className="tr-person"><span className="worker-name"><WorkerMark kind={employeeKind(e.turnkey)} /><b dir="auto">{e.name}</b></span> <span className={`tstate ${e.status === 'working' ? 'working' : e.status === 'waiting' ? 'waiting' : ''}`}>{t.dept.status[e.status]}</span></span>
-                    {e.task && <button className="linkish" type="button" onClick={() => onOpenTask(e.task!.id)}>{taskText(e, t)}</button>}
+                    {e.task && <button className="linkish" type="button" dir="auto" onClick={() => onOpenTask(e.task!.id)}>{taskText(e, t)}</button>}
                   </li>
                 ))}
               </ul>

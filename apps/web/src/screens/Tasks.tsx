@@ -292,7 +292,7 @@ function OwnGoals({ goals, label, onOpenGoal }: { goals: GoalView[]; label: stri
         <ul>
           {goals.map(g => (
             <li key={g.id}>
-              <button className="linkish" type="button" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
+              <button className="linkish" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
               {g.target !== null ? <Progress done={Math.min(g.current ?? 0, g.target)} total={g.target} label={t.tracker.card.target(g.current ?? 0, g.target, g.unit)} />
                 : g.total > 0 && <Progress done={g.done} total={g.total} label={t.tracker.card.tasksDone(g.done, g.total)} />}
             </li>

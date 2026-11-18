@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { agentChanges, agents, subscriptions, teams } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import type { HireLine } from '../tools/staff.js';
 
 export type Hired = { id: string; name: string; role: string; title: string };

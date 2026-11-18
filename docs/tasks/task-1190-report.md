@@ -1,5 +1,7 @@
 # Task 1190: future stage owners after employee removal
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/tasks/task-1190-report.md). These are historical results, not checks of the current release.
+
 Status: DONE_WITH_CONCERNS, ready for independent Review. This is an author handoff, with Security and Tests still required.
 
 Base: `11aa5777c4a5f74a550c0e53570ec35ebae39f53` from origin/turn-31 at the authorized start. Checked executable commit: `47d80c905b5d671f8825c77a5eb7dd0252cfd73b` on task-1190. The delivery adds only this report after that commit; the attached manifest records the exact delivery commit and verifies that difference. No code changes follow the passing checks. The head integrates for 0.31.1; no push or merge to turn-31 or main was made.

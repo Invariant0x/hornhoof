@@ -1,5 +1,7 @@
 # Task 1283: skill transport through one prepared test app
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1283-conversation.md). These are historical results, not checks of the current release.
+
 The original case awaited a run after its job had failed with `node_too_old`.
 Merge `fea65b723309b840932d5a8be76b2b0fed0266b3` imported 284 more units of
 `hh-questions`, taking that old-node fixture from 19,868 to 20,152 UTF-16

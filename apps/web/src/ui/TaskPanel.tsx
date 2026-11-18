@@ -255,7 +255,7 @@ type Words = { states: Record<string, string>; names: (id: string) => string | u
    change, an edit or work passed on to someone else, say it all in their title. */
 export function LogEntry({ entry, when, words, task, onChanged }: { entry: TaskLogLine; when: (at: string) => string; words: Words; task?: TaskDetail; onChanged?: () => void }) {
   const t = useT();
-  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names);
+  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names, 'task');
   const said = own !== null || entry.kind === 'created' ? null : lineText(t, entry, when) || null;
   const evidence = evidenceOf(entry.data);
 

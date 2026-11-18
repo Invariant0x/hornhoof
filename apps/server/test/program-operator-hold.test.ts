@@ -579,7 +579,7 @@ it('keeps queue, start and deadline apart for one operator of two nodes: no acti
   const b = await anotherNode(c);
   const a = { agent: c.agent, job: c.job, fact: c.fact, identity: c.identity };
   /* Turns that ran with the instructions their agents have now, so going on in their sessions is up to the node alone. */
-  const ran = async (side: typeof a | typeof b, sessionId: string) => c.db.update(jobs).set({ sessionId, createdBy: c.sub.ownerPersonId, instructionsHash: (await instructionsOf(c.ctx, side.agent, c.ctx.hub.takesSkillFiles(side.identity))).hash }).where(eq(jobs.id, side.job.id));
+  const ran = async (side: typeof a | typeof b, sessionId: string) => c.db.update(jobs).set({ sessionId, createdBy: c.sub.ownerPersonId, instructionsHash: (await instructionsOf(c.ctx, side.agent)).hash }).where(eq(jobs.id, side.job.id));
   await ran(a, 'session-a');
   await ran(b, 'session-b');
   const now = new Date(); let ordinal = 0;

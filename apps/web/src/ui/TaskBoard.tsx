@@ -12,14 +12,15 @@ function Chevron() {
   return <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>;
 }
 
-/* How much of a whole is done, in whole goals or tasks, as a bar and in words. */
+/* How much of a whole is done, in whole goals or tasks, as a bar and in words; the words in their own direction, so "212 of
+   500 shops" reads in that order right to left too. */
 export function Progress({ done, total, label, wide = false }: { done: number; total: number; label: string; wide?: boolean }) {
   return (
     <div className={`goal-progress${wide ? ' wide' : ''}`}>
       <span className="turn-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
         <i style={{ inlineSize: `${total ? (done / total) * 100 : 0}%` }} />
       </span>
-      <small aria-hidden="true">{label}</small>
+      <small aria-hidden="true" dir="auto">{label}</small>
     </div>
   );
 }
@@ -45,8 +46,8 @@ function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
     <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
       <StateWord status={status} />
       <div className="goal-row-main">
-        <button className="linkish goal-row-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-        <span className="goal-row-who">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
+        <button className="linkish goal-row-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+        <span className="goal-row-who" dir="auto">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
         <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
         {(asking || goal.children.length > 0) && (
           <div className="entry-actions goal-row-actions">
@@ -79,17 +80,17 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
     <article className={`goal${asking ? ' you' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
       <div className="goal-head">
         <h3 className="goal-title">
-          <button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+          <button className="linkish" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
         </h3>
         <span className="goal-no">#{task.number}</span>
       </div>
-      {task.brief && <p className="goal-brief">{task.brief}</p>}
+      {task.brief && <p className="goal-brief" dir="auto">{task.brief}</p>}
       <div className="goal-meta">
         <StateWord status={status} />
         {task.urgent && <span className="badge urgent">{t.tasks.board.urgent}</span>}
-        {place && <span className="badge goal-place">{place}</span>}
-        <span>{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
-        <span>{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
+        {place && <span className="badge goal-place" dir="auto">{place}</span>}
+        <span dir="auto">{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
+        <span dir="auto">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
       </div>
       <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
       {goal.total > 0 && <Progress done={goal.done} total={goal.total} label={t.tasks.board.progress(goal.done, goal.total)} />}
@@ -119,7 +120,7 @@ export function SplitGoals({ split, rows, empty }: { split: Split; rows: CardRow
   const [shown, setShown] = useState(false);
   return (
     <>
-      {split.open.length ? <GoalList goals={split.open} rows={rows} /> : empty && <p className="muted">{empty}</p>}
+      {split.open.length ? <GoalList goals={split.open} rows={rows} /> : empty && <p className="muted" dir="auto">{empty}</p>}
       {split.closed.length > 0 && (
         <div className="goal-closed">
           <Fold open={shown} onToggle={() => setShown(!shown)}>{t.tasks.board.closed(split.closed.length)}</Fold>
@@ -136,7 +137,7 @@ export function BoardSection({ heading, folded = false, children }: { heading: s
   const [shown, setShown] = useState(!folded);
   return (
     <section className="board-section" aria-labelledby={id}>
-      <h2 id={id}>{folded ? <Fold open={shown} onToggle={() => setShown(!shown)}>{heading}</Fold> : heading}</h2>
+      <h2 id={id} dir="auto">{folded ? <Fold open={shown} onToggle={() => setShown(!shown)}>{heading}</Fold> : heading}</h2>
       {shown && children}
     </section>
   );

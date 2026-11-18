@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { backlogItems, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 
 export type BacklogItem = typeof backlogItems.$inferSelect;
 type BacklogItemView = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };

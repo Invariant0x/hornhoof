@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { requests, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { openPersonRequests } from '../tasks/decisions.js';
-import { CLOSED } from '../tasks/engine.js';
+import { CLOSED } from '../tasks/state.js';
 
 /* The watchdog sees wait facts, never dependency bodies or references outside the task's department, and with each task what
    decides whether it may open it. */

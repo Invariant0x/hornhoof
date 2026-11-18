@@ -1,3 +1,9 @@
+import type { ConversationEffects } from './modules/conversation/effects.js';
+import type { CallEffects } from './modules/calls/effects.js';
+import { fallbackMove } from './modules/subscriptions/fallback.js';
+import { notifyFailure } from './modules/tasks/failures.js';
+import { resumeOperatorProcess } from './modules/program-operator/recovery.js';
+import { cancelJob, wakeAll } from './modules/tasks/wake.js';
 import { inboxRoutes } from './modules/conversation/inbox-routes.js';
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
 import type { Socket } from 'node:net';
@@ -120,6 +126,8 @@ export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logg
 export type Ctx = Deps & {
   /* When this server came up: it did not hear of any machine before then. */
   startedAt: Date;
+  conversationEffects: ConversationEffects;
+  callEffects: CallEffects;
   readCommit: CommitReader;
   markCommit: CommitMarker;
   /* Creates a repository on a git host with a key the company saved. */
@@ -246,6 +254,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     bus: new EventBus(),
     terminals: new TerminalRelay(),
   } as Ctx;
+  ctx.conversationEffects = { beforeDispatch: fallbackMove, resumeProgram: resumeOperatorProcess, notifyHold: notifyFailure };
+  ctx.callEffects = { wakeAll, cancelJob };
   app.decorate('ctx', ctx);
   ctx.mode = new AppMode({ dir: deps.config.controlDir, fromKeeper: deps.config.keeper, log: line => app.log.info(line) });
   ctx.hub = new NodeHub({

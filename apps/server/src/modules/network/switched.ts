@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
-import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
+import { enqueueTurn } from '../conversation/queue.js';
+import { NoSubscription, orchestratorOf } from '../conversation/turn-records.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from './store.js';
 

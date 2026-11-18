@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks, type jobs } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { appendEvent } from '../events/store.js';
-import { published } from './engine.js';
+import { published } from './events.js';
 
 type Turn = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId'>;
 

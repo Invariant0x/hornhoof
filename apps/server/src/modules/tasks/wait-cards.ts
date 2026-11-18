@@ -5,7 +5,8 @@ import type { AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
 import { tasks, taskWaits, turns, waitNotices } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import { ownNote, taskSpot } from './engine.js';
+import { ownNote } from './events.js';
+import { taskSpot } from './state.js';
 import { pageAfter, type WaitPlace } from './wait-views.js';
 
 /* The cards kept for a person about waits past their dates: only their own, of what they reach, until they say they saw them.

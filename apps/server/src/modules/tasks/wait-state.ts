@@ -5,7 +5,8 @@ import { runsDepartment } from '../../auth/departments.js';
 import type { Checker } from '../../checker.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
+import { CLOSED, refuse, type Actor, type Task, type Tx } from './state.js';
+import { note, ownNote } from './events.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
 
 /* The record of who answers for each thing a task waits on, and until when. Its source ends it: a date passing proves nothing.

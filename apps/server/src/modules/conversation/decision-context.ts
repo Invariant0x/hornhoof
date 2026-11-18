@@ -1,3 +1,4 @@
+import { inLane } from '@hornhoof/protocol';
 import { and, eq, gt, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
@@ -187,13 +188,7 @@ const held = new WeakMap<object, Map<string, Promise<unknown>>>();
 export function withInputLock<T>(ctx: Pick<Ctx, 'db'>, agentId: string, fn: () => Promise<T>): Promise<T> {
   const mine = held.get(ctx.db) ?? new Map<string, Promise<unknown>>();
   held.set(ctx.db, mine);
-  const run = (mine.get(agentId) ?? Promise.resolve()).then(fn);
-  const settled = run.catch(() => undefined);
-  mine.set(agentId, settled);
-  void settled.then(() => {
-    if (mine.get(agentId) === settled) mine.delete(agentId);
-  });
-  return run;
+  return inLane(mine, agentId, fn);
 }
 
 /* Marks the running turn's words as on their way, before they go: a decision in it waits for them to be kept. */

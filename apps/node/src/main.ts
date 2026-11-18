@@ -16,8 +16,9 @@ import { agentUser, secureNode, userFor, type JobUser } from './isolation.js';
 import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
-import { machineLoad } from './load.js';
-import { CallRoom, type CallSeat } from './call-room.js';
+import { machineLoad, type MachineLoad } from './load.js';
+import { MemoryShort } from './memory-short.js';
+import { CallRoom } from './call-room.js';
 import { removalWatch } from './removal.js';
 import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
 import { adapterFor, builtinAdapters, programFor } from './providers/index.js';
@@ -134,8 +135,8 @@ type RunOptions = {
   browserCheckMs?: number;
   /* Why the node cannot write its work folder now, or null when it can; tests pass their own. */
   checkWork?: () => Promise<string | null>;
-  /* The memory a new program can get on the machine now, which one-shot calls start by; tests pass their own. */
-  freeMemory?: () => number;
+  /* The machine as each report of the node reads it; tests pass their own readings. */
+  machine?: () => MachineLoad;
 };
 
 const MODEL_WEEK = /^seven_day_[a-z]+$/;
@@ -212,7 +213,7 @@ function sealedFor(known: CodexSealed | null, version: number, recipients: Recip
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS, checkWork = () => workFolderError(dir), freeMemory }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS, checkWork = () => workFolderError(dir), machine = () => machineLoad({ dir }) }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -405,12 +406,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (workError === null) await status();
   };
 
-  /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
-  const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
-  /* One-shot calls start as the machine's memory holds their programs. */
-  const calls = new CallRoom(freeMemory ?? (() => machineLoad({ dir }).memFree));
+  /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run, and whether its kernel killed a
+     process for want of memory since the report before. The count of kills stays here. */
+  const memory = new MemoryShort();
+  const load = (): NodeLoad => {
+    const { oomKills, ...now } = machine();
+    return { ...now, tests: testing.size, jobs: running.size, memoryShort: memory.report(oomKills) };
+  };
+  /* One-shot calls wait while the machine's last report found such a kill. */
+  const calls = new CallRoom(() => memory.now);
   /* The agents whose programs run in its terminals, as of the last look, for Hornhoof starts no new one on a machine short
-     of free memory. A node without terminals names none. */
+     of memory. A node without terminals names none. */
   let live = terminal ? await terminal.tmux.livePrograms() : null;
   const lookLive = async () => {
     if (terminal) live = await terminal.tmux.livePrograms();
@@ -438,7 +444,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -640,11 +646,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     : undefined;
 
   async function runOne(m: JobRun, signal: AbortSignal) {
-    /* A one-shot call starts once the machine has memory for its program, and says it started only then; one stopped while
-       it waits ends there. */
-    const seat = m.call ? await calls.enter(signal).catch(() => null) : null;
-    const done: JobDone = m.call && !seat ? { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: 'Stopped.', tail: '', error: 'cancelled' } : await runStarted(m, signal, seat);
-    seat?.leave();
+    /* A one-shot call starts unless the machine's last report found a kill for want of memory, and says it started only
+       then; one stopped while it waits ends there. */
+    const started = m.call ? await calls.enter(signal).then(() => true, () => false) : true;
+    const done: JobDone = started ? await runStarted(m, signal) : { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: 'Stopped.', tail: '', error: 'cancelled' };
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
     outbox.hold(done);
     running.delete(m.jobId);
@@ -665,7 +670,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     }
   }
 
-  async function runStarted(m: JobRun, signal: AbortSignal, seat: CallSeat | null): Promise<JobDone> {
+  async function runStarted(m: JobRun, signal: AbortSignal): Promise<JobDone> {
     emit({ type: 'job.started', jobId: m.jobId });
     try {
       await programs.ready(signal);
@@ -698,8 +703,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => {
-        /* A call's program that says something is up, and the memory it takes shows from now on. */
-        seat?.settled();
         emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
       };
       const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), log, ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
@@ -751,10 +754,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   checkingBrowser.unref();
   /* An old figure says nothing, so one that cannot go out now is not kept for later. */
   const reporting = setInterval(() => {
+    const said = load();
     /* Calls that wait for memory look again as the node looks at its machine. */
     calls.look();
     void recheckWork();
-    void lookLive().then(() => send?.({ type: 'load', ...load(), ...liveNow() }));
+    void lookLive().then(() => send?.({ type: 'load', ...said, ...liveNow() }));
   }, loadMs);
   reporting.unref();
 

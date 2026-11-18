@@ -23,7 +23,7 @@ async function company(beforeReady?: (app: FastifyInstance) => void) {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await state(app, ceo)).ready);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));

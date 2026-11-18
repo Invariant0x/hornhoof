@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, programOperatorCases } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { liveSubscription } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { agentParty } from '../events/parties.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeAccess } from './access.js';

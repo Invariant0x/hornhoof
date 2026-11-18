@@ -10,7 +10,7 @@ import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
-import { refuse } from '../tasks/engine.js';
+import { refuse } from '../tasks/state.js';
 import { TEST_MEMORY_GB } from '../departments/repository.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
@@ -18,7 +18,7 @@ import { partSpread, planProductParts, type ProductPlan } from './plan-product.j
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
-import { AWAY_MS, WAIT_MS } from './runs.js';
+import { AWAY_MS, WAIT_MS } from './constants.js';
 export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision, type RunMode } from './reuse.js';
 

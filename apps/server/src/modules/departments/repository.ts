@@ -26,11 +26,6 @@ export async function turnPlaces(db: Pick<Ctx['db'], 'select'>, agent: { product
   return task && task.departmentId === agent.departmentId ? [task.productId, task.departmentId] : [agent.productId, agent.departmentId];
 }
 
-/* The repository an agent works in: its product's, else its department's, else none. */
-export async function repoFor(ctx: Pick<Ctx, 'db' | 'config'>, agent: { productId: string | null; departmentId: string | null }): Promise<Repo | null> {
-  return (await repoAt(ctx, [agent.productId, agent.departmentId]))?.repo ?? null;
-}
-
 /* One repository under two spellings of its address, with or without the ending .git or /. */
 const bare = (url: string) => url.replace(/\/+$/, '').replace(/\.git$/i, '');
 

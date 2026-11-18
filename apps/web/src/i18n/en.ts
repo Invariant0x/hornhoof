@@ -893,6 +893,7 @@ export const en = {
     /* What the node can use is less than its machine has: Docker on a Mac gets only the share its owner gave it. */
     smallerMac: 'Docker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.',
     smaller: 'Hornhoof on this machine is set smaller than the machine, so it uses only part of it.',
+    memoryShort: 'The machine reported a shortage of memory. New agent programs wait, and what already runs there goes on.',
     runningOn: (host: string) => `What runs on ${host} now`,
     nothing: 'Nothing right now',
     working: 'working',
@@ -1298,7 +1299,7 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
-    memoryWait: 'The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.',
+    memoryWait: 'The machine reported a shortage of memory. Turns wait and go on by themselves once it reports none, and what already runs there goes on.',
     /* The notes at the foot of an agent's window, each led by a word in a frame that says what kind of note it is. */
     notes: {
       label: 'Notes',
@@ -2509,6 +2510,8 @@ export const en = {
         title: 'the title', brief: 'the short text', why: 'the why', goal: 'the goal', responsible: 'who answers for it', due: 'the due date', pipeline: 'the pipeline',
         stage: 'the stage', parent: 'the bigger goal', target: 'the target', current: 'where it stands now', unit: 'what it is counted in',
       } as Record<string, string>,
+      /* What changed when it has no words of its own: the goal or the task itself. */
+      whole: { goal: 'the goal', task: 'the task' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`),
     },
   },

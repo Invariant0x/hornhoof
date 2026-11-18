@@ -6,7 +6,8 @@ import type { Db } from '../../db/client.js';
 import { agents, companies, people, tasks, teams } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx } from './engine.js';
+import { CLOSED, loadTask, refuse, type Actor, type Moved, type Task, type Tx } from './state.js';
+import { note, published } from './events.js';
 import { freePeers, type Work } from './role-peers.js';
 
 /* Whether work is urgent is data: the CEO or a department's owner says so through the orchestrator or a route, and nothing

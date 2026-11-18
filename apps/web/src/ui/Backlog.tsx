@@ -80,7 +80,7 @@ function ItemRow({ item, index, count, chosen, open, busy, drag, onChoose, onOpe
             <svg className="bl-grip" viewBox="0 0 12 12" aria-hidden="true"><title>{t.backlog.drag}</title><path d="M4 2h.01M8 2h.01M4 6h.01M8 6h.01M4 10h.01M8 10h.01" /></svg>
             <button className="rowbtn" type="button" aria-expanded={open} aria-label={t.tables.openCard(item.title)}>
               <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>
-              <span className="nm"><b>{item.title}</b></span>
+              <span className="nm"><b dir="auto">{item.title}</b></span>
             </button>
           </span>
         </td>
@@ -93,7 +93,7 @@ function ItemRow({ item, index, count, chosen, open, busy, drag, onChoose, onOpe
           </div>
         </td>
       </tr>
-      {open && <tr className="det"><td colSpan={COLUMNS}><div className="task-sum"><p className="bl-text">{item.text || t.backlog.noText}</p></div></td></tr>}
+      {open && <tr className="det"><td colSpan={COLUMNS}><div className="task-sum"><p className="bl-text" dir="auto">{item.text || t.backlog.noText}</p></div></td></tr>}
     </>
   );
 }
@@ -178,13 +178,13 @@ export function Backlog({ departmentId }: { departmentId: string }) {
       <div className="backlog-head">
         <div>
           <h2 id={heading}>{t.backlog.heading}</h2>
-          <p className="muted">{t.backlog.intro}</p>
+          <p className="muted" dir="auto">{t.backlog.intro}</p>
         </div>
         {!adding && <button className="btn small ghost" type="button" onClick={() => setAdding(true)}>{t.backlog.add}</button>}
       </div>
       {adding && <AddForm onAdd={add} onCancel={() => setAdding(false)} />}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {items && !list.length && <p className="muted">{t.backlog.empty}</p>}
+      {failure !== null && <p className="alert" role="alert" dir="auto">{errorText(t, failure)}</p>}
+      {items && !list.length && <p className="muted" dir="auto">{t.backlog.empty}</p>}
       {list.length > 0 && (
         <Edge className="tbl-frame"><div className="tbl" ref={frame}>
           <table className="dt task-table bl-table" aria-label={t.backlog.heading}>
@@ -221,8 +221,8 @@ export function Backlog({ departmentId }: { departmentId: string }) {
           <button className="btn small" type="button" disabled={busy || !chosen.size} onClick={schedule}>{t.backlog.schedule(chosen.size)}</button>
         </div>
       )}
-      {said && <p className="muted" role="status">{said}</p>}
-      {problem !== null && <p className="alert" role="alert">{errorText(t, problem)}</p>}
+      {said && <p className="muted" role="status" dir="auto">{said}</p>}
+      {problem !== null && <p className="alert" role="alert" dir="auto">{errorText(t, problem)}</p>}
     </section>
   );
 }

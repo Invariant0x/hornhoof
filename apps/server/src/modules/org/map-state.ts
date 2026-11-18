@@ -3,7 +3,7 @@ import { and, asc, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, jobs, mapReturns, requests, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { GONE_ALONG } from '../conversation/queue.js';
+import { GONE_ALONG } from '../conversation/constants.js';
 
 /* The lines of the company map, kept apart from the pulses of single messages: a line is blue while the one below works on
    an assignment, and yellow for a while after it gave back a result. Lines run from the orchestrator to each department's

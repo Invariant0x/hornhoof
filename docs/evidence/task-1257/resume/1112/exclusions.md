@@ -1,5 +1,7 @@
 # Task 1112 exclusions authorized by the head
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/evidence/task-1257/resume/1112/exclusions.md). These are historical results, not checks of the current release.
+
 Source: 76c4b7d571aba37c5eefd12cac4eeee4945c01e5, source merge base 77c5f226f7ef84de8876cf42da3312fe8da779ce. The head confirmed that iv-no-confirm is current policy and deleted outbound remains deleted. All standing department-head authority is retained. The per-channel ruleOf API remains current.
 
 - apps/server/src/modules/outbound/tools-head.ts: excluded all head-standing-authority edits because upstream deleted the entire module.

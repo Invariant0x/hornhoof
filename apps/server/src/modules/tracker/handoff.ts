@@ -1,8 +1,9 @@
 import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, goals, tasks } from '../../db/schema.js';
-import { CLOSED, ownNote, published, taskSpot } from '../tasks/engine.js';
-import { nextRevision } from './edit.js';
+import { CLOSED, taskSpot } from '../tasks/state.js';
+import { ownNote, published } from '../tasks/events.js';
+import { nextRevision } from './revision.js';
 import { goalNote } from './goals.js';
 import { ownersOf, type Owners } from './responsible.js';
 
