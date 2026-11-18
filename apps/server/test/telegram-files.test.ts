@@ -8,6 +8,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { KEEP_IN_REPOSITORY } from '../src/modules/conversation/pictures.js';
+import { appendEvent } from '../src/modules/events/store.js';
 import { albums } from '../src/modules/telegram/bots.js';
 import { whatCame } from '../src/modules/telegram/inbox.js';
 import { fakeTelegram, type TelegramUser } from './fake-telegram.js';
@@ -177,6 +178,31 @@ describe('what a Telegram message carries', () => {
   });
 });
 
+it('shows typing and carries earlier attachments once with the final answer', async () => {
+  const { app, db, tg, builtin, orchestrator } = await company();
+  tg.write(TOKEN, IVAN, 'Пришли отчет.');
+  const run = await nextOf(builtin, 'job.run');
+  const [file] = await db.insert(attachments).values({
+    companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId,
+    name: 'report.zip', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length,
+  }).returning();
+  const event = { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId, kind: 'text' as const };
+  const pictures = [{ id: file!.id, name: file!.name }];
+  await appendEvent(app.ctx, { ...event, data: { text: 'Собираю отчет.', pictures } });
+  await appendEvent(app.ctx, { ...event, data: { text: 'Ваш отчет готов.' } });
+  await appendEvent(app.ctx, { ...event, data: { text: '', pictures } });
+  const calls = tg.calls.filter(call => call === 'getUpdates').length;
+  tg.write(TOKEN, IVAN, 'In a group.', { id: -100200, type: 'group' });
+  await until(() => tg.calls.filter(call => call === 'getUpdates').length > calls);
+  expect(tg.sent).toEqual([]);
+  expect(tg.sentDocuments).toEqual([]);
+
+  builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+  await until(() => tg.sent.length > 0 && tg.sentDocuments.length > 0);
+  expect(tg.sent.map(s => s.text)).toEqual(['Ваш отчет готов.']);
+  expect(tg.sentDocuments).toMatchObject([{ chat_id: IVAN.id, file_name: 'report.zip', bytes: ZIP }]);
+  expect(tg.calls).toContain('sendChatAction');
+});
 
 describe('the sender of a Telegram file', () => {
   async function sender() {

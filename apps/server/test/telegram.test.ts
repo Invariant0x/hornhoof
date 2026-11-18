@@ -3,7 +3,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, people, telegramBots } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, telegramBots, telegramReplies } from '../src/db/schema.js';
 import { splitForTelegram } from '../src/modules/telegram/api.js';
 import { fakeTelegram, type FakeTelegram, type TelegramUser } from './fake-telegram.js';
 import { appOn, as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -191,11 +191,12 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain("Ivan wrote this in Telegram. Ivan is the company's owner (the CEO).");
     await until(async () => (await db.select().from(people).where(eq(people.id, owner.id)))[0]!.telegramUserId === IVAN.id);
     builtin.send({ type: 'job.started', jobId: run.jobId });
-    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it: *one* designer_ <b>.' } });
-    await until(() => tg.sent.length === 1);
-    expect(tg.sent[0]).toEqual({ token: TOKEN, chat_id: IVAN.id, text: 'On it: *one* designer_ <b>.' });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Looking for candidates.' } });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 1, event: { kind: 'text', text: 'On it: *one* designer_ <b>.' } });
     builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: 'On it.', tail: '', error: null });
     await until(() => builtin.acks.includes(run.jobId));
+    await until(() => tg.sent.length === 1);
+    expect(tg.sent[0]).toEqual({ token: TOKEN, chat_id: IVAN.id, text: 'On it: *one* designer_ <b>.' });
     const events = (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().events;
     expect(events[0]).toMatchObject({ kind: 'message', person: { id: owner.id }, data: { text: 'Hire a designer.' }, message: { channel: 'telegram' } });
   });
@@ -276,6 +277,7 @@ describe('a message through the bot', () => {
     const long = `${'Sales are fine. '.repeat(300)}\nThe end.`;
     c.builtin.send({ type: 'job.started', jobId: run.jobId });
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: long } });
+    c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.tg.sent.length === 2);
     expect(c.tg.sent.every(s => s.token === SECOND && s.chat_id === IVAN.id && s.text.length <= 4096)).toBe(true);
     expect(c.tg.sent.map(s => s.text).join('')).toBe(long);
@@ -295,18 +297,20 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain("Wes wrote this in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
-  it('tells the person when the agent could not answer', async () => {
-    const { app, ceo, owner, tg, builtin } = await company();
+  it.each(['agent_failed', 'cancelled'])('sends only the failure words when a turn ends with %s after progress', async error => {
+    const { app, db, ceo, owner, tg, builtin } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');
     await connectBot(app, ceo, 'orchestrator', TOKEN);
     tg.write(TOKEN, IVAN, 'Hello.');
     const run = await nextOf(builtin, 'job.run');
-    builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error: 'agent_failed' });
+    await until(async () => (await db.select().from(telegramReplies)).length === 1);
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'I am looking into it.' } });
+    builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error });
     await until(() => builtin.acks.includes(run.jobId));
     await pollOnce(tg, TOKEN);
     await pollOnce(tg, TOKEN);
-    await until(() => tg.sent.length === 1);
-    expect(tg.sent[0]!.text).toContain('Orchestrator');
+    await until(async () => (await db.select().from(telegramReplies)).length === 0);
+    expect(tg.sent.map(s => s.text)).toEqual(['Orchestrator could not answer this time. Open Hornhoof to see why, or write again.']);
   });
 
   it('keeps where it read up to, so a restart neither loses nor repeats a message', async () => {

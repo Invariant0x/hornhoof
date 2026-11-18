@@ -64,7 +64,7 @@ async function repliesToOnePerson(ctx: Pick<Ctx, 'db'>, jobId: string, source?: 
   return Boolean(privateMessage);
 }
 
-/* Whether a person's words would go into a turn that answers someone else in Telegram. Every word of a turn goes back to
+/* Whether a person's words would go into a turn that answers someone else in Telegram. The answer goes back to
    each Telegram chat a message of the turn came from, so words of one person typed into another's turn would carry the
    answer to the one into the chat of the other, and the agent could not tell whose question each answer is for. Such words
    wait for a turn of their own: the words of a turn whose Telegram chats are all the person's own, or, from Telegram, of a

@@ -53,6 +53,7 @@ it('lets a linked invited person write to the company bot and get their own answ
   builtin.send({ type: 'job.started', jobId: run.jobId });
   await until(async () => (await db.select().from(telegramReplies)).some(reply => reply.jobId === run.jobId));
   say(builtin, run.jobId, 0, 'С какого устройства начнем?');
+  builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
   await until(() => sentTo(tg, CLARA.id).length > 0);
   expect(sentTo(tg, CLARA.id)).toEqual(['С какого устройства начнем?']);
 });
@@ -83,16 +84,15 @@ describe('two people who write to one head in Telegram', () => {
     builtin.send({ type: 'agent.said', ref: typed.ref, ok: true });
 
     say(builtin, first.jobId, 0, 'Лидов за неделю: 42, по каналам ниже.');
-    await until(() => sentTo(tg, MAX.id).length === 1);
     builtin.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
 
     const second = await nextOf(builtin, 'job.run');
     expect(second.jobId).toBe(queued!.id);
     builtin.send({ type: 'job.started', jobId: second.jobId });
     say(builtin, second.jobId, 0, 'Бриф по запуску: в приложении.');
-    await until(() => sentTo(tg, CLARA.id).length === 1);
     builtin.send({ type: 'job.done', jobId: second.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => builtin.acks.includes(second.jobId));
+    await until(() => sentTo(tg, MAX.id).length > 0 && sentTo(tg, CLARA.id).length > 0);
 
     expect(sentTo(tg, MAX.id)).toEqual(['Лидов за неделю: 42, по каналам ниже.']);
     expect(sentTo(tg, CLARA.id)).toEqual(['Бриф по запуску: в приложении.']);
