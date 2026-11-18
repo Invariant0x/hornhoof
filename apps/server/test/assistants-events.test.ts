@@ -267,8 +267,8 @@ describe('a wake at the events address', () => {
     c.builtin.send({ type: 'job.started', jobId: run.jobId });
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it.' } });
     await until(async () => (await eventsOf(c, ava.key)).length === 1);
-    /* A moment for a wake that would go for a word alone; none does. */
-    await new Promise(done => setTimeout(done, 100));
+    /* A wake that would go for a word alone would have gone once the service settles; none does. */
+    await c.app.ctx.assistants.settled();
     expect(address.wakes).toEqual([]);
     c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => address.wakes.length === 1);
@@ -299,7 +299,7 @@ describe('a wake at the events address', () => {
 
     await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Europe.' }, headers: { authorization: `Bearer ${ava.key}` } });
     await until(async () => (await eventsOf(c, ava.key, told!.seq)).length === 1);
-    await new Promise(done => setTimeout(done, 100));
+    await c.app.ctx.assistants.settled();
     expect(address.wakes).toHaveLength(1);
     const [closed] = await eventsOf(c, ava.key, told!.seq);
     await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which city then?', topic: 'task' });
@@ -350,8 +350,8 @@ describe('the work for assistants, stopped and started again as a server gets an
     service.collect(c.acme.id);
     const meanwhile = read(c, ava.key, first!.seq, 50);
     await until(() => waiting === 2);
-    /* A moment for anything that would still go, so that it shows here; nothing does. */
-    await new Promise(done => setTimeout(done, 100));
+    /* Anything that would still go has gone once the service settles, so that it shows here; nothing does. */
+    await service.settled();
     expect(await eventsOf(c, ava.key, first!.seq)).toEqual([]);
     expect(address.wakes).toHaveLength(1);
 
