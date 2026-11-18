@@ -1,3 +1,0 @@
-
-> @hornhoof/server@0.32.0 build
-> tsc -p tsconfig.json && node -e "require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })"
