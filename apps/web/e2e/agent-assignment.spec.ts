@@ -127,11 +127,16 @@ async function mountFixture(page: Page, state: FixtureState, errors: string[]): 
   });
   page.on('requestfailed', request => {
     const failure = request.failure()?.errorText ?? 'Unknown failure';
-    /* The fixture's deliberately open stream is cancelled when the locale navigation replaces its page. */
-    if (new URL(request.url()).pathname === '/api/stream' && /aborted|cancelled/i.test(failure)) return;
+    if (new URL(request.url()).pathname === '/api/stream' && STREAM_ENDED_BY_PAGE.test(failure)) return;
     errors.push(`${request.method()} ${request.url()}: ${failure}`);
   });
 }
+
+/* The fixture's stream stays open until the page ends it. A locale navigation replaces the page, and the app closes the
+   first stream it opened as React's development mode, which these checks run in, mounts its effects twice. Each engine
+   names that end in its own words: Chromium net::ERR_ABORTED, Firefox NS_BINDING_ABORTED for a navigation and
+   NS_ERROR_ABORT for a close, WebKit cancelled. Any other failure of the stream, a refused connection say, is an error. */
+const STREAM_ENDED_BY_PAGE = /^(?:net::ERR_ABORTED|NS_BINDING_ABORTED|NS_ERROR_ABORT|cancelled)$/;
 
 async function openCard(page: Page, locale: Language, words: Messages): Promise<Locator> {
   await page.goto(`/departments/${DEPARTMENT_ID}?assignment-locale=${locale}`);
