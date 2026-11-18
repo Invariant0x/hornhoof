@@ -1,5 +1,5 @@
 import { useId, type MouseEvent } from 'react';
-import { deptLabel, useLanguage, useT } from '../i18n';
+import { deptLabel, teamLabel, useLanguage, useT } from '../i18n';
 import { routePath } from '../routes';
 import { localPipeline } from '../tasks';
 import { modelLine } from '../ui/Chip';
@@ -89,7 +89,7 @@ export function DepartmentStructure(props: Props) {
       <div className="dv-structure-grid">
         {remaining.length > 0 && <div className="dv-stage">{remaining.map(agent)}</div>}
         {d.teams.map(team => <div className="dv-stage" key={team.id}>
-          <h4 dir="auto">{team.name}</h4>
+          <h4 dir="auto">{teamLabel(team, language)}</h4>
           {d.employees.filter(e => e.teamId === team.id).map(agent)}
         </div>)}
       </div>

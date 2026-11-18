@@ -258,7 +258,7 @@ select:disabled { opacity: .55; }
 .template-depts { color: var(--muted); opacity: .85; }
 .template-count { font-size: 12px; color: var(--cyan-ink); margin-top: 2px; }
 /* The scheme keeps one aspect on every card, so cards in a row share its height and their titles line up. */
-.scheme { width: 100%; max-width: 320px; margin-inline: auto; height: auto; aspect-ratio: 280 / 114; display: block; }
+.scheme { width: 100%; max-width: 320px; margin-inline: auto; height: auto; aspect-ratio: 280 / var(--scheme-h, 114); display: block; }
 .scheme-root { fill: var(--cyan-ink); }
 .scheme-line { stroke: var(--line2); stroke-width: 1.25; }
 .scheme-dept { fill: var(--surface2); stroke: var(--line2); stroke-width: 1; }
@@ -1530,6 +1530,8 @@ body:has(.dview) .version-mark { display: none; }
 .dv-agent-place > div { display: grid; min-inline-size: 0; }
 .dv-structure small { font-size: 12px; color: var(--muted); }
 .call-marks.named { display: grid; gap: 4px; }
+/* A call's status is one unit: when it does not fit after the name, it moves to the next line whole. */
+.call-marks.named .worker-name small { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .dv-structure .cell { animation: none; } }
 /* The department's tasks under its people, and a new task written in place. */
 .dv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }

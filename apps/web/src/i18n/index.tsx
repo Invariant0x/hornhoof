@@ -103,3 +103,8 @@ export function restoreEnded(t: Messages, status: { state: 'running' | 'done' | 
 export function deptLabel(t: Messages, d: { name: string | null; templateKey: keyof Messages['templates'] | null }): string {
   return d.name ?? (d.templateKey ? t.templates[d.templateKey].name : '');
 }
+
+/* A team by the name of its template in the reader's language while it keeps that name, else as it was named. */
+export function teamLabel(team: { name: string; title?: { en: string; ru: string } }, language: Language): string {
+  return team.title?.[language] ?? team.name;
+}

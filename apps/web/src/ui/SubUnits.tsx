@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, teamLabel, useLanguage, useT } from '../i18n';
 import type { Department, Employee, Team } from '../types';
 import { employeeKind, WorkerMark } from './WorkerMark';
 
@@ -93,6 +93,7 @@ function TurnkeyMark({ departmentId, team, onFail }: { departmentId: string; tea
 
 function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team: Team; onFail: (err: unknown) => void }) {
   const t = useT();
+  const { language } = useLanguage();
   const id = useId();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(team.name);
@@ -116,7 +117,7 @@ function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team
         </div>
       ) : (
         <>
-          <b>{team.name}</b>
+          <b>{teamLabel(team, language)}</b>
           <TurnkeyMark departmentId={departmentId} team={team} onFail={onFail} />
           <div className="f">
             <button className="btn small ghost" type="button" onClick={() => { setName(team.name); setRenaming(true); }}>

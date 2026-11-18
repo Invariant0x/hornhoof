@@ -77,6 +77,60 @@ test.afterAll(async () => {
 
 for (const language of ['en', 'ru'] as const) {
   for (const width of [1440, 390]) {
+    test(`shows every department of every kit card whole in its scheme at ${width} in ${language}`, async ({ page }, info) => {
+      const t = MESSAGES[language];
+      const errors: string[] = [];
+      page.on('pageerror', err => errors.push(err.message));
+      await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript(lang => localStorage.setItem('hh-lang', lang), language);
+      /* A server that waits for its setup: the cards come from the catalog the page carries. */
+      await page.route('**/api/**', async route => {
+        const url = new URL(route.request().url());
+        if (url.pathname === '/api/setup') return route.fulfill({ json: { needed: true } });
+        if (url.pathname.startsWith('/api/setup/names/')) return route.fulfill({ json: { name: decodeURIComponent(url.pathname.split('/').at(-1)!), free: true } });
+        return route.fulfill({ status: 404, json: { error: { code: 'not_found', message: 'Not here.' } } });
+      });
+      await page.goto('/setup?code=LINK-CODE-123');
+      const pick = page.locator('.templates-pick');
+      const video = page.getByRole('radio', { name: new RegExp(t.companyTemplates.video.name) });
+      await expect(video).toBeVisible();
+      await expect(page.locator('svg.scheme')).toHaveCount(11);
+
+      /* Every line of every name lies inside its box: nothing cut, nothing hidden, no ellipsis. */
+      const outside = await page.locator('text.scheme-name').evaluateAll(texts => texts.flatMap(text => {
+        const box = (text.previousElementSibling as SVGGraphicsElement).getBBox(), own = (text as SVGGraphicsElement).getBBox();
+        const name = text.querySelector('title')?.textContent ?? '';
+        const style = getComputedStyle(text);
+        const fits = own.x >= box.x - 0.5 && own.y >= box.y - 0.5 && own.x + own.width <= box.x + box.width + 0.5 && own.y + own.height <= box.y + box.height + 0.5;
+        return fits && !text.textContent!.includes('\u2026') && style.textOverflow !== 'ellipsis' ? [] : [name];
+      }));
+      expect(outside).toEqual([]);
+      const names = await page.locator('text.scheme-name title').allTextContents();
+      expect(names).toContain(t.templates.video_production.name);
+      /* The cards of a row are as high as each other, and every scheme as high as the others. */
+      const cards = await page.locator('.template-card').evaluateAll(all => all.map(card => {
+        const r = card.getBoundingClientRect(), scheme = card.querySelector('svg.scheme')!.getBoundingClientRect();
+        return { top: Math.round(r.top), height: Math.round(r.height), scheme: Math.round(scheme.height), overflows: card.scrollWidth > card.clientWidth + 1 };
+      }));
+      for (const card of cards) expect(card.height).toBe(Math.max(...cards.filter(other => other.top === card.top).map(other => other.height)));
+      expect(new Set(cards.map(card => card.scheme)).size).toBe(1);
+      expect(cards.filter(card => card.overflows)).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+      expect(errors).toEqual([]);
+
+      if (SHOT_DIR) {
+        mkdirSync(SHOT_DIR, { recursive: true });
+        const file = join(SHOT_DIR, `kit-cards-${info.project.use.browserName}-${language}-${width}.png`);
+        /* All the cards at once: the page grows by what its scrolling panels hold below the fold. */
+        const hidden = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('*')]
+          .filter(el => /auto|scroll/.test(getComputedStyle(el).overflowY)).map(el => el.scrollHeight - el.clientHeight)));
+        await page.setViewportSize({ width, height: Math.min(900 + hidden, 12_000) });
+        await expect(video).toBeInViewport();
+        await pick.screenshot({ path: file });
+        await info.attach(`kit-cards-${language}-${width}`, { path: file, contentType: 'image/png' });
+      }
+    });
+
     test(`shows the whole Video production department right after setup at ${width} in ${language}`, async ({ page, baseURL }, info) => {
       const t = MESSAGES[language], srv = server!;
       const errors: string[] = [];
@@ -114,6 +168,12 @@ for (const language of ['en', 'ru'] as const) {
         await expect(structure.getByRole('region', { name: t.pipelineCatalog[key].name, exact: true })).toBeVisible();
       }
       await expect(structure.getByRole('heading', { name: t.dept.members, exact: true })).toBeVisible();
+      /* The turnkey team goes by its template's title in the reader's language; employees keep their names. */
+      await expect(structure.getByRole('heading', { name: { en: 'Turnkey team', ru: 'Команда под ключ' }[language], exact: true })).toBeVisible();
+      /* A call's status is one unit: its words stay on one line, whatever the width. */
+      const statuses = structure.locator('.call-marks.named .worker-name small');
+      expect(await statuses.count()).toBeGreaterThan(0);
+      expect(await statuses.evaluateAll(all => all.filter(status => status.getClientRects().length !== 1).map(status => status.textContent))).toEqual([]);
 
       /* Nothing scrolls sideways and no stage card is wider than its place. */
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);

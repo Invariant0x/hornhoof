@@ -130,7 +130,8 @@ export type ModelTokens = { model: string | null; total: number };
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 /* turnkey: each member does a task alone from start to finish, with no stages and nobody else of the department. */
-export type Team = { id: string; name: string; about: string; stage: number; gate: boolean; turnkey: boolean };
+/* title: the template's own name of a team made from it and not renamed since, in both languages. */
+export type Team = { id: string; name: string; title?: Lang; about: string; stage: number; gate: boolean; turnkey: boolean };
 
 export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 

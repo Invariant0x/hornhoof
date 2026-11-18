@@ -1,5 +1,5 @@
 import { departmentProgress } from '../tasks/turn-progress.js';
-import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type Limits, type ModelOption, type ProviderId } from '@hornhoof/protocol';
+import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type Limits, type ModelOption, type ProviderId, type TemplateKey } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -75,6 +75,12 @@ const liveWays = (ways: readonly Channel[]) => ways.filter(w => w.from.kind !== 
 
 export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub, templates, bus } = ctx;
+  /* A team still named as its department's template named it has that template's title in both languages; a name a
+     person gave it stays only theirs. */
+  const stockTitle = (key: TemplateKey | null, name: string) => {
+    const stock = key ? templates.teamsOf(key).find(team => team.title.en === name) : undefined;
+    return stock ? { title: stock.title } : {};
+  };
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -277,7 +283,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           repoHost: repoHostOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)
-            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly, turnkey: t.turnkey })),
+            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly, turnkey: t.turnkey, ...stockTitle(d.templateKey, t.name) })),
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),

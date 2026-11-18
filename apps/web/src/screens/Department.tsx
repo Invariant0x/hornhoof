@@ -1,7 +1,7 @@
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, teamLabel, useLanguage, useT } from '../i18n';
 import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
@@ -32,7 +32,7 @@ import { guardedResizeObserver, useRenderGuard } from '../guard';
 export { employeeGroups };
 
 const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
-  f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+  f.team ? teamLabel(f.team, language) : f.role ? f.role.title[language] : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
