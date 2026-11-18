@@ -4,10 +4,12 @@ import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { readReadiness, readinessScript } from './readiness.js';
-import { phoneTextSteps } from './text.js';
+import { phoneTextSteps, type TextStep } from './text.js';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
+/* next: where the untyped rest of the text starts, in code points of the text as sent. */
+export type PhoneTyped = { next: number; failure?: 'phone_adb_failed' | 'phone_keyboard_unavailable' };
 export type AdbRun = (call: AdbCall) => Promise<Buffer>;
 
 /* The phone's own PNG of a whole screen of a photo, up to 10.4 MB at 1080x2400, comes whole before the node shrinks it. */
@@ -66,6 +68,15 @@ export function privateAdb(executable: string, keyDir: string): AdbRun {
 /* The keyboard app for characters Android's input text cannot type, including Russian and emoji. */
 const KEYBOARD_APP = 'com.android.adbkeyboard';
 const KEYBOARD_IME = `${KEYBOARD_APP}/.AdbIME`;
+/* Every step starts an Android process. A few per call keep each call far from the adb deadline. */
+const STEPS_PER_CALL = 4;
+
+function stepCommand(step: TextStep, keyboard: boolean): string {
+  if (step.kind === 'enter') return `input keyevent${' KEYCODE_ENTER'.repeat(step.count)}`;
+  if (keyboard) return `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(step.text).toString('base64')}' >/dev/null`;
+  // adb expands %s even in a quoted word. Split the literal sequence across two invocations.
+  return step.text.split(/(?<=%)(?=s)/).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}`).join('\n');
+}
 
 export class PhoneAdb {
   /* keyboard: the local path of the keyboard app, put on a phone the first time it types such a text. */
@@ -123,9 +134,35 @@ export class PhoneAdb {
 
   async act(serial: string, input: unknown, signal: AbortSignal): Promise<void> {
     const op = PhoneOperation.parse(input);
-    if (op.kind === 'capture') throw new Error('phone_capture_is_not_an_action');
-    const script = op.kind === 'text' ? await this.textScript(serial, op.text, signal) : await this.script(serial, op, signal);
-    await this.call(serial, ['shell'], signal, script);
+    if (op.kind === 'capture' || op.kind === 'text') throw new Error('phone_operation_is_not_an_action');
+    await this.call(serial, ['shell'], signal, await this.script(serial, op, signal));
+  }
+
+  /* Types line by line in calls of a few steps each, paced on the phone. more() says whether time is left to start
+     another call, so a call stops only after a whole step. A failure is returned with where the rest starts. */
+  async type(serial: string, text: string, signal: AbortSignal, more: () => boolean): Promise<PhoneTyped> {
+    PhoneSerial.parse(serial);
+    PhoneOperation.parse({ kind: 'text', text });
+    const steps = phoneTextSteps(text);
+    const keyboard = steps.some(step => step.kind === 'text' && /[^\x20-\x7e]/.test(step.text));
+    let own: string | undefined;
+    let next = 0;
+    try {
+      if (keyboard) {
+        own = await this.ownKeyboard(serial, signal);
+        await this.call(serial, ['shell'], signal, `set -e\nime enable ${KEYBOARD_IME} >/dev/null\nime set ${KEYBOARD_IME} >/dev/null\nsleep 1\n`);
+      }
+      for (let at = 0; at < steps.length && (at === 0 || more()); at += STEPS_PER_CALL) {
+        const group = steps.slice(at, at + STEPS_PER_CALL);
+        await this.call(serial, ['shell'], signal, ['set -e', ...group.flatMap(step => [stepCommand(step, keyboard), 'sleep 0.06']), ''].join('\n'));
+        next = group.at(-1)!.end;
+      }
+      return { next };
+    } catch (error) {
+      return { next, failure: error instanceof Error && error.message === 'phone_keyboard_unavailable' ? 'phone_keyboard_unavailable' : 'phone_adb_failed' };
+    } finally {
+      if (own !== undefined) await this.keyboardOff(serial, own);
+    }
   }
 
   private async call(serial: string, args: string[], signal: AbortSignal, input?: string): Promise<Buffer> {
@@ -157,34 +194,19 @@ export class PhoneAdb {
     }
   }
 
-  private async textScript(serial: string, text: string, signal: AbortSignal): Promise<string> {
-    const steps = phoneTextSteps(text);
-    const keyboard = steps.some(step => step.kind === 'text' && /[^\x20-\x7e]/.test(step.text));
-    const setup = keyboard ? await this.keyboardSetup(serial, signal) : [];
-    const commands = steps.map(step => {
-      if (step.kind === 'enter') return `input keyevent${' KEYCODE_ENTER'.repeat(step.count)}`;
-      if (keyboard) return `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(step.text).toString('base64')}' >/dev/null`;
-      // adb expands %s even in a quoted word. Split the literal sequence across two invocations.
-      return step.text.split(/(?<=%)(?=s)/).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}`).join('\n');
-    });
-    // Pause between chunks on the device, with a six-second budget for text containing many short lines.
-    const pause = Math.min(60, Math.floor(6000 / commands.length)) / 1000;
-    return ['set -e', ...setup, ...commands.flatMap(command => [command, `sleep ${pause}`]), ''].join('\n');
-  }
-
-  /* Switch once for all Unicode chunks and give the phone its old keyboard back even if input fails. */
-  private async keyboardSetup(serial: string, signal: AbortSignal): Promise<string[]> {
+  /* Puts the keyboard app on the phone the first time and names the phone's own keyboard before typing switches to it,
+     once for a whole text, as a person picks another keyboard. */
+  private async ownKeyboard(serial: string, signal: AbortSignal): Promise<string> {
     if (!(await this.call(serial, ['shell', 'pm', 'path', KEYBOARD_APP], signal)).toString().startsWith('package:')) {
       const apk = await this.keyboard?.().catch(() => undefined);
       if (!apk || !(await this.call(serial, ['install', '-r', apk], signal)).toString().includes('Success')) throw new Error('phone_keyboard_unavailable');
     }
-    return [
-      'p=$(settings get secure default_input_method)',
-      'trap \'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null\' EXIT',
-      'trap \'exit 1\' HUP INT TERM',
-      `ime enable ${KEYBOARD_IME} >/dev/null`,
-      `ime set ${KEYBOARD_IME} >/dev/null`,
-      'sleep 1',
-    ];
+    return (await this.call(serial, ['shell', 'settings', 'get', 'secure', 'default_input_method'], signal)).toString().trim();
+  }
+
+  /* The phone gets its own keyboard back even when typing failed or its session was revoked, so this call has its own signal. */
+  private async keyboardOff(serial: string, own: string): Promise<void> {
+    const known = /^[A-Za-z0-9._]+\/[A-Za-z0-9._$]+$/.test(own) && own !== KEYBOARD_IME;
+    await this.call(serial, ['shell'], new AbortController().signal, known ? `ime set ${shellWord(own)} >/dev/null 2>&1 || ime reset >/dev/null\n` : 'ime reset >/dev/null\n').catch(() => undefined);
   }
 }

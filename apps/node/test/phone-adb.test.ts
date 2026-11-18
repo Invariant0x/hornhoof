@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PhoneAdb, privateAdb, privateAdbEnvironment, type AdbCall } from '../src/phones/adb.js';
+import { phoneTextSteps } from '../src/phones/text.js';
 
 describe('the phone adb boundary', () => {
   it('keeps the adb server off TCP and its keys and trace out of agent users', () => {
@@ -52,7 +53,7 @@ describe('the phone adb boundary', () => {
   it('quotes remote shell syntax in the text an agent types and keeps a literal %s', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
-    await adb.act('R58M123', { kind: 'text', text: "SECRET_%s_$(echo bad)' end" }, new AbortController().signal);
+    expect(await adb.type('R58M123', "SECRET_%s_$(echo bad)' end", new AbortController().signal, () => true)).toEqual({ next: 26 });
     expect(calls[0]!.args).toEqual(['-s', 'R58M123', 'shell']);
     expect(calls[0]!.input).toBe("set -e\ninput text 'SECRET_%'\ninput text 's_$(echo%sbad)'\\''%send'\nsleep 0.06\n");
   });
@@ -60,56 +61,91 @@ describe('the phone adb boundary', () => {
   it('types Russian, emoji and new lines through the keyboard app, put on the phone once, and gives the phone its own keyboard back', async () => {
     const calls: AdbCall[] = [];
     let installed = false;
+    const own = 'com.huawei.ohos.inputmethod/com.android.inputmethod.HwLatinIME';
     const adb = new PhoneAdb(async call => {
       calls.push(call);
       const a = call.args.join(' ');
       if (a === '-s R58M123 shell pm path com.android.adbkeyboard') return Buffer.from(installed ? 'package:/data/app/adbkeyboard/base.apk\n' : '');
       if (a === '-s R58M123 install -r /keys/adbkeyboard.apk') { installed = true; return Buffer.from('Performing Streamed Install\nSuccess\n'); }
+      if (a === '-s R58M123 shell settings get secure default_input_method') return Buffer.from(`${own}\n`);
       return Buffer.alloc(0);
     }, async () => '/keys/adbkeyboard.apk');
     const signal = new AbortController().signal;
-    await adb.act('R58M123', { kind: 'text', text: 'Привет, мир 👋\nВторая строка' }, signal);
-    await adb.act('R58M123', { kind: 'text', text: 'Еще раз' }, signal);
+    expect(await adb.type('R58M123', 'Привет, мир 👋\nВторая строка', signal, () => true)).toEqual({ next: 27 });
+    await adb.type('R58M123', 'Еще раз', signal, () => true);
+    const read = 'settings get secure default_input_method';
     expect(calls.map(c => c.args.join(' '))).toEqual([
-      '-s R58M123 shell pm path com.android.adbkeyboard', '-s R58M123 install -r /keys/adbkeyboard.apk', '-s R58M123 shell',
-      '-s R58M123 shell pm path com.android.adbkeyboard', '-s R58M123 shell',
+      '-s R58M123 shell pm path com.android.adbkeyboard', '-s R58M123 install -r /keys/adbkeyboard.apk', `-s R58M123 shell ${read}`, '-s R58M123 shell', '-s R58M123 shell', '-s R58M123 shell',
+      '-s R58M123 shell pm path com.android.adbkeyboard', `-s R58M123 shell ${read}`, '-s R58M123 shell', '-s R58M123 shell', '-s R58M123 shell',
     ]);
-    const script = calls[2]!.input!;
-    expect(script).toContain("trap 'ime set \"$p\" >/dev/null 2>&1 || ime reset >/dev/null' EXIT");
-    expect(script).toContain('ime set com.android.adbkeyboard/.AdbIME >/dev/null\nsleep 1\n');
+    expect(calls[3]!.input).toBe('set -e\nime enable com.android.adbkeyboard/.AdbIME >/dev/null\nime set com.android.adbkeyboard/.AdbIME >/dev/null\nsleep 1\n');
     const first = Buffer.from('Привет, мир 👋').toString('base64');
     const second = Buffer.from('Вторая строка').toString('base64');
-    expect(script).toContain(`am broadcast -a ADB_INPUT_B64 --es msg '${first}' >/dev/null\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\nam broadcast -a ADB_INPUT_B64 --es msg '${second}' >/dev/null`);
+    expect(calls[4]!.input).toBe(`set -e\nam broadcast -a ADB_INPUT_B64 --es msg '${first}' >/dev/null\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\nam broadcast -a ADB_INPUT_B64 --es msg '${second}' >/dev/null\nsleep 0.06\n`);
+    expect(calls[5]!.input).toBe(`ime set '${own}' >/dev/null 2>&1 || ime reset >/dev/null\n`);
   });
 
-  it('paces bounded Unicode chunks and types CRLF, blank lines and terminal newlines with Enter', async () => {
+  it('gives the phone its own keyboard back after a failed or cancelled typing call, and resets one it cannot name', async () => {
+    const calls: AdbCall[] = [];
+    const stop = new AbortController();
+    const adb = new PhoneAdb(async call => {
+      calls.push(call);
+      const a = call.args.join(' ');
+      if (a.endsWith('pm path com.android.adbkeyboard')) return Buffer.from('package:/data/app/adbkeyboard/base.apk\n');
+      if (a.endsWith('settings get secure default_input_method')) return Buffer.from('null\n');
+      if (call.input?.includes('ADB_INPUT_B64')) { stop.abort(); throw new Error('adb echoed Привет'); }
+      return Buffer.alloc(0);
+    });
+    expect(await adb.type('R58M123', 'Привет', stop.signal, () => true)).toEqual({ next: 0, failure: 'phone_adb_failed' });
+    expect(calls.at(-1)!.input).toBe('ime reset >/dev/null\n');
+    expect(calls.at(-1)!.signal.aborted).toBe(false);
+  });
+
+  it('types a line break, a blank line and CRLF with Enter and never splits an emoji between chunks', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => {
       calls.push(call);
       return Buffer.from(call.args.includes('pm') ? 'package:/data/app/adbkeyboard/base.apk\n' : '');
     });
-    const line = '  ' + '👋'.repeat(65) + " Привет %s $(echo 'sample')  ";
-    await adb.act('R58M123', { kind: 'text', text: line + '\r\n\n  last  \n' }, new AbortController().signal);
-    const script = calls.at(-1)!.input!;
-    const chunks = [...script.matchAll(/ADB_INPUT_B64 --es msg '([^']+)'/g)].map(match => Buffer.from(match[1]!, 'base64').toString());
-    expect(chunks.slice(0, -1).join('')).toBe(line);
-    expect(chunks.at(-1)).toBe('  last  ');
+    const text = '  ' + 'x'.repeat(45) + '👋🏽' + " Привет %s $(echo 'sample')  \r\n\n  last  \n";
+    expect(await adb.type('R58M123', text, new AbortController().signal, () => true)).toEqual({ next: [...text].length });
+    const typing = calls.filter(c => c.input?.includes('ADB_INPUT_B64') || c.input?.includes('KEYCODE_ENTER')).map(c => c.input!).join('');
+    const chunks = [...typing.matchAll(/ADB_INPUT_B64 --es msg '([^']+)'/g)].map(match => Buffer.from(match[1]!, 'base64').toString());
+    expect(chunks[0]).toBe('  ' + 'x'.repeat(45));
+    expect(chunks[1]!.startsWith('👋🏽 Привет')).toBe(true);
     expect(chunks.every(chunk => [...chunk].length <= 48)).toBe(true);
-    expect(script.match(/KEYCODE_ENTER/g)).toHaveLength(3);
-    expect(script).toMatch(/KEYCODE_ENTER KEYCODE_ENTER\nsleep 0\.06\nam broadcast/);
-    expect(script).toContain('set -e\n');
+    expect(typing.match(/KEYCODE_ENTER/g)).toHaveLength(3);
+    expect(typing).toMatch(/input keyevent KEYCODE_ENTER KEYCODE_ENTER\nsleep 0\.06\nam broadcast/);
   });
 
-  it('keeps pauses bounded even when the text has many short lines', async () => {
+  it('types a few steps per call and starts no new call once the time is used, stopping after a whole step', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
-    await adb.act('R58M123', { kind: 'text', text: 'x\n'.repeat(2048) }, new AbortController().signal);
-    const script = calls[0]!.input!;
-    expect(script.match(/KEYCODE_ENTER/g)).toHaveLength(2048);
-    const delays = [...script.matchAll(/^sleep ([\d.]+)$/gm)].map(match => Number(match[1]));
-    expect(delays).toHaveLength(4096);
-    expect(delays.every(delay => delay > 0)).toBe(true);
-    expect(delays.reduce((total, delay) => total + delay, 0)).toBeLessThanOrEqual(6);
+    const text = 'a\nb\n\nc\r\nd\ne';
+    let more = 1;
+    expect(await adb.type('R58M123', text, new AbortController().signal, () => more-- > 0)).toEqual({ next: 10 });
+    expect(calls.map(c => c.input)).toEqual([
+      "set -e\ninput text 'a'\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\ninput text 'b'\nsleep 0.06\ninput keyevent KEYCODE_ENTER KEYCODE_ENTER\nsleep 0.06\n",
+      "set -e\ninput text 'c'\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\ninput text 'd'\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\n",
+    ]);
+    expect([...text].slice(10).join('')).toBe('e');
+    expect(await adb.type('R58M123', text, new AbortController().signal, () => false)).toEqual({ next: 5 });
+    expect([...text].slice(5).join('')).toBe('c\r\nd\ne');
+  });
+
+  it('reports where the rest starts when a typing call fails midway', async () => {
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => {
+      calls.push(call);
+      if (call.input?.includes("'c'")) throw new Error('adb echoed c');
+      return Buffer.alloc(0);
+    });
+    expect(await adb.type('R58M123', 'a\nb\n\nc\r\nd\ne', new AbortController().signal, () => true)).toEqual({ next: 5, failure: 'phone_adb_failed' });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('counts the positions of a text in code points of the text as sent', () => {
+    expect(phoneTextSteps('ab\r\n\r\n👋🏽c\rd').map(step => step.end)).toEqual([2, 6, 9, 10, 11]);
   });
 
   it('presses Back and Home as Android key events, as the phone\'s own buttons do', async () => {
@@ -134,7 +170,9 @@ describe('the phone adb boundary', () => {
     await expect(adb.act('-s other', { kind: 'tap', x: 1, y: 2 }, signal)).rejects.toThrow();
     await expect(adb.act('R58M123', { kind: 'url', url: 'javascript:alert(1)' }, signal)).rejects.toThrow();
     await expect(adb.connect('phone:5555;id', signal)).rejects.toThrow();
-    await expect(adb.act('R58M123', { kind: 'text', text: '' }, signal)).rejects.toThrow();
+    await expect(adb.type('R58M123', '', signal, () => true)).rejects.toThrow();
+    await expect(adb.type('-s other', 'text', signal, () => true)).rejects.toThrow();
+    await expect(adb.act('R58M123', { kind: 'text', text: 'typed by type' }, signal)).rejects.toThrow();
     expect(calls).toEqual([]);
   });
 

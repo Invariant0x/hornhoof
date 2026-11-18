@@ -23,7 +23,7 @@ const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarch
 const editableField = (value: string) => tree('12:00').replace('••••••••', value).replace('password="true"', 'password="false"');
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean } = {}) {
+function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -38,6 +38,9 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: s
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
     if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
     if (input.failure && call.input?.includes('input text')) throw new Error('ADB echoed a private value');
+    if (input.failOn && call.input?.includes(input.failOn)) throw new Error('ADB echoed a private value');
+    // Each typing call takes the phone this long on the test's own clock.
+    if (input.typingMs && /input text|KEYCODE_ENTER/.test(call.input ?? '')) vi.setSystemTime(Date.now() + input.typingMs);
     if (a.endsWith('screencap -p')) return png;
     if (a.endsWith('pm path com.android.adbkeyboard')) return Buffer.from('package:/data/app/adbkeyboard/base.apk\n');
     if (a.endsWith('shell sh')) return Buffer.from(baseline);
@@ -132,7 +135,7 @@ describe('phone messages on the execution node', () => {
     const p = phone(Buffer.alloc(0), SERIAL, '', { failure: true });
     await p.open();
     await p.act(6, { kind: 'text', text: 'a private value' });
-    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', reason: 'phone_adb_failed' } });
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', reason: 'phone_adb_failed', next: 0 } });
     expect(JSON.stringify(p.reply(6))).not.toContain('a private value');
     await p.act(7, { kind: 'capture' });
     expect(p.reply(7)?.status).toBe('ok');
@@ -177,16 +180,44 @@ describe('phone messages on the execution node', () => {
     p.phones.close();
   });
 
+  const lines = Array.from({ length: 8 }, (_, n) => `line ${n}`).join('\n');
+  const field = (text: string) => editableField(text.replaceAll('\n', '&#10;'));
+
+  it('starts no new typing call once the time is used and says where the rest starts, keeping the session', async () => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [field(''), field('line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n')], typingMs: 4000 });
+    await p.open();
+    await p.act(6, { kind: 'text', text: lines });
+    expect(p.reply(6)).toMatchObject({ status: 'partial', typing: { kind: 'typing_partial', next: 42 } });
+    expect(p.reply(6)?.typing).toEqual({ kind: 'typing_partial', next: 42 });
+    expect(p.shells()).toHaveLength(3);
+    expect(lines.slice(42)).toBe('line 6\nline 7');
+    await p.act(7, { kind: 'capture' });
+    expect(p.reply(7)?.status).toBe('ok');
+    p.phones.close();
+  });
+
+  it('reads the field back after a typing call fails midway and reports where the rest starts', async () => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [field(''), field('line 0\nline 1\nline 2\n')], failOn: 'line%s2' });
+    await p.open();
+    await p.act(6, { kind: 'text', text: lines });
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', reason: 'phone_adb_failed', next: 14, check: { kind: 'typing_mismatch' } } });
+    await p.act(7, { kind: 'capture' });
+    expect(p.reply(7)?.status).toBe('ok');
+    p.phones.close();
+  });
+
   it('reports the offsets of dropped Unicode characters without echoing them', async () => {
     const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField('Prefix: '), editableField('Prefix: a&#10;c')] });
     await p.open();
     await p.act(6, { kind: 'text', text: 'a👋\r\nbc' });
-    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_dropped', missing: [{ start: 1, count: 1 }, { start: 3, count: 1 }] } });
+    // Positions count code points of the text as sent, so the b after \r\n is at 4.
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_dropped', missing: [{ start: 1, count: 1 }, { start: 4, count: 1 }] } });
     const typing = p.reply(6)?.typing;
     expect(JSON.stringify(typing)).not.toContain('👋');
     await p.act(6, { kind: 'text', text: 'a👋\r\nbc' });
     expect(p.reply(6)?.typing).toEqual(typing);
-    expect(p.shells()).toHaveLength(1);
+    // Keyboard on, one typing call, the phone's own keyboard back: the repeated request typed nothing again.
+    expect(p.shells()).toHaveLength(3);
     p.phones.close();
   });
 

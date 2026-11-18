@@ -1,15 +1,30 @@
-import { PhoneCapture, PhoneServerMessage, networkEndpoint, type PhoneFrame, type PhoneOperation, type PhoneReply, type PhoneGrant } from '@hornhoof/protocol';
-import type { PhoneAdb } from './adb.js';
+import { PhoneCapture, PhoneServerMessage, networkEndpoint, type PhoneFrame, type PhoneOperation, type PhoneReply, type PhoneGrant, type PhoneTypingCheck, type PhoneTypingIssue } from '@hornhoof/protocol';
+import type { PhoneAdb, PhoneTyped } from './adb.js';
 import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
 import { checkPhoneText } from './text.js';
 
-export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'readiness'>;
+export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'type' | 'readiness'>;
 export type PhoneExecutorDeps = { adb: PhoneDriver; send(message: PhoneReply | PhoneFrame): void };
 const noFrame = (): PhoneCapture => ({ jpeg: null, width: 0, height: 0, elements: [] });
 const FRAME_MS = 1500;
+/* A text action starts no new typing call after this, so its reply reaches the server within its 20 s wait. */
+const TEXT_BUDGET_MS = 10_000;
 type ActionResult = Pick<PhoneReply, 'capture' | 'typing'>;
 class PhoneDeviceChanged extends Error {}
+
+function typingIssue(typed: PhoneTyped, length: number, check: PhoneTypingCheck | undefined): PhoneTypingIssue | undefined {
+  const found = check ? { check } : {};
+  if (typed.failure) return { kind: 'typing_failed', reason: typed.failure, next: typed.next, ...found };
+  if (typed.next < length) return { kind: 'typing_partial', next: typed.next, ...found };
+  return check;
+}
+
+/* Text that went in but could not be read back is not a failure: typing it again would double a password. */
+function typingStatus(typing: PhoneTypingIssue | undefined): PhoneReply['status'] {
+  if (!typing || typing.kind === 'typing_unverified') return 'ok';
+  return typing.kind === 'typing_partial' ? 'partial' : 'failed';
+}
 
 /* The agent taps and swipes in the pixels of the picture it sees, adb in the phone's. */
 function onPhone(op: PhoneOperation, scale: number): PhoneOperation {
@@ -129,26 +144,29 @@ export class PhoneExecutor {
       });
       const state = this.#sessions.view(m.sessionId, m.generation);
       if (result.capture) this.emitFrame(state.grant, result.capture);
-      // Text that went in but could not be read back is not a failure: typing it again would double a password.
-      return reply(result.typing && result.typing.kind !== 'typing_unverified' ? 'failed' : 'ok', result);
+      return reply(typingStatus(result.typing), result);
     } catch (error) {
       if (m.operation.kind !== 'text' || error instanceof PhoneDeviceChanged || await this.textSessionGone(m)) return reply('session_gone');
-      const reason = error instanceof Error && error.message === 'phone_keyboard_unavailable' ? 'phone_keyboard_unavailable' : 'phone_adb_failed';
-      return reply('failed', { typing: { kind: 'typing_failed', reason } });
+      // Only the device check before typing gets here, so nothing was typed.
+      return reply('failed', { typing: { kind: 'typing_failed', reason: 'phone_adb_failed', next: 0 } });
     }
   }
 
   private async typeText(state: PhoneSessionView, operation: Extract<PhoneOperation, { kind: 'text' }>): Promise<ActionResult> {
     const { grant: { binding: { serial } }, signal } = state;
+    const started = Date.now();
     const readTree = () => this.deps.adb.tree(serial, signal).catch(() => '');
     const before = await readTree();
-    await this.deps.adb.act(serial, operation, signal);
+    const typed = await this.deps.adb.type(serial, operation.text, signal, () => Date.now() - started < TEXT_BUDGET_MS);
+    if (typed.failure && await this.deviceGone(state)) throw new PhoneDeviceChanged('phone_device_gone');
     const after = await readTree();
-    const typing = checkPhoneText(before, after, operation.text);
+    const sent = [...operation.text];
+    const check = checkPhoneText(before, after, sent.slice(0, typed.next).join(''));
     const capture = await this.capture(state, after).catch((error: unknown) => {
       if (error instanceof PhoneDeviceChanged) throw error;
       return undefined;
     });
+    const typing = typingIssue(typed, sent.length, check);
     return { ...(capture ? { capture } : {}), ...(typing ? { typing } : {}) };
   }
 
@@ -156,6 +174,10 @@ export class PhoneExecutor {
     let state: PhoneSessionView;
     try { state = this.#sessions.view(m.sessionId, m.generation); }
     catch { return true; }
+    return this.deviceGone(state);
+  }
+
+  private async deviceGone(state: PhoneSessionView): Promise<boolean> {
     const devices = await this.deps.adb.devices(state.signal).catch(() => undefined);
     return !state.valid() || Boolean(devices && !devices.some(device => device.serial === state.grant.binding.serial && device.status === 'device'));
   }

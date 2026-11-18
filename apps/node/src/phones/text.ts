@@ -1,21 +1,54 @@
-import type { PhoneElement, PhoneTypingIssue } from '@hornhoof/protocol';
+import type { PhoneElement, PhoneTypingCheck } from '@hornhoof/protocol';
 import { parsePhoneTree } from './capture.js';
 
 const CHUNK = 48;
-type TextStep = { kind: 'text'; text: string } | { kind: 'enter'; count: number };
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+/* end: where the rest of the text starts after this step, in code points of the text as the agent sent it. */
+export type TextStep = ({ kind: 'text'; text: string } | { kind: 'enter'; count: number }) & { end: number };
 
-const normalize = (text: string): string => text.replace(/\r\n?/g, '\n');
-
+/* Lines in chunks of at most 48 code points that never split a character a person sees as one, such as 👋🏽.
+   Each \r\n, \r or \n is one Enter. */
 export function phoneTextSteps(text: string): TextStep[] {
   const steps: TextStep[] = [];
-  for (const part of normalize(text).match(/\n+|[^\n]+/g) ?? []) {
-    const points = [...part];
-    for (let at = 0; at < points.length; at += CHUNK) {
-      const chunk = points.slice(at, at + CHUNK);
-      steps.push(part.startsWith('\n') ? { kind: 'enter', count: chunk.length } : { kind: 'text', text: chunk.join('') });
+  let end = 0;
+  for (const part of text.match(/[\r\n]+|[^\r\n]+/g) ?? []) {
+    if (/^[\r\n]/.test(part)) {
+      const breaks = part.match(/\r\n|\r|\n/g)!;
+      for (let at = 0; at < breaks.length; at += CHUNK) {
+        const run = breaks.slice(at, at + CHUNK);
+        end += run.join('').length;
+        steps.push({ kind: 'enter', count: run.length, end });
+      }
+      continue;
     }
+    let chunk: string[] = [];
+    const flush = () => {
+      end += chunk.length;
+      steps.push({ kind: 'text', text: chunk.join(''), end });
+      chunk = [];
+    };
+    for (const { segment } of graphemes.segment(part)) {
+      const points = [...segment];
+      if (chunk.length && chunk.length + points.length > CHUNK) flush();
+      chunk.push(...points);
+    }
+    flush();
   }
   return steps;
+}
+
+/* The field holds \n for every \r\n or \r. origin maps each code point of the normalized text back to the text as sent. */
+function normalized(text: string): { points: string[]; origin: number[] } {
+  const sent = [...text];
+  const points: string[] = [];
+  const origin: number[] = [];
+  for (let at = 0; at < sent.length; at++) {
+    origin.push(at);
+    points.push(sent[at] === '\r' ? '\n' : sent[at]!);
+    if (sent[at] === '\r' && sent[at + 1] === '\n') at++;
+  }
+  origin.push(sent.length);
+  return { points, origin };
 }
 
 function focusedField(tree: string): PhoneElement | undefined {
@@ -37,7 +70,7 @@ function matchingEdge(before: string[], after: string[]): number {
   return count;
 }
 
-function missingText(wanted: string[], observed: string[]): PhoneTypingIssue | undefined {
+function missingText(wanted: string[], observed: string[], origin: number[]): PhoneTypingCheck | undefined {
   let at = 0;
   const missing: { start: number; count: number }[] = [];
   for (const [start, point] of wanted.entries()) {
@@ -50,25 +83,25 @@ function missingText(wanted: string[], observed: string[]): PhoneTypingIssue | u
     else missing.push({ start, count: 1 });
   }
   if (at !== observed.length) return { kind: 'typing_mismatch' };
-  if (missing.length) return { kind: 'typing_dropped', missing };
+  if (missing.length) return { kind: 'typing_dropped', missing: missing.map(({ start, count }) => ({ start: origin[start]!, count: origin[start + count]! - origin[start]! })) };
   return undefined;
 }
 
 /* The tree does not expose a caret or selection. Strip the unchanged edges and compare only the changed text. */
-export function checkPhoneText(before: string, after: string, input: string): PhoneTypingIssue | undefined {
+export function checkPhoneText(before: string, after: string, input: string): PhoneTypingCheck | undefined {
   const field = focusedField(before);
   const readback = focusedField(after);
   if (!field || !readback?.text || !sameField(field, readback)) return { kind: 'typing_unverified' };
-  const initial = [...normalize(field.text)];
-  const observed = [...normalize(readback.text)];
-  const wanted = [...normalize(input)];
+  const initial = normalized(field.text).points;
+  const observed = normalized(readback.text).points;
+  const { points: wanted, origin } = normalized(input);
   if (field.text === readback.text) return { kind: 'typing_unverified' };
   if (observed.join('') === wanted.join('')) return undefined;
 
   const prefix = matchingEdge(initial, observed);
   const suffix = matchingEdge(initial.toReversed(), observed.toReversed());
   // An empty field reports its hint as its text. The hint is gone after typing, so compare with the whole field.
-  if (prefix + suffix < initial.length) return missingText(wanted, observed);
+  if (prefix + suffix < initial.length) return missingText(wanted, observed, origin);
   const added = observed.length - initial.length;
   if (added === wanted.length) {
     // Repeated text can leave several possible insertion positions.
@@ -77,5 +110,5 @@ export function checkPhoneText(before: string, after: string, input: string): Ph
     }
   }
   const tail = Math.min(suffix, initial.length - prefix, observed.length - prefix);
-  return missingText(wanted, observed.slice(prefix, observed.length - tail));
+  return missingText(wanted, observed.slice(prefix, observed.length - tail), origin);
 }

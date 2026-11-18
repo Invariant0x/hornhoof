@@ -68,16 +68,26 @@ export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), request
 export const PhoneAction = z.strictObject({ type: z.literal('phone.action'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), operation: PhoneOperation });
 export const PhoneRenew = z.strictObject({ type: z.literal('phone.renew'), sessionId: z.uuid(), generation: z.number().int().nonnegative(), expiresAt: z.iso.datetime() });
 export const PhoneRevoke = z.strictObject({ type: z.literal('phone.revoke'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), binding: PhoneBinding });
-const MissingTextSpan = z.strictObject({ start: z.number().int().min(0).max(4095), count: z.number().int().min(1).max(4096) });
-export const PhoneTypingIssue = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('typing_failed'), reason: z.enum(['phone_adb_failed', 'phone_keyboard_unavailable']) }),
+/* Positions count code points of the text as the agent sent it. */
+const TextPosition = z.number().int().min(0).max(4095);
+const MissingTextSpan = z.strictObject({ start: TextPosition, count: z.number().int().min(1).max(4096) });
+const TypingChecks = [
   z.strictObject({ kind: z.literal('typing_unverified') }),
   z.strictObject({ kind: z.literal('typing_dropped'), missing: z.array(MissingTextSpan).min(1).max(4096) }),
   z.strictObject({ kind: z.literal('typing_mismatch') }),
+] as const;
+/* What the field read back after typing shows; none means it holds the typed text. */
+export const PhoneTypingCheck = z.discriminatedUnion('kind', TypingChecks);
+export type PhoneTypingCheck = z.infer<typeof PhoneTypingCheck>;
+/* next: where the untyped rest of the text starts. */
+export const PhoneTypingIssue = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('typing_failed'), reason: z.enum(['phone_adb_failed', 'phone_keyboard_unavailable']), next: TextPosition, check: PhoneTypingCheck.optional() }),
+  z.strictObject({ kind: z.literal('typing_partial'), next: TextPosition.min(1), check: PhoneTypingCheck.optional() }),
+  ...TypingChecks,
 ]);
 export type PhoneTypingIssue = z.infer<typeof PhoneTypingIssue>;
 export const PhoneReply = z.strictObject({
-  type: z.literal('phone.reply'), requestId: z.uuid(), status: z.enum(['ok', 'failed', 'needs_person', 'session_gone', 'busy']),
+  type: z.literal('phone.reply'), requestId: z.uuid(), status: z.enum(['ok', 'partial', 'failed', 'needs_person', 'session_gone', 'busy']),
   devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(), readiness: PhoneReadiness.optional(), typing: PhoneTypingIssue.optional(),
 });
 export type PhoneReply = z.infer<typeof PhoneReply>;
