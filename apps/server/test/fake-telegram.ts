@@ -147,6 +147,8 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
         tg.sent.push({ token, chat_id: chatId, text, ...(typeof body.parse_mode === 'string' ? { parse_mode: body.parse_mode } : {}) });
         return { ok: true, result: { message_id: nextMessage++, chat: { id: chatId, type: 'private' }, date: Math.floor(Date.now() / 1000), text } };
       }
+      case 'sendChatAction':
+        return { ok: true, result: body.action === 'typing' };
       case 'sendDocument': {
         if (!Buffer.isBuffer(req.body)) return reply.code(400).send(refuse(400, 'Bad Request: multipart/form-data expected'));
         const form = await new Request('http://127.0.0.1/sendDocument', {

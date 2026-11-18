@@ -1065,6 +1065,13 @@
       "when": 1794998164071,
       "tag": "0153_standing_computer_access",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1795025608881,
+      "tag": "0154_telegram_chat_languages",
+      "breakpoints": true
     }
   ]
 }

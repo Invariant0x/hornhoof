@@ -3,11 +3,12 @@ import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentEvents, agents, assistants, attachments, jobs, people } from '../src/db/schema.js';
+import { agentEvents, agents, assistants, attachments, jobs, people, telegramReplies } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { KEEP_IN_REPOSITORY } from '../src/modules/conversation/pictures.js';
+import { appendEvent } from '../src/modules/events/store.js';
 import { albums } from '../src/modules/telegram/bots.js';
 import { whatCame } from '../src/modules/telegram/inbox.js';
 import { fakeTelegram, type TelegramUser } from './fake-telegram.js';
@@ -70,7 +71,7 @@ describe('a file sent to a head through its Telegram bot', () => {
     expect(run.prompt).toContain(`brief.zip: hh-fetch message ${kept!.id}`);
     expect(run.prompt).toContain('A file came with this message');
     expect(run.prompt).toContain(KEEP_IN_REPOSITORY);
-    expect(run.prompt).toContain('wrote this in Telegram');
+    expect(run.prompt).toContain('writing to you directly in Telegram');
     expect(tg.sent).toEqual([]);
     const [event] = await db.select().from(agentEvents).where(eq(agentEvents.jobId, run.jobId));
     expect(event).toMatchObject({ data: { text: 'Материалы к запуску', channel: 'telegram', pictures: [{ id: kept!.id, name: 'brief.zip', file: true }] } });
@@ -111,6 +112,25 @@ describe('a file sent to a head through its Telegram bot', () => {
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('A voice message, 2 s, with no transcript');
     expect(run.prompt).toContain('voice.ogg: hh-fetch message');
+    expect(run.prompt).toContain('Write it directly to them in Russian.');
+  });
+
+  it('keeps the language of the person\'s earlier text for a voice message without a transcript', async () => {
+    const { tg, db, builtin } = await company();
+    const user = { ...IVAN, language_code: 'en' };
+    tg.write(TOKEN, user, 'Посмотри видео.');
+    const first = await nextOf(builtin, 'job.run');
+    builtin.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(() => builtin.acks.includes(first.jobId));
+    tg.files.set('v-1', OGG);
+    tg.send(TOKEN, user, { voice: { file_id: 'v-1', file_size: OGG.length, duration: 33 } });
+    const voice = await nextOf(builtin, 'job.run');
+    expect(voice.prompt).toContain('A voice message, 33 s, with no transcript');
+    expect(voice.prompt).toContain('Write it directly to them in Russian.');
+    const forVoice = () => db.select().from(telegramReplies).where(eq(telegramReplies.jobId, voice.jobId));
+    await until(async () => (await forVoice()).length === 1);
+    const [reply] = await forVoice();
+    expect(reply!.lang).toBe('ru');
   });
 
   it('reads a sticker as what it shows, and keeps a still one as a picture', async () => {
@@ -124,7 +144,7 @@ describe('a file sent to a head through its Telegram bot', () => {
 
   it('tells the person when a file is over what Telegram gives a bot, and still passes the words on', async () => {
     const { tg, builtin, db } = await company();
-    tg.send(TOKEN, IVAN, { document: { file_id: 'big', file_name: 'video.mov', file_size: 50 * 1024 * 1024 }, caption: 'Смотри видео' });
+    tg.send(TOKEN, { ...IVAN, language_code: 'en' }, { document: { file_id: 'big', file_name: 'video.mov', file_size: 50 * 1024 * 1024 }, caption: 'Смотри видео' });
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('Смотри видео');
     expect(run.prompt).toContain('[video.mov (50 MB) did not come: Telegram gives a bot files of up to 20 MB.]');
@@ -177,6 +197,32 @@ describe('what a Telegram message carries', () => {
   });
 });
 
+it('shows typing and carries earlier attachments once with the final answer', async () => {
+  const { app, db, tg, builtin, orchestrator } = await company();
+  tg.write(TOKEN, IVAN, 'Пришли отчет.');
+  const run = await nextOf(builtin, 'job.run');
+  const [file] = await db.insert(attachments).values({
+    companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId,
+    name: 'report.zip', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length,
+  }).returning();
+  const event = { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run.jobId, kind: 'text' as const };
+  const pictures = [{ id: file!.id, name: file!.name }];
+  await appendEvent(app.ctx, { ...event, data: { text: 'Собираю отчет.', pictures } });
+  await appendEvent(app.ctx, { ...event, data: { text: 'Ваш отчет готов.' } });
+  await appendEvent(app.ctx, { ...event, data: { text: '', pictures } });
+  await until(() => tg.calls.includes('sendChatAction'));
+  const calls = tg.calls.filter(call => call === 'getUpdates').length;
+  tg.write(TOKEN, IVAN, 'In a group.', { id: -100200, type: 'group' });
+  await until(() => tg.calls.filter(call => call === 'getUpdates').length > calls);
+  expect(tg.sent).toEqual([]);
+  expect(tg.sentDocuments).toEqual([]);
+
+  builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+  await until(() => builtin.acks.includes(run.jobId));
+  await until(async () => (await db.select().from(telegramReplies)).length === 0);
+  expect(tg.sent.map(s => s.text)).toEqual(['Ваш отчет готов.']);
+  expect(tg.sentDocuments).toMatchObject([{ chat_id: IVAN.id, file_name: 'report.zip', bytes: ZIP }]);
+});
 
 describe('the sender of a Telegram file', () => {
   async function sender() {

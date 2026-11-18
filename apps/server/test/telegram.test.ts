@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, people, telegramBots } from '../src/db/schema.js';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { agentEvents, agents, companies, departments, jobs, people, telegramBots, telegramReplies } from '../src/db/schema.js';
+import { pump } from '../src/modules/conversation/queue.js';
 import { splitForTelegram } from '../src/modules/telegram/api.js';
 import { fakeTelegram, type FakeTelegram, type TelegramUser } from './fake-telegram.js';
 import { appOn, as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -188,14 +189,16 @@ describe('a message through the bot', () => {
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('From Ivan (CEO) via Telegram to Orchestrator:');
     expect(run.prompt).toContain('Hire a designer.');
-    expect(run.prompt).toContain("Ivan wrote this in Telegram. Ivan is the company's owner (the CEO).");
+    expect(run.prompt).toContain("This is Ivan writing to you directly in Telegram. Ivan is the company's owner (the CEO).");
+    expect(run.prompt).toContain('Write it directly to them in English.');
     await until(async () => (await db.select().from(people).where(eq(people.id, owner.id)))[0]!.telegramUserId === IVAN.id);
     builtin.send({ type: 'job.started', jobId: run.jobId });
-    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it: *one* designer_ <b>.' } });
-    await until(() => tg.sent.length === 1);
-    expect(tg.sent[0]).toEqual({ token: TOKEN, chat_id: IVAN.id, text: 'On it: *one* designer_ <b>.' });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Looking for candidates.' } });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 1, event: { kind: 'text', text: 'On it: *one* designer_ <b>.' } });
     builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: 'On it.', tail: '', error: null });
     await until(() => builtin.acks.includes(run.jobId));
+    await until(() => tg.sent.length === 1);
+    expect(tg.sent[0]).toEqual({ token: TOKEN, chat_id: IVAN.id, text: 'On it: *one* designer_ <b>.' });
     const events = (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().events;
     expect(events[0]).toMatchObject({ kind: 'message', person: { id: owner.id }, data: { text: 'Hire a designer.' }, message: { channel: 'telegram' } });
   });
@@ -232,6 +235,80 @@ describe('a message through the bot', () => {
     expect(tg.sent[1]!.text).toContain('8880009');
     expect(tg.sent[1]!.text).toMatch(/^[\x20-\x7e\n]+$/);
     expect(await quiet(builtin)).toBe(0);
+  });
+
+  it('uses the latest written language for bot words in that chat alone', async () => {
+    const c = await company();
+    const { app, ceo, tg } = c;
+    const { head } = await salesHead(c);
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    await connectBot(app, ceo, head.id, SECOND);
+    const guest = { id: 8880010, first_name: 'Lena', language_code: 'en' };
+    const voice = { voice: { file_id: 'v-1', duration: 33 } };
+    tg.write(TOKEN, guest, 'Здравствуйте.');
+    tg.send(TOKEN, guest, voice);
+    await until(() => tg.sent.length === 2);
+    expect.soft(tg.sent.map(s => s.text)).toEqual([
+      expect.stringContaining('Я вас пока не знаю.'),
+      expect.stringContaining('Я вас пока не знаю.'),
+    ]);
+    tg.send(SECOND, guest, voice);
+    await until(() => tg.sent.length === 3);
+    expect(tg.sent[2]!.text).toContain('I do not know you yet.');
+    const russianApp = { ...guest, language_code: 'ru' };
+    tg.write(TOKEN, russianApp, 'Hello again.');
+    tg.send(TOKEN, russianApp, voice);
+    await until(() => tg.sent.length === 5);
+    expect(tg.sent.slice(3).map(s => s.text)).toEqual([
+      expect.stringContaining('I do not know you yet.'),
+      expect.stringContaining('I do not know you yet.'),
+    ]);
+  });
+
+  it('finds the written language in older Telegram messages even after a voice note', async () => {
+    const { app, db, ceo, owner, tg, orchestrator } = await company();
+    await setTelegram(app, ceo, owner.id, String(IVAN.id));
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    const [bot] = await db.select().from(telegramBots);
+    await db.insert(agentEvents).values([
+      { companyId: owner.companyId, personId: owner.id, agentId: orchestrator.id, kind: 'message', data: { channel: 'telegram', text: 'Посмотри видео.', telegram: { bot: bot!.id, chat: IVAN.id, update: 2 } } },
+      { companyId: owner.companyId, personId: owner.id, agentId: orchestrator.id, kind: 'message', data: { channel: 'telegram', text: '[A voice message, 33 s, with no transcript: its recording is the file voice.ogg below.]', telegram: { bot: bot!.id, chat: IVAN.id, update: 3 } } },
+    ]);
+    tg.send(TOKEN, IVAN, { dice: { emoji: '🎲', value: 3 } });
+    await until(() => tg.sent.length === 1);
+    expect(tg.sent[0]!.text).toContain('Такое сообщение я прочитать не могу.');
+  });
+
+  it('addresses the person directly in the first prompt and the prompt after tools were lost', async () => {
+    const c = await company();
+    const { sales, head } = await salesHead(c);
+    await invitePerson(c.app, c.ceo, { name: 'Lena', email: 'lena@acme.com', access: { departments: [sales.id] } });
+    const [lena] = await c.db.select().from(people).where(eq(people.email, 'lena@acme.com'));
+    expect((await setTelegram(c.app, c.ceo, lena!.id, '8880010')).statusCode).toBe(200);
+    await connectBot(c.app, c.ceo, head.id, SECOND);
+    c.tg.write(SECOND, { id: 8880010, first_name: 'Lena', language_code: 'en' }, 'Как идут продажи?');
+    await until(() => c.builtin.queued() > 0 || c.tg.sent.length > 0);
+    expect(c.tg.sent).toEqual([]);
+    const first = await nextOf(c.builtin, 'job.run');
+    c.builtin.send({ type: 'job.event', jobId: first.jobId, seq: 0, event: { kind: 'text', text: 'I am looking into it.' } });
+    c.builtin.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 's1', result: '', tail: '', error: 'agent_failed', failure: { kind: 'tools', retryable: true, text: 'Connection to tools lost.' } });
+    await until(() => c.builtin.acks.includes(first.jobId));
+    const [retry] = await c.db.select().from(jobs).where(eq(jobs.continueOf, first.jobId));
+    expect(retry).toMatchObject({ notBefore: expect.any(Date) });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(+retry!.notBefore!);
+    onTestFinished(() => clock.mockRestore());
+    await pump(c.app.ctx, head.id);
+    const next = await nextOf(c.builtin, 'job.run');
+    expect(next.prompt).toContain('turn ended before the work');
+    c.builtin.send({ type: 'job.event', jobId: next.jobId, seq: 0, event: { kind: 'text', text: 'Ваш отчет готов.' } });
+    c.builtin.send({ type: 'job.done', jobId: next.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(() => c.tg.sent.length > 0);
+    expect(c.tg.sent.map(s => s.text)).toEqual(['Ваш отчет готов.']);
+    for (const { prompt } of [first, next]) {
+      expect.soft(prompt).toContain('This is Lena writing to you directly in Telegram.');
+      expect.soft(prompt).toContain('Your last message of this turn goes to Lena as your answer.');
+      expect.soft(prompt).toContain('Write it directly to them in Russian. Keep it short and use plain text. Do not narrate your steps to them.');
+    }
   });
 
   it('says plainly when the person may not write to this agent in Hornhoof, and sends nothing to it', async () => {
@@ -276,6 +353,7 @@ describe('a message through the bot', () => {
     const long = `${'Sales are fine. '.repeat(300)}\nThe end.`;
     c.builtin.send({ type: 'job.started', jobId: run.jobId });
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: long } });
+    c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.tg.sent.length === 2);
     expect(c.tg.sent.every(s => s.token === SECOND && s.chat_id === IVAN.id && s.text.length <= 4096)).toBe(true);
     expect(c.tg.sent.map(s => s.text).join('')).toBe(long);
@@ -292,21 +370,23 @@ describe('a message through the bot', () => {
     await connectBot(c.app, c.ceo, head.id, SECOND);
     c.tg.write(SECOND, { id: 6660006, first_name: 'Wes', language_code: 'en' }, 'Drop the cold calls.');
     const run = await nextOf(c.builtin, 'job.run');
-    expect(run.prompt).toContain("Wes wrote this in Telegram. Wes is the CEO's delegate and responsible for your department.");
+    expect(run.prompt).toContain("This is Wes writing to you directly in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
-  it('tells the person when the agent could not answer', async () => {
-    const { app, ceo, owner, tg, builtin } = await company();
+  it.each(['agent_failed', 'cancelled'] as const)('sends only the failure words when a turn ends with %s after progress', async error => {
+    const { app, db, ceo, owner, tg, builtin } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');
     await connectBot(app, ceo, 'orchestrator', TOKEN);
     tg.write(TOKEN, IVAN, 'Hello.');
     const run = await nextOf(builtin, 'job.run');
-    builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error: 'agent_failed' });
+    await until(async () => (await db.select().from(telegramReplies)).length === 1);
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'I am looking into it.' } });
+    builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error });
     await until(() => builtin.acks.includes(run.jobId));
     await pollOnce(tg, TOKEN);
     await pollOnce(tg, TOKEN);
-    await until(() => tg.sent.length === 1);
-    expect(tg.sent[0]!.text).toContain('Orchestrator');
+    await until(async () => (await db.select().from(telegramReplies)).length === 0);
+    expect(tg.sent.map(s => s.text)).toEqual(['Orchestrator could not answer this time. Open Hornhoof to see why, or write again.']);
   });
 
   it('keeps where it read up to, so a restart neither loses nor repeats a message', async () => {

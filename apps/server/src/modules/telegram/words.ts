@@ -1,6 +1,6 @@
 import { LINK_DAYS } from '../assistants/files.js';
 
-/* What a bot says on its own, in the language of the person's Telegram: Russian for Russian, English for everyone else. */
+/* What a bot can say on its own, in Russian or English. */
 export type BotLang = 'en' | 'ru';
 
 export const langOf = (code: string | undefined): BotLang => (code?.toLowerCase().startsWith('ru') ? 'ru' : 'en');
