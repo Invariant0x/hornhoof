@@ -47,7 +47,6 @@ async function company() {
 
   vi.spyOn(ctx.hub, 'isReady').mockImplementation(id => id.kind === 'builtin');
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
-  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   /* The built-in node takes live words into a running turn when the test says it does, and says so. */
   let takesLiveWords = true;
   const send = vi.spyOn(ctx.hub, 'send').mockImplementation((to, m) => {

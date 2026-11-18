@@ -56,8 +56,12 @@ export const PhoneGrant = z.strictObject({
 export type PhoneGrant = z.infer<typeof PhoneGrant>;
 
 export const PhoneProbe = z.strictObject({ type: z.literal('phone.probe'), requestId: z.uuid(), endpoint: PhoneEndpoint, pairing: PhonePairing.optional() });
+/* Which of these phones the node's adb lists now, and in what state. It only reads adb's list: it connects nowhere and asks
+   no phone anything, and it names no phone the server did not ask about. */
+export const PhoneList = z.strictObject({ type: z.literal('phone.list'), requestId: z.uuid(), serials: z.array(PhoneEndpoint).min(1).max(100) });
 export const PhoneBaseline = z.strictObject({ type: z.literal('phone.baseline'), requestId: z.uuid(), binding: PhoneBinding });
-export const PhoneReadinessIssue = z.enum(['connection', 'nodeUpdate', 'check', 'lock', 'awake', 'brightness', 'batterySaver', 'appSleep', 'deviceIdle', 'appBattery', 'debugTrust', 'prompt']);
+/* Settings of a phone its computer lists. Whether the phone is there at all comes from phone.list alone, never from here. */
+export const PhoneReadinessIssue = z.enum(['nodeUpdate', 'check', 'lock', 'awake', 'brightness', 'batterySaver', 'appSleep', 'deviceIdle', 'appBattery', 'debugTrust', 'prompt']);
 export type PhoneReadinessIssue = z.infer<typeof PhoneReadinessIssue>;
 const PhoneReadiness = z.array(PhoneReadinessIssue).max(PhoneReadinessIssue.options.length);
 export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), requestId: z.uuid(), grant: PhoneGrant });
@@ -74,5 +78,5 @@ export const PhoneFrame = z.strictObject({
   at: z.iso.datetime(), capture: PhoneCapture,
 });
 export type PhoneFrame = z.infer<typeof PhoneFrame>;
-export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
+export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
 export type PhoneServerMessage = z.infer<typeof PhoneServerMessage>;

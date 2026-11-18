@@ -1,36 +1,22 @@
-/* The program a one-shot call runs, alone and once, with no session and none of a turn's helpers: about 400 MB. */
-export const CALL_BYTES = 400 * 2 ** 20;
-
-/* A call that got its room: its program said its first word, so the memory it takes shows in the machine's own measure from
-   then on; or it ended. */
-export type CallSeat = { settled(): void; leave(): void };
-
-type Waiting = { go: (seat: CallSeat) => void; signal: AbortSignal; stop: () => void };
-
-/* Where one-shot calls start: as many at once as the machine's memory holds, with no count of its own. One more starts while
-   the memory a new program can get holds its program besides the calls that started and do not show in that memory yet.
-   Where no call runs, one starts all the same, so a small machine is never left with none. The others wait in their order
-   and look again when a call says its first word or ends, and whenever the node looks at its machine. A call takes no slot
-   of the check queue: it waits on its model, and its cost on the machine is the memory of its program. */
+/* Where one-shot calls start: all at once, with no count of their own, while the machine's last report found no process
+   its kernel killed for want of memory. After one that did, new calls wait in their order and start once a report finds
+   none, as the node looks at its machine; the calls that run go on. A call takes no slot of the check queue: it waits on
+   its model. */
 export class CallRoom {
-  private running = 0;
-  /* Calls that started and whose programs have not said a word yet. */
-  private fresh = 0;
-  private readonly queue: Waiting[] = [];
+  private readonly queue: { go: () => void; signal: AbortSignal; stop: () => void }[] = [];
 
-  /* free: the memory a new program can get now. */
-  constructor(private readonly free: () => number, private readonly size = CALL_BYTES) {}
+  /* short: whether the machine's last report found a kill for want of memory. */
+  constructor(private readonly short: () => boolean) {}
 
-  enter(signal: AbortSignal): Promise<CallSeat> {
+  enter(signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       signal.throwIfAborted();
-      const waiting: Waiting = {
+      const waiting = {
         go: resolve,
         signal,
         stop: () => {
           this.queue.splice(this.queue.indexOf(waiting), 1);
           reject(signal.reason as Error);
-          this.look();
         },
       };
       signal.addEventListener('abort', waiting.stop, { once: true });
@@ -39,40 +25,12 @@ export class CallRoom {
     });
   }
 
-  /* Starts the calls the memory has room for now, first come first. */
+  /* Starts the calls that wait, first come first, unless the machine is short of memory now. */
   look(): void {
-    while (this.queue.length && this.fits()) {
+    while (this.queue.length && !this.short()) {
       const next = this.queue.shift()!;
       next.signal.removeEventListener('abort', next.stop);
-      next.go(this.seat());
+      next.go();
     }
-  }
-
-  private fits(): boolean {
-    return this.running === 0 || this.free() - this.fresh * this.size >= this.size;
-  }
-
-  private seat(): CallSeat {
-    this.running += 1;
-    this.fresh += 1;
-    let fresh = true, gone = false;
-    const settle = () => {
-      if (!fresh) return;
-      fresh = false;
-      this.fresh -= 1;
-    };
-    return {
-      settled: () => {
-        settle();
-        this.look();
-      },
-      leave: () => {
-        if (gone) return;
-        gone = true;
-        settle();
-        this.running -= 1;
-        this.look();
-      },
-    };
   }
 }

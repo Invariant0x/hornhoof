@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
 import type { ExternalWait, TaskDetail } from '../src/types';
-import { openTaskCard, serveApi, TASKS } from './api';
+import { openTaskCard, serveApi, streamEndedByPage, TASKS } from './api';
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`named task wait ${language} ${theme} ${width}`, async ({ page }, info) => {
@@ -13,7 +13,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-    page.on('requestfailed', request => errors.push(request.url()));
+    page.on('requestfailed', request => { if (!streamEndedByPage(request)) errors.push(request.url()); });
     await serveApi(page);
     await page.route('**/api/version', route => route.fulfill({ json: { version: '0.6.1', commit: 'task-241' } }));
     await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.6.1', commit: 'task-241' }, available: false, latest: null, updater: { status: null, waiting: null } } }));

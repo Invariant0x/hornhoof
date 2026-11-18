@@ -29,7 +29,7 @@ async function company({ inbox = false } = {}) {
   if (!inbox) await db.update(companies).set({ inboxMode: 'direct' });
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Wanda heads the Operations it starts with; the others rest, so each test's rounds are its own. */
   const [wanda] = await db.update(agents).set({ name: 'Wanda' }).where(eq(agents.kind, 'head')).returning();

@@ -24,7 +24,7 @@ import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
-import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
+import { repoAt, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { openTaskNumbers } from '../tasks/open-numbers.js';
@@ -65,8 +65,8 @@ export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: strin
 export type AgentState = FailureState & {
   ready: boolean;
   machineDrain: MachineDrain | null;
-  /* Its turns would start its program on a machine short of free memory, so they wait and go on by themselves once the
-     memory frees up. */
+  /* Its turns would start its program on a machine whose kernel killed a process for want of memory since its node's
+     report before, so they wait and go on by themselves with a report that finds no new kill. */
   memoryWait: boolean;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
@@ -313,7 +313,7 @@ export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentit
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
+  const place = agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   return place !== null && !sameNode(place.node, from);
 }
 
@@ -795,17 +795,16 @@ async function unheardSession(ctx: Ctx, agentId: string, jobId: string, on: On, 
   return matchingSession(original, on, instructionsHash);
 }
 
-/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live.
-   Turns with a repository need 0.5.0, which clones it. The built-in node always matches the server. */
-const CONVERSATION_NODE = [0, 3, 0];
-const REPOSITORY_NODE = [0, 5, 0];
-function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
+/* Turns need a node from 0.5.0 on, which clones a repository and writes an agent's skills as files; an older one waits for
+   its update. Nodes go to the server's version by themselves from 0.8.4 on. The built-in node always matches the server. */
+const NODE_FLOOR = [0, 5, 0];
+function outdated(version: string | null): boolean {
   const have = (version ?? '0').split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < need.length; i++) if ((have[i] ?? 0) !== need[i]) return (have[i] ?? 0) < need[i]!;
+  for (let i = 0; i < NODE_FLOOR.length; i++) if ((have[i] ?? 0) !== NODE_FLOOR[i]) return (have[i] ?? 0) < NODE_FLOOR[i]!;
   return false;
 }
 
-export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_NODE): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
+export const takesTurns = (ctx: Ctx, n: NodeRow): boolean => n.status === 'ready' && !outdated(n.version) && ctx.hub.isReady(nodeIdentity(n.id));
 
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 /* builtinMachine: the machine of the built-in node, for an API key's turn. moves: the agent's program is not there yet. */
@@ -818,17 +817,17 @@ type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtin
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
 /* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
-const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent), true);
+const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, true);
 
 /* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
    else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
    the one picked waits for an update or has no room. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. A turn that would start a new program goes only to a machine with free memory for it, and an
-   employee's turn goes to none that works past what it carries; roomy: whether a node has room, which the agent's state
-   also asks as if every node had. */
-async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent))): Promise<Placement | null> {
+   node can take it. A turn that would start a new program goes to no machine whose kernel killed a process for want of
+   memory since its node's report before; roomy: whether a node has room, which the agent's state also asks as if every
+   node had. */
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
   if (sub.kind === 'api_key') {
     const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
     if (!machine) return null;
@@ -839,8 +838,8 @@ async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 
   /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
   const onHold = await nodesOnHold(ctx, all.map(n => n.id));
   const open = all.filter(n => !onHold.has(n.id));
-  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, need, roomy)));
+  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
@@ -854,9 +853,9 @@ async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Pr
 
 /* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
    is one of those. */
-async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
+async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
   if (!isLeader(agent)) return null;
-  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
   return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
@@ -1134,7 +1133,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
-  const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
+  const place = await placement(ctx, agent, sub);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
      Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
@@ -1148,9 +1147,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!mail.length && going.some(j => j.inboxWake)) mail = await unreadMail(db, agentId);
   const along = going.flatMap(j => (!j.inboxWake ? [j] : mail.length ? [{ ...j, prompt: mailSummary(mail) }] : []));
 
-  /* A node from before skill files gets every skill in the instructions. */
-  const files = ctx.hub.takesSkillFiles(place.node);
-  const instructions = await instructionsOf(ctx, agent, files);
+  const instructions = await instructionsOf(ctx, agent);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
@@ -1209,7 +1206,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
          company's machines built for its commit. Which tasks are still open lets the node take away its worktrees of the
          closed ones. */
       workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}), ...(tasksNow ? { tasks: tasksNow } : {}) },
-      ...(files ? { skills: instructions.skills } : {}),
+      skills: instructions.skills,
     });
   } catch (err) {
     await failedTurnDelivery(ctx, job, err);
@@ -1287,12 +1284,11 @@ export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
-async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
+async function waitsFor(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
   if (sub.kind === 'api_key') return ctx.hub.builtins().length > 0 || notAway(ctx, ownBuiltin(ctx.config)) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
-  const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
@@ -1335,14 +1331,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
-  const place = sub && agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
+  const place = sub && agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   const shown = await shownNode(ctx, agentId, place);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
+    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, () => true))),
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

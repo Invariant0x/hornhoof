@@ -23,6 +23,13 @@ describe("a node's machine load", () => {
     expect(machineLoad({ read: () => null, cpus: 10, load: 1, free: 6 * GIB, total: 32 * GIB })).toMatchObject({ cpus: 10, load: 1, memFree: 6 * GIB, memTotal: 32 * GIB });
   });
 
+  it("reads how many processes the machine's kernel killed for want of memory, and nothing where there is no /proc", () => {
+    const read = files({ '/proc/meminfo': 'MemTotal:       16777216 kB\nMemAvailable:    8388608 kB\n', '/proc/vmstat': 'drop_slab 0\noom_kill 26\nnuma_pte_updates 0\n' });
+    expect(machineLoad({ read, cpus: 16, load: 2.84 }).oomKills).toBe(26);
+    expect(machineLoad({ read: () => null, cpus: 10, load: 1, free: 6 * GIB, total: 32 * GIB }).oomKills).toBeUndefined();
+    expect(machineLoad({ read: files({ '/proc/vmstat': 'drop_slab 0\n' }), cpus: 10, load: 1, free: 6 * GIB, total: 32 * GIB }).oomKills).toBeUndefined();
+  });
+
   it("names the machine's processor, the disk its folder is on, and what the machine has when the node runs in a smaller system", () => {
     const read = files({ '/proc/meminfo': 'MemTotal:       8388608 kB\nMemAvailable:    4194304 kB\n' });
     const disk = () => ({ free: 120 * GIB, total: 460 * GIB });
