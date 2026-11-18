@@ -111,7 +111,8 @@ function rowsHold({ header, bars, wide }: Awaited<ReturnType<typeof places>>, wi
   if (header.length < 2) offences.push(`the header shows ${header.length} parts`);
   if (wide > 0) offences.push(`the page scrolls sideways by ${wide}px`);
   bars.forEach((bar, i) => {
-    if (bar.y < bottom - 0.5) offences.push(`"${bar.what}" starts at ${bar.y}, above the header's bottom ${bottom}`);
+    /* A row of its own, apart from the header: not under it, and not glued to its bottom edge either. */
+    if (bar.y < bottom + 0.5) offences.push(`"${bar.what}" starts at ${bar.y}, not under the header's bottom ${bottom}`);
     for (const part of header) if (meet(bar, part)) offences.push(`"${bar.what}" meets the header part "${part.what}"`);
     if (bar.x < -0.5 || bar.x + bar.width > width + 0.5) offences.push(`"${bar.what}" leaves the page's width`);
     if (!bar.onTop) offences.push(`"${bar.what}" is drawn under something else`);
@@ -214,6 +215,20 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     const top = (await heading.boundingBox())!;
     expect(top.y, 'the heading stands under the panel').toBeGreaterThanOrEqual(people.bars[0]!.y + people.bars[0]!.height - 0.5);
     if (pictured) await shot(page, info.outputPath(`failure-people-${name.replaceAll(' ', '-')}.png`));
+    /* Scrolled, the page and its bars pass under the band at the top, never over it: nothing shows around the glass
+       blocks of the header. */
+    await page.setViewportSize({ width, height: 300 });
+    const main = page.getByRole('main');
+    await main.evaluate(element => { element.scrollTop = 30; });
+    expect(await main.evaluate(element => element.scrollTop)).toBe(30);
+    const below = Math.max(...people.header.map(h => h.y + h.height)) + 2;
+    const covered = await panel.evaluate((element, y) => {
+      const r = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, y);
+      return { reaches: r.top < y && r.bottom > y, over: hit !== null && element.contains(hit) };
+    }, below);
+    expect(covered).toEqual({ reaches: true, over: false });
+    await page.setViewportSize({ width, height: 900 });
 
     /* The tracker, which stands right under the header: the panel in its own row, the tracker after it. */
     await page.goto('/tasks');
