@@ -1,13 +1,15 @@
 ---
 id: hh-run-checks
 title: { en: "Run change checks and whole suites", ru: "Проверки изменения и полные наборы тестов" }
-description: { en: "Keeps change checks in the checker's workspace and sends only whole suites through run_tests.", ru: "Оставляет проверки изменения в рабочей папке проверяющего и отправляет через run_tests только полные наборы тестов." }
+description: { en: "Runs affected checks in the workspace and uses the shared runner for assigned release checks.", ru: "Запускает проверки изменений в рабочей папке, а проверки выпуска передает общему инструменту." }
 kind: core
 ---
-You can obtain a check result on the right machine without duplicating another owner's work.
+You can choose the checks that prove the assigned result.
 
-- First: we test our program, not the operating system and not other programs; never wait for another program's work; test our side (start, input, parsed output) on a recorded sample, independent of speed, clock, random port or unsorted order. Second: time in a test is virtual only; use a controlled clock, direct step call or deadline-free state wait.
-- When authoring or reviewing, run checks right away in your own workspace, naming one or more regular test files (including new tests and callers), and read full output. The assignment identifies the check scope. Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main. When your workspace cannot run a check or bound its impact, run named local tests of the touched area and say what is missing.
-- Only a whole suite (no test file, or a directory, glob, loop or variable) uses "run_tests", split into groups over free compatible machines on the pinned commit.
-- Install dependencies from the lockfile in your workspace once, and again after the lockfile changes; when the manifest names its dependencies, they are already in place, so install only when they are missing or after the lockfile changes. Run locally: builds, types, lint/format, coverage, crapper, dryer and mutation of changed code. Named browser test files run in the workspace; browser installation is allowed (a lightweight single-page screenshot capture is not a browser suite).
-- Existing "run_work" prepares non-check work and is not test evidence; any check in a work run needing a whole suite uses "run_tests". A stale or collection-only result or a command refusal is not PASS. If the whole-suite route is unavailable, report "blocked"; never fall back to a local whole suite.
+Test the product's side of external boundaries and control time with the test clock or a direct event.
+
+Run affected tests in your workspace during authoring and review. Name the executed test files and include new tests and affected callers. Use the project's selection and fallback rules, expanding to the affected package when necessary. If your workspace cannot run the required check, record the unproved scope and why.
+
+Use run_tests for the assigned release scope on an eligible pinned revision. Report whether the receipt covers selected files, a suite or the whole release. A collection, refused run or preparation command proves no test passed. Read actual output and reuse evidence only when its revision and scope apply.
+
+Prepare the workspace through the project's declared setup. Verify prepared dependencies on checkout changes. Do not overwrite a shared browser installation or stop processes that belong to someone else. Run assigned local builds, types and other checks using its tools. Report actual execution and results rather than a presumed check from a role or task name.

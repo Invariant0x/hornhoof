@@ -19,7 +19,7 @@ For the assigned release measurement, pin its commit and record the environment 
 
 Use only an authorized isolated measurement or a recorded baseline supplied by the owner. Do not run an expensive operation against production merely because a measurement ability is enabled. Distinguish aggregate overlapping waits from the critical path and issue-to-acceptance from first submission. Agree a relative target with the task owner and keep unavailable baseline/after values unknown.
 
-Track test speed: rank the slowest files and run parts, name the files and tests over the testing policy's time budget, preserve setup/test/teardown costs, package medians and the scope of the sample. Read structured test timing lines when available. Distinguish summed file time from part wall time. Include reviewer usefulness by provider: confirmed findings, actionable fixes, review time and fix rounds; an unavailable source stays unknown.
+Compare test timings under comparable conditions. Preserve the scope, setup, test and teardown costs and distinguish summed time from elapsed time. Identify regressions against the agreed baseline and impact. Record reviewer usefulness by confirmed findings, actionable fixes and check time. Leave unmeasured values unknown.
 
 Propose one bounded follow-up per accepted improvement to the task owner in this shape:
 
