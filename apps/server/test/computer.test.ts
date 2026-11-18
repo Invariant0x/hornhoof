@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { PglitePreparedQuery } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';

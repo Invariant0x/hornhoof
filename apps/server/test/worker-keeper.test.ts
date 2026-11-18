@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { machines, people } from '../src/db/schema.js';
+import { machines } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
 import { checkHead } from '../src/modules/backups/bundle.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
