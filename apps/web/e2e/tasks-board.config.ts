@@ -10,7 +10,7 @@ const origin = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'tasks-board/tasks-board.spec.ts',
+  testMatch: ['tasks-board/tasks-board.spec.ts', 'task-panel.spec.ts'],
   outputDir: 'results/tasks-board',
   forbidOnly: Boolean(process.env.CI),
   retries: 0,

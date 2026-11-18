@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { openTaskCard } from './api';
+import { openTaskAction, openTaskCard } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_CWD = process.env.HH_E2E_SERVER_CWD ?? resolve(HERE, '../../server');
@@ -400,6 +400,7 @@ for (const lang of LANGUAGES) {
         const panel = page.locator('aside');
         await expect(panel).toBeVisible();
 
+        await openTaskAction(panel, t, t.tracker.card.materials);
         /* Files section shows clean plain-words filenames without 64-char sha256 noise. */
         const filesRegion = panel.getByRole('region', { name: t.tasks.files });
         await expect(filesRegion).toBeVisible();
@@ -410,11 +411,13 @@ for (const lang of LANGUAGES) {
         await expect(panel).not.toContainText(sc.verdictSha256);
         await expect(panel).not.toContainText('[Full text](/api/attachments/');
 
+        await openTaskAction(panel, t, t.tasks.details);
         /* Full 12,000-character choice feedback is rendered inline without truncation or fake Picked/Approved/Declined prefix. */
         await expect(panel).toContainText(`[CHOICE-FEEDBACK-${lang.toUpperCase()}:HEAD]`);
         await expect(panel).toContainText(`[CHOICE-FEEDBACK-${lang.toUpperCase()}:TAIL]`);
         await expect(panel).not.toContainText(/Picked \d|Approved|Declined/);
 
+        await openTaskAction(panel, t, t.tasks.fullLog);
         /* Expand the 12,400-char verdict via real GET /api/attachments/:id and verify head + tail in the browser. */
         const verdictEntry = panel.locator('ol.tp-log > li.verdict');
         await expect(verdictEntry).toContainText(`[VERDICT-COMMENT-${lang.toUpperCase()}:HEAD]`);
@@ -565,14 +568,17 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   const panel = page.locator('aside');
   await expect(panel).toBeVisible();
 
+  await openTaskAction(panel, ru, ru.tasks.fullLog);
   const subEntry = panel.locator('ol.tp-log > li.submitted');
   await subEntry.getByRole('button', { name: ru.tasks.readFull }).nth(1).click();
   await expect(subEntry).toContainText('[EDGE-EVIDENCE:TAIL]');
 
+  await openTaskAction(panel, ru, ru.tasks.comment);
   const commentField = panel.getByLabel(ru.tasks.comment);
   await commentField.fill(taskComment12k);
   await panel.getByRole('button', { name: ru.tasks.addComment }).click();
-  await expect(commentField).toHaveValue('');
+  await expect(commentField).toHaveCount(0);
+  await openTaskAction(panel, ru, ru.tasks.fullLog);
 
   const commentEntry = panel.locator('ol.tp-log > li.comment').last();
   await expect(commentEntry).toContainText('[EDGE-TASK-COMMENT:HEAD]');

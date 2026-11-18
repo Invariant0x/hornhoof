@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, openTaskCard, serveApi, TASKS } from './api';
+import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its place, the panel runs to the bottom of the window,
    scrolls by itself and leaves the page scrolled where it was. On the tracker a task's card stands at the end side, and from
@@ -178,6 +178,8 @@ test.describe('scrolling', () => {
     const panel = panelOf(page, 5);
     const heading = panel.getByRole('heading', { name: 'Checkout step 5' });
     await expect(heading).toBeVisible();
+    await panel.getByRole('button', { name: en.tasks.moreDescription, exact: true }).click();
+    await panel.evaluate(el => el.querySelector('.ac-body')!.scrollTop = 0);
     const top = (await box(heading)).y;
     const inside = await box(panel);
     await page.mouse.move(inside.x + inside.width / 2, inside.y + inside.height / 2);
@@ -189,17 +191,22 @@ test.describe('scrolling', () => {
 });
 
 const MESSAGES: Record<Language, Messages> = { en, ru };
-const CHECKED_LOCALES = [...LANGUAGES]
-  .map(entry => ({ id: entry.id, score: MESSAGES[entry.id].tasks.independentPart.length }))
-  .sort((a, b) => b.score - a.score)
-  .filter((entry, index, all) => index === 0 || index === all.length - 1)
-  .map(entry => entry.id);
+const ranked = LANGUAGES.map(({ id }) => {
+  const { tasks, tracker, window } = MESSAGES[id];
+  const copy = [window.close, tracker.groups.working, tracker.card.executor, tracker.card.responsible, tracker.card.due, tracker.card.facts,
+    tasks.moreDescription, tasks.showLess, tasks.log, tasks.earlierSteps, tasks.taskActions, tasks.details,
+    tasks.backToActions, tasks.independentPart, tasks.events.comment(''), tracker.groups.notStarted];
+  return { id, score: copy.reduce((sum, line) => sum + line.length, 0) };
+}).sort((a, b) => a.score - b.score);
+const rtl = LANGUAGES.find(({ id }) => /^(ar|fa|he|ps|sd|ug|ur|yi)(-|$)/.test(id));
+const CHECKED_LOCALES = new Set([ranked[0]!.id, ranked.at(-1)!.id, ...(rtl ? [rtl.id] : [])]);
 const LONG_PART = `contract/${'x'.repeat(180)}`;
 
 for (const lang of CHECKED_LOCALES) {
   for (const theme of ['light', 'dark'] as const) {
-    for (const width of [375, 1440]) {
-      test(`independent part wraps without sideways scroll: ${lang}/${theme}/${width}`, async ({ page }, info) => {
+    for (const width of [390, 1440]) {
+      test(`the task wraps on its face and in Details: ${lang}/${theme}/${width}`, async ({ page }, info) => {
+        const t = MESSAGES[lang];
         await page.setViewportSize({ width, height: 900 });
         await page.addInitScript(({ language, skin }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', skin); }, { language: lang, skin: theme === 'light' ? 'light' : 'cyberpunk' });
         await serveApi(page);
@@ -209,6 +216,13 @@ for (const lang of CHECKED_LOCALES) {
           body: JSON.stringify({
             task: {
               ...detail(base),
+              title: LONG_PART,
+              brief: `Test first. ${LONG_PART}`,
+              body: `Test the API.\n\n${LONG_PART}`,
+              executor: { ...base.assignee!, name: LONG_PART },
+              responsible: { id: 'p1', name: 'Ivan' },
+              dueAt: '2099-11-20T00:00:00.000Z',
+              log: Array.from({ length: 5 }, (_, i) => ({ kind: 'comment', text: `Checkpoint ${i + 1}.`, data: {}, by: null, at: base.createdAt })),
               independentPart: {
                 title: 'Contract tests', brief: 'Test first.', body: LONG_PART,
                 executor: { id: 'b1', name: 'Bruno', kind: 'worker', role: null },
@@ -218,13 +232,24 @@ for (const lang of CHECKED_LOCALES) {
           }),
         }));
         await page.goto('/');
-        await page.getByRole('button', { name: lang === 'ru' ? 'Задачи' : 'Tasks', exact: true }).click();
+        await page.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
         await openTaskCard(page, 1);
-        const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-        const part = panel.getByRole('region', { name: MESSAGES[lang].tasks.independentPart });
+        const panel = page.getByRole('complementary', { name: `#1 ${LONG_PART}` });
+        await expect(panel.getByRole('heading', { name: LONG_PART })).toBeVisible();
+        const trigger = panel.getByRole('button', { name: t.tasks.taskActions });
+        const target = await box(trigger);
+        expect(target.width).toBe(44);
+        expect(target.height).toBe(44);
+        await panel.getByRole('button', { name: t.tasks.moreDescription, exact: true }).click();
+        await expect(panel.locator('.tp-body').getByText(LONG_PART)).toBeVisible();
+        await panel.getByRole('button', { name: t.tasks.earlierSteps, exact: true }).click();
+        await expect(panel.getByRole('list', { name: t.tasks.log, exact: true }).getByRole('listitem')).toHaveCount(5);
+        await page.screenshot({ path: info.outputPath(`task-card-${lang}-${theme}-${width}.png`), fullPage: true });
+        await openTaskAction(panel, t, t.tasks.details);
+        const part = panel.getByRole('region', { name: t.tasks.independentPart });
         await expect(part).toBeVisible();
         await expect(part.getByText(LONG_PART)).toBeVisible();
-        for (const element of [panel, part]) {
+        for (const element of [panel, panel.locator('.ac-body'), part]) {
           const dimensions = await element.evaluate(el => ({ client: el.clientWidth, scroll: el.scrollWidth }));
           expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client + 1);
         }

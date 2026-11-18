@@ -1,6 +1,8 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
-import { openTaskCard, serveApi, TASKS } from './api';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { openTaskAction, openTaskCard, serveApi, TASKS } from './api';
 
 for (const language of ['en', 'ru']) {
   for (const theme of ['light', 'dark']) {
@@ -31,7 +33,9 @@ for (const language of ['en', 'ru']) {
         await page.getByRole('button', { name: /^(Tasks|Задачи)/ }).click();
         await openTaskCard(page, 1);
         const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-        const log = panel.getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
+        const t = language === 'ru' ? ru : en;
+        await openTaskAction(panel, t, t.tasks.fullLog);
+        const log = panel.getByRole('list', { name: t.tasks.fullLog });
         await expect(log.getByRole('listitem')).toHaveCount(4);
         await expect(log).toContainText(language === 'ru' ? 'Запуск пропущен: задача уже закрыта.' : 'Run skipped: task is already closed.');
         await expect(log).toContainText(language === 'ru' ? 'возобновление после перезапуска' : 'resume after a restart');

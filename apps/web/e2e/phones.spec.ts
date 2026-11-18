@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import type { MachineView } from '../src/types';
-import { ME, openTaskCard, serveApi } from './api';
+import { openTaskAction, ME, openTaskCard, serveApi } from './api';
 import type { PhoneView } from '../src/ui/Phones';
 import { inOneRowAtEnd } from './button-row';
 
@@ -190,7 +190,9 @@ test('task recording opens and advances with virtual time', async ({ page }) => 
   await page.route('**/api/tasks/t1/phone-recordings', route => route.fulfill({ json: { recordings: [{ id: 's1', phone: 'Pixel', agent: 'Assistant', status: 'ended', reason: 'completed', startedAt: new Date(NOW).toISOString(), endedAt: new Date(NOW).toISOString(), frames: [1, 2].map(sequence => ({ sequence, at: new Date(NOW + sequence * 1000).toISOString(), imageUrl: null })) }] } }));
   await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
   await openTaskCard(page, 1);
-  const recording = page.getByRole('region', { name: t.phones.recordings });
+  const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
+  await openTaskAction(panel, t, t.tasks.details);
+  const recording = panel.getByRole('region', { name: t.phones.recordings });
   await recording.getByRole('button', { name: t.phones.replay }).click();
   await expect(recording.getByText(t.phones.frameOf(1, 2), { exact: true })).toBeVisible();
   await recording.getByRole('button', { name: t.phones.play, exact: true }).click();

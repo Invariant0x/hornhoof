@@ -1,6 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page, Request } from '@playwright/test';
+import type { Messages } from '../src/i18n';
 import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TokenPeriods, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -182,4 +183,14 @@ export async function openTaskCard(page: Page, number: number) {
   await search.fill(String(number));
   await page.locator('.tr-found').getByRole('listitem', { name: new RegExp(`^#${number} `) }).first().locator('.tr-title').click();
   await search.fill('');
+}
+
+export async function openTaskAction(panel: Locator, t: Pick<Messages, 'tasks'>, action?: string) {
+  const trigger = panel.getByRole('button', { name: t.tasks.taskActions, exact: true });
+  if (await trigger.getAttribute('aria-expanded') === 'true') {
+    await panel.getByRole('button', { name: t.tasks.backToActions, exact: true }).click();
+  } else {
+    await trigger.click();
+  }
+  if (action) await panel.getByRole('button', { name: action, exact: true }).click();
 }
