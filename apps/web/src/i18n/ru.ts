@@ -473,7 +473,6 @@ export const ru: Messages = {
     },
   },
   workers: {
-    legend: 'Виды работников',
     employee: 'Сотрудник',
     generalist: 'Универсал: делает задачу целиком',
     ghost: 'Призрак: разовый вызов, появляется на одну задачу и исчезает',
@@ -491,9 +490,6 @@ export const ru: Messages = {
     deputy: (where: string) => `Заместитель: ${where}`,
     agentsWorking: 'агентов в работе',
     deptAgents: 'Агентов в работе из всех',
-    calls: (running, waiting) => `Разовые вызовы: идут ${running}, ждут свободной памяти на машине ${waiting}`,
-    call: (n, task, by) => `Вызов ${n} по #${task}${by ? ` от ${by}` : ''}`,
-    judgeCall: (task, by) => `Судья вызовов по #${task}${by ? ` от ${by}` : ''}`,
     readyForRelease: n => `Готово к выпуску: ${n}`,
     orchestrator: 'Оркестратор',
     emptyHint: 'Отделов пока нет. Расскажите оркестратору о компании, и он предложит структуру.',

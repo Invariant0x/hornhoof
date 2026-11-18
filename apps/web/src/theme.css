@@ -577,18 +577,6 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
-.map-workspace { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
-.map-workspace > .map { position: relative; inset: auto; }
-.worker-legend { min-inline-size: 0; background: var(--surface); border-block-start: 1px solid var(--line); }
-.worker-legend summary { display: flex; align-items: center; gap: 8px; min-block-size: 44px; margin: 0; padding: 8px 16px; border: 0; background: none; font: inherit; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; cursor: pointer; list-style: none; }
-.worker-legend summary::-webkit-details-marker { display: none; }
-.worker-legend summary:hover { background: var(--surface2); }
-.worker-legend summary:focus-visible { outline-offset: -2px; }
-.worker-legend summary .ic { transform: rotate(90deg); }
-.worker-legend[open] summary .ic { transform: rotate(-90deg); }
-.worker-legend ul { display: flex; flex-wrap: wrap; gap: 8px 24px; max-block-size: 28vh; margin: 0; padding: 8px 16px 12px; overflow: auto; scrollbar-gutter: stable; list-style: none; }
-.worker-legend li, .worker-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
-.worker-legend li > span:last-child, .worker-name > b { min-inline-size: 0; }
 .map::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -1470,6 +1458,8 @@ body:has(.dview) .version-mark { display: none; }
 .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
 .dot.working { background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
 .dot.needs_subscription { background: var(--amber); }
+.worker-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
+.worker-name > b { min-inline-size: 0; }
 /* Worker marks use the current skin's ink roles and the tracker's status rings. */
 :root {
   --worker-employee-fill: var(--muted);
@@ -1483,22 +1473,18 @@ body:has(.dview) .version-mark { display: none; }
 .worker-mark[data-worker-kind='ghost'] { color: var(--worker-ghost-ink); }
 .worker-mark .ic { inline-size: 100%; block-size: 100%; }
 .worker-mark:is([data-worker-kind='employee'], [data-worker-kind='generalist']) .ic { fill: currentColor; }
-/* Department cards use 9 px staff marks and 12 px ghost marks. The map sets the card height from their wrapped rows. */
-.cells { display: flex; flex: none; flex-wrap: wrap; gap: 3px; margin-block-start: 2px; }
-.worker-mark.cell { --cell-ink: var(--line2); inline-size: 9px; block-size: 9px; color: var(--cell-ink); }
-.cell.w { --cell-ink: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
-.cell.q { --cell-ink: color-mix(in srgb, var(--cyan) 45%, var(--idle)); }
-.cell.r { --cell-ink: var(--amber); animation: breathe 3.2s ease-in-out infinite; }
-.cell.h { --cell-ink: var(--pink); }
-.cell.o { --cell-ink: var(--amber); }
-.worker-mark.cell.o .ic { fill: none; }
-.worker-mark.cell[data-worker-kind='ghost'] { inline-size: 12px; block-size: 12px; color: var(--worker-ghost-ink); }
-.worker-mark.cell[data-worker-kind='ghost'].w { color: var(--worker-ghost-running); filter: drop-shadow(0 0 2px var(--worker-ghost-running)); animation: none; }
-.worker-mark.cell[data-worker-kind='ghost'].q { color: var(--worker-ghost-waiting); }
+/* One square per employee on a department's card on the map. */
+.cells { display: flex; flex-wrap: wrap; gap: 3px; margin-block-start: 2px; }
+.cell { inline-size: 9px; block-size: 9px; background: var(--idle); }
+.cell.w { background: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
+.cell.q { background: color-mix(in srgb, var(--cyan) 45%, var(--idle)); }
+.cell.r { background: var(--amber); animation: breathe 3.2s ease-in-out infinite; }
+.cell.h { background: var(--pink); }
+.cell.o { background: none; box-shadow: inset 0 0 0 1px var(--amber); }
 .cell.ping { animation: ping .9s ease-out; }
 @media (prefers-reduced-motion: reduce) { .cells .cell { animation: none; } }
 @keyframes breathe { 0%, 100% { opacity: .95; } 50% { opacity: .55; } }
-@keyframes ping { 0% { color: var(--ink); transform: scale(1.8); } 100% { transform: none; } }
+@keyframes ping { 0% { background: var(--ink); transform: scale(1.8); } 100% { transform: none; } }
 /* The department's tasks under its people, and a new task written in place. */
 .dv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dv-h h3 { margin-bottom: 10px; }

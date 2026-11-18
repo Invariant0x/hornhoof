@@ -359,7 +359,7 @@ Cyberpunk, Light, Matrix, Pixel and custom skins use the same aliases. Each reso
 | `--worker-ghost-running` | `--cyan-ink` | `--cyan` | Lit ghost for a running call |
 | `--worker-ghost-waiting` | `--amber-ink` | `--amber` | Warning outline for a waiting call |
 
-Map staff squares and diamonds use employee status colors, with `--line2` for idle staff. The tracker keeps the program fill and initials and adds a diamond in the mark's own ink for a generalist. The map legend has a row outside the canvas so opening it leaves the cards clear.
+The company map shows one 9 px square per employee, in the employee's status color. The tracker keeps the program fill and initials and adds a diamond in the mark's own ink for a generalist.
 
 ## 5. Languages
 

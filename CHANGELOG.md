@@ -5,6 +5,13 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Changed
+
+- The company map shows only employee squares again, in their original status colors and with their usual blinking.
+- The company map has no worker kinds legend.
+
 ## [0.34.0] - 2026-11-18
 
 ### Fixed

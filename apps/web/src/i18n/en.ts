@@ -448,7 +448,6 @@ export const en = {
     } satisfies SkinErrorWords as SkinErrorWords,
   },
   workers: {
-    legend: 'Worker kinds',
     employee: 'Employee',
     generalist: 'Generalist: does a task whole',
     ghost: 'Ghost: a one-shot call, appears for one task and is gone',
@@ -466,10 +465,6 @@ export const en = {
     deputy: (where: string) => `Deputy: ${where}`,
     agentsWorking: 'agents working',
     deptAgents: 'Agents at work out of all',
-    /* One-shot calls of a department while they wait or run: short runs of an employee's program that each answer once. */
-    calls: (running: number, waiting: number) => `One-shot calls: ${running} running, ${waiting} waiting for free memory on ${waiting === 1 ? 'its' : 'their'} machine`,
-    call: (n: number, task: number, by: string) => `Call ${n} on #${task}${by ? `, started by ${by}` : ''}`,
-    judgeCall: (task: number, by: string) => `Judge call on #${task}${by ? `, started by ${by}` : ''}`,
     /* What a department's open turn holds: every result accepted into its branch. */
     readyForRelease: (n: number) => `Ready for release: ${n}`,
     orchestrator: 'Orchestrator',
