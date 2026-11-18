@@ -76,11 +76,20 @@ const STEP_MS = 1_500;
 const BATCH_TIMEOUT_MS = STEPS_PER_CALL * STEP_MS;
 const RESTORE_KEYBOARD_MS = 1_500;
 
+/* Android expands %s even in a quoted word. Give each ASCII fragment its own step and source offset. */
+function splitAsciiTextStep(step: TextStep): TextStep[] {
+  if (step.kind === 'enter') return [step];
+  let end = step.end - step.text.length;
+  return step.text.split(/(?<=%)(?=s)/).map(text => {
+    end += text.length;
+    return { kind: 'text', text, end };
+  });
+}
+
 function stepCommand(step: TextStep, keyboard: boolean): string {
   if (step.kind === 'enter') return `input keyevent${' KEYCODE_ENTER'.repeat(step.count)}`;
   if (keyboard) return `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(step.text).toString('base64')}' >/dev/null`;
-  // adb expands %s even in a quoted word. Split the literal sequence across two invocations.
-  return step.text.split(/(?<=%)(?=s)/).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}`).join('\n');
+  return `input text ${shellWord(step.text.replaceAll(' ', '%s'))}`;
 }
 
 export class PhoneAdb {
@@ -149,8 +158,9 @@ export class PhoneAdb {
   async type(serial: string, text: string, signal: AbortSignal, deadline = Infinity, restoreBy = deadline): Promise<PhoneTyped> {
     PhoneSerial.parse(serial);
     PhoneOperation.parse({ kind: 'text', text });
-    const steps = phoneTextSteps(text);
-    const keyboard = steps.some(step => step.kind === 'text' && /[^\x20-\x7e]/.test(step.text));
+    const textSteps = phoneTextSteps(text);
+    const keyboard = textSteps.some(step => step.kind === 'text' && /[^\x20-\x7e]/.test(step.text));
+    const steps = keyboard ? textSteps : textSteps.flatMap(splitAsciiTextStep);
     const batchDeadline = keyboard ? deadline - RESTORE_KEYBOARD_MS : deadline;
     let own: string | undefined;
     let next = 0;

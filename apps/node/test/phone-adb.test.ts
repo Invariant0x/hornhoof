@@ -55,7 +55,33 @@ describe('the phone adb boundary', () => {
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
     expect(await adb.type('R58M123', "SECRET_%s_$(echo bad)' end", new AbortController().signal)).toEqual({ next: 26 });
     expect(calls[0]!.args).toEqual(['-s', 'R58M123', 'shell']);
-    expect(calls[0]!.input).toBe("set -e\ninput text 'SECRET_%'\ninput text 's_$(echo%sbad)'\\''%send'\nsleep 0.06\n");
+    expect(calls[0]!.input).toBe("set -e\ninput text 'SECRET_%'\nsleep 0.06\ninput text 's_$(echo%sbad)'\\''%send'\nsleep 0.06\n");
+  });
+
+  it('budgets repeated literal %s commands and resumes the exact untyped suffix', async () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let field = '';
+    const adb = new PhoneAdb(async call => {
+      const deadline = Date.now() + call.timeoutMs!;
+      for (const [, part] of (call.input ?? '').matchAll(/^input text '([^']*)'$/gm)) {
+        const end = Date.now() + 800;
+        vi.setSystemTime(Math.min(end, deadline));
+        if (end > deadline) throw new Error('fake adb timed out');
+        field += part;
+      }
+      return Buffer.alloc(0);
+    });
+    const text = 'abc%s'.repeat(8);
+    const signal = new AbortController().signal;
+    const { next, failure } = await adb.type('R58M123', text, signal, 12_000);
+    expect(failure).toBeUndefined();
+    expect(next).toBe(39);
+    expect(field).toBe(text.slice(0, next));
+
+    const rest = text.slice(next);
+    expect(await adb.type('R58M123', rest, signal, Date.now() + 12_000)).toEqual({ next: rest.length });
+    expect(field).toBe(text);
   });
 
   it('types Russian, emoji and new lines through the keyboard app, put on the phone once, and gives the phone its own keyboard back', async () => {
