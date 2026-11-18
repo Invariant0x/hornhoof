@@ -81,7 +81,7 @@ export function boardColumns(tasks: TaskLine[], pipeline: Pipeline | null, opts:
     const cards = surfaced(counted(trees(tasks), opts.all ?? tasks), asksYou);
     return BOARD_STATUSES.filter(s => s !== 'cancelled' || opts.cancelled)
       .map(status => ({ id: status, status, cards: cards.filter(c => boardStatus(c.task, asks(c.task)) === status).sort(newestFirst) }))
-      .filter(column => (column.status !== 'stopped' && column.status !== 'paused') || column.cards.length > 0);
+      .filter(({ status, cards }) => cards.length > 0 || !['failure', 'stopped', 'paused'].includes(status));
   }
   const under = new Map<string, TaskTree>();
   const index = (nodes: TaskTree[]) => nodes.forEach(n => { under.set(n.task.id, n); index(n.children); });

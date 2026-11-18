@@ -13,7 +13,7 @@ const pipeline = {
 afterEach(() => vi.unstubAllGlobals());
 
 it.each([
-  [null, ['Not started', 'In work', 'Review', 'Waits for a person', 'Failures', 'Done']],
+  [null, ['Not started', 'In work', 'Review', 'Waits for a person', 'Done']],
   [pipeline, ['Not started', 'Build', 'Check', 'Ship', 'Done']],
 ] as const)('keeps all columns in one row or stacks them in the same order', (route, headings) => {
   let resize!: (width: number) => void;
@@ -34,7 +34,7 @@ it.each([
   expect(columns.map(column => column.getAttribute('aria-label'))).toEqual(headings);
   expect(columns.map(column => within(column).getByRole('heading').textContent)).toEqual(headings.map(name => `${name} 0`));
 
-  act(() => resize(1200));
+  act(() => resize(850));
   expect(group).toHaveAttribute('data-layout', 'row');
   expect(group).toHaveStyle(`--tr-column-count: ${headings.length}`);
   act(() => resize(810));

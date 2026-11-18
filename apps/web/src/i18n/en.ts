@@ -2107,8 +2107,8 @@ export const en = {
       days: (n: number) => (n === 1 ? '1 day' : `${n} days`),
     },
     board: {
-      executor: (name: string) => `Does it: ${name}`,
-      responsible: (name: string) => `Answers for it: ${name}`,
+      executor: 'Does it:',
+      responsible: 'Answers for it:',
       subtasks: (done: number, total: number) => `subtasks: ${done} of ${total}`,
       due: (day: string) => `due ${day}`,
       empty: 'Nothing here',

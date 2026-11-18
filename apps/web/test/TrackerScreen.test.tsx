@@ -586,6 +586,16 @@ it('shows a failed run in Turns with the full task title and no question action'
   expect(row).not.toHaveTextContent('Waits');
 });
 
+it('keeps complete names together inside board facts', async () => {
+  const responsible = { ...MARIA, name: 'Sam Rivera' };
+  const executor = { ...BRUNO, name: 'Lee Chen' };
+  shell('/tasks?department=d2&view=board', { 'GET /api/tasks?status=all': [200, { tasks: [{ ...PAY, responsible, executor }] }] });
+  const record = within(await screen.findByRole('article', { name: '#21 Take card payments' }));
+  expect(screen.getByRole('button', { name: 'Failures 0' })).toBeInTheDocument();
+  expect(record.getByText('Sam Rivera', { selector: 'bdi' }).parentElement).toHaveTextContent('Answers for it: Sam Rivera');
+  expect(record.getByText('Lee Chen', { selector: 'bdi' }).parentElement).toHaveTextContent('Does it: Lee Chen');
+});
+
 it('surfaces failed work in its own column on both boards', async () => {
   const user = userEvent.setup();
   const failed = line({ id: 'failed-step', number: 79, title: 'Check the card form', parentId: PAY.id, pipelineId: 'pl1', pipelineStageId: 's1',

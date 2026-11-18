@@ -2103,8 +2103,8 @@ export const ru: Messages = {
       days: (n: number) => `${n} ${plural('ru', n, { one: 'день', few: 'дня', many: 'дней', other: 'дня' })}`,
     },
     board: {
-      executor: (name: string) => `Делает: ${name}`,
-      responsible: (name: string) => `Отвечает: ${name}`,
+      executor: 'Делает:',
+      responsible: 'Отвечает:',
       subtasks: (done: number, total: number) => `подзадачи: ${done} из ${total}`,
       due: (day: string) => `срок ${day}`,
       empty: 'Пусто',

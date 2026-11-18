@@ -55,7 +55,7 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
   const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, filters.goal, ...Object.values(statuses)];
   return view === 'tasks'
     ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, t.tracker.priority.label, list.goal, list.due, list.addTask]
-    : [...common, ...controls, board.executor(''), board.responsible(''), board.subtasks(1, 1), board.empty, t.tracker.wait.question];
+    : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question];
 }
 
 const RTL = new Set(['ar', 'fa', 'he', 'ur']);

@@ -75,9 +75,9 @@ describe('the list', () => {
 describe('the board', () => {
   it('separates stopped work, and shows cancelled work only when requested', () => {
     const columns = boardColumns([...TASKS, task({ id: 't9', number: 9, status: 'blocked' })], null);
-    expect(columns.map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'failure', 'stopped', 'done']);
-    expect(columns.map(c => ids(c.cards.map(card => card.task)))).toEqual([['t500'], ['t419', 't412'], [], [], [], ['t9'], ['t502']]);
-    expect(boardColumns(TASKS, null, { cancelled: true }).map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'failure', 'done', 'cancelled']);
+    expect(columns.map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'stopped', 'done']);
+    expect(columns.map(c => ids(c.cards.map(card => card.task)))).toEqual([['t500'], ['t419', 't412'], [], [], ['t9'], ['t502']]);
+    expect(boardColumns(TASKS, null, { cancelled: true }).map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'done', 'cancelled']);
     expect(boardColumns([T412, S1, S2], null, {}, () => false).find(c => c.id === 'working')!.cards[0]).toMatchObject({ done: 1, total: 2 });
   });
 

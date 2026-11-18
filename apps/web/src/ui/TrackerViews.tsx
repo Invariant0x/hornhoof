@@ -189,8 +189,8 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
       {(stage || status === 'waitingYou' || status === 'paused' || status === 'stopped') && <StateWord status={status} />}
       <ul className="tr-card-facts">
         {/* Each fact is a whole phrase in its own direction, so its dot and the parts of its date stay in place in RTL. */}
-        <li dir="auto">{words.executor(doerOf(task)?.name ?? t.tracker.nobody)}</li>
-        <li dir="auto">{words.responsible(task.responsible?.name ?? t.tracker.nobody)}</li>
+        <li dir="auto">{words.executor} <bdi className="tr-card-person">{doerOf(task)?.name ?? t.tracker.nobody}</bdi></li>
+        <li dir="auto">{words.responsible} <bdi className="tr-card-person">{task.responsible?.name ?? t.tracker.nobody}</bdi></li>
         {due && <li className={due.late ? 'tp-late' : undefined} dir="auto">{words.due(due.text)}</li>}
         {tree.total > 0 && <li dir="auto">{words.subtasks(tree.done, tree.total)}</li>}
         <li className="tr-card-activity"><WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} /></li>
@@ -206,7 +206,7 @@ function Column({ column, rows }: { column: BoardColumn; rows: Rows }) {
   const name = column.stage ? column.stage.name : t.tracker.statuses[column.status!];
   return (
     <section className="tr-col" aria-label={name}>
-      <h2 className="tr-col-head">{name} <span className="tr-count">{column.cards.length}</span></h2>
+      <h2 className="tr-col-head"><span>{name}</span> <span className="tr-count">{column.cards.length}</span></h2>
       {column.cards.length ? column.cards.map(card => <BoardCard key={card.task.id} tree={card} rows={rows} stage={!!column.stage} />) : <p className="muted">{t.tracker.board.empty}</p>}
     </section>
   );
