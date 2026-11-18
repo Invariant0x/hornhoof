@@ -47,16 +47,19 @@ async function inside(page: Page, what: string) {
   expect(await sideways(page), what).toBeLessThanOrEqual(0);
 }
 
-/* What a finger presses is at least 44 px high, and a link that stands alone at least 44 px wide too, even with two letters. */
+/* What a finger presses is at least 44 px high, and a link that stands alone at least 44 px wide too, even with two letters,
+   on a phone and on any touch screen. A mouse on a wide screen takes the layout's sizes, never under 24 px (WCAG 2.5.8). */
 const LINKS = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
 async function touchable(page: Page, what: string) {
-  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-add-view, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
-    els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
-    expect(height, what).toBeGreaterThanOrEqual(43.5);
+  const finger = page.viewportSize()!.width <= 760 || await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+  const least = finger ? 43.5 : 23.5;
+  for (const [name, height] of await page.locator(`.tr-item, .tr-views label, .tr-add-view, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
+    els.filter(e => e.getClientRects().length).map(e => [`${e.className} ${e.textContent}`, e.getBoundingClientRect().height] as const))) {
+    expect(height, `${what}: ${name}`).toBeGreaterThanOrEqual(least);
   }
   for (const [text, width] of await page.locator(LINKS).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().width] as const))) {
-    expect(width, `${what}: ${text}`).toBeGreaterThanOrEqual(43.5);
+    expect(width, `${what}: ${text}`).toBeGreaterThanOrEqual(least);
   }
 }
 
@@ -198,7 +201,7 @@ for (const dir of ['ltr', 'rtl'] as const) {
     const chips = page.getByRole('group', { name: t.tracker.filters.label });
     const status = chips.getByLabel(t.tracker.filters.status);
     await status.focus();
-    const chip = chips.locator('label').filter({ has: status });
+    const chip = chips.locator('label').filter({ has: page.getByLabel(t.tracker.filters.status, { exact: true }) });
     const ring = await chip.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineColor]; });
     expect(ring).toEqual(['solid', '2px', await roleColor(page, '--cyan-ink')]);
     await shot('chip-focus');
@@ -277,10 +280,13 @@ async function cardWords(page: Page, what: string) {
    a chosen card, a chosen node and a node under the pointer draw their border at 3:1 at least on both sides; a due day reads
    day then month right to left too, in the list, on the board and in the cards of a task and a goal; a card gives its words
    as much width in every engine; and a link of two letters is still 44 px wide. */
-for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
-  test(`draws the chosen work clearly, keeps dates in order, cards as wide and links wide enough: ${dir} ${width}`, async ({ page }, info) => {
+/* As Design splits the touch rule: on a phone, on a wide touch screen and on a wide screen with a mouse. */
+for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ width: 1440, touch: false }, { width: 1440, touch: true }, { width: 375, touch: false }]) {
+  test.describe(`${dir} ${width}${touch ? ' touch' : ''}`, () => {
+  test.use({ hasTouch: touch });
+  test(`draws the chosen work clearly, keeps dates in order, cards as wide and links wide enough: ${dir} ${width}${touch ? ' touch' : ''}`, async ({ page }, info) => {
     const t = MESSAGES.en;
-    const look = `${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const look = `${dir}-${width}${touch ? '-touch' : ''}-${info.project.name.replace('tasks-', '')}`;
     const shot = (name: string) => capture(page, info, `last-${name}-${look}`);
     /* A close look at one box and 24 px around it, where a line of 1 px is hard to see on the whole screen. */
     const closeUp = async (target: Locator, name: string) => {
@@ -379,11 +385,14 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
     await shot('goals');
     await visit(`/tasks?department=${DEV.id}`);
     if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    /* A department's employees are folded under its name in the left panel. */
+    await page.locator('.tr-dept-body summary').filter({ hasText: t.tracker.side.employees }).click();
     const people = page.locator('.tr-people .linkish').first();
     await expect(people).toBeVisible();
     await people.scrollIntoViewIfNeeded();
     await touchable(page, `people ${look}`);
     await shot('people');
+  });
   });
 }
 
@@ -397,7 +406,8 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
     await expect(side).toBeVisible();
     const box = (await side.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(16);
+    /* It stands against the start edge, and 16 px of the page show beside it at the end. */
+    expect(box.x).toBe(0);
     expect(box.x + box.width).toBeLessThanOrEqual(375 - 16);
     /* It runs to the bottom of the screen, so nothing of the page shows under it. */
     expect(box.y + box.height).toBe(page.viewportSize()!.height);

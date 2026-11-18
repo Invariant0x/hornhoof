@@ -1869,6 +1869,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   --tracker-mark-strength: 100%;
   --tracker-working-ring: var(--cyan);
   --tracker-waiting-ring: var(--amber);
+  /* The least a pointer target takes: 24 px for a mouse (WCAG 2.5.8), 44 px for a finger. */
+  --tracker-target-fine: 24px;
+  --tracker-target-touch: 44px;
 }
 :root[data-scheme='light'] {
   --tracker-mark-ink: var(--ink);
@@ -1933,7 +1936,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
 .tr-task-title { display: inline-flex; align-items: baseline; gap: 8px; min-inline-size: 0; max-inline-size: 100%; }
 .tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
-.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: 24px; min-block-size: 24px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: var(--tracker-target-fine); min-block-size: var(--tracker-target-fine); margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
 .tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
 [dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
@@ -1948,10 +1951,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
 .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-row-line .tr-title { min-block-size: 24px; }
+.tr-row-line .tr-title { min-block-size: var(--tracker-target-fine); }
 .tr-title { color: var(--ink); text-align: start; font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
-.tr-goal-link { text-decoration: none; }
+.tr-goal-link { display: inline-flex; align-items: center; min-block-size: var(--tracker-target-fine); text-decoration: none; }
 .tr-goal-link:is(:hover, :focus-visible) { text-decoration: underline; }
 .tr-name .badge { white-space: normal; }
 .tr-relation { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-inline-size: 100%; padding: 2px 6px; border: 1px solid var(--line2); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -2048,12 +2051,12 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 
 /* What a finger presses is 44 by 44 px on a phone and on any touch screen, whatever its width: the views, chips and
    buttons of the bar, the row's title, its subtask caret and its goal link. A fine pointer on a wide screen keeps the
-   layout's sizes, none under 24 by 24 px (WCAG 2.5.8; the subtask caret is that floor). */
+   layout's sizes, none under 24 by 24 px (WCAG 2.5.8; the subtask caret is that floor). Both sizes are tokens of the
+   tracker's own, --tracker-target-touch and --tracker-target-fine. */
 @media (max-width: 760px), (pointer: coarse) {
-  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: 44px; }
-  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: 44px; }
-  .tr-row-caret { inline-size: 44px; }
-  .tr-goal-link { display: inline-flex; align-items: center; }
+  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: var(--tracker-target-touch); }
+  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: var(--tracker-target-touch); }
+  .tr-row-caret { inline-size: var(--tracker-target-touch); }
 }
 
 @media (max-width: 760px) {
