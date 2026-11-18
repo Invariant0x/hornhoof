@@ -7,3 +7,10 @@ coverage/
 apps/web/e2e/results/
 .metrics/
 target/
+# Raw run logs, profiles and build output are never committed (hh-task-flow, #1286):
+# proof goes into the task's submit or report, long logs are attached to the task.
+*.log
+*.cpuprofile
+*.heapprofile
+*.heapsnapshot
+*.tsbuildinfo

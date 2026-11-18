@@ -8,7 +8,9 @@ import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/e
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn, prepareApp } from './helpers.js';
+
+await prepareApp();
 
 /* Which employees' lanes were asked for, in order: a change to an employee waits in its lane while another is written. */
 const lanes = vi.hoisted(() => [] as string[]);
@@ -392,6 +394,23 @@ describe('the employee card', () => {
     expect(org.departments[0].employees).toEqual([]);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect((await app.inject({ method: 'DELETE', url: `/api/agents/${orchestrator!.id}`, ...as(ceo) })).json().error.reason).toBe('orchestrator_locked');
+  });
+
+  it('makes all waiting turns obsolete when an employee leaves and keeps its completed history', async () => {
+    const { app, db, ceo, teamKey, brunoId } = await company();
+    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    const recorded = await db.insert(jobs).values([
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Inbox wake.', inboxWake: true, timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Waiting words.', timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'tools', prompt: 'Waiting step.', timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Finished words.', status: 'done', result: 'Kept history.', timeoutMs: 900000 },
+    ]).returning();
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(ceo) })).statusCode).toBe(204);
+    const after = await db.select().from(jobs).where(eq(jobs.agentId, brunoId));
+    for (const before of recorded.filter(j => j.status === 'queued')) {
+      expect(after.find(j => j.id === before.id)).toMatchObject({ status: 'obsolete', error: 'removed', finishedAt: expect.any(Date) });
+    }
+    expect(after.find(j => j.status === 'done')).toMatchObject({ result: 'Kept history.' });
   });
 
   it("changes the orchestrator's model from his card", async () => {
