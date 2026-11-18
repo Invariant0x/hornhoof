@@ -1,4 +1,4 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type ServerMessage, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -35,8 +35,10 @@ export function testRunMode(input: ModeInput, kind: RunKind): TestRunMode {
   return { mode: 'product', ...(input.suite === undefined ? {} : { suite: input.suite }) };
 }
 
-/* The description request each run was last sent, by run id, so one request goes out once per node connection. */
-const sent = new WeakMap<Ctx, Map<string, string>>();
+/* An unanswered request is replayed on reconnect or after a minute, under the same id. */
+const DESCRIPTION_RETRY_MS = 60_000;
+type DescriptionAttempt = { requestId: string; at: number };
+const sent = new WeakMap<Ctx, Map<string, DescriptionAttempt>>();
 export function repositoryScope(companyId: string, ownerId: string, url: string): RepositoryScope {
   return { companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) };
 }
@@ -244,11 +246,20 @@ async function dispatchDescription(ctx: Ctx, run: Run, open: Place[], target: Ta
   if (!assigned || !ctx.hub.isOnline(assigned)) request = await assignDescription(ctx, { ...run, environmentRequest: request }, open, target);
   if (request) publishDescription(ctx, run, request, target?.repo ?? null);
 }
+function sendDescription(ctx: Ctx, node: NodeIdentity, message: Extract<ServerMessage, { type: 'tests.describe' }>, failed: () => void): void {
+  try {
+    if (!ctx.hub.send(node, message, error => { if (error) failed(); })) failed();
+  } catch { failed(); }
+}
 function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest, repo: NonNullable<Target>['repo']): void {
   if (!request.requestId || !repo) return;
-  const node = requestNode(ctx, request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
-  if (delivered.get(run.id) === request.requestId) return;
-  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
+  const node = requestNode(ctx, request)!, attempts = sent.get(ctx) ?? new Map<string, DescriptionAttempt>(); sent.set(ctx, attempts);
+  const previous = attempts.get(run.id), now = Date.now();
+  if (previous?.requestId === request.requestId && now - previous.at < DESCRIPTION_RETRY_MS) return;
+  const attempt = { requestId: request.requestId, at: now };
+  attempts.set(run.id, attempt);
+  const failed = () => { if (attempts.get(run.id) === attempt) attempts.delete(run.id); };
+  sendDescription(ctx, node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } }, failed);
 }
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {
