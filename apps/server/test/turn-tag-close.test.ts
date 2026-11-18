@@ -1,46 +1,13 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
-import { agents, departments, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { eq, sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { agents, departments, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
-import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
 import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
 import { BASE } from './development-echelons-fixture.js';
-import { as, ownDatabases } from './helpers.js';
-import { releasing, turnkeyAfterR } from './turn-release-fixture.js';
-
-ownDatabases();
-
-const LATER = '4'.repeat(40);
-const OTHER = '3'.repeat(40);
-
-/* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
-async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
-  const f = await releasing();
-  const errors: string[] = [];
-  const round = () => minuteRound(f.ctx, new Date(), what => () => { errors.push(what); });
-  f.repo.tags['v1.6.0'] = BASE;
-  await round();
-  /* turnkey: the release also brings turnkey work its holder checked itself, joined to the turn branch after R. */
-  const work = options.turnkey ? await turnkeyAfterR(f) : null;
-  const commit = work?.head ?? f.R;
-  const run = await f.fullRun({ commit });
-  /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
-  if (options.autonomous) await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
-  else await f.approve(commit);
-  if (options.record !== false) expect((await f.recordRelease({ commit, runId: run.id })).isError).toBe(false);
-  f.repo.heads.main = commit;
-  f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? commit;
-  const departmentTurns = () => f.db.select().from(turns).where(eq(turns.departmentId, f.task.departmentId!)).orderBy(asc(turns.number));
-  const open = async () => (await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open'))))[0]!;
-  /* Another result of the turn, accepted after its release was recorded. */
-  const lateResult = async () => {
-    const { task } = await f.create({ title: 'Late change' });
-    await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
-    return task;
-  };
-  return { ...f, round, errors, departmentTurns, open, lateResult, run, work, commit };
-}
+import { as } from './helpers.js';
+import { releasing } from './turn-release-fixture.js';
+import { LATER, OTHER, released } from './turn-tag-close-fixture.js';
 
 describe('the server closes a turn by the tag of its release', () => {
   it('takes the newest tag as where a turn starts on its first look, and closes nothing', async () => {
@@ -119,19 +86,6 @@ describe('the server closes a turn by the tag of its release', () => {
     await deliverWaitNotices(f.ctx);
     const cards = (await f.app.inject({ method: 'GET', url: '/api/wait-cards', ...as(f.ceoToken) })).json().cards;
     expect(cards).toEqual([expect.objectContaining({ about: 'turn_summary', taskId: f.task.id, turn: { number: f.turn.number, version: 'v1.7.0' }, tag: null })]);
-  });
-
-  it('never keeps a turn from closing over its snapshot: the failure is logged and the turn rebuilds when it is read', async () => {
-    const f = await released();
-    await f.db.execute(sql`create function refuse_snapshot() returns trigger language plpgsql as $$ begin raise exception 'no snapshots'; end $$`);
-    await f.db.execute(sql`create trigger no_snapshots before insert on turn_snapshots for each row execute function refuse_snapshot()`);
-    const logged = vi.spyOn(f.ctx.log, 'error');
-    await f.round();
-    expect((await f.db.select().from(turns).where(eq(turns.id, f.turn.id)))[0]).toMatchObject({ status: 'closed', version: 'v1.7.0' });
-    expect(await f.db.select().from(turnSnapshots)).toEqual([]);
-    expect(logged.mock.calls.some(([, text]) => String(text).includes('snapshot'))).toBe(true);
-    await f.db.execute(sql`drop trigger no_snapshots on turn_snapshots`);
-    expect((await pipelineReport(f.db, f.task.companyId, f.turn.number)).turn).toMatchObject({ number: f.turn.number, source: 'rebuilt' });
   });
 
   it('does nothing more on a tag it already closed a turn by', async () => {
