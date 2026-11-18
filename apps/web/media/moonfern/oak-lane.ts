@@ -239,6 +239,7 @@ function oakDept(
     about,
     agents: { total: employees.length, working },
     products: [],
+    pipelines: [],
     teams: [],
     people: [],
     employees,

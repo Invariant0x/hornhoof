@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createSceneRecorder } from '../moonfern/record';
+import { mapDepartment } from '../moonfern/scene-locators';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage, pushStream } from '../moonfern/stream';
 import { buildDevelopmentTreeSnapshots } from '../moonfern/tree';
@@ -13,10 +14,10 @@ test('speed.gif: Speed side panel beside Development schema, switching from Spee
   const api = await serveMoonfern(page, { initialOrg: first.org, initialTree: first.tree });
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
-  await expect(page.locator('.dview')).toBeVisible();
-  await page.waitForTimeout(850);
-  await page.locator('.dview').getByRole('button', { name: 'Show everything', exact: true }).click();
+  await mapDepartment(page, 'Development').click();
+  await page.getByRole('button', { name: 'Staff map', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Department schema' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show everything', exact: true }).click();
   await page.waitForTimeout(850);
 
   await page.getByRole('button', { name: 'Speed', exact: true }).click();

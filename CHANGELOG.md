@@ -7,8 +7,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
+- The README animations show the current map, department routes, tracker, task cards and agent windows.
+
 ### Added
 
+- The Media workflow captures the current map, Startup department, tracker list, task card and agent window at desktop and phone widths in light and dark.
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
 

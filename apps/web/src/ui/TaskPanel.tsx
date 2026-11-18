@@ -271,7 +271,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
     <>
       <header className="ac-head tp-head">
         <div className="tp-title">
-          <h3 dir="auto">{task.title}</h3>
+          <h2 className="tp-heading" dir="auto">{task.title}</h2>
           <button className="tp-menu-button" type="button" ref={trigger} aria-label={t.tasks.taskActions} aria-expanded={view !== null} aria-controls={view ? menuId : undefined}
             onMouseDown={() => { if (!view && task.mayHideSecret) selection.current = window.getSelection()?.toString() ?? ''; }}
             onClick={() => view ? closeMenu() : openMenu()}>

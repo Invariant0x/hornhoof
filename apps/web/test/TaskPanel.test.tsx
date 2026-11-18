@@ -9,6 +9,7 @@ import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { openFromTracker, openTaskAction } from './open-task';
 import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { decl } from './css';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
@@ -34,6 +35,20 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('the simple task card', () => {
+  it('uses the standard panel heading size for a long title', async () => {
+    const user = userEvent.setup();
+    const title = 'Keep every part of a task visible, including a long title and its actions';
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, title } }] });
+    await user.click(await screen.findByRole('button', { name: 'Tasks' }));
+    await openFromTracker(user, 12);
+    const panel = within(await screen.findByRole('complementary', { name: `#12 ${title}` }));
+    const heading = panel.getByRole('heading', { name: title });
+    expect.soft(heading).toHaveClass('tp-heading');
+    expect.soft(heading.tagName).toBe('H2');
+    expect.soft(decl('h2', 'font-size')).toBe('18px');
+    expect(decl('.tp-heading', 'overflow-wrap')).toBe('anywhere');
+  });
+
   it('shows the title, plain facts, brief, body and log in order', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: {
