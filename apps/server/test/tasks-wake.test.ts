@@ -194,8 +194,6 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
-    const takesSkillFiles = c.ctx.hub.takesSkillFiles.bind(c.ctx.hub);
-    vi.spyOn(c.ctx.hub, 'takesSkillFiles').mockImplementation(id => rexs(id) || takesSkillFiles(id));
     const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();
@@ -1013,7 +1011,7 @@ describe("working in the product's repository", () => {
     expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: null });
   });
 
-  it('keeps a turn with a repository waiting for a machine whose Hornhoof is too old to clone it', async () => {
+  it('keeps every turn waiting on a machine whose Hornhoof is older than 0.5.0, with a repository or without one', async () => {
     const { app, db, url, ceo, ctx, dev, hire, repository, task } = await withRepositories();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
@@ -1023,14 +1021,16 @@ describe("working in the product's repository", () => {
     mac.send({ type: 'hello', version: '0.4.0', loggedIn: true, running: [] });
     await until(async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, node.subscriptionId)))[0]!.status === 'ready');
     const olga = await hire('Olga', null, node.subscriptionId);
-    await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
-    expect((await nextRun(mac)).workspace).toEqual({ key: olga.id, repo: null });
-    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
-    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, olga.id));
+    const reason = async () => (await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason;
     await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
     await marked(mac);
     expect(mac.queued()).toBe(0);
-    expect((await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason).toBe('node_outdated');
+    expect(await reason()).toBe('node_outdated');
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
+    await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
+    await marked(mac);
+    expect(mac.queued()).toBe(0);
+    expect(await reason()).toBe('node_outdated');
   });
 });
 

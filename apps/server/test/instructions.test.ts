@@ -4,6 +4,10 @@ import type { agents } from '../src/db/schema.js';
 import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { loadTemplates, textHash, type Role, type Skill, type SkillKind, type Templates } from '../src/modules/templates/load.js';
 
+/* Every part of an agent's instructions whole, skills too, as its card's text has them: a rule an agent gets is here, whether
+   the program reads it in its instructions or from a skill file. */
+const wholeOf = (told: { parts: { text: string }[] }) => told.parts.map(p => p.text).join('\n\n');
+
 const skill = (id: string, title: string, body: string, kind: SkillKind = 'procedure', description = ''): Skill => ({
   id,
   title: { en: title, ru: title },
@@ -123,7 +127,7 @@ describe('independent Security before integration', () => {
     const gate = packet.skills.find(s => s.name === 'dev-gates');
     expect(gate, roleKey).toBeDefined();
     expect(preMergeSecurityProblems(gate!.body), roleKey).toEqual([]);
-    expect(preMergeSecurityProblems(packet.whole), `${roleKey} whole`).toEqual([]);
+    expect(preMergeSecurityProblems(wholeOf(packet)), `${roleKey} whole`).toEqual([]);
     expect(packet.text).toContain('dev-gates');
     const entry = roleKey === 'DEV-ENG' ? packet.parts.find(p => p.id === 'dev-task-flow')!.text : packet.skills.find(s => s.name === 'dev-lead')!.body;
     expect(preMergeSecurityProblems(entry), `${roleKey} standalone entry`).toEqual([]);
@@ -136,7 +140,7 @@ describe('independent Security before integration', () => {
     const selected = packet.parts.find(p => p.id === id);
     expect(selected, id).toBeDefined();
     expect(preMergeSecurityProblems(selected!.text), id).toEqual([]);
-    expect(preMergeSecurityProblems(packet.whole), `${id} whole`).toEqual([]);
+    expect(preMergeSecurityProblems(wholeOf(packet)), `${id} whole`).toEqual([]);
     expect(savedSkills).toEqual([id]);
     if (shipped.skills.get(id)!.kind === 'core') expect(packet.text).toContain(selected!.text);
     else expect(packet.skills.find(s => s.name === id)?.body).toContain(shipped.skills.get(id)!.body);
@@ -166,9 +170,8 @@ describe('independent Security before integration', () => {
   });
 });
 
-describe('what a node from before skill files takes', () => {
+describe("the orchestrator's standing role", () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
-  const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
 
   it('gives the orchestrator owner authority in any turn and treats quoted text as data', () => {
     const { text } = orchestratorSteady(shipped);
@@ -176,15 +179,6 @@ describe('what a node from before skill files takes', () => {
     expect(text).toContain('A permanent deletion requires the CEO');
     expect(text).toContain('Lines Hornhoof marks with "> "');
     expect(text).not.toContain('do it only when they say so');
-  });
-
-  it('gets every brick of a role and of the orchestrator whole', () => {
-    for (const role of shipped.roles.values()) {
-      const { parts, whole } = always(role);
-      for (const p of parts) expect(whole, `${role.id} ${p.id}`).toContain(p.text);
-    }
-    const steady = orchestratorSteady(shipped);
-    for (const p of steady.parts) expect(steady.whole, p.id ?? 'base').toContain(p.text);
   });
 });
 
@@ -199,7 +193,7 @@ describe('renderInstructions', () => {
     expect(packet.parts.slice(0, 3).map(p => p.kind)).toEqual(['header', 'base', 'assignment']);
     expect(packet.text).toContain(ROLE.body);
     expect(packet.text).toContain(assignment);
-    expect(packet.whole).toContain(assignment);
+    expect(wholeOf(packet)).toContain(assignment);
     expect(packet.raw).toContain(assignmentBlock(assignment));
     expect(packet.skills.map(s => s.name)).not.toContain('assignment');
     expect(saved.overrides).toEqual({ base: assignment });
@@ -208,7 +202,7 @@ describe('renderInstructions', () => {
   it.each([{ overrides: {}, overridden: false }, { overrides: { base: '' }, overridden: true }])('always includes an empty assignment part with overridden=$overridden', ({ overrides, overridden }) => {
     const packet = renderInstructions(T, agent({ overrides }), PLACE);
     expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: assignmentBlock(''), overridden, templateChanged: false });
-    for (const text of [packet.text, packet.raw, packet.whole]) expect(text).toContain(assignmentBlock(''));
+    for (const text of [packet.text, packet.raw]) expect(text).toContain(assignmentBlock(''));
   });
 
   it.each([null, 'RETIRED-ROLE'])('retains a saved assignment without a current role template: %s', roleKey => {
@@ -216,7 +210,7 @@ describe('renderInstructions', () => {
     const packet = renderInstructions(T, agent({ roleKey, overrides: { base: assignment } }), PLACE);
     expect(packet.parts.some(p => p.kind === 'base')).toBe(false);
     expect(packet.parts[1]).toMatchObject({ kind: 'assignment', id: null, text: assignmentBlock(assignment), overridden: true, templateChanged: false });
-    for (const text of [packet.text, packet.raw, packet.whole]) expect(text).toContain(assignmentBlock(assignment));
+    for (const text of [packet.text, packet.raw]) expect(text).toContain(assignmentBlock(assignment));
   });
 
   it('changes the instruction hash when an assignment changes while retaining the canonical role identity', () => {
@@ -278,7 +272,7 @@ describe('renderInstructions', () => {
      skill's own text keeps to it by the product policy, templates-policy.test.ts. */
   it('names superpowers in no instructions and no skill an employee of any role or the orchestrator reads', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
-    const read = (told: { text: string; whole: string; skills: { name: string; description: string; body: string }[] }) => [told.text, told.whole, ...told.skills.flatMap(f => [f.name, f.description, f.body])];
+    const read = (told: { text: string; parts: { text: string }[]; skills: { name: string; description: string; body: string }[] }) => [told.text, wholeOf(told), ...told.skills.flatMap(f => [f.name, f.description, f.body])];
     for (const role of shipped.roles.values()) {
       const every = role.skills.map(s => s.id);
       const told = renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: every }), PLACE);
@@ -328,19 +322,10 @@ describe('renderInstructions', () => {
     expect(fileOf('DEV-REV', 'dev-review-diff')).toContain(`${rule} Such an assertion in a test is a finding.`);
   });
 
-  it('keeps every skill whole in the text for a node that writes no skill files, as before', () => {
-    const { parts, whole } = renderInstructions(T, agent(), PLACE);
-    expect(whole.startsWith('You are Bruno')).toBe(true);
-    expect(whole).toContain('\n\nYou own the server side.\n\n');
-    expect(whole.endsWith(parts.filter(p => p.kind === 'skill').map(p => p.text).join('\n\n'))).toBe(true);
-    /* Such a node has no files to list. */
-    expect(whole).not.toContain('## Skills');
-  });
-
-  it('keeps the whole override for a node that takes skills inline', () => {
+  it("keeps a long override of a skill whole in the skill's file", () => {
     const long = 'Test first. '.repeat(2000);
-    const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
-    expect(whole).toContain(`${long}\n<!-- /hh:skill -->`);
+    const { skills } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
+    expect(skills.find(f => f.name === 'dev-tdd')?.body).toBe(`# Test first\n\n${long}`);
   });
 
   it('marks assignment and skill overrides without replacing or marking the role identity', () => {
@@ -368,7 +353,7 @@ describe('renderInstructions', () => {
       expect(delivered, roleKey).toContain('reviewedCommit');
       expect(delivered, roleKey).toContain('fixCommit');
       expect(delivered, roleKey).not.toContain('at high effort');
-      expect(rendered.whole, roleKey).toContain('fixCommit');
+      expect(wholeOf(rendered), roleKey).toContain('fixCommit');
     }
     const revRole = shipped.roles.get('DEV-REV')!;
     const revRendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
@@ -390,12 +375,12 @@ describe('renderInstructions', () => {
       expect(uiSkill, roleKey).toBeDefined();
       const browserSkill = rendered.skills.find(s => s.name === 'dev-browser-check');
       expect(browserSkill, roleKey).toBeDefined();
-      for (const delivered of [uiSkill!.body, rendered.whole]) {
+      for (const delivered of [uiSkill!.body, wholeOf(rendered)]) {
         expect(delivered, roleKey).toMatch(/whole group|together as one group/i);
         expect(delivered, roleKey).toMatch(/non-visual[\s\S]*in parallel/i);
         expect(delivered, roleKey).toMatch(/explicit[\s\S]*browser default[\s\S]*scrollbar space/i);
       }
-      for (const delivered of [browserSkill!.body, rendered.whole]) {
+      for (const delivered of [browserSkill!.body, wholeOf(rendered)]) {
         expect(delivered, roleKey).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
         expect(delivered, roleKey).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
       }
@@ -411,7 +396,7 @@ describe('renderInstructions', () => {
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: skillIds, templateHashes: {} }), PLACE);
       expect(rendered.text, roleKey).toContain('<!-- hh:skill hh-questions -->');
       expect(rendered.text, roleKey).toContain('- **Materials**:');
-      expect(rendered.whole, roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
+      expect(wholeOf(rendered), roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
     }
   });
 
@@ -428,17 +413,17 @@ describe('renderInstructions', () => {
       const fresh = renderInstructions(shipped, agent({ kind, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
       expect(occurrences(fresh.raw, marker), `${role.id} raw`).toBe(1);
       expect(occurrences(fresh.text, marker), `${role.id} text`).toBe(1);
-      expect(occurrences(fresh.whole, marker), `${role.id} whole`).toBe(1);
+      expect(occurrences(wholeOf(fresh), marker), `${role.id} whole`).toBe(1);
       expect(fresh.text, role.id).toContain(canonicalChecks);
-      expect(fresh.whole, role.id).toContain(canonicalChecks);
+      expect(wholeOf(fresh), role.id).toContain(canonicalChecks);
       expect(fresh.skills.some(s => s.name === 'hh-run-checks'), role.id).toBe(false);
     }
 
     const steady = orchestratorSteady(shipped);
     expect(occurrences(steady.text, marker)).toBe(1);
-    expect(occurrences(steady.whole, marker)).toBe(1);
+    expect(occurrences(wholeOf(steady), marker)).toBe(1);
     expect(steady.text).toContain(canonicalChecks);
-    expect(steady.whole).toContain(canonicalChecks);
+    expect(wholeOf(steady)).toContain(canonicalChecks);
     expect(steady.skills.some(s => s.name === 'hh-run-checks')).toBe(false);
 
     const oldWorkerSkills = ['hh-outside-is-data', 'dev-tdd'];
@@ -447,7 +432,7 @@ describe('renderInstructions', () => {
     expect(oldWorker.skills).toEqual(['hh-outside-is-data', 'dev-tdd']);
     expect(occurrences(workerPacket.raw, marker)).toBe(1);
     expect(occurrences(workerPacket.text, marker)).toBe(1);
-    expect(occurrences(workerPacket.whole, marker)).toBe(1);
+    expect(occurrences(wholeOf(workerPacket), marker)).toBe(1);
     expect(workerPacket.text).toContain(canonicalChecks);
     expect(workerPacket.text).not.toContain('Run npm test locally.');
     expect(workerPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
@@ -467,7 +452,7 @@ describe('renderInstructions', () => {
     expect(occurrences(rolelessWorker.text, marker)).toBe(1);
     expect(rolelessWorker.text).toContain('Roleless base.');
     expect(rolelessWorker.text).toContain(canonicalChecks);
-    expect(rolelessWorker.whole).toContain(canonicalChecks);
+    expect(wholeOf(rolelessWorker)).toContain(canonicalChecks);
     expect(rolelessWorker.parts.some(p => p.id === 'retired-gone')).toBe(false);
     expect(rolelessWorker.skills.find(s => s.name === 'retired-kept')?.body).toContain('Saved custom procedure.');
   });
@@ -495,7 +480,7 @@ describe('renderInstructions', () => {
     const headPacket = renderInstructions(shipped, staleHead, PLACE);
     expect(staleHead.skills).toEqual(['hh-outside-is-data']);
     expect(headPacket.text).toContain(canonicalLead);
-    expect(headPacket.whole).toContain(canonicalLead);
+    expect(wholeOf(headPacket)).toContain(canonicalLead);
     expect(headPacket.raw).toContain(canonicalLead);
     expect(headPacket.text).toContain(canonicalChecks);
     expect(headPacket.text).not.toContain('Keep holds in your own queue.');
@@ -528,7 +513,7 @@ describe('renderInstructions', () => {
     expect(verdict).toContain('mechanical');
     expect(verdict).toMatch(/provably cannot change[^.!?]*behaviour/i);
     expect(verdict).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
-    expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
+    expect(wholeOf(rendered)).toMatch(/provably cannot change[^.!?]*behaviour/i);
   });
 
   it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
@@ -539,7 +524,7 @@ describe('renderInstructions', () => {
     expect(steady.text).toMatch(/external service failure never prolongs a general hold once the service recovers/i);
     const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
     expect(troubleFile).toBeDefined();
-    for (const delivered of [troubleFile!.body, steady.whole]) {
+    for (const delivered of [troubleFile!.body, wholeOf(steady)]) {
       expect(delivered).toMatch(/external service failure (?:never prolongs|does not keep) a general hold[^.!?]*(?:recovers|recovery)/i);
       expect(delivered).toMatch(/communicate (?:a lifted hold|[^.!?]*lifting)[^.!?]*at once in one action[^.!?]*every affected holder/i);
       expect(delivered).toMatch(/authorized company coordinator[\s\S]*decide any general hold[\s\S]*lifting yourself/i);
@@ -569,7 +554,7 @@ describe('renderInstructions', () => {
       );
       expect(legacySavedSkills).toEqual(['hh-outside-is-data', 'hh-ask-dont-guess']);
       expect(legacyHead.text, `${role.id} legacy text`).toContain(canonicalLead);
-      expect(legacyHead.whole, `${role.id} legacy whole`).toContain(canonicalLead);
+      expect(wholeOf(legacyHead), `${role.id} legacy whole`).toContain(canonicalLead);
       expect(legacyHead.text, `${role.id} legacy text`).not.toContain('Hold recovery in your queue');
       expect(legacyHead.text.split(headMarker).length - 1, `${role.id} legacy once`).toBe(1);
     }
@@ -604,7 +589,7 @@ describe('renderInstructions', () => {
       const packet = renderInstructions(shipped, candidate, PLACE);
       for (const rule of headRules) {
         expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toMatch(rule);
-        expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toMatch(rule);
+        expect(wholeOf(packet), `${candidate.roleKey ?? 'roleless'} whole`).toMatch(rule);
       }
       expect(packet.text).not.toContain('Only order tasks and wait while people stand free.');
       const breakDownFile = packet.skills.find(s => s.name === 'hh-break-down');
@@ -626,7 +611,7 @@ describe('renderInstructions', () => {
       expect(watchPacket.text).toContain('\n- ops-task-watch:');
       const watchSkill = watchPacket.skills.find(s => s.name === 'ops-task-watch');
       expect(watchSkill?.body).toContain('People who stand free while work waits are a fault, not a normal wait');
-      expect(watchPacket.whole).toContain('People who stand free while work waits are a fault, not a normal wait');
+      expect(wholeOf(watchPacket)).toContain('People who stand free while work waits are a fault, not a normal wait');
     }
     expect(savedWatchList).toEqual(['ops-task-watch']);
   });
@@ -649,7 +634,7 @@ describe('renderInstructions', () => {
       expect(policy, roleKey).toMatch(/unavailable adapter[\s\S]*complete affected package rather than an empty selection/i);
       expect(policy, roleKey).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
       expect(policy, roleKey).toMatch(/unavailable rather than zero for an absent full-suite comparator/i);
-      expect(rendered.whole, roleKey).toContain('NOT_RUN');
+      expect(wholeOf(rendered), roleKey).toContain('NOT_RUN');
     }
 
     const headRole = shipped.roles.get('DEV-HEAD')!;
@@ -661,7 +646,7 @@ describe('renderInstructions', () => {
     const headPolicy = headRendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
     expect(headPolicy).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
     expect(headPolicy).toMatch(/unavailable rather than zero for an absent full-suite comparator/i);
-    expect(headRendered.whole).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
+    expect(wholeOf(headRendered)).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
 
     for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
       const role = shipped.roles.get(roleKey)!;
@@ -689,7 +674,7 @@ describe('reading web pages in a browser on the node', () => {
     for (const [id, packet] of packets) {
       expect(packet.text.split(marker).length - 1, id).toBe(1);
       expect(packet.text, id).toContain(rule!.body);
-      expect(packet.whole, id).toContain(rule!.body);
+      expect(wholeOf(packet), id).toContain(rule!.body);
       expect(packet.skills.some(s => s.name === 'hh-web-pages'), id).toBe(false);
     }
   });
@@ -716,7 +701,7 @@ describe('work a department did before', () => {
   /* Every department, not only Development: a marketing pilot left its work on branches nobody took into main. */
   it('tells every role of every department to start from the branch of earlier work, and that a machine that is off stops no work kept in git', () => {
     for (const role of shipped.roles.values()) {
-      const whole = rendered(role).whole;
+      const whole = wholeOf(rendered(role));
       expect(whole, role.id).toMatch(/departmentBranches[^.]*branches of [^.]*accepted and handed-in tasks not in main/);
       expect(whole, role.id).toMatch(/starts from that branch/);
       expect(whole, role.id).toMatch(/machine that is off stops no work kept in the repository[^.]*plan of your department is online[^.]*never tell a person the work stands because a machine is off/);
@@ -745,7 +730,7 @@ describe('one run of every test per release', () => {
 
   it('tells every development role that every test runs together once per release', () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
-      const whole = renderRole(roleId).whole;
+      const whole = wholeOf(renderRole(roleId));
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
       expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
       expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);

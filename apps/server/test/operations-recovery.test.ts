@@ -138,7 +138,7 @@ describe('what Operations are told', () => {
     await c.db.update(agents).set({ skills: ['ops-work-pipeline', 'ops-intake'], overrides: { skills: { 'ops-program-operator': 'An old text of its own.' } } }).where(eq(agents.id, c.opsHead.id));
     for (const id of [c.opsHead.id, c.operator!.id]) {
       const [agent] = await c.db.select().from(agents).where(eq(agents.id, id));
-      const told = renderInstructions(c.ctx.templates, agent!, await placeOf(c.db, agent!)).whole;
+      const told = renderInstructions(c.ctx.templates, agent!, await placeOf(c.db, agent!)).raw;
       expect(told, agent!.roleKey!).toContain('stop_employee');
       expect(told, agent!.roleKey!).toMatch(/never ask a person to stop a turn/i);
       expect(told, agent!.roleKey!).not.toContain('An old text of its own.');

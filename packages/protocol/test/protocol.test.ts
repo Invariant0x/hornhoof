@@ -152,9 +152,9 @@ describe('server messages', () => {
     expect(parseServerMessage(JSON.stringify({ ...job, call: true }))).toMatchObject({ call: true, timeoutMs: 0 });
   });
 
-  it('let a node say it writes skills as files, which nodes before it do not', () => {
-    const hello = { type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true };
-    expect(parseNodeMessage(JSON.stringify(hello))).toEqual(hello);
+  it('take the hello of a node that still says it writes skills as files, and leave that word out: every node writes them', () => {
+    const hello = { type: 'hello', version: '0.5.0', loggedIn: true, running: [] };
+    expect(parseNodeMessage(JSON.stringify({ ...hello, skillFiles: true }))).toEqual(hello);
   });
 });
 
@@ -188,6 +188,14 @@ describe('test runs', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: LOAD, tests: ['p-1'] }))).toMatchObject({ load: LOAD, tests: ['p-1'] });
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD }))).toEqual({ type: 'load', ...LOAD });
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpus: 0 }))).toBeNull();
+  });
+
+  it("say whether the machine's kernel killed a process for want of memory since the node's report before, from newer nodes only", () => {
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, memoryShort: true }))).toEqual({ type: 'load', ...LOAD, memoryShort: true });
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: { ...LOAD, memoryShort: false } }))).toMatchObject({ load: { ...LOAD, memoryShort: false } });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, memoryShort: 'yes' }))).toBeNull();
+    /* The count itself stays on the node. */
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, oomKills: 26 }))).toEqual({ type: 'load', ...LOAD });
   });
 
   it('name the agents whose programs run on a node that says so, and leave a list that is not one out instead of refusing the frame', () => {

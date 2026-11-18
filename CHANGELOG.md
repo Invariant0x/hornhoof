@@ -54,6 +54,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The `turns` tool lists a result accepted into a turn whose parent task is in no turn, such as a member of a coordination task.
 - A program operator who answers No to a protected question, such as Claude Code's check before a removal, can report it as `denied`, as on a permission question; a `denied` report with no denial recorded says so plainly instead of refusing access to the case.
 - A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back, and while its computer is offline. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
+- Right to left, the tracker keeps the order of a goal's name and of its progress in words, of a person's task in the left panel, and of each value with its name in a narrow list, "Executor: Hana".
+- Right to left, every phrase of a goal's card, of Turns and releases with its list for later turns, and of the goal board keeps its order: a goal's name with its number, a task with its number, and each sentence with its full stop at its end.
+- A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
 
 ### Added
 
@@ -76,7 +79,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
 - The approval and release guides explain when to ask and which checks prove the exact commit.
 - Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
-- Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Turns carry the full instructions and notebook, with skills delivered as files.
 - Employees can send messages and file improvements throughout a turn.
 - People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
 - One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
@@ -92,6 +95,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
 - Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
+- A new agent program or one-shot call waits only after its machine's system killed a program for want of memory, until a report without one; Hornhoof's own memory and processor thresholds for agents are gone, and the machine's card and the agent's window say so in one line.
+- Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
 
 ## [0.32.1] - 2026-11-17
 
