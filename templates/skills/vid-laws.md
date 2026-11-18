@@ -35,11 +35,11 @@ Each exact clip in the cut needs the keeper's recorded acceptance against the ag
 
 ## Law 7. Each tool does what it does best
 
-Assign motion, performance, sound and precise visual details to tools that can produce and preserve them reliably. Check those properties in the result. Plan sound with the action from the start, including when silence is intentional.
+An authorized tool and access route must reliably produce and preserve the motion, performance, sound and precise visual details the work requires. The result must preserve real actions and approved source details when they matter. Sound belongs with the action from the start, including intentional silence.
 
 ## Law 8. Prove the hardest moment first
 
-The hardest moment must be proven in enough context to judge the risk before full production. The head and keeper accept that evidence as the shared baseline for the look and method. A materially different risk calls for its own evidence. Keep the result, method and cost so the next choice has evidence.
+The hardest moment must be proven in enough context to judge the risk before full production. Comparisons need equivalent evidence and must stay within the agreed budget. The head and keeper accept the result as the shared baseline for the look and method. A materially different risk calls for its own evidence. Keep the result, method and cost so the next choice has evidence.
 
 ## Law 9. The platform shapes the frame
 

@@ -101,6 +101,34 @@ describe('the laws of video production', () => {
     expect(setup).toMatch(/prompts[\s\S]*reference frames[\s\S]*cost[\s\S]*git/i);
   });
 
+  it('uses included video credits first and keeps each order within its spending limit', () => {
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/included credits[\s\S]*studio[\s\S]*developer credits[\s\S]*before pay-per-use/i);
+    expect(work).toMatch(/spending limit and currency for each order[\s\S]*stop before the order can exceed its limit/i);
+    expect(work).toMatch(/cheaper modes for drafts[\s\S]*quality mode for accepted finals/i);
+    expect(work).toMatch(/record the route, model, settings[\s\S]*actual cost/i);
+  });
+
+  it('allows studio automation only with provider permission and the account holder authorization', () => {
+    const laws = templates.skills.get('vid-laws')!.body.split('## Law 7.')[1]?.split('## Law 8.')[0];
+    expect(laws).toMatch(/authorized tool and access route/i);
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/check[\s\S]*models, prices, limits and terms[\s\S]*on the day/i);
+    expect(work).toMatch(/agent may operate the browser studio only when the provider permits it and the account holder authorizes it[\s\S]*person[\s\S]*documented API or official connector/i);
+    expect(work).toMatch(/operator[\s\S]*named vault entry[\s\S]*signs in[\s\S]*protected sign-in surface/i);
+    expect(work).toMatch(/check the existing job before retrying/i);
+  });
+
+  it('uses each maker\'s prompt structure and compares models using accepted probe evidence', () => {
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/before using a model[\s\S]*maker's current prompt guide[\s\S]*model's structure/i);
+    expect(work).toMatch(/same references and acceptance conditions[\s\S]*chosen route[\s\S]*fallback/i);
+    expect(work).toMatch(/short note per model[\s\S]*notebook[\s\S]*what worked[\s\S]*settings[\s\S]*cost per accepted second[\s\S]*probe file/i);
+    const short = templates.catalogs.get('video_production')!.pipelines[0]!;
+    expect(short.stages.find(stage => stage.name === 'Prove the hardest shot')?.brief).toMatch(/route, model, settings, cost and fallback/i);
+    expect(short.stages.find(stage => stage.name === 'Make or capture draft shots')?.brief).toMatch(/model's prompt guide/i);
+  });
+
   it('offers a long-work pipeline next to the short default and finishes before the whole-work gate', () => {
     const catalog = templates.catalogs.get('video_production')!;
     expect(catalog.default).toBe('video-production');

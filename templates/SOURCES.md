@@ -40,6 +40,8 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | The Science Behind Pixar [story and art](https://sciencebehindpixar.org/pipeline/story-and-art) | Facts only | Look development and the color script. |
 | University of Arkansas, Moving Pictures [cinematography](https://uark.pressbooks.pub/movingpictures/chapter/cinematography/) and [sound](https://uark.pressbooks.pub/movingpictures/chapter/sound/) | Facts only | Lens, light, dialogue, ambience and sound across edits. |
 | Frame.io [editing stages](https://workflow.frame.io/guide/editing-stages) and Adobe [J and L cuts](https://helpx.adobe.com/premiere/desktop/edit-projects/trim-clips/perform-j-cuts-and-l-cuts.html) | Facts only | Edit passes and sound carried across picture cuts. |
+| Runway [official connector](https://runway.com/mcp) and Google's [developer benefits](https://developers.google.com/profile/help/benefits?hl=en) | Facts only | Plans can include credits for authorized connectors or eligible developer use. |
+| Runway [video prompt guide](https://help.runwayml.com/hc/en-us/articles/39789879462419-Gen-4-Video-Prompting-Guide) and Google Cloud [video prompt guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/video-gen-prompt-guide) | Facts only | Model-specific prompt structures, image inputs and motion and sound controls. |
 
 The development testing and environment procedures are project-owned adaptations. The current procedures define their use.
 
@@ -344,5 +346,5 @@ The development testing and environment procedures are project-owned adaptations
 | `echelons/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
 | `pipelines/video_production.md` | Written for Hornhoof | ScreenSkills, Sundance Institute and Frame.io for crew decisions, edit passes and export checks | Hornhoof |
 | `skills/vid-continuity.md` | Written for Hornhoof | ScreenSkills for continuity, take records and the handoff to the editor | Hornhoof |
-| `skills/vid-laws.md` | Written for Hornhoof | ScreenSkills and Sundance Institute for continuity and checks of the delivery copy | Hornhoof |
-| `skills/vid-work-pipeline.md` | Written for Hornhoof | Sundance Collab, ScreenSkills, Disney Animation, The Science Behind Pixar, Moving Pictures, Frame.io and Adobe for production and editing practice | Hornhoof |
+| `skills/vid-laws.md` | Written for Hornhoof | ScreenSkills and Sundance Institute for continuity and playback, and provider documentation for tool routes | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | Film craft sources above for production and editing, and Runway and Google documentation for access, credits and prompts | Hornhoof |
