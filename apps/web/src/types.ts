@@ -664,7 +664,6 @@ export type ProposalDecision = MaterialStampView & {
 } & ({ kind: 'structure'; items: StructureItem[] } | { kind: 'staff'; items: StaffLine[] });
 
 /* The orchestrator's request for a machine of the company, which its owner answers; id is the machine's. */
-export type ComputerAccessDecision = { kind: 'computer_access'; id: string; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerAccessView };
 
 /* A card Hornhoof kept for this person until they say they saw it: a wait past its date that came up to them, a goal at
    risk, a turn that is over, or a version marked in the code that released nothing of its turn. Seeing it decides nothing.
@@ -698,8 +697,8 @@ export type MachineAwayCard = {
 export type Decisions = {
   requests: WaitingRequest[];
   proposals: ProposalDecision[];
+  machineAccess?: never[];
   /* The orchestrator's requests for machines. A server from before machines had access of their own sends none. */
-  machineAccess?: ComputerAccessDecision[];
   /* What merges left for the CEO alone. A server from before merges sends none. */
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
@@ -962,30 +961,16 @@ export type Running = {
 /* A machine of the company that has its core. hostname: the name its computer told, or none. data: it keeps the company's
    data. */
 export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: 'data' | 'worker' | null; os: 'linux' | 'darwin' | null; data: boolean };
-/* Computer access to one machine as this person sees it: whether Hornhoof reaches it, until when it is open, what the
-   orchestrator asked it for, and whether they may open or close it. key: not_needed for the server's own machine
-   while it holds no key; held when the machine holds its owner's key, so what the owner signs opens it; not_held when
-   it holds none or another, so nothing opens it until its owner runs a new command there. */
+/* Computer access to a connected machine, including the owner's switch and the orchestrator's employee grants. */
 export type ComputerAccessView = {
   machine: AccessMachine;
   reachable: boolean;
-  until: string | null;
-  asked: { reason: string; at: string } | null;
+  open: boolean;
   canOpen: boolean;
   canClose: boolean;
-  key: 'not_needed' | 'held' | 'not_held';
-  /* Who it is open to (#1119): the orchestrator alone, or every agent of the company; null while closed. Who opened it
-     and when. Older servers omit them: what they open is the orchestrator's. */
-  scope?: AccessScope | null;
-  openedBy?: { id: string; name: string } | null;
-  openedAt?: string | null;
+  scope: 'orchestrator' | 'all_agents' | null;
+  employees: { employeeId: string; taskId: string }[];
 };
-/* Who a machine opens to, and for how long its owner opens it (#1119): the first duration is what opens when nothing
-   else is chosen, and the owner's signature spans exactly the chosen seconds. */
-export type AccessScope = 'orchestrator' | 'all_agents';
-export const ACCESS_DURATIONS = ['1h', '8h', '24h'] as const;
-export type AccessDuration = (typeof ACCESS_DURATIONS)[number];
-export const DURATION_S: Record<AccessDuration, number> = { '1h': 3600, '8h': 28_800, '24h': 86_400 };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

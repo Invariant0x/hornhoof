@@ -1,57 +1,35 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { ComputerAccessView, MachineView, Org } from '../src/types';
-import { box, ME, serveApi, serveOwnerKey } from './api';
+import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { box, ME, serveApi } from './api';
 
-/* Computer access in each machine's card in Machines (#1115, Design #1102, sketch B with A's request state). A card says
-   whether access is closed, open to the orchestrator until a time, open in full to every agent of the company until a
-   time, asked for by the orchestrator, or out of reach while the machine is offline, and who opened it. Its owner opens
-   it after choosing for how long (1 hour by default, 8 hours, a day) and for whom; full access to every agent asks once
-   more first. Closing is one press, without a question. The server keeps each machine's access as the server of #1119
-   would, so every press is checked by what it sends. */
-
+/* The existing card controls keep their geometry with standing access and no approval steps. */
 test.describe.configure({ timeout: 180_000 });
 
-type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; theme: 'light' | 'dark'; width: 1440 | 375 };
-const LOOKS: Look[] = (['en', 'ru'] as const).flatMap(lang =>
-  (['ltr', 'rtl'] as const).flatMap(dir => (['light', 'dark'] as const).flatMap(theme => ([1440, 375] as const).map(width => ({ lang, dir, theme, width })))),
-);
-const named = ({ lang, dir, theme, width }: Look) => `${lang} ${dir} ${theme} ${width}`;
-
-const NOW = Date.parse('2026-11-16T11:38:00.000Z');
-const HOUR = 3_600_000;
+type Look = { lang: Language; theme: 'light' | 'dark'; width: 1440 | 375 };
+const messages: Record<Language, Messages> = { en, ru };
+const rtl = /^(ar|fa|he|ur)(-|$)/;
+const ranked = LANGUAGES.map(({ id }) => {
+  const { machines, window } = messages[id];
+  const { closed, open, full, closedText, offlineText, forOrchestrator, forTeam, openText, fullText, forTasks, reopen, opening, closing, failed, retry } = machines.computer;
+  const words = [machines.access, closed, open, full, closedText, offlineText, forOrchestrator, forTeam, openText, fullText, forTasks, reopen, opening, closing, failed, retry, window.computerMac, window.computerClose];
+  return { id, length: words.join('').length };
+}).sort((a, b) => a.length - b.length);
+const locales = [...new Set([ranked[0]!.id, ranked.at(-1)!.id, ...LANGUAGES.filter(({ id }) => rtl.test(id)).map(({ id }) => id)])];
+const LOOKS: Look[] = locales.flatMap(lang => (['light', 'dark'] as const).flatMap(theme => ([1440, 375] as const).map(width => ({ lang, theme, width }))));
+const named = ({ lang, theme, width }: Look) => `${lang} ${theme} ${width}`;
 const GIB = 1024 ** 3;
-const REASON = 'Install Docker and open port 8080 to check the build.';
-
-/* Design's words (strings-ru-en.csv of #1102), as a person reads them. */
-const WORDS = {
-  en: {
-    machines: 'Machines', block: 'Computer access', closed: 'Access closed', open: 'Access open', full: 'Full access for the team', asks: 'Asks for access',
-    forOrchestrator: 'For the orchestrator', forTeam: 'Every company agent', openedBy: 'Opened by: Ivan', until: /^Until /,
-    openCard: 'Open the card of ', choose: 'Open access', close: 'Close access', who: 'Who gets access?', duration: 'Access duration', hour: '1 hour', hours: '8 hours', day: '1 day',
-    orchestrator: 'Orchestrator', team: 'Every company agent', cancel: 'Cancel',
-    openHour: 'Open for 1 hour', notNow: 'Not now', offline: 'The machine is not responding. Access can be opened when it is online.', owner: "Decided by the machine's owner alone.",
-  },
-  ru: {
-    machines: 'Машины', block: 'Доступ к машинам', closed: 'Доступ закрыт', open: 'Доступ открыт', full: 'Полный доступ для команды', asks: 'Просит доступ',
-    forOrchestrator: 'Для оркестратора', forTeam: 'Все агенты компании', openedBy: 'Открыл: Ivan', until: /^До /,
-    openCard: 'Открыть карточку ', choose: 'Открыть доступ', close: 'Закрыть доступ', who: 'Кому открыть доступ?', duration: 'Срок доступа', hour: '1 ч', hours: '8 ч', day: 'Сутки',
-    orchestrator: 'Оркестратору', team: 'Всем агентам компании', cancel: 'Отмена',
-    openHour: 'Открыть на 1 ч', notNow: 'Не сейчас', offline: 'Машина не отвечает. Доступ можно открыть, когда она появится в сети.', owner: 'Решение принимает только владелец машины.',
-  },
-};
 
 const IVAN = { id: 'p1', name: 'Ivan' };
 const ANNA = { id: 'p2', name: 'Anna' };
-type Scope = 'orchestrator' | 'all_agents';
-/* Access as #1119's server shows it: who it is open to, until when and who opened it. */
-type View = ComputerAccessView & { scope: Scope | null; openedBy: { id: string; name: string } | null; openedAt: string | null };
-
+type View = ComputerAccessView;
 const access = (id: string, hostname: string, owner: { id: string }, over: Partial<View> = {}): View => ({
   machine: { id, networkId: `n-${id}`, name: hostname, hostname, personId: owner.id, role: 'worker', os: 'linux', data: false },
-  reachable: true, until: null, asked: null, canOpen: owner.id === IVAN.id, canClose: true, key: 'not_needed', scope: null, openedBy: null, openedAt: null,
+  reachable: true, open: true, scope: 'orchestrator', employees: [], canOpen: owner.id === IVAN.id, canClose: owner.id === IVAN.id,
   ...over,
 });
-const opened = (scope: Scope, hours: number, by = IVAN): Partial<View> => ({ scope, until: new Date(NOW + hours * HOUR).toISOString(), openedBy: by, openedAt: new Date(NOW).toISOString() });
 
 const machine = (id: string, hostname: string, owner: { id: string; name: string }, over: Partial<MachineView> = {}): MachineView => ({
   id, hostname, os: 'linux', arch: 'x86_64', owner, online: true, lastSeenAt: null, plans: [],
@@ -59,34 +37,30 @@ const machine = (id: string, hostname: string, owner: { id: string; name: string
   lendsTests: true, running: { agents: [], parts: [] }, programs: [], keepsBackups: false, heldBackups: 0, ...over,
 } as MachineView);
 
-/* a-host is closed and Ivan's; build-node is Anna's and open to the orchestrator by her; studio-mac is open in full;
-   test-node is offline; the build server is asked for. */
 const LONG = 'build-server-eu-west-01.internal';
 function startViews(): Record<string, View> {
+  const mac = access('m3', 'studio-mac', IVAN, { scope: 'all_agents' });
   return {
     m1: access('m1', 'a-host', IVAN),
-    m2: access('m2', 'build-node', ANNA, opened('orchestrator', 1, ANNA)),
-    m3: { ...access('m3', 'studio-mac', IVAN, opened('all_agents', 8)), machine: { ...access('m3', 'studio-mac', IVAN).machine, os: 'darwin' } },
-    m4: access('m4', 'test-node', IVAN, { reachable: false }),
-    m5: access('m5', LONG, IVAN, { asked: { reason: REASON, at: new Date(NOW - 10 * 60_000).toISOString() } }),
+    m2: access('m2', 'build-node', ANNA, { open: false, scope: null }),
+    m3: { ...mac, machine: { ...mac.machine, os: 'darwin' } },
+    m4: access('m4', LONG, IVAN, { reachable: false, employees: [{ employeeId: 'a1', taskId: 't1' }] }),
   };
 }
 const HOSTS: Record<string, [string, { id: string; name: string }, Partial<MachineView>]> = {
-  m1: ['a-host', IVAN, {}], m2: ['build-node', ANNA, {}], m3: ['studio-mac', IVAN, { os: 'darwin', arch: 'arm64' }], m4: ['test-node', IVAN, { online: false }], m5: [LONG, IVAN, {}],
+  m1: ['a-host', IVAN, {}], m2: ['build-node', ANNA, {}], m3: ['studio-mac', IVAN, { os: 'darwin', arch: 'arm64' }], m4: [LONG, IVAN, { online: false }],
 };
 
 type Sent = { path: string; body: unknown };
 
 async function openMachines(page: Page, look: Look, id: string) {
   await page.setViewportSize({ width: look.width, height: look.width === 375 ? 2400 : 1400 });
-  await page.clock.install({ time: NOW });
   await serveApi(page);
-  await serveOwnerKey(page);
   await page.addInitScript(({ lang, theme, dir }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
     if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
-  }, look);
+  }, { ...look, dir: rtl.test(look.lang) ? 'rtl' : 'ltr' });
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   const views = startViews();
@@ -101,25 +75,22 @@ async function openMachines(page: Page, look: Look, id: string) {
     builtin: null, priority: false, move: null, canMove: false, copies: null,
   } }));
   await page.route('**/api/machines/access', route => route.fulfill({ json: { views: Object.values(views) } }));
-  await page.route(/\/api\/machines\/[^/]+\/access\/(open|close|decline)$/, route => {
+  await page.route(/\/api\/machines\/[^/]+\/access\/(open|close)$/, route => {
     const path = new URL(route.request().url()).pathname;
     const [, , , key, , action] = path.split('/');
-    const body = route.request().postDataJSON() as { scope?: Scope; duration?: '1h' | '8h' | '24h' } | null;
-    sent.push({ path, body });
-    const now = views[key!]!;
-    views[key!] = action === 'open'
-      ? { ...now, asked: null, ...opened(body?.scope ?? 'orchestrator', { '1h': 1, '8h': 8, '24h': 24 }[body?.duration ?? '1h']) }
-      : { ...now, asked: null, until: action === 'close' ? null : now.until, scope: action === 'close' ? null : now.scope, openedBy: action === 'close' ? null : now.openedBy, canOpen: now.machine.personId === IVAN.id };
+    sent.push({ path, body: route.request().postData() });
+    const open = action === 'open';
+    views[key!] = { ...views[key!]!, open, scope: open ? 'orchestrator' : null, employees: [] };
     return route.fulfill({ json: views[key!] });
   });
   await page.goto(`/machines/${id}`);
   await page.evaluate(async () => { await document.fonts.ready; });
   const card = page.getByRole('article', { name: HOSTS[id]![0], exact: true });
   await expect(card).toBeVisible();
-  return { card, sent, errors, words: WORDS[look.lang], views };
+  return { card, sent, errors, t: messages[look.lang] };
 }
 
-const blockOf = (card: Locator, words: (typeof WORDS)['en']) => card.getByRole('region', { name: words.block, exact: true });
+const blockOf = (card: Locator, t: Messages) => card.getByRole('region', { name: t.machines.access, exact: true });
 /* A picture of the card for Design, by the state it shows. */
 const snap = (card: Locator, name: string) => card.screenshot({ path: test.info().outputPath(`${name}.png`), animations: 'disabled' });
 
@@ -138,92 +109,43 @@ async function expectFits(page: Page, card: Locator, block: Locator, width: numb
 }
 
 for (const look of LOOKS) {
-  test(`opens a machine to the orchestrator for the hour it chose, and closes it in one press: ${named(look)}`, async ({ page }) => {
-    const { card, sent, errors, words } = await openMachines(page, look, 'm1');
-    const block = blockOf(card, words);
-    await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
-    await expectFits(page, card, block, look.width);
-    await snap(card, 'closed');
-    await block.getByRole('button', { name: words.choose, exact: true }).click();
-    await expect(block.getByText(words.who, { exact: true })).toBeVisible();
-    await snap(card, 'choose');
-    /* One hour is chosen until another is pressed. */
-    const durations = block.getByRole('group', { name: words.duration });
-    await expect(durations.getByRole('button', { name: words.hour, exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(durations.getByRole('button', { name: words.hours, exact: true })).toHaveAttribute('aria-pressed', 'false');
-    await expectFits(page, card, block, look.width);
-    await block.getByRole('button', { name: words.orchestrator, exact: true }).click();
-    await expect(block.getByText(words.open, { exact: true })).toBeVisible();
-    await expect(block.getByText(words.forOrchestrator, { exact: true })).toBeVisible();
-    await expect(block.getByText(words.until)).toBeVisible();
-    await expect(block.getByText(words.openedBy, { exact: true })).toBeVisible();
-    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', duration: '1h' } }]);
+  test(`the owner closes and reopens standing access in one press: ${named(look)}`, async ({ page }) => {
+    const { card, sent, errors, t } = await openMachines(page, look, 'm1');
+    const block = blockOf(card, t);
+    const c = t.machines.computer;
+    await expect(block.getByText(c.open, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
     await snap(card, 'open');
-    /* Closing asks nothing. */
-    await block.getByRole('button', { name: words.close, exact: true }).click();
-    await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
-    expect(sent.map(one => one.path)).toEqual(['/api/machines/m1/access/open', '/api/machines/m1/access/close']);
-    if (look.dir === 'rtl') expect(await block.evaluate(el => getComputedStyle(el).direction)).toBe('rtl');
-    expect(errors).toEqual([]);
-  });
-
-  test(`opens full access when the owner selects every agent, and Cancel opens nothing: ${named(look)}`, async ({ page }) => {
-    const { card, sent, errors, words } = await openMachines(page, look, 'm1');
-    const block = blockOf(card, words);
-    const choose = block.getByRole('button', { name: words.choose, exact: true });
-    await choose.click();
-    await block.getByRole('group', { name: words.duration }).getByRole('button', { name: words.hours, exact: true }).click();
+    await block.getByRole('button', { name: t.window.computerClose, exact: true }).click();
+    await expect(block.getByText(c.closedText, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
-    expect(sent).toEqual([]);
-    await block.getByRole('button', { name: words.cancel, exact: true }).click();
-    await expect(choose).toBeFocused();
-    expect(sent).toEqual([]);
-    await choose.click();
-    await block.getByRole('group', { name: words.duration }).getByRole('button', { name: words.hours, exact: true }).click();
-    await block.getByRole('button', { name: words.team, exact: true }).click();
-    await expect(block.getByText(words.full, { exact: true })).toBeVisible();
-    await expect(block.getByText(words.forTeam, { exact: true })).toBeVisible();
-    await snap(card, 'full');
-    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'all_agents', duration: '8h' } }]);
-    /* At its time the card closes by itself, before the server says so. */
-    await page.clock.fastForward(8 * HOUR + 1000);
-    await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
-    await expect(block.getByText(words.forTeam, { exact: true })).toHaveCount(0);
+    await snap(card, 'closed');
+    await block.getByRole('button', { name: c.reopen, exact: true }).click();
+    await expect(block.getByText(c.forOrchestrator, { exact: true })).toBeVisible();
+    expect(sent).toEqual([{ path: '/api/machines/m1/access/close', body: null }, { path: '/api/machines/m1/access/open', body: null }]);
+    await expect(block.getByLabel(t.common.password)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  /* Each card opens from the list, in the page, so that no load is cut off by a new one. */
-  test(`says each state of access, and who may act on it: ${named(look)}`, async ({ page }) => {
-    const { card, sent, errors, words } = await openMachines(page, look, 'm5');
-    /* Asked for: the reason, the hour and the answers. */
-    const asked = blockOf(card, words);
-    await expect(asked.getByText(words.asks, { exact: true })).toBeVisible();
-    await expect(asked.getByText(REASON)).toBeVisible();
-    await expectFits(page, card, asked, look.width);
-    await snap(card, 'asks');
-    await asked.getByRole('button', { name: words.notNow, exact: true }).click();
-    await expect(asked.getByText(words.asks, { exact: true })).toHaveCount(0);
-    expect(sent.map(one => one.path)).toEqual(['/api/machines/m5/access/decline']);
-    /* Anna's machine, open to the orchestrator by her: the CEO closes it but does not open it. */
-    await page.getByRole('button', { name: `${words.openCard}build-node`, exact: true }).click();
-    const anna = blockOf(page.getByRole('article', { name: 'build-node', exact: true }), words);
-    await expect(anna.getByText(words.open, { exact: true })).toBeVisible();
-    await expect(anna.getByText(words.openedBy.replace('Ivan', 'Anna'), { exact: true })).toBeVisible();
-    await expect(anna.getByRole('button', { name: words.close, exact: true })).toBeVisible();
-    await expect(anna.getByRole('button', { name: words.choose, exact: true })).toHaveCount(0);
-    await snap(page.getByRole('article', { name: 'build-node', exact: true }), 'open-by-another');
-    /* Full access on the Mac. */
-    await page.getByRole('button', { name: `${words.openCard}studio-mac`, exact: true }).click();
-    const mac = blockOf(page.getByRole('article', { name: 'studio-mac', exact: true }), words);
-    await expect(mac.getByText(words.full, { exact: true })).toBeVisible();
-    await expect(mac.getByText(words.forTeam, { exact: true })).toBeVisible();
-    /* Offline: nothing to open. */
-    await page.getByRole('button', { name: `${words.openCard}test-node`, exact: true }).click();
-    const away = blockOf(page.getByRole('article', { name: 'test-node', exact: true }), words);
-    await expect(away.getByText(words.offline, { exact: true })).toBeVisible();
-    await expect(away.getByRole('button')).toHaveCount(0);
-    await snap(page.getByRole('article', { name: 'test-node', exact: true }), 'offline');
+  test(`the card shows delegations and lets the owner close access while offline: ${named(look)}`, async ({ page }) => {
+    const { card, sent, errors, t } = await openMachines(page, look, 'm4');
+    const c = t.machines.computer;
+    const block = blockOf(card, t);
+    await expect(block.getByText(c.offlineText, { exact: true })).toBeVisible();
+    await expect(block.getByText(c.forTasks, { exact: true })).toBeVisible();
+    await expectFits(page, card, block, look.width);
+    await snap(card, 'offline');
+    await expect(block.getByRole('button', { name: t.window.computerClose, exact: true })).toBeVisible();
+    for (const [id, status] of [['m2', c.closed], ['m3', c.full]] as const) {
+      const host = HOSTS[id]![0];
+      await page.getByRole('button', { name: t.tables.openCard(host), exact: true }).click();
+      const other = page.getByRole('article', { name: host, exact: true });
+      const access = blockOf(other, t);
+      await expect(access.getByText(status, { exact: true })).toBeVisible();
+      await expectFits(page, other, access, look.width);
+      if (id === 'm2') await expect(access.getByRole('button')).toHaveCount(0);
+    }
+    expect(sent).toEqual([]);
     expect(errors).toEqual([]);
   });
 }

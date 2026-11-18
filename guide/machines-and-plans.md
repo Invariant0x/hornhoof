@@ -9,6 +9,10 @@ Agents run on machines that hold the subscriptions.
 - Company API keys run on the built-in node that comes with the server.
 - A personal plan runs on its owner's machines: Linux, macOS, or Windows with Docker Desktop.
 
+## Computer access
+
+Connecting a machine gives the orchestrator standing access to it. The orchestrator can run commands with full permissions on a Linux machine or in Docker's Linux system on a Mac. It can also give access to all company employees or to one employee for a task. The owner can close or reopen access in the machine's card in Machines.
+
 ## Connect your plans
 
 1. Open Subscriptions and click "Connect a subscription".

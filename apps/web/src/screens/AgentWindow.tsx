@@ -21,7 +21,7 @@ import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { WindowFoot, type WindowNote } from '../ui/WindowNotes';
-import { isOpen, machineName } from '../ui/access';
+import { machineName } from '../ui/access';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
@@ -153,8 +153,7 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
 }
 
 /* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
-   are the CEO's alone. Computer access to the company's machines: the orchestrator asks for one, its owner's screen opens
-   it, and the server answers each person with the machines that are theirs to see. */
+   are the CEO's alone. The window shows a note about the machines with standing access. */
 const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator });
 
 /* Loads them; null for what this person does not get, or what did not load. */
@@ -190,12 +189,14 @@ const messageAuthor = (t: Messages, from: string, name: string) => (from === 'or
 const personOr = (e: EventView, other: string) => e.person?.name ?? other;
 type ComputerStep = (t: Messages, language: Language, e: EventView, machine: string) => string;
 
-/* What the orchestrator asked of a machine, what its owner did about it, what the machine itself refused, and an access
-   its time closed. An opening no person made is the orchestrator's, for the owner (#1119); any other step is a refusal. */
+/* Changes to standing access and older events kept in the window's history. */
 const COMPUTER_STEPS = new Map<string, ComputerStep>([
   ['asked', (t, _, e, machine) => t.window.computerAsked(field(e.data, 'reason'), machine)],
   ['opened', (t, language, e, machine) => t.window.computerOpened(personOr(e, t.window.computerByOrchestrator), clock(language, field(e.data, 'until')) ?? '', machine)],
   ['expired', (t, _, __, machine) => t.window.computerExpired(machine)],
+  ['reopened', (t, _, e, machine) => t.window.computerReopened(personOr(e, t.window.hornhoof), machine)],
+  ['delegated', (t, _, __, machine) => t.window.computerDelegated(machine)],
+  ['revoked', (t, _, __, machine) => t.window.computerRevoked(machine)],
   ['closed', (t, _, e, machine) => t.window.computerClosed(personOr(e, t.window.hornhoof), machine)],
   ['refused', (t, _, __, machine) => t.window.computerRefused(machine)],
 ]);
@@ -310,19 +311,15 @@ function stateNotes(t: Messages, language: Language, state: OrchestratorState, r
 const memoryNote = (t: Messages, state: OrchestratorState): WindowNote | null =>
   state.memoryWait ? { id: 'memory', word: t.window.notes.wait, text: t.window.memoryWait, tone: 'wait' } : null;
 
-/* Access to machines is opened and closed in Machines: here only a note of each machine the orchestrator asks for, and
-   one of the machines open to it, each with the way to that place. */
-function accessNotes(t: Messages, language: Language, views: ComputerAccessView[], open: (id: string) => void): WindowNote[] {
+/* The window links to the cards of connected machines with open access. */
+function accessNotes(t: Messages, views: ComputerAccessView[], open: (id: string) => void): WindowNote[] {
   const w = t.window.notes;
-  const link = (label: string, id: string) => ({ label, href: `/machines/${id}`, onOpen: () => open(id) });
-  const asked: WindowNote[] = views.filter(view => !isOpen(view) && view.asked).map(view => ({
-    id: `asks-${view.machine.id}`, word: w.asks, text: w.asksFor(machineName(t, view.machine), view.asked!.reason), tone: 'access', link: link(w.answer, view.machine.id),
-  }));
-  const opened = views.filter(isOpen);
+  const opened = views.filter(view => view.open);
   const first = opened[0];
-  if (!first) return asked;
-  const text = opened.length === 1 ? t.window.computerOpenUntil(machineName(t, first.machine), clock(language, first.until) ?? '') : w.openOn(opened.length);
-  return [...asked, { id: 'open', word: w.access, text, tone: 'access', link: link(w.manage, first.machine.id) }];
+  if (!first) return [];
+  const id = first.machine.id;
+  const text = opened.length === 1 ? t.window.computerStanding(machineName(t, first.machine)) : w.openOn(opened.length);
+  return [{ id: 'open', word: w.access, text, tone: 'access', link: { label: w.manage, href: `/machines/${id}`, onOpen: () => open(id) } }];
 }
 
 function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void): void {
@@ -823,7 +820,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         <WindowFoot
           label={t.window.notes.label}
           memory={memoryNote(t, state)}
-          notes={[...(terminal ? termNotes : []), ...stateNotes(t, language, state, ready, sub), ...accessNotes(t, language, computer, onOpenMachine)]}
+          notes={[...(terminal ? termNotes : []), ...stateNotes(t, language, state, ready, sub), ...accessNotes(t, computer, onOpenMachine)]}
         />
       )}
       {chat && (ready || state.busy) && <ChatState state={state} onStop={stop} />}

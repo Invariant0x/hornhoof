@@ -11,7 +11,6 @@ import { decl } from './css';
    heading each, what the machine is for the company's server, what it is and who may reach it, and what its owner sets,
    then the connection to the server. */
 
-const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
 const held = (over: object) => ({ number: null, why: null, pin: null, unfit: null, copy: null, leftAt: null, ...over });
 /* dev-laptop of the CEO: second in line with an up-to-date copy, its programs, open to the orchestrator, keeping backups,
    and joined before machines had a core. */
@@ -19,7 +18,7 @@ const LAPTOP: MachineView = {
   ...MACHINES[0]!,
   data: held({ number: 2, why: 'always.best_link', copy: { line: 'ready' } }),
   programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }],
-  access: accessView('dev-laptop', { until: UNTIL, machine: { id: 'm1' } }),
+  access: accessView('dev-laptop', { machine: { id: 'm1' } }),
   keepsBackups: true,
   heldBackups: 2,
   needsCore: true,
@@ -95,7 +94,7 @@ describe("the lower part of a machine's card", () => {
     expect(within(system).getByRole('button', { name: 'Update programs' })).toBeInTheDocument();
     const access = within(system).getByRole('region', { name: 'Computer access' });
     expect(within(access).getByText('Access open')).toBeInTheDocument();
-    expect(within(access).getByText(/^Until .+/)).toBeInTheDocument();
+    expect(within(access).getByText('For the orchestrator')).toBeInTheDocument();
     expect(within(access).getByRole('button', { name: 'Close access' })).toBeInTheDocument();
   });
 
@@ -125,7 +124,7 @@ describe("the lower part of a machine's card", () => {
   });
 
   it.each(['add', 'core'] as const)('gives Cancel under the %s command a group of its own on the end edge, a button of 44 px', async kind => {
-    const command = { id: 'c1', kind, plans: [], machineId: 'm1', machine: 'dev-laptop', command: 'curl -fsSL https://hq.acme.com/install.sh | bash', expiresAt: UNTIL };
+    const command = { id: 'c1', kind, plans: [], machineId: 'm1', machine: 'dev-laptop', command: 'curl -fsSL https://hq.acme.com/install.sh | bash', expiresAt: new Date(Date.now() + 86_400_000).toISOString() };
     show('en', LAPTOP, { 'GET /api/nodes/commands': [200, { commands: [command] }] });
     /* A machine with a command still open stands open by itself. */
     const card = await screen.findByRole('article', { name: 'dev-laptop' });

@@ -1096,18 +1096,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .acc { display: grid; gap: 8px; min-inline-size: 0; }
 .acc p { margin: 0; overflow-wrap: break-word; }
 .acc .status.acc-open { color: var(--ok); border-color: currentColor; }
-.acc .status.acc-full, .acc .status.acc-asks { color: var(--amber-ink); border-color: currentColor; }
-.acc .status.acc-closed, .acc .status.acc-offline { color: var(--muted); }
+.acc .status.acc-full { color: var(--amber-ink); border-color: currentColor; }
+.acc .status.acc-closed { color: var(--muted); }
 .acc-who { font-weight: 600; }
-.acc-step { display: grid; gap: 12px; min-inline-size: 0; max-inline-size: 560px; padding: 18px; border: 1px solid var(--cyan-ink); }
-.acc-step h5 { margin: 0; font-family: var(--f-display); font-size: 16px; overflow-wrap: break-word; }
-.acc-step h5:focus { outline: none; }
-.acc-step h5:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.acc-dur { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
-.acc-dur legend { padding: 0; margin-block-end: 8px; font-weight: 600; }
-.acc-pick { display: grid; gap: 8px; }
-.acc-pick > .act { justify-content: flex-start; min-block-size: 44px; padding: 8px 12px; text-align: start; overflow-wrap: break-word; }
-.acc-facts { display: grid; gap: 4px; padding: 12px; background: var(--surface2); }
 .acc-failed { display: grid; gap: 8px; color: var(--pink-ink); }
 @media (max-width: 600px) {
   .t-foot { font-size: 16px; }

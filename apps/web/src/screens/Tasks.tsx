@@ -6,8 +6,7 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
-import type { ComputerAccessDecision, Decisions, GoalView, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
-import { ComputerCard } from '../ui/ComputerCard';
+import type { Decisions, GoalView, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -73,7 +72,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   recipient: string;
 };
 
-type Shown = Pick<Decisions, 'requests' | 'proposals'> & { machineAccess: ComputerAccessDecision[]; merges: MergeDecision[] };
+type Shown = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
 
 function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: string | null): T[] {
   return personId ? items.filter(i => i.ownerPersonId === personId) : items;
@@ -81,12 +80,12 @@ function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: s
 
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
-  if (!decisions) return { requests: [], proposals: [], machineAccess: [], merges: [] };
+  if (!decisions) return { requests: [], proposals: [], merges: [] };
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), machineAccess: theirs(decisions.machineAccess ?? []), merges: theirs(decisions.merges ?? []) };
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: theirs(decisions.merges ?? []) };
 }
 
-const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.machineAccess.length && !s.merges.length;
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
 /* The person whose decisions show, with a cross that shows everyone's again. */
 function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
@@ -122,19 +121,16 @@ function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: Propos
 
 type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & { shown: Shown; onFailure: (err: unknown) => void };
 
-/* Each decision with the buttons it already has elsewhere: requests, then the orchestrator's cards, then the computer. */
+/* Each decision with the buttons it has elsewhere. */
 function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
   const t = useT();
-  const { requests, proposals, machineAccess, merges } = shown;
+  const { requests, proposals, merges } = shown;
   return (
     <>
       {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
         <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} />
-      ))}
-      {machineAccess.map(card => (
-        <ComputerCard key={card.id} view={card.view} onChange={onDecisionsChanged} onFailure={onFailure} />
       ))}
       {merges.map(merge => (
         <MergeCard key={merge.id} merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />
@@ -152,7 +148,7 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
   </div>;
 }
 
-/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer, the cards Hornhoof
+/* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
    kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
    taken off. */
 function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, ...rest }: Waiting) {
@@ -198,7 +194,7 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
 /* A task with a question counts once, alongside decisions that have no task. */
 function countOf(s: Shown, tasks: TaskLine[]): number {
   const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.machineAccess.length + s.merges.length;
+  return taskIds.size + s.proposals.length + s.merges.length;
 }
 
 /* Which part of the tracker a place is: what waits for a person, the turns, or work to look at as a list, a board or a graph. */

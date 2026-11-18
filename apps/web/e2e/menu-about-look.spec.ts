@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { ComputerAccessView, FeedbackShown, Improvement } from '../src/types';
+import type { FeedbackShown, Improvement } from '../src/types';
 import { ME, serveApi } from './api';
 import { cutByNavigation } from './look-steps';
 
@@ -17,11 +17,6 @@ const SKINS = ['light', 'cyberpunk'];
 const WIDTHS = [1440, 375];
 const SHOTS = process.env.SHOTS;
 
-/* The machine the person sits at, theirs to open and closed: the menu offers to give the orchestrator access to it. */
-const HERE: ComputerAccessView = {
-  machine: { id: 'm1', networkId: 'n-m1', name: 'kostya-workstation-01', hostname: 'kostya-workstation-01', personId: 'p1', role: 'worker', os: 'linux', data: false },
-  reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
-};
 const OPEN: Improvement = {
   id: 'i1', title: 'Check card numbers before sending them', text: 'The card form sends numbers the bank turns down.', seen: 2, status: 'open', result: null,
   at: '2026-11-15T08:00:00.000Z', updatedAt: '2026-11-15T09:00:00.000Z', agent: { id: 'b1', name: 'Bruno' }, department: { id: 'd2', name: 'Development' },
@@ -52,7 +47,6 @@ async function prepare(page: Page, { lang, skin, width, person = 'whole' }: Look
   if (person === 'listed') {
     await page.route('**/api/me', route => route.fulfill({ json: LISTED }));
   } else {
-    await page.route('**/api/machines/here', route => route.fulfill({ json: { machine: HERE.machine, view: HERE } }));
     await page.route('**/api/feedback', route => route.fulfill({ json: { inbox: true } }));
     await page.route('**/api/improvements', route => route.fulfill({ json: { improvements: [OPEN, { ...OPEN, id: 'i2' }, { ...OPEN, id: 'i3' }] } }));
   }
@@ -152,7 +146,7 @@ function checkMenu(found: Awaited<ReturnType<typeof menuLayout>>, width: number,
   expect(found.broken, `${look}: no word broken that fits a line`).toEqual([]);
 }
 
-const WHOLE_ORDER = (t: Messages) => ['head', '—', t.window.computerHere('kostya-workstation-01'), '—', t.firstContact.title, t.settings.menu, '—', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '—', t.about.menu, t.shell.logOut];
+const WHOLE_ORDER = (t: Messages) => ['head', '\u2014', t.firstContact.title, t.settings.menu, '\u2014', t.shell.tabs.improvements, t.inbox.menu, t.updates.menu, '\u2014', t.about.menu, t.shell.logOut];
 const LISTED_ORDER = (t: Messages) => ['head', '—', t.firstContact.title, t.settings.menu, '—', t.about.menu, t.shell.logOut];
 
 const LOOKS: Look[] = [
@@ -167,7 +161,6 @@ for (const look of LOOKS) {
     const problems = await prepare(page, look);
     let menu = await openMenu(page, t);
     await direction(page, look.dir ?? 'ltr');
-    await expect(menu.getByRole('button', { name: t.window.computerHere('kostya-workstation-01'), exact: true })).toBeVisible();
     await expect(menu.getByRole('button', { name: t.improvements.nav(3), exact: true })).toBeVisible();
     await expect(menu.getByRole('button', { name: t.inbox.menu, exact: true })).toBeVisible();
     const found = await menuLayout(menu);
@@ -318,9 +311,7 @@ for (const skin of SKINS) for (const width of WIDTHS) {
     });
     const menu = await openMenu(page, t);
     const settings = menu.getByRole('button', { name: t.settings.menu, exact: true });
-    await expect(menu.getByRole('button', { name: t.window.computerHere('kostya-workstation-01'), exact: true })).toBeVisible();
-    /* Access to this machine, then Talk to the orchestrator, then Settings. */
-    await page.keyboard.press('Tab');
+    /* Talk to the orchestrator, then Settings. */
     await page.keyboard.press('Tab');
     await expect(menu.getByRole('button', { name: t.firstContact.title, exact: true })).toBeFocused();
     await page.keyboard.press('Tab');

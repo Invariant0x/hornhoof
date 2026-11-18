@@ -15,12 +15,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
 - The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
 - Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
-- The orchestrator can use an open machine grant whoever started the turn or last wrote.
-- Choosing access for every agent opens the machine for the selected duration in one step.
 - The orchestrator can see personal assistants and their conversations while each assistant takes orders from its person.
 - The orchestrator can read and settle ordinary merge conflicts, and only a direct CEO choice can pick a permanent deletion.
 - A department head can enable a skill that grants only department tracker work.
-- The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
+- The orchestrator receives machine setup commands and can read the same pending cards as the owner.
 - Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
 - Assignment changes made by a department head show the head and the person whose authority it used.
 - Editing an employee card preserves a tracker nudge that arrives during the edit.
@@ -79,6 +77,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Changed
 
 - Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
+- Connected machines give the orchestrator standing computer access, including machines that already hold their owner's key.
+- The orchestrator can give computer access to all company employees or to a named employee for a task and withdraw it when the work ends.
+- Each machine owner can close or reopen computer access from the machine card.
+- The update clears old computer access requests and removes the approval cards.
+- Restoring a backup keeps each owner's machine access setting and clears employee grants.
 - Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
 - Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
