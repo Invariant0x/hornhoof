@@ -88,7 +88,8 @@ describe('a run that ends while the one who started it waits', () => {
       await waitingOn(c, run, { minutes: 5 });
       await nextOf(ivan.node, 'tests.run');
       await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
-      await endedOnce(c, new RegExp(`${run.name} 1 failed[\\s\\S]*did not end within 5 min`));
+      const cause = run.tool === 'run_tests' ? 'reached the upper time limit of 5 min' : 'did not end within 5 min';
+      await endedOnce(c, new RegExp(`${run.name} 1 failed[\\s\\S]*${cause}`));
     });
 
     it('ends the wait and wakes the agent once when someone else stops it', async () => {
