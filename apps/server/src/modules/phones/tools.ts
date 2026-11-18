@@ -46,7 +46,7 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent):
   }));
   server.registerTool(PRIVATE_TOOLS.phone.name, {
     _meta: PRIVATE_TOOLS.phone._meta,
-    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as a picture and its element tree; tap and swipe use coordinates on that picture; key presses back or home; text types any text into the field you tapped, Russian and emoji too, a login and password you hold as well; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
+    description: 'Use social networks through their phone apps at a human pace. capture returns the screen and its element tree. tap and swipe use screen coordinates. key presses back or home, text types into the selected field, app opens an installed app and url opens a web page. Type vault values yourself into the protected sign-in field. If a robot check stops you, record the blocker. After a lost reply, check the screen before taking another action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {
     const reply = await phoneAction(ctx, me, input.session, input.operation);

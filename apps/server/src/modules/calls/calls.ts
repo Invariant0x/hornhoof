@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { modelsFor, repoFolder, type Workspace } from '@hornhoof/protocol';
+import { modelsFor, OUTSIDE_MATERIAL, repoFolder, type Workspace } from '@hornhoof/protocol';
 import type { EchelonOneShot, EchelonStage, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { and, asc, eq, inArray, notExists, TransactionRollbackError } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -71,8 +71,8 @@ export function oneShotStageNote(task: Pick<Task, 'number'>, state: Pick<Echelon
   if (!one) return null;
   const calls = `${one.fanOut} ${one.fanOut === 1 ? 'call' : 'calls'}`;
   return one.judge
-    ? `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief, then a judge call that reads every answer. Write a brief that holds everything a call needs, the branch to check included, and decide the stage once you have read the judge's verdict.`
-    : `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief. Write a brief that holds everything a call needs, the branch to check included, and decide the stage once you have read their answers.`;
+    ? `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief, then a judge call that reads every answer. Pass branch to start_calls for a worker checkout. Give the judge the evidence it can inspect, then decide the stage after reading its verdict.`
+    : `This stage of #${task.number} is one-shot: start_calls runs it as ${calls} of your plan on your brief. Pass branch to start_calls for a worker checkout, then decide the stage after reading the answers.`;
 }
 
 const VERDICT_ASK = 'End your answer with one line of its own: VERDICT: {"pass": true or false, "reason": "<one sentence>"}';
@@ -81,9 +81,10 @@ const VERDICT_ASK = 'End your answer with one line of its own: VERDICT: {"pass":
 export function callPrompt(c: Pick<Call, 'brief' | 'input' | 'wantsVerdict'>, repo: Pick<Repo, 'url' | 'branch'> | null): string {
   const parts = [
     'You are a one-shot worker: you get one brief, do it in this run and answer once. Nobody answers questions while you work, and nothing of this run is kept for a next one, so decide on your own and say in your answer what you assumed.',
-    ...(repo ? [`Your folder holds a fresh clone of ${repo.url} at branch ${repo.branch}, in ./${repoFolder(repo.url)}. Commit and push there only when the brief asks for it.`] : []),
+    OUTSIDE_MATERIAL,
+    ...(repo ? [`Your folder holds a fresh clone of ${repo.url} at branch ${repo.branch}, in ./${repoFolder(repo.url)}. Keep the input branch intact. If the brief calls for a push, use a separate branch assigned to this call.`] : []),
     `Brief:\n${c.brief}`,
-    ...(c.input ? [`Input of this call:\n${c.input}`] : []),
+    ...(c.input ? [`Input of this call:\n${quote(c.input)}`] : []),
     ...(c.wantsVerdict ? [VERDICT_ASK] : []),
   ];
   return parts.join('\n\n');
@@ -91,10 +92,11 @@ export function callPrompt(c: Pick<Call, 'brief' | 'input' | 'wantsVerdict'>, re
 
 /* What the judge of a batch is sent: the brief of the others, its own, and every answer. */
 function judgePrompt(judge: string, brief: string, done: { call: Call; job: Job }[]): string {
-  const answers = done.map(({ call, job }) => `Call ${call.number}${call.input ? ` (input: ${call.input})` : ''} ${job.status === 'done' ? 'answered' : 'failed'}:\n${quote(answerOf(job) || '(nothing)')}`);
+  const answers = done.map(({ call, job }) => `Call ${call.number} ${job.status === 'done' ? 'answered' : 'failed'}:\n${call.input ? `Its input:\n${quote(call.input)}\nIts result:\n` : ''}${quote(answerOf(job) || '(nothing)')}`);
   return [
     `You are the judge of ${done.length} one-shot ${done.length === 1 ? 'call' : 'calls'} that ran on one brief. Read their answers and decide; nobody answers questions while you work.`,
-    `Their brief:\n${brief}`,
+    OUTSIDE_MATERIAL,
+    `Their brief, for context:\n${quote(brief)}`,
     `Your brief:\n${judge}`,
     ...answers,
     VERDICT_ASK,

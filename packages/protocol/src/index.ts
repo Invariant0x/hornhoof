@@ -3,6 +3,7 @@ export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
 export * from './questions.js';
+export { OUTSIDE_MATERIAL } from './model-instructions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
