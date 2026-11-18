@@ -131,6 +131,16 @@ describe('the phone adb boundary', () => {
     expect([...text].slice(10).join('')).toBe('e');
     expect(await adb.type('R58M123', text, new AbortController().signal, () => false)).toEqual({ next: 5 });
     expect([...text].slice(5).join('')).toBe('c\r\nd\ne');
+    calls.length = 0;
+    expect(await adb.type('R58M123', 'a\nb\n', new AbortController().signal, () => true)).toEqual({ next: 4 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('says the keyboard app is unavailable when the phone lacks it and the node has none to install', async () => {
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
+    expect(await adb.type('R58M123', 'Привет', new AbortController().signal, () => true)).toEqual({ next: 0, failure: 'phone_keyboard_unavailable' });
+    expect(calls.map(c => c.args.join(' '))).toEqual(['-s R58M123 shell pm path com.android.adbkeyboard']);
   });
 
   it('reports where the rest starts when a typing call fails midway', async () => {
@@ -146,6 +156,13 @@ describe('the phone adb boundary', () => {
 
   it('counts the positions of a text in code points of the text as sent', () => {
     expect(phoneTextSteps('ab\r\n\r\n👋🏽c\rd').map(step => step.end)).toEqual([2, 6, 9, 10, 11]);
+    expect(phoneTextSteps('\n'.repeat(48) + 'x'.repeat(48) + '\n' + 'y'.repeat(49))).toEqual([
+      { kind: 'enter', count: 48, end: 48 },
+      { kind: 'text', text: 'x'.repeat(48), end: 96 },
+      { kind: 'enter', count: 1, end: 97 },
+      { kind: 'text', text: 'y'.repeat(48), end: 145 },
+      { kind: 'text', text: 'y', end: 146 },
+    ]);
   });
 
   it('presses Back and Home as Android key events, as the phone\'s own buttons do', async () => {

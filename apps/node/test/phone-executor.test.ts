@@ -23,22 +23,25 @@ const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarch
 const editableField = (value: string) => tree('12:00').replace('••••••••', value).replace('password="true"', 'password="false"');
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number } = {}) {
+function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
   let ticks = 0;
+  let unplugged = false;
   const adb = new PhoneAdb(async call => {
     calls.push(call);
     const a = call.args.join(' ');
     if (a === `connect ${serial}`) return Buffer.from(`connected to ${serial}\n`);
-    if (a === 'devices -l') return Buffer.from(`List of devices attached\n${serial} device model:Pixel_8 transport_id:1\n`);
+    if (a === 'devices -l') return Buffer.from(`List of devices attached\n${unplugged ? '' : `${serial} device model:Pixel_8 transport_id:1\n`}`);
     if (a.endsWith('getprop ro.serialno')) return Buffer.from('R58MIDENTITY\n');
     if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
     if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
     if (input.failure && call.input?.includes('input text')) throw new Error('ADB echoed a private value');
     if (input.failOn && call.input?.includes(input.failOn)) throw new Error('ADB echoed a private value');
+    if (input.revokeOnType && call.input?.includes('input text')) void phones.handle({ type: 'phone.revoke', requestId: id(9), sessionId: SESSION, generation: 1, binding: grant.binding });
+    if (input.unplugOnType && call.input?.includes('input text')) { unplugged = true; throw new Error('device not found'); }
     // Each typing call takes the phone this long on the test's own clock.
     if (input.typingMs && /input text|KEYCODE_ENTER/.test(call.input ?? '')) vi.setSystemTime(Date.now() + input.typingMs);
     if (a.endsWith('screencap -p')) return png;
@@ -184,13 +187,14 @@ describe('phone messages on the execution node', () => {
   const field = (text: string) => editableField(text.replaceAll('\n', '&#10;'));
 
   it('starts no new typing call once the time is used and says where the rest starts, keeping the session', async () => {
-    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [field(''), field('line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n')], typingMs: 4000 });
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [field(''), field('line 0\nline 1\nline 2\nline 3\n')], typingMs: 5000 });
     await p.open();
     await p.act(6, { kind: 'text', text: lines });
-    expect(p.reply(6)).toMatchObject({ status: 'partial', typing: { kind: 'typing_partial', next: 42 } });
-    expect(p.reply(6)?.typing).toEqual({ kind: 'typing_partial', next: 42 });
-    expect(p.shells()).toHaveLength(3);
-    expect(lines.slice(42)).toBe('line 6\nline 7');
+    // Two calls use the 10 seconds; the third would start with no time left.
+    expect(p.reply(6)).toMatchObject({ status: 'partial', typing: { kind: 'typing_partial', next: 28 } });
+    expect(p.reply(6)?.typing).toEqual({ kind: 'typing_partial', next: 28 });
+    expect(p.shells()).toHaveLength(2);
+    expect(lines.slice(28)).toBe('line 4\nline 5\nline 6\nline 7');
     await p.act(7, { kind: 'capture' });
     expect(p.reply(7)?.status).toBe('ok');
     p.phones.close();
@@ -203,6 +207,17 @@ describe('phone messages on the execution node', () => {
     expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', reason: 'phone_adb_failed', next: 14, check: { kind: 'typing_mismatch' } } });
     await p.act(7, { kind: 'capture' });
     expect(p.reply(7)?.status).toBe('ok');
+    p.phones.close();
+  });
+
+  it.each([
+    ['the owner takes the phone back', { revokeOnType: true }],
+    ['the phone is unplugged', { unplugOnType: true }],
+  ])('ends a text action with session_gone when %s while it types', async (_, ending) => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', ending);
+    await p.open();
+    await p.act(6, { kind: 'text', text: 'hello' });
+    expect(p.reply(6)).toEqual({ type: 'phone.reply', requestId: id(6), status: 'session_gone' });
     p.phones.close();
   });
 
