@@ -290,11 +290,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const denied = !company && ['improvements', 'inbox', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const windows = useAgentWindows(null);
-  /* A window's note leads to a machine's card: the window steps aside to its strip, so the card is not under it. */
-  const openMachine = (id: string) => {
-    windows.hide();
-    navigate({ kind: 'machines', id });
-  };
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
@@ -416,7 +411,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
         {company && <CompanyPage tab={tab} improvements={{ improvements, failure: improvementsFailure, load: loadImprovements }} inbox={inbox} onTask={openTask} onHome={goHome} />}
       </main>
-      <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} onOpenMachine={openMachine} />
+      <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
       <LightNotice />
       {contact && <FirstContact onClose={closeContact} />}
       {taskId && card === 'task' && (

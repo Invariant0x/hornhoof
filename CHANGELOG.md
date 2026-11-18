@@ -24,6 +24,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
 - Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
 - On phones, task details stack under the title and long text wraps within the list.
+### Fixed
+
+- Removed computer access details from agent windows, including the orchestrator's window.
 
 ## [0.34.0] - 2026-11-18
 
