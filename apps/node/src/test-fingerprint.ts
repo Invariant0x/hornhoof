@@ -138,13 +138,17 @@ class Tree {
     }
     return undefined;
   }
-  /* A built path leads to what it is built from. */
+  /* A built path leads to what it is built from. A built file of code comes from the source of its name in src beside the built
+     folder, as TypeScript builds src into dist, when the build reads that source; the built folder, and a built file of no such
+     source, come from all the build reads. */
   builtFrom(path: string): string[] | undefined {
     const artifact = this.artifacts.find(item => isInside(path, item.path));
     if (!artifact) return undefined;
     let found = this.built.get(artifact.path);
     if (!found) { found = this.matching(artifact.inputs); this.built.set(artifact.path, found); }
-    return found;
+    const named = path !== artifact.path && SOURCE_OF_BUILT[posix.extname(path)];
+    const source = named ? this.resolve(posix.join(posix.dirname(artifact.path), 'src', posix.relative(artifact.path, path))) : undefined;
+    return source && found.includes(source) ? [source] : found;
   }
 }
 
