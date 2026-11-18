@@ -25,6 +25,8 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
       wait = null;
       return route.fulfill({ status: 201, json: { task: detail() } });
     });
+    /* The page's clock stands inside the wait, so the wait is still running: past its end the card says time ran out. */
+    await page.clock.setFixedTime(new Date('2026-11-04T16:10:00Z'));
     await page.goto('/');
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
     await openTaskCard(page, 1);
