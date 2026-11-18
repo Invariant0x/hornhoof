@@ -14,7 +14,8 @@ import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContex
 import { EnvironmentFailure, MANIFEST, buildSharedTestInvocation, buildTestInvocation, sharedVitestCommand, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies, type SharedMember } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
-import { machineLoad, WORKER_BYTES } from './load.js';
+import { machineLoad } from './load.js';
+import { namedWorkers, partShare, vitestWorkers } from './vitest-workers.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
@@ -384,15 +385,15 @@ export function partFolders(root: string, msg: TestRun): { own: string; user: st
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
-/* Vitest's workers: the cores and memory the machine has free when the part starts, one core left for Vitest itself,
-   and never fewer than half the cores. */
-function vitestWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>): string {
-  const preset = (options.env ?? process.env).VITEST_MAX_WORKERS?.trim();
+/* Vitest's workers: a count the machine names, or a share of the cores it names for Vitest, as 50%, else as many as the part's
+   share of the machine takes when it starts. */
+function partWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>): string {
+  const env = options.env ?? process.env, named = namedWorkers(env), preset = env.VITEST_MAX_WORKERS?.trim();
+  if (named !== null) return String(named);
   if (preset) return preset;
   const machine = options.load === undefined || options.memFree === undefined ? machineLoad() : null;
   const cpus = options.cpus ?? availableParallelism(), load = options.load ?? machine!.load, memFree = options.memFree ?? machine!.memFree;
-  const free = Math.min(cpus - 1, Math.floor(cpus - load), Math.floor(memFree / WORKER_BYTES) - 1);
-  return String(Math.max(1, Math.floor(cpus / 2), free));
+  return String(vitestWorkers(partShare({ cpus, load, memFree })));
 }
 
 function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: string): NodeJS.ProcessEnv {
@@ -487,7 +488,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = { ...commandEnv(base, msg, inbox, outbox, vitestWorkers(options)), ...harnessEnv };
+      const env = { ...commandEnv(base, msg, inbox, outbox, partWorkers(options)), ...harnessEnv };
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);
@@ -938,7 +939,7 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     await timedPhase(state.receipt, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
-    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options) }));
+    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: partWorkers(state.options) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
     collectProductResults(execution, state, msg.kept ?? []);

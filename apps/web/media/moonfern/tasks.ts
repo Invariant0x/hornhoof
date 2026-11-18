@@ -150,7 +150,7 @@ function line(s: TaskSeed, idx: number, turn: number | null, parentId: string | 
   const gateCount = dept === 'dev' ? 3 : 0;
   const updatedAt = isoMinutes(-45 + (idx % 30));
   const since = status === 'waiting' ? isoMinutes(-(40 + (idx % 5) * 9)) : isoMinutes(-(25 + (idx % 7) * 23));
-  const waiting = status === 'waiting' ? [{ who: { kind: 'person' as const, ...(dept === 'dsn' ? LEO : MAYA) }, since }] : [];
+  const waiting = status === 'waiting' ? [{ kind: 'person' as const, reason: null, who: { kind: 'person' as const, ...(dept === 'dsn' ? LEO : MAYA) }, since }] : [];
   const onWay = dept === 'dev' && gateCount > 0;
   return {
     echelons: routeAt(stage, gateCount),

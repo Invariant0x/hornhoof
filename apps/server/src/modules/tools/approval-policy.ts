@@ -1,24 +1,26 @@
 import { WAIT_SOURCE_KINDS, WaitPlan } from '@hornhoof/protocol/waits';
-import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey, ruleOf } from '@hornhoof/protocol';
+import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { orchestratorHeaders } from '../../auth/internal.js';
+import { orchestratorHeaders, orchestratorJobHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
+import { agents, departments, jobs, requests } from '../../db/schema.js';
 import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
-import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
+import { approvalRuleFor, departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
 import { departmentWaitPolicies } from '../departments/wait-policy-routes.js';
 import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { isAutonomousReleaseEnabled, tryAutonomousCommitApproval } from '../tasks/autonomous-release.js';
+import { commitApprovalRequired } from '../tasks/commit-approval.js';
 import { decisionPerson } from '../tasks/decisions.js';
 import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
+import { refusePaused } from '../tasks/pause.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { openTurnOf } from '../tasks/turn-department.js';
 import { taskByRef } from '../tasks/views.js';
@@ -62,13 +64,6 @@ type Asked = {
   plan?: WaitPlan | undefined;
 };
 
-/* The rule of a channel of the task's department; a task of no department goes by the rule nobody set. */
-async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChannel) {
-  if (!task.departmentId) return ruleOf(undefined, channel);
-  const [stored] = await ctx.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, task.departmentId), eq(approvalPolicies.channel, channel)));
-  return ruleOf(stored, channel);
-}
-
 const limitWords = (rule: { limit: number; unit?: string | undefined }) => `${rule.limit}${rule.unit ? ` ${rule.unit}` : ''}`;
 
 /* The task, when this agent is the one who asks on it. */
@@ -101,8 +96,7 @@ async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'q
 
 /* Why the policy lets this work go without a person, when it does. */
 async function letGoBecause(ctx: Pick<Ctx, 'db'>, job: ToolJob, task: Task, asked: Asked): Promise<string | null> {
-  if (asked.channel === 'commit') return null;
-  const rule = await ruleFor(ctx, task, asked.channel);
+  const rule = await approvalRuleFor(ctx.db, task.departmentId, asked.channel);
   const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(ctx.db, job.companyId, task.departmentId, asked.channel, asked.kind));
   if (approvalNeeded(rule, { amount: asked.amount ?? null, known })) return null;
   if (rule.mode === 'none') return `the department asks no approval for ${asked.channel}`;
@@ -121,29 +115,37 @@ function approvalCard(asked: Asked, kind: string, topic: 'task' | 'release', tex
   };
 }
 
-async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, kind: string, commit: string, asked: Asked) {
+async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
   if (carriesFile(asked.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  if (!(await commitApprovalRequired(ctx.db, job.companyId, task.departmentId))) {
+    refusePaused(task);
+    return proceedWithoutApproval(ctx, job, task, asked, 'commit', 'the department asks no approval for commit');
+  }
   const auto = await tryAutonomousCommitApproval(ctx, task, job.agentId, commit, asked.text);
   if (auto) {
     await wakeAll(ctx, auto.moved.wakes);
     return say(auto.text);
   }
   const said = proofLine(await commitProof(ctx.db, task, commit));
-  await askPerson(ctx, job, task, approvalCard(asked, kind, 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}`, commit));
+  await askPerson(ctx, job, task, approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}`, commit));
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it. ${said}`);
 }
 
-/* Asks under the policy. Work the policy lets go leaves a line in the task's log, so people can see what went without them. */
+/* Work the policy lets go leaves a line in the task's log. */
+async function proceedWithoutApproval(ctx: Ctx, job: ToolJob, task: Task, asked: Asked, kind: string, why: string) {
+  await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.commit ? `${asked.commit}. ` : ''}${asked.text}`)).wakes);
+  return say(`No approval needed: ${why}. Go on with the work.`);
+}
+
+
 async function requestApproval(ctx: Ctx, job: ToolJob, ref: number | string, asked: Asked) {
   if (asked.commit && asked.channel !== 'commit') throw refuse(400, 'task_invalid', 'Only channel commit names a commit SHA.');
   const task = await heldTask(ctx, job, ref);
   const kind = kindKey(asked.kind);
-  if (asked.commit) return requestCommitApproval(ctx, job, task, kind, asked.commit, asked);
+  if (asked.commit) return requestCommitApproval(ctx, job, task, asked.commit, asked);
   const why = await letGoBecause(ctx, job, task, asked);
-  if (why) {
-    await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.text}`)).wakes);
-    return say(`No approval needed: ${why}. Go on with the work.`);
-  }
+  if (why) return proceedWithoutApproval(ctx, job, task, asked, kind, why);
+  if (asked.channel === 'commit') throw refuse(400, 'task_invalid', 'Commit approval needs the full 40-character commit.');
   await askPerson(ctx, job, task, approvalCard(asked, kind, 'task', asked.text));
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
 }
@@ -207,11 +209,10 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'request_approval',
     {
       description:
-        'Before work that may need a person\'s approval under the rules of the task\'s department (a spend, or a message, price or publication its department chose to approve), ask here. It follows the policy of the task\'s department: what goes out asks nobody unless the department set a rule for it. ' +
-        'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
+        'Follows the approval policy of the task\'s department. A channel with no rule needs no approval. When the policy lets the work go, the task log records it. Otherwise the department\'s owner (with none, the CEO) is asked and the task waits for their answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
-        'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
-        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green whole run of its release on main or a release-X.Y.Z branch that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
+        'amount: how much this work is in the limit\'s unit. text: what you want to do. link: an https page where it can be seen. ' +
+        'For an exact commit to main, send its full SHA. Exact commits share one kind and have no amount. If autonomous release is on, it can approve a main integration with a whole green run, an independent PASS verdict and a verified fast-forward path. Otherwise the commit rule says whether to ask a person.',
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,
@@ -254,17 +255,21 @@ type Change = (url: string, payload: object) => Promise<ReturnType<typeof say>>;
 /* A change calls the screen's route under the input lock with the agent's current principal: a head's department owner,
    otherwise the CEO, and the orchestrator's company principal. */
 function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
+  const send = async (url: string, payload: object, headers: Record<string, string>) => {
+    const res = await app.inject({ method: 'PUT', url, headers, payload });
+    if (res.statusCode < 400) return say(res.body);
+    return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
+  };
+  if (job.agentKind === 'orchestrator') return (url, payload) => send(url, payload, orchestratorJobHeaders(job));
   return (url, payload) =>
     withInputLock(ctx, job.agentId, async () => {
       const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
       if (!personId) return say(NO_PERSON, true);
-      const res = await app.inject({ method: 'PUT', url, headers: orchestratorHeaders(personId, job.agentId), payload });
-      if (res.statusCode < 400) return say(res.body);
-      return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
+      return send(url, payload, orchestratorHeaders(personId, job.agentId));
     });
 }
 
-const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
+const ORCHESTRATOR_WHO = 'In any turn as the company owner.';
 const HEAD_WHO = 'Only for your own department, in any turn with its named owner\'s rights, or the CEO\'s when it has none. No fresh human message is needed. Follow its rules and notebook.';
 
 /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */
@@ -280,6 +285,15 @@ function registerPolicyTools(server: McpServer, change: Change, who: string, min
     },
     ({ department, channel, mode, limit, unit }) =>
       place(department, `/api/departments/${department}/approval-policy/${channel}`, { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) }),
+  );
+
+  server.registerTool(
+    'set_autonomous_release',
+    {
+      description: 'Turns the department\'s use of proof to satisfy commit approvals on or off. ' + who,
+      inputSchema: { department: Department, enabled: z.boolean() },
+    },
+    ({ department, enabled }) => place(department, `/api/departments/${department}/approval-policy/autonomous-release`, { enabled }),
   );
 
   server.registerTool(
@@ -301,7 +315,7 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
   server.registerTool(
     'set_department_owner',
     {
-      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Only in a turn that answers the CEO or the CEO delegate.',
+      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Available in any turn.',
       inputSchema: { department: Department, person: z.uuid().nullable() },
     },
     ({ department, person }) => change(`/api/departments/${department}/owner`, { personId: person }),
@@ -310,7 +324,7 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
 }
 
 /* A head's own: the same tools for its own department only, with no word of the orchestrator or the CEO. The route still lets
-   only a person who runs the department, or the CEO, change them, and commits always ask. */
+   the people who run the department, the CEO and the CEO delegate change them. */
 export function registerHeadPolicyTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
   registerPolicyTools(server, changeAsPerson(ctx, app, job), HEAD_WHO, department => job.departmentId !== null && department === job.departmentId);
 }

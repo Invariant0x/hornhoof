@@ -84,13 +84,18 @@ describe('a machine with agents that has gone away', () => {
     expect((await c.db.select().from(waitNotices)).length).toBe(before.notices);
   });
 
-  it('counts for its people and shows to nobody else, though they see the whole company', async () => {
+  it('shows a machine failure to its people without counting it as a person wait', async () => {
     const c = await world();
     const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
     await drops(c, node, after(0));
     at(after(5 * MINUTE));
-    expect((await waiting(c, c.tokens.ceo)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.ceo]: 1, [c.ids.bob]: 1 } });
-    expect((await waiting(c, c.tokens.bob)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.bob]: 1 } });
+    for (const token of [c.tokens.ceo, c.tokens.bob]) {
+      const view = await waiting(c, token);
+      expect(view.machinesAway).toMatchObject([{ hostname: 'Air', back: null }]);
+      expect(view.counts).toMatchObject({ total: 0, byPerson: {} });
+      expect(view.counts.byPerson[c.ids.bob]).toBeUndefined();
+      expect(view.counts.byPerson[c.ids.ceo]).toBeUndefined();
+    }
     for (const token of [c.tokens.wes, c.tokens.clara, c.tokens.ann, c.tokens.olga]) {
       expect(await cardsOf(c, token)).toEqual([]);
       expect((await waiting(c, token)).counts.total).toBe(0);
@@ -103,7 +108,6 @@ describe('a machine with agents that has gone away', () => {
     await drops(c, node, after(0));
     at(after(5 * MINUTE));
     expect(await cardsOf(c, c.tokens.ceo)).toHaveLength(1);
-    expect((await waiting(c, c.tokens.ceo)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.ceo]: 1 } });
   });
 
   it('goes to the CEO with no owner named when its owner has left', async () => {
@@ -145,7 +149,7 @@ describe('a machine with agents that has gone away', () => {
     const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
     await drops(c, node, after(0));
     at(after(30 * MINUTE));
-    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(1);
+    expect((await cardsOf(c, c.tokens.ceo)).filter(card => !card.back)).toHaveLength(1);
 
     await returns(c, machine, node, after(30 * MINUTE));
     expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(0).toISOString(), back: after(30 * MINUTE).toISOString() }]);
@@ -154,7 +158,7 @@ describe('a machine with agents that has gone away', () => {
     await drops(c, node, after(40 * MINUTE));
     at(after(45 * MINUTE));
     expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(40 * MINUTE).toISOString(), back: null }]);
-    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(1);
+    expect((await cardsOf(c, c.tokens.ceo)).filter(card => !card.back)).toHaveLength(1);
   });
 
   it('forgets the line about its return after a day', async () => {

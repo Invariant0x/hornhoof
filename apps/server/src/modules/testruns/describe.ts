@@ -1,10 +1,11 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type ServerMessage, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
+import { hasCode } from '../../db/errors.js';
 import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
@@ -13,7 +14,7 @@ import { refuse } from '../tasks/engine.js';
 import { TEST_MEMORY_GB } from '../departments/repository.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
-import { planProductParts, type ProductPlan } from './plan-product.js';
+import { partSpread, planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
@@ -34,8 +35,10 @@ export function testRunMode(input: ModeInput, kind: RunKind): TestRunMode {
   return { mode: 'product', ...(input.suite === undefined ? {} : { suite: input.suite }) };
 }
 
-/* The description request each run was last sent, by run id, so one request goes out once per node connection. */
-const sent = new WeakMap<Ctx, Map<string, string>>();
+/* An unanswered request is replayed on reconnect or after a minute, under the same id. */
+const DESCRIPTION_RETRY_MS = 60_000;
+type DescriptionAttempt = { requestId: string; at: number };
+const sent = new WeakMap<Ctx, Map<string, DescriptionAttempt>>();
 export function repositoryScope(companyId: string, ownerId: string, url: string): RepositoryScope {
   return { companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) };
 }
@@ -101,13 +104,12 @@ function planningCosts(history: PlanningHistory | null | undefined) {
     ...(history?.preparationMs ? { preparationMs: history.preparationMs } : {}) };
 }
 /* The full run checks a release, and a part of it that runs into its limit sends all of it again: unless the run asked for a limit, each
-   part has an hour, and the run goes out in two to four parts that each fit in it. */
+   part has an hour. */
 export const FULL_RUN_MINUTES = 60;
-const FULL_RUN_PARTS = { min: 2, max: 4 };
 function partLimitMs(run: Run, mode: RunMode): number {
   return mode?.mode === 'full' && run.environmentRequest?.minutes === undefined ? Math.max(run.timeoutMs, FULL_RUN_MINUTES * 60_000) : run.timeoutMs;
 }
-const spreadFor = (run: Run, mode: RunMode) => mode?.mode === 'full' ? { spread: { ...FULL_RUN_PARTS, ceilingMs: run.timeoutMs } } : {};
+const spreadFor = (run: Run, mode: RunMode) => partSpread(mode?.mode === 'full', run.timeoutMs);
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision, mode: RunMode): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
@@ -122,6 +124,26 @@ async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, 
 }
 const pendingDescription = (id: string) => and(eq(testRuns.id, id), eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot));
 const requestMatches = (id: string, requestId: string) => and(pendingDescription(id), sql`${testRuns.environmentRequest}->>'requestId' = ${requestId}`);
+class DescriptionMismatch extends Error {}
+
+/* Only validating the node's evidence can call it incompatible. Planning and storage failures belong to the server. */
+async function checkedSnapshot(run: Run, value: EnvironmentDescription): Promise<EnvironmentSnapshot> {
+  try {
+    const description = await validateEnvironmentDescription(value);
+    if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(run.environmentRequest!.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
+    const snapshot = snapshotFor(description);
+    requestedUnits(snapshot, run.environmentRequest!.suite);
+    return snapshot;
+  } catch (cause) {
+    throw new DescriptionMismatch('The node returned invalid or incompatible pinned environment evidence.', { cause });
+  }
+}
+
+function descriptionError(error: unknown): EnvironmentProblem {
+  if (error instanceof DescriptionMismatch) return { code: 'description_mismatch', detail: error.message };
+  if (hasCode(error, '25P04')) return { code: 'transaction_timeout', detail: 'The database ended the environment description lookup or save at its 5 s transaction limit.' };
+  return { code: 'save_failed', detail: 'The server could not prepare or save the environment description.' };
+}
 async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<Run | undefined> {
   const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest}->>'requestId' = ${message.requestId}`));
   const request = run?.environmentRequest, assigned = request && requestNode(ctx, request);
@@ -141,7 +163,7 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
-    if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
+    if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new DescriptionMismatch('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
     await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache, timeoutMs }).where(eq(testRuns.id, run.id));
     await addParts(tx, run, leaves);
@@ -158,9 +180,7 @@ function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[]): Promise<EnvironmentProblem | null> {
-  const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
-  if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const snapshot = snapshotFor(description);
+  const request = run.environmentRequest!, snapshot = await checkedSnapshot(run, value), { description } = snapshot;
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
   const problem = unrunnable(snapshot);
   if (problem) return problem;
@@ -179,7 +199,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
   const problem = await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [])
-    .catch((): EnvironmentProblem => ({ code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }));
+    .catch(descriptionError);
   if (problem) await descriptionProblem(ctx, run, message, problem);
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {
@@ -226,11 +246,20 @@ async function dispatchDescription(ctx: Ctx, run: Run, open: Place[], target: Ta
   if (!assigned || !ctx.hub.isOnline(assigned)) request = await assignDescription(ctx, { ...run, environmentRequest: request }, open, target);
   if (request) publishDescription(ctx, run, request, target?.repo ?? null);
 }
+function sendDescription(ctx: Ctx, node: NodeIdentity, message: Extract<ServerMessage, { type: 'tests.describe' }>, failed: () => void): void {
+  try {
+    if (!ctx.hub.send(node, message, error => { if (error) failed(); })) failed();
+  } catch { failed(); }
+}
 function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest, repo: NonNullable<Target>['repo']): void {
   if (!request.requestId || !repo) return;
-  const node = requestNode(ctx, request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
-  if (delivered.get(run.id) === request.requestId) return;
-  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
+  const node = requestNode(ctx, request)!, attempts = sent.get(ctx) ?? new Map<string, DescriptionAttempt>(); sent.set(ctx, attempts);
+  const previous = attempts.get(run.id), now = Date.now();
+  if (previous?.requestId === request.requestId && now - previous.at < DESCRIPTION_RETRY_MS) return;
+  const attempt = { requestId: request.requestId, at: now };
+  attempts.set(run.id, attempt);
+  const failed = () => { if (attempts.get(run.id) === attempt) attempts.delete(run.id); };
+  sendDescription(ctx, node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } }, failed);
 }
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {

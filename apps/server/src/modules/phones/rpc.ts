@@ -8,14 +8,15 @@ import { idOnly } from '../../db/selections.js';
 
 type Request = Exclude<PhoneServerMessage, { type: 'phone.renew' }>;
 type Pending = { node: string; done(reply: PhoneReply): void; timer: ReturnType<typeof setTimeout> };
-type State = { capable: Map<string, NodeIdentity>; pending: Map<string, Pending> };
+type State = { capable: Map<string, NodeIdentity>; baseline: Set<string>; pending: Map<string, Pending> };
 const states = new WeakMap<Ctx, State>();
 function state(ctx: Ctx): State {
   let found = states.get(ctx);
-  if (!found) states.set(ctx, (found = { capable: new Map(), pending: new Map() }));
+  if (!found) states.set(ctx, (found = { capable: new Map(), baseline: new Set(), pending: new Map() }));
   return found;
 }
 export const phoneCapable = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isOnline(node) && state(ctx).capable.has(keyOf(node));
+export const phoneBaselineCapable = (ctx: Ctx, node: NodeIdentity): boolean => phoneCapable(ctx, node) && state(ctx).baseline.has(keyOf(node));
 
 export async function phoneRequest(ctx: Ctx, node: NodeIdentity, message: Request): Promise<PhoneReply> {
   const failed = (): PhoneReply => ({ type: 'phone.reply', requestId: message.requestId, status: 'failed' });
@@ -38,8 +39,12 @@ export async function phoneRequest(ctx: Ctx, node: NodeIdentity, message: Reques
 
 export function phoneNodeMessage(ctx: Ctx, node: NodeIdentity, message: NodeMessage): boolean {
   if (message.type === 'hello') {
-    if (message.phones) state(ctx).capable.set(keyOf(node), node);
-    else state(ctx).capable.delete(keyOf(node));
+    const phones = state(ctx);
+    const key = keyOf(node);
+    if (message.phones) phones.capable.set(key, node);
+    else phones.capable.delete(key);
+    if (message.phones && message.phoneBaseline) phones.baseline.add(key);
+    else phones.baseline.delete(key);
     return false;
   }
   if (message.type !== 'phone.reply') return false;
@@ -55,6 +60,7 @@ export function phoneNodeMessage(ctx: Ctx, node: NodeIdentity, message: NodeMess
 export function phoneNodeGone(ctx: Ctx, node: NodeIdentity): void {
   if (ctx.hub.isOnline(node)) return;
   state(ctx).capable.delete(keyOf(node));
+  state(ctx).baseline.delete(keyOf(node));
   for (const [id, pending] of state(ctx).pending) if (pending.node === keyOf(node)) {
     clearTimeout(pending.timer);
     state(ctx).pending.delete(id);
@@ -64,6 +70,7 @@ export function phoneNodeGone(ctx: Ctx, node: NodeIdentity): void {
 
 export function closePhoneRequests(ctx: Ctx): void {
   state(ctx).capable.clear();
+  state(ctx).baseline.clear();
   for (const [id, pending] of state(ctx).pending) { clearTimeout(pending.timer); pending.done({ type: 'phone.reply', requestId: id, status: 'failed' }); }
   state(ctx).pending.clear();
 }

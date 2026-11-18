@@ -18,18 +18,18 @@ prepareTemplates();
 
 const NODE_KEY = 'file-results-node-0123456789abcdef';
 const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'd'.repeat(64) }];
-const FILES = ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts'];
+const FILES = ['checks/a.test.ts', 'checks/b.test.ts', 'checks/c.test.ts'];
 const print = (name: string) => name.repeat(64).slice(0, 64);
-const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
+const PRINTS = { 'checks/a.test.ts': print('a'), 'checks/b.test.ts': print('b'), 'checks/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
 /* What a runner said of a part where a failed and b and c passed. */
-const FAILED_A = [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' as const }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' as const }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' as const }];
+const FAILED_A = [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' as const }, { suiteId: 'unit', file: 'checks/b.test.ts', status: 'passed' as const }, { suiteId: 'unit', file: 'checks/c.test.ts', status: 'passed' as const }];
 
 const manifest = (preparation = false, full = true) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-  suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
+  suites: [{ id: 'unit', root: '.', files: ['checks/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
   execution: { version: 2, ...(full ? { fullRun: { replaces: 'final', profile: 'full' } } : {}), ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
@@ -126,11 +126,11 @@ describe('reusing green test results', () => {
     const run = await f.runOf(first);
     expect(run.environmentSnapshot!.profile).toBe('full');
     expect(run.fileCache).toMatchObject({ mode: 'full', release: 'turn-3', reused: 0 });
-    await f.finish(first, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
+    await f.finish(first, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'checks/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'checks/c.test.ts', status: 'passed' }] });
     await until(async () => (await f.told()).includes('Test run 1 failed'));
     expect(await f.told()).toContain('This was the first run of release turn-3: every test file ran, nothing was reused.');
-    const second = await f.start({}, fingerprints({ 'test/c.test.ts': print('d') }));
-    expect(await f.ranFiles(second)).toEqual(['test/a.test.ts', 'test/c.test.ts']);
+    const second = await f.start({}, fingerprints({ 'checks/c.test.ts': print('d') }));
+    expect(await f.ranFiles(second)).toEqual(['checks/a.test.ts', 'checks/c.test.ts']);
     expect((await f.runOf(second)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: 1 });
   });
 
@@ -221,24 +221,24 @@ describe('reusing green test results', () => {
   it('runs a file again once its fingerprint changed, and its old green result cannot stand for it', async () => {
     const f = await fixture();
     await f.finish(await f.start({}));
-    const changed = fingerprints({ 'test/b.test.ts': print('e') });
+    const changed = fingerprints({ 'checks/b.test.ts': print('e') });
     const next = await f.start({}, changed);
-    expect(await f.ranFiles(next)).toEqual(['test/b.test.ts']);
-    await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'test/b.test.ts', status: 'failed' }] });
+    expect(await f.ranFiles(next)).toEqual(['checks/b.test.ts']);
+    await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'checks/b.test.ts', status: 'failed' }] });
     expect(await f.runOf(next)).toMatchObject({ status: 'failed' });
-    expect((await f.greenRows()).filter(row => row.file === 'test/b.test.ts').map(row => row.fingerprint)).toEqual([print('b')]);
-    expect(await f.ranFiles(await f.start({}, changed))).toEqual(['test/b.test.ts']);
+    expect((await f.greenRows()).filter(row => row.file === 'checks/b.test.ts').map(row => row.fingerprint)).toEqual([print('b')]);
+    expect(await f.ranFiles(await f.start({}, changed))).toEqual(['checks/b.test.ts']);
   });
 
   it('runs only the file whose dependency changed', async () => {
     const f = await fixture();
     const first = await f.start({});
     await f.finish(first);
-    const second = await f.start({}, fingerprints({ 'test/b.test.ts': print('d') }));
-    expect(await f.ranFiles(second)).toEqual(['test/b.test.ts']);
+    const second = await f.start({}, fingerprints({ 'checks/b.test.ts': print('d') }));
+    expect(await f.ranFiles(second)).toEqual(['checks/b.test.ts']);
     expect((await f.runOf(second)).fileCache).toMatchObject({ mode: 'cached', reused: 2 });
     await f.finish(second);
-    expect((await f.greenRows()).filter(row => row.file === 'test/b.test.ts').map(row => row.fingerprint).sort()).toEqual([print('b'), print('d')]);
+    expect((await f.greenRows()).filter(row => row.file === 'checks/b.test.ts').map(row => row.fingerprint).sort()).toEqual([print('b'), print('d')]);
     expect((await f.runOf(second)).status).toBe('passed');
   });
 
@@ -301,14 +301,14 @@ describe('reusing green test results', () => {
     const f = await fixture();
     const one = await f.start({}), two = await f.start({});
     await f.finish(one);
-    await f.finish(two, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
-    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+    await f.finish(two, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
+    expect(await f.ranFiles(await f.start({}))).toEqual(['checks/a.test.ts']);
   });
 
   /* A whole run of a release after one that ended runs what that release failed and takes what it proved green. */
   it.each([
     ['passed', undefined, []],
-    ['failed', FAILED_A, ['test/a.test.ts']],
+    ['failed', FAILED_A, ['checks/a.test.ts']],
   ] as const)('runs again, in a second whole run of a release after one that %s, only what failed, and takes the green of its release', async (_end, files, ran) => {
     const f = await fixture();
     const first = await f.start({});
@@ -323,9 +323,9 @@ describe('reusing green test results', () => {
     const f = await fixture();
     await f.finish(await f.start({}), { ok: false, files: FAILED_A });
     /* The next release changed b and c, and passed a as it is. */
-    await f.finish(await f.start({}, fingerprints({ 'test/b.test.ts': print('e'), 'test/c.test.ts': print('f') }), 'turn-4'));
+    await f.finish(await f.start({}, fingerprints({ 'checks/b.test.ts': print('e'), 'checks/c.test.ts': print('f') }), 'turn-4'));
     const next = await f.start({});
-    expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
+    expect(await f.ranFiles(next)).toEqual(['checks/a.test.ts']);
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: 2 });
   });
 
@@ -347,11 +347,11 @@ describe('reusing green test results', () => {
     const f = await fixture();
     await f.finish(await f.start({}), { ok: false, files: FAILED_A });
     const older = await f.start({}), newer = await f.start({});
-    expect([await f.ranFiles(older), await f.ranFiles(newer)]).toEqual([['test/a.test.ts'], ['test/a.test.ts']]);
+    expect([await f.ranFiles(older), await f.ranFiles(newer)]).toEqual([['checks/a.test.ts'], ['checks/a.test.ts']]);
     await f.runBeside(newer);
-    await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
     await f.finish(older);
-    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+    expect(await f.ranFiles(await f.start({}))).toEqual(['checks/a.test.ts']);
   });
 
   it('keeps the green result of a newer run of its release when an older run passes the file after it', async () => {
@@ -359,12 +359,12 @@ describe('reusing green test results', () => {
     await f.finish(await f.start({}), { ok: false, files: FAILED_A });
     const older = await f.start({}), failing = await f.start({});
     await f.runBeside(failing);
-    await f.finish(failing, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    await f.finish(failing, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
     const passing = await f.start({});
     await f.runBeside(passing);
     await f.finish(passing);
     await f.finish(older);
-    expect((await f.greenRows()).find(row => row.file === 'test/a.test.ts')?.runId).toBe(passing);
+    expect((await f.greenRows()).find(row => row.file === 'checks/a.test.ts')?.runId).toBe(passing);
     expect(await f.ranFiles(await f.start({}))).toEqual([]);
   });
 
@@ -374,24 +374,24 @@ describe('reusing green test results', () => {
     await f.finish(await f.start({}), { ok: false, files: FAILED_A });
     const cut = await f.start({});
     await f.finish(cut);
-    expect((await f.greenRows()).find(row => row.file === 'test/a.test.ts')?.runId).toBe(cut);
+    expect((await f.greenRows()).find(row => row.file === 'checks/a.test.ts')?.runId).toBe(cut);
     /* As the run stands when it was stopped, or its preparation failed, after this part passed. */
     if (end === 'was stopped') await f.db.update(testRuns).set({ status: 'stopped' }).where(eq(testRuns.id, cut));
     else {
       await f.db.insert(testParts).values({ companyId: f.companyId, runId: cut, part: 2, status: 'failed', environmentSelection: { selection: { kind: 'prepare', version: 2, expectedCommitSha: TEST_COMMIT }, after: [] } });
       await f.db.update(testRuns).set({ status: 'failed', parts: 2 }).where(eq(testRuns.id, cut));
     }
-    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+    expect(await f.ranFiles(await f.start({}))).toEqual(['checks/a.test.ts']);
   });
 
   it('keeps no result of a file that failed and keeps those that passed beside it', async () => {
     const f = await fixture();
     const first = await f.start({});
-    await f.finish(first, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
-    expect((await f.greenRows()).map(row => row.file)).toEqual(['test/b.test.ts', 'test/c.test.ts']);
+    await f.finish(first, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'checks/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'checks/c.test.ts', status: 'passed' }] });
+    expect((await f.greenRows()).map(row => row.file)).toEqual(['checks/b.test.ts', 'checks/c.test.ts']);
     await until(async () => (await f.told()).includes('Test run 1 failed'));
-    expect(await f.told()).toContain('Failed test files: test/a.test.ts.');
-    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+    expect(await f.told()).toContain('Failed test files: checks/a.test.ts.');
+    expect(await f.ranFiles(await f.start({}))).toEqual(['checks/a.test.ts']);
   });
 
   it('keeps nothing of a part that failed without saying which file, or that checked another commit', async () => {
@@ -400,7 +400,7 @@ describe('reusing green test results', () => {
     expect(await f.greenRows()).toEqual([]);
     await f.finish(await f.start({}), { commit: 'f'.repeat(40) });
     expect(await f.greenRows()).toEqual([]);
-    await f.finish(await f.start({}), { ok: false, commit: 'f'.repeat(40), files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed' }] });
+    await f.finish(await f.start({}), { ok: false, commit: 'f'.repeat(40), files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'passed' }] });
     expect(await f.greenRows()).toEqual([]);
   });
 
@@ -408,15 +408,15 @@ describe('reusing green test results', () => {
     const f = await fixture(5);
     await f.finish(await f.start({}, undefined, 'turn-4'));
     const full = await f.start({});
-    await f.finish(full, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
+    await f.finish(full, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'checks/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'checks/c.test.ts', status: 'passed' }] });
     const run = await f.runOf(full);
-    expect(run.fileCache!.mismatches).toEqual([{ suiteId: 'unit', file: 'test/a.test.ts' }]);
+    expect(run.fileCache!.mismatches).toEqual([{ suiteId: 'unit', file: 'checks/a.test.ts' }]);
     await until(async () => (await f.told()).includes('Test run 2 failed'));
-    expect(await f.told()).toContain('Mismatch with the kept results: test/a.test.ts was green at this same fingerprint and failed now.');
-    expect((await f.greenRows()).map(row => row.file)).toEqual(['test/b.test.ts', 'test/c.test.ts']);
+    expect(await f.told()).toContain('Mismatch with the kept results: checks/a.test.ts was green at this same fingerprint and failed now.');
+    expect((await f.greenRows()).map(row => row.file)).toEqual(['checks/b.test.ts', 'checks/c.test.ts']);
     const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 2);
-    expect(shown).toMatchObject({ reuse: { mode: 'full', release: 'turn-5', mismatches: ['test/a.test.ts'], failedFiles: ['test/a.test.ts'] } });
-    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+    expect(shown).toMatchObject({ reuse: { mode: 'full', release: 'turn-5', mismatches: ['checks/a.test.ts'], failedFiles: ['checks/a.test.ts'] } });
+    expect(await f.ranFiles(await f.start({}))).toEqual(['checks/a.test.ts']);
   });
 
   it('runs everything for a node that sends no fingerprints and keeps nothing', async () => {
@@ -434,9 +434,9 @@ describe('reusing green test results', () => {
   });
 
   it('shows what a result came to, when the file runs and when it does not run again', async () => {
-    const f = await fixture(), note = '2 killed, 7 survived, 0 uncovered of 9 sites', line = `Notes on test files: test/a.test.ts: ${note}.`;
+    const f = await fixture(), note = '2 killed, 7 survived, 0 uncovered of 9 sites', line = `Notes on test files: checks/a.test.ts: ${note}.`;
     const first = await f.start({});
-    await f.finish(first, { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note }] });
+    await f.finish(first, { files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'passed', note }] });
     await until(async () => (await f.told()).includes('Test run 1 passed'));
     expect((await f.told()).split(line)).toHaveLength(2);
     const second = await f.start({});
@@ -444,12 +444,12 @@ describe('reusing green test results', () => {
     await until(async () => (await f.told()).includes('Test run 2 passed'));
     expect((await f.told()).split(line)).toHaveLength(3);
     const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 2);
-    expect(shown).toMatchObject({ reuse: { notes: [{ file: 'test/a.test.ts', note }] } });
+    expect(shown).toMatchObject({ reuse: { notes: [{ file: 'checks/a.test.ts', note }] } });
   });
 
   it('forgets what a result came to once a passing run says nothing of the file', async () => {
     const f = await fixture();
-    await f.finish(await f.start({}), { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note: 'old' }] });
+    await f.finish(await f.start({}), { files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'passed', note: 'old' }] });
     await f.finish(await f.start({}, undefined, 'turn-4'));
     expect((await f.greenRows()).map(row => row.note)).toEqual([null, null, null]);
   });
@@ -468,7 +468,7 @@ describe('reusing green test results', () => {
   it('starts over from the last part when all that was kept no longer fits one message', async () => {
     const f = await fixture();
     await f.finish(await f.start({}));
-    const run = await f.runOf(await f.start({}, fingerprints({ 'test/a.test.ts': print('d') })));
+    const run = await f.runOf(await f.start({}, fingerprints({ 'checks/a.test.ts': print('d') })));
     const remember = (path: string, text: string) => rememberKept(f.app.ctx, run, { commit: TEST_COMMIT, kept: [{ suiteId: 'unit', files: [{ path, text }] }] });
     await remember('.metrics/mutate/a.edn', 'a'.repeat(600 * 1024));
     await remember('.metrics/mutate/b.edn', 'b'.repeat(600 * 1024));
@@ -494,15 +494,15 @@ describe('reusing green test results', () => {
       await f.finish(await f.start({}), { ok: false, files: FAILED_ALL });
       await f.finish(await f.start({}, undefined, 'turn-4'));
     }],
-    ['another release passed a file this release failed, at the same fingerprint', ['test/a.test.ts'], async (f: Fixture) => {
+    ['another release passed a file this release failed, at the same fingerprint', ['checks/a.test.ts'], async (f: Fixture) => {
       await f.finish(await f.start({}), { ok: false, files: FAILED_A });
-      await f.finish(await f.start({}, fingerprints({ 'test/b.test.ts': print('e'), 'test/c.test.ts': print('f') }), 'turn-4'));
+      await f.finish(await f.start({}, fingerprints({ 'checks/b.test.ts': print('e'), 'checks/c.test.ts': print('f') }), 'turn-4'));
     }],
-    ['an older run of the release passed a file after a newer one failed it', ['test/a.test.ts'], async (f: Fixture) => {
+    ['an older run of the release passed a file after a newer one failed it', ['checks/a.test.ts'], async (f: Fixture) => {
       await f.finish(await f.start({}), { ok: false, files: FAILED_A });
       const older = await f.start({}), newer = await f.start({});
       await f.runBeside(newer);
-      await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+      await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
       await f.finish(older);
     }],
   ] as const)('marks no success and proves no whole run where it would keep what its release did not prove: %s', async (_how, ran, before) => {
@@ -514,7 +514,7 @@ describe('reusing green test results', () => {
     expect(await f.ranFiles(next)).toEqual(ran);
     expect(marks.slice(marked0)).toEqual([]);
     expect(await wholeProductRun(f.db, run, f.companyId, run.departmentId!, TEST_COMMIT)).toBe(false);
-    await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
     expect(marks.slice(marked0)).toEqual([{ commit: TEST_COMMIT, state: 'failure' }]);
   });
 

@@ -9,7 +9,7 @@ import { namedAgent } from '../agents/find.js';
 import { enterPressed } from '../conversation/decision-context.js';
 import { windowNode } from '../conversation/queue.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
-import { programAccess } from './access.js';
+import { mayTypeTo, programAccess } from './access.js';
 import { readKeys } from './keys.js';
 import { cols, followFrames, keepLooking, rows, type BrowserFrame } from './look.js';
 import { CLOSE } from './relay.js';
@@ -34,9 +34,9 @@ async function programFor(ctx: Ctx, req: FastifyRequest) {
    running turn is over, and the browser opens the view again there; so too when the person no longer types into what it
    shows, for the node to hear that. */
 async function whyEnd(ctx: Ctx, req: FastifyRequest, { node, personId, write }: Open) {
-  const { plan } = await programFor(ctx, req);
+  const { me, agent, plan } = await programFor(ctx, req);
   const at = plan && identityOf(plan, plan.nodeId, plan.builtinMachine, ownBuiltin(ctx.config));
-  return !at || !sameNode(at, node) || (plan.ownerPersonId === personId) !== write ? CLOSE.nodeOffline : null;
+  return !at || !sameNode(at, node) || (mayTypeTo(me, agent) && plan.ownerPersonId === personId) !== write ? CLOSE.nodeOffline : null;
 }
 
 /* Each frame goes on only while the view may. */
@@ -72,7 +72,8 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         const { me, agent } = await programFor(ctx, req);
         const at = await windowNode(ctx, agent.id);
         if (at) await requireAgentView(ctx.db, me, agent, at.planId);
-        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: at?.node ?? null, write: at?.ownerPersonId === me.id, message: true });
+        const message = mayTypeTo(me, agent);
+        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: at?.node ?? null, write: message && at?.ownerPersonId === me.id, message });
       },
     },
     (socket, req) => {

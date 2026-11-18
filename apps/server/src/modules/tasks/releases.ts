@@ -1,12 +1,13 @@
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, autonomousReleases, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
+import { agents, autonomousReleases, companies, departments, people, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 import { taskByRef } from './views.js';
 import { keepSnapshot } from './pipeline-report.js';
+import { commitApprovalRequired, exactCommitApproval } from './commit-approval.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
@@ -17,9 +18,9 @@ import { wholeProductRun } from './autonomous-release.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R of
    turn-<number>, its head or one the branch went past while R was checked, main under it, the full run on R, the results R
-   brings with the verdicts on them, and what approved R: a person's approval of it, or, with autonomous release on, the entry
-   of the autonomous release log, for a release every commit of which was checked: by a checker other than its author, or, for
-   turnkey work, by its holder's own review, security check and tests. Main then goes to R by fast-forward and R
+   brings with the verdicts on them, and any exact approval required by its department. Autonomous release can record proof
+   from independent checkers or, for turnkey work, from the holder's own review, security check and tests.
+   Main then goes to R by fast-forward and R
    is tagged vX.Y.Z; the minute round closes the turn on that tag, and what the release left out goes into the next turn,
    whose branch starts from the head of this one. */
 
@@ -70,15 +71,8 @@ function endProblem(run: ReleaseRun): string | null {
 const allPartsPassed = (run: ReleaseRun, parts: { status: string }[]): boolean =>
   parts.length === run.parts && parts.every(part => part.status === 'passed') && (parts.length > 0 || keptEverything(run));
 
-/* A person's approval of exactly R, on the release task, or none. */
-async function personApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
-  const [approval] = await db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id), eq(requests.kind, 'approval'),
-    eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).orderBy(desc(requests.answeredAt)).limit(1);
-  return approval?.id ?? null;
-}
-
 const needsPerson = (task: Task, commit: string, why: string) =>
-  refuse(403, 'decision_not_allowed', `A release needs a person's approval of exactly ${commit}: ask for it on #${task.number} with ask_person, kind approval, naming the commit.${why}`);
+  refuse(403, 'decision_not_allowed', `The department requires approval of exactly ${commit}. Use ask_person with that commit on #${task.number}.${why}`);
 
 /* The department has autonomous release on, held so a switch of its people waits for the record, for a repository whose main
    line is main. */
@@ -267,12 +261,18 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   const uncovered = await coverage(ctx, target.repo, base, input.commit, held);
   const released: ReleasedTask[] = held.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts, ...(r.turnkey ? { report: r.turnkey.report } : {}) }));
   const left = results.filter(r => !held.includes(r)).map(r => r.task.number);
-  /* A person's approval stands first; without one, autonomous release approves only what was checked whole. */
-  const asked = await personApproval(ctx.db, task, input.commit);
-  if (!asked) {
-    if (!(await autonomousOn(ctx.db, turn.departmentId!, target.repo))) throw needsPerson(task, input.commit, '');
-    if (uncovered.length) throw needsPerson(task, input.commit, ` Autonomous release approves only a release every commit of which was checked, by a checker or by the holder of turnkey work, and this one brings what was not: ${uncovered.join(' ')}`);
-  }
+  const checkApproval = async (db: Ctx['db'] | Tx, hold = false) => {
+    const approvalRequestId = await exactCommitApproval(db, companyId, task.id, input.commit);
+    if (approvalRequestId || !(await commitApprovalRequired(db, companyId, turn.departmentId, hold))) return { approvalRequestId, canLog: false };
+    const on = await autonomousOn(db, turn.departmentId!, target.repo, hold);
+    const canLog = on && uncovered.length === 0;
+    if (!canLog) {
+      const why = on ? ` Autonomous release needs proof for each change, and this one brings what was not: ${uncovered.join(' ')}` : '';
+      throw needsPerson(task, input.commit, why);
+    }
+    return { approvalRequestId, canLog };
+  };
+  await checkApproval(ctx.db);
   const record = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
@@ -280,13 +280,9 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     const still = await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id));
     if (still.length !== results.length || still.some(row => !results.some(r => r.task.id === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
     await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
-    const approvalRequestId = await personApproval(tx, task, input.commit);
-    let autonomousReleaseId: string | null = null;
-    if (!approvalRequestId) {
-      if (!(await autonomousOn(tx, turn.departmentId!, target.repo, true))) throw needsPerson(task, input.commit, ' Autonomous release was turned off meanwhile.');
-      autonomousReleaseId = await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released);
-      if (!autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work, so autonomous release cannot approve it.');
-    }
+    const { approvalRequestId, canLog } = await checkApproval(tx, true);
+    const autonomousReleaseId = canLog ? await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released) : null;
+    if (canLog && !autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work.');
     const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, runId: input.runId, tasks: released, taskId: task.id, approvalRequestId, autonomousReleaseId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered }).returning();
     const by = autonomousReleaseId ? ', approved by autonomous release' : '';
     await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}${by}.`, data: { release: row!.id } });
@@ -375,19 +371,15 @@ async function tellOfTag(ctx: Reader, turn: Turn, version: string, commit: strin
   ctx.log?.warn({ companyId: turn.companyId, turn: turn.number, version, commit, why }, `${version} released nothing of Turn ${turn.number}: ${cause}.`);
 }
 
-/* The full run and the approval the record relies on still stand as they stood: the person's approval of its commit, or the
-   entry of the autonomous release log, while autonomous release is on and every checker and turnkey holder it relied on is
-   still at work. */
+/* The full run and the approval the record relied on still stand. A release recorded without approval still follows the
+   department's commit rule. */
 async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolean> {
   if (!record.runId) return false;
   try { await requireFullRun(tx, turn, `turn-${turn.number}`, turn.departmentId!, record.runId, record.commit); }
   catch { return false; }
-  if (record.approvalRequestId) {
-    const [approval] = await tx.select(idOnly(requests)).from(requests).where(and(eq(requests.id, record.approvalRequestId), eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
-      eq(requests.commit, record.commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt)));
-    return !!approval;
-  }
-  if (!record.autonomousReleaseId || !record.covered) return false;
+  if (record.approvalRequestId) return Boolean(record.taskId && await exactCommitApproval(tx, turn.companyId, record.taskId, record.commit, record.approvalRequestId));
+  if (!record.autonomousReleaseId) return !(await commitApprovalRequired(tx, turn.companyId, turn.departmentId, true));
+  if (!record.covered) return false;
   const [department] = await tx.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, turn.departmentId!)).for('share');
   const [entry] = await tx.select(idOnly(autonomousReleases)).from(autonomousReleases).where(and(eq(autonomousReleases.id, record.autonomousReleaseId), eq(autonomousReleases.commitSha, record.commit)));
   return !!department?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;

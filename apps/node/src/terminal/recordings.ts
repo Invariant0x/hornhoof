@@ -1,18 +1,18 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, writeSync } from 'node:fs';
+import { createConnection } from 'node:net';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { JobUser } from '../isolation.js';
 import type { ProgramOutput } from '../program-exit.js';
 import { KEEP_BYTES, writePrivate } from '../providers/process.js';
 
 export type ExitSnapshot = { output: string; complete: boolean; programOutput?: ProgramOutput };
-export type Recording = { name: string; file: string; ready: string; flush: string; position: string; ended: Promise<ExitSnapshot | null> | null };
+export type Recording = { name: string; file: string; ready: string; flush: string; position: string; control?: string; masked?: { forms: string[]; receipt: Promise<void> }; ended: Promise<ExitSnapshot | null> | null };
 
 const digest = (name: string): string => createHash('sha256').update(name).digest('hex');
 const capturePath = (file: string): boolean => isAbsolute(file) && !file.includes('\0') && /^\.hh-output-[a-f0-9]{16}\.log$/.test(basename(file));
-const manifest = z.object({ name: z.string().min(1).max(256), file: z.string().refine(capturePath) });
-const privacy = z.object({ jobId: z.string().min(1).max(200).nullable() });
+const manifest = z.object({ name: z.string().min(1).max(256), file: z.string().refine(capturePath), control: z.string().regex(/^\/tmp\/hh-rec-[a-z0-9]{6}\/mask$/i).optional() });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /* A replaced recording cannot make the node follow a link, block on a pipe or read an unbounded file. */
@@ -95,7 +95,7 @@ function requestFlush(recording: Recording): void {
   }
 }
 
-/* The node owns this registry. It is written before raw files exist, so cleanup survives losing the node or recorder. */
+/* The node owns this registry. It is written before output files exist, so cleanup survives losing the node or recorder. */
 export class Recordings {
   private readonly dir: string;
   private readonly active = new Map<string, Recording>();
@@ -115,38 +115,17 @@ export class Recordings {
     return join(this.dir, `${digest(name)}.json`);
   }
 
-  isPrivate(name: string): boolean {
-    return existsSync(join(this.dir, `${digest(name)}.private`));
-  }
-
-  private privacyPath(name: string): string {
-    return join(this.dir, `${digest(name)}.private`);
-  }
-
-  privateJob(name: string): string | null {
-    if (!this.isPrivate(name)) return null;
-    return privacy.parse(JSON.parse(recorded(this.privacyPath(name), 4096) ?? 'null')).jobId;
-  }
-
-  protect(name: string, jobId: string | null): void {
+  create(name: string, dir: string, masking = false): Recording {
     this.privateDir();
-    const pending = `${this.privacyPath(name)}.${randomBytes(8).toString('hex')}.pending`;
-    writePrivate(pending, JSON.stringify({ jobId }), null);
-    try { renameSync(pending, this.privacyPath(name)); }
-    finally { rmSync(pending, { force: true }); }
-  }
-
-  release(name: string): void {
-    rmSync(join(this.dir, `${digest(name)}.private`), { force: true });
-  }
-
-  create(name: string, dir: string): Recording {
-    if (this.isPrivate(name)) throw new Error('Raw recording is disabled for a sensitive program.');
-    privateDirectory(this.root);
-    privateDirectory(this.dir);
+    /* Unix sockets need a short path even when the node's data directory is deeply nested. */
+    const control = masking ? join(mkdtempSync('/tmp/hh-rec-'), 'mask') : undefined;
     const file = resolve(dir, `.hh-output-${randomBytes(8).toString('hex')}.log`);
-    this.publish(name, file);
-    const recording = this.remember(name, file);
+    try { this.publish(name, file, control); }
+    catch (error) {
+      if (control) rmSync(dirname(control), { recursive: true, force: true });
+      throw error;
+    }
+    const recording = this.remember(name, file, control);
     writePrivate(file, '', this.user);
     writePrivate(recording.ready, '', this.user);
     writePrivate(recording.flush, '', this.user);
@@ -154,17 +133,17 @@ export class Recordings {
     return recording;
   }
 
-  private publish(name: string, file: string): void {
+  private publish(name: string, file: string, control: string | undefined): void {
     const pending = `${this.path(name)}.${randomBytes(8).toString('hex')}.pending`;
-    writePrivate(pending, JSON.stringify({ name, file }), null);
+    writePrivate(pending, JSON.stringify({ name, file, control }), null);
     try { linkSync(pending, this.path(name)); }
     finally { rmSync(pending, { force: true }); }
   }
 
-  private remember(name: string, file: string): Recording {
+  private remember(name: string, file: string, control?: string): Recording {
     const known = this.active.get(name);
     if (known?.file === file) return known;
-    const recording: Recording = { name, file, ready: `${file}.ready`, flush: `${file}.flush`, position: `${file}.position`, ended: null };
+    const recording: Recording = { name, file, ready: `${file}.ready`, flush: `${file}.flush`, position: `${file}.position`, control, ended: null };
     this.active.set(name, recording);
     return recording;
   }
@@ -177,7 +156,7 @@ export class Recordings {
       const text = recorded(file, 4096);
       const data = manifest.parse(JSON.parse(text ?? 'null'));
       if (this.path(data.name) !== file) throw new Error('Mismatched recording.');
-      return this.remember(data.name, data.file);
+      return this.remember(data.name, data.file, data.control);
     } catch {
       throw new Error('Cannot read terminal recording metadata safely.');
     }
@@ -236,10 +215,36 @@ export class Recordings {
     return { output, complete: drained && output !== null };
   }
 
+  async mask(name: string, forms: string[]): Promise<void> {
+    const recording = this.get(name);
+    if (!recording?.control || !forms.length || recorded(recording.ready, 5) === 'ended') return;
+    if (recording.masked?.forms === forms) return recording.masked.receipt;
+    privateDirectory(dirname(recording.control));
+    const receipt = this.sendMasks(recording.control, forms);
+    recording.masked = { forms, receipt };
+    try { await receipt; }
+    catch (error) {
+      if (recording.masked?.receipt === receipt) delete recording.masked;
+      throw error;
+    }
+  }
+
+  private sendMasks(path: string, forms: string[]): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const client = createConnection(path, () => { client.end(JSON.stringify(forms)); });
+      let answer = '';
+      client.setEncoding('utf8');
+      client.on('data', (chunk: string) => { answer += chunk; });
+      client.once('close', () => { if (answer === 'ok') resolve(); else reject(new Error('Terminal recorder did not receive its masks.')); });
+      client.once('error', reject);
+    });
+  }
+
   remove(name: string): void {
     const recording = this.get(name);
     if (!recording) return;
     for (const file of [recording.file, recording.ready, recording.flush, recording.position, this.path(name)]) rmSync(file, { force: true });
+    if (recording.control) rmSync(dirname(recording.control), { recursive: true, force: true });
     this.active.delete(name);
   }
 }

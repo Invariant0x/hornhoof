@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { useT } from '../i18n';
 import { takeEscape } from './escape';
 import { guardedResizeObserver } from '../guard';
+import { useScrollbarRoom } from './scrollbar-room';
 
 /* The panels that slide out of an agent's window, all alike. They stand in a row left of the window, in the order they were
    opened, and the terminal never moves for them. A row the free space cannot hold reaches over the window as far as it must;
@@ -125,10 +126,12 @@ export function SidePanelRow({ stack, id }: { stack: ReturnType<typeof useSidePa
   );
 }
 
-/* A panel's frame: its name, the button that closes it, and a body that scrolls. heading: what its bar says, when not its name.
-   kind: a class that styles what this panel holds. */
+/* A panel's frame: its name, the button that closes it, and a body that scrolls, which gives its words the same width in every
+   browser. heading: what its bar says, when not its name. kind: a class that styles what this panel holds. */
 export function PanelFrame({ label, heading = label, busy, kind, onClose, children }: { label?: string; heading?: string; busy?: boolean; kind?: string; onClose(): void; children: ReactNode }) {
   const t = useT();
+  const body = useRef<HTMLDivElement>(null);
+  useScrollbarRoom(body);
   return (
     <aside className={kind ? `acard ${kind}` : 'acard'} aria-label={label} aria-busy={busy}>
       <div className="t-bar">
@@ -144,7 +147,7 @@ export function PanelFrame({ label, heading = label, busy, kind, onClose, childr
           </svg>
         </button>
       </div>
-      <div className="ac-body">{children}</div>
+      <div ref={body} className="ac-body">{children}</div>
     </aside>
   );
 }

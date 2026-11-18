@@ -2,7 +2,7 @@ import { inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { goals, people } from '../../db/schema.js';
 import type { Task } from '../tasks/engine.js';
-import { timeFacts, type TimeFacts } from '../tasks/time-facts.js';
+import { timeFacts, type TimeFacts, type TimedTask, type WaitNames } from '../tasks/time-facts.js';
 import type { TaskWait } from '../tasks/wait-state.js';
 
 export type GoalRef = { id: string; number: number; title: string };
@@ -29,13 +29,13 @@ async function goalsServed(db: Ctx['db'], rows: Pick<Task, 'id'>[]): Promise<Map
 export const goalServed = async (db: Ctx['db'], task: Pick<Task, 'id'>): Promise<string | null> => (await goalsServed(db, [task])).get(task.id) ?? null;
 
 /* What the tracker shows of the tasks, read in one go for all of them. */
-export async function trackerLookups(db: Ctx['db'], rows: Pick<Task, 'id' | 'createdAt' | 'responsiblePersonId'>[], waits: (t: Pick<Task, 'id'>) => TaskWait[], agentName: (id: string) => string | undefined): Promise<TrackerLookups> {
+export async function trackerLookups(db: Ctx['db'], rows: (TimedTask & Pick<Task, 'responsiblePersonId'>)[], waits: (t: Pick<Task, 'id'>) => TaskWait[], names: WaitNames): Promise<TrackerLookups> {
   const served = rows.length ? await goalsServed(db, rows) : new Map<string, string>();
   const goalIds = [...new Set(served.values())];
   const goalRows = goalIds.length ? await db.select({ id: goals.id, number: goals.number, title: goals.title }).from(goals).where(inArray(goals.id, goalIds)) : [];
   const personIds = [...new Set(rows.flatMap(t => (t.responsiblePersonId ? [t.responsiblePersonId] : [])))];
   const personRows = personIds.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, personIds)) : [];
-  const facts = await timeFacts(db, rows, waits, agentName);
+  const facts = await timeFacts(db, rows, waits, names);
   return {
     goal: t => goalRows.find(g => g.id === served.get(t.id)) ?? null,
     person: id => personRows.find(p => p.id === id) ?? null,

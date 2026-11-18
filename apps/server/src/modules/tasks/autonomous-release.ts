@@ -2,10 +2,8 @@ import { EnvironmentSnapshot, validateEnvironmentDescription } from '@hornhoof/p
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf } from '../../auth/access.js';
-import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, autonomousReleases, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, autonomousReleases, departments, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
@@ -61,18 +59,6 @@ export type AutonomousReleaseEntry = {
   verdictStage: string;
   createdAt: string;
 };
-
-/* Who turns a department's autonomous release on or off: a signed-in person who runs that department, or the orchestrator
-   acting for the CEO, who runs every department; never a head or an assistant acting for one. */
-export async function maySetAutonomousRelease(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
-  if (me.status !== 'active' || Boolean(me.viaHead) || Boolean(me.assistant)) return false;
-  const [row] = await db
-    .select(idOnly(people))
-    .from(people)
-    .where(and(eq(people.id, me.id), eq(people.companyId, me.companyId), eq(people.status, 'active'), eq(people.isAgent, false)));
-  if (!row) return false;
-  return me.isOwner || (await accessOf(db, me)).owns?.has(departmentId) === true;
-}
 
 /* Whether a department has autonomous release on: a top-level one its own, a product or part the department that holds it. */
 export async function isAutonomousReleaseEnabled(db: Pick<QueryDb, 'select'>, departmentId: string): Promise<boolean> {

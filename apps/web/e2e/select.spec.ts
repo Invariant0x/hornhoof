@@ -145,7 +145,6 @@ const BRUNO_CARD: AgentCardView = {
   skills: [],
   parts: [],
   raw: '',
-  instructions: { length: 100, max: 200_000 },
   runsOn: [{ subscription: SUB, models: [SONNET] }],
   changes: [],
   interrupted: [],

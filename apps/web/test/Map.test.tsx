@@ -67,6 +67,77 @@ describe('orchestratorStatus', () => {
 });
 
 describe('Map', () => {
+  it('distinguishes employees, generalists and declared ghosts without subscriptions, then lights the same ghost slots', async () => {
+    const [dev] = DEV_ORG.departments;
+    const employees = dev!.employees.map((e, i) => ({ ...e, status: 'off', provider: null, turnkey: i === 1 }));
+    const oneShotStages = [{ stage: 'review', fanOut: 2, judge: true }];
+    const calls = [
+      { id: 'running', departmentId: 'shop', number: 1, judge: false, task: 12, by: employees[1]!.id, stage: 'review', startedAt: '2026-11-17T10:00:00.000Z' },
+      { id: 'waiting', number: 2, judge: false, task: 12, by: employees[1]!.id, stage: 'review', startedAt: null },
+      { id: 'extra', number: 1, judge: false, task: 13, by: employees[1]!.id, stage: 'review', startedAt: null },
+    ];
+    const stream = fakeStream();
+    let active = false;
+    const products = [{ id: 'shop', name: 'Shop' }];
+    mockApi({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [{ ...dev!, employees, products, oneShotStages, calls: active ? calls : [] }] }] });
+    render(<MapScreen {...PROPS} />);
+    const card = await screen.findByRole('button', { name: /^Development/ });
+    const marks = (kind: string) => [...card.querySelectorAll(`[data-worker-kind="${kind}"]`)];
+    expect(marks('employee')).toHaveLength(1);
+    expect(marks('generalist')).toHaveLength(1);
+    expect(marks('generalist')[0]).toHaveAccessibleName(/Generalist: does a task whole/);
+    const ghosts = marks('ghost');
+    expect(ghosts).toHaveLength(3);
+    expect(ghosts.every(mark => mark.classList.contains('cell') && !mark.classList.contains('w') && !mark.classList.contains('q'))).toBe(true);
+    expect(ghosts[2]).toHaveAccessibleName(/Ghost: a one-shot call.*Review.*Judge.*Idle/i);
+
+    active = true;
+    stream.send({ type: 'org' });
+    await act(async () => {});
+    expect(ghosts[0]).toHaveClass('w');
+    expect(ghosts[0]).toHaveAccessibleName(/Call 1 on #12.*Running/);
+    expect(ghosts[1]).toHaveClass('q');
+    expect(ghosts[1]).toHaveAccessibleName(/Call 2 on #12.*Waiting/);
+    expect(marks('ghost')).toHaveLength(4);
+    expect(marks('ghost')[3]).toHaveAccessibleName(/Call 1 on #13.*Waiting/);
+
+    active = false;
+    stream.send({ type: 'org' });
+    await act(async () => {});
+    expect(marks('ghost')).toEqual(ghosts);
+    expect(ghosts[0]).not.toHaveClass('w');
+  });
+
+  it.each([
+    ['en', 'Worker kinds', 'Employee', 'Generalist: does a task whole', 'Ghost: a one-shot call, appears for one task and is gone'],
+    ['ru', 'Виды работников', 'Сотрудник', 'Универсал: делает задачу целиком', 'Призрак: разовый вызов, появляется на одну задачу и исчезает'],
+  ])('shows a collapsible worker legend in %s outside the map canvas', async (language, title, ...words) => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    mockApi({ 'GET /api/org': [200, DEV_ORG] });
+    render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByText('Ivan');
+    const summary = screen.getByText(title);
+    const legend = summary.closest('details');
+    expect(legend?.closest('.map')).toBeNull();
+    expect(legend).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(legend).toHaveAttribute('open');
+    for (const [i, word] of words.entries()) {
+      expect(screen.getByText(word).closest('li')?.querySelector('[data-worker-kind]')).toHaveAttribute('data-worker-kind', ['employee', 'generalist', 'ghost'][i]);
+    }
+    fireEvent.click(summary);
+    expect(legend).not.toHaveAttribute('open');
+  });
+
+  it('gives a department card room for multiple rows of declared ghost marks', () => {
+    const [dev] = DEV_ORG.departments;
+    const many: Department = { ...dev!, oneShotStages: [{ stage: 'review', fanOut: 80, judge: true }] };
+    const ordinary = arrangeMap(DEV_ORG).depts[0]!;
+    const ghosts = arrangeMap({ ...DEV_ORG, departments: [many] }).depts[0]!;
+    expect(ghosts.h).toBeGreaterThan(ordinary.h + 48);
+  });
+
   it('shows the orchestrator, the company people and the empty state on first run', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const { container } = render(<MapScreen {...PROPS} />);
@@ -212,8 +283,8 @@ describe('Map', () => {
     let later = false;
     mockApi({ 'GET /api/org': () => [200, later ? { ...staffed, departments: [{ ...staffed.departments[0]!, employees: [one('a', 'handed'), ...staffed.departments[0]!.employees.slice(1)] }] } : staffed] });
     const { container } = render(<MapScreen {...PROPS} />);
-    const cells = await screen.findByRole('img', { name: 'working: 1, needs a decision: 1, free: 2' });
-    expect([...cells.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell h', 'cell', 'cell']);
+    const cells = await screen.findByRole('group', { name: 'working: 1, needs a decision: 1, free: 2' });
+    expect([...cells.querySelectorAll('.cell')].map(c => c.className)).toEqual(['worker-mark cell w', 'worker-mark cell h', 'worker-mark cell', 'worker-mark cell']);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       later = true;
@@ -250,9 +321,15 @@ describe('Map', () => {
       onTestFinished(() => localStorage.removeItem('hh-lang'));
       mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, calls }] }] });
       const { unmount } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
-      const marks = await screen.findByRole('img', { name });
-      expect([...marks.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell w', 'cell q']);
-      expect([...marks.querySelectorAll('.cell')].map(c => c.getAttribute('title'))).toEqual([first, first.replace('1', '2'), judge]);
+      const marks = await screen.findByRole('group', { name });
+      const ghosts = within(marks).getAllByRole('img');
+      const words = (lang === 'en' ? en : ru).workers;
+      expect(ghosts.map(c => c.className)).toEqual(['worker-mark cell w', 'worker-mark cell w', 'worker-mark cell q']);
+      expect(ghosts.map(c => c.getAttribute('title'))).toEqual([
+        `${words.ghost}. ${first}. ${words.running}`,
+        `${words.ghost}. ${first.replace('1', '2')}. ${words.running}`,
+        `${words.ghost}. ${judge}. ${words.waiting}`,
+      ]);
       unmount();
     }
     mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, calls: [] }] }] });

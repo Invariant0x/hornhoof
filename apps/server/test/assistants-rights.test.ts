@@ -107,25 +107,22 @@ describe('whom an assistant may write to', () => {
     expect(await reach(c, (await assistantOf(c, 'clara')).key)).toEqual({ crew: (Object.keys(c.crew) as Crew[]).sort(), orchestrator: true });
   });
 
-  it("a department owner's: that department's head and employees, as the owner's window has it", async () => {
+  it("a department owner's: the orchestrator and that department's head and employees", async () => {
     const c = await aclCompany();
     const { key } = await assistantOf(c, 'olga');
-    expect(await reach(c, key)).toEqual({ crew: ['head', 'mine', 'other', 'owned'], orchestrator: false });
-    const refused = await asAssistant(c, key, '/api/assistant/messages', 'POST', { agentId: c.orchestrator.id, text: 'Hire a designer.' });
-    expect(refused.statusCode).toBe(403);
-    expect(refused.json().error.reason).toBe('assistant_agent_refused');
+    expect(await reach(c, key)).toEqual({ crew: ['head', 'mine', 'other', 'owned'], orchestrator: true });
     expect((await asAssistant(c, key, '/api/assistant/messages', 'POST', { agentId: c.crew.far.id, text: 'Hi.' })).statusCode).toBe(403);
-    const file = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=plan.pdf&agentId=${c.orchestrator.id}`, headers: { ...bearer(key).headers, 'content-type': 'application/pdf' }, payload: Buffer.from('%PDF-1.7') });
+    const file = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=plan.pdf&agentId=${c.crew.far.id}`, headers: { ...bearer(key).headers, 'content-type': 'application/pdf' }, payload: Buffer.from('%PDF-1.7') });
     expect(file.statusCode).toBe(403);
     expect(file.json().error.reason).toBe('assistant_agent_refused');
   });
 
   it("a listed person's: the employees on their plan where they work, as their window has it", async () => {
     const c = await aclCompany();
-    expect(await reach(c, (await assistantOf(c, 'ann')).key)).toEqual({ crew: ['mine'], orchestrator: false });
+    expect(await reach(c, (await assistantOf(c, 'ann')).key)).toEqual({ crew: ['mine'], orchestrator: true });
   });
 
-  it("is exactly whom its owner writes to in the agent's window, for everyone", async () => {
+  it("reaches the orchestrator and the employees its owner writes to in their windows", async () => {
     const c = await aclCompany();
     const everyone = [c.orchestrator, ...Object.values(c.crew)];
     for (const owner of Object.keys(c.tokens) as Viewer[]) {
@@ -133,7 +130,7 @@ describe('whom an assistant may write to', () => {
       const listed = new Set((await asAssistant(c, key, '/api/assistant/agents')).json().agents.map((a: { id: string }) => a.id));
       for (const agent of everyone) {
         const window = (await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.tokens[owner]) })).statusCode === 200;
-        expect(listed.has(agent.id), `${owner}: ${agent.name}`).toBe(window);
+        expect(listed.has(agent.id), `${owner}: ${agent.name}`).toBe(agent.id === c.orchestrator.id || window);
       }
     }
   });

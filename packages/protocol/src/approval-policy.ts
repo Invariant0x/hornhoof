@@ -28,12 +28,8 @@ export type ApprovalRule = z.infer<typeof ApprovalRule>;
    wants to approve its own sets a rule for them. */
 export const GOING_OUT_CHANNELS = ['message', 'price', 'publication'] as const satisfies readonly ApprovalChannel[];
 
-/* The rule of a channel nobody set a rule for: what goes out asks nothing, a commit asks every time, and the rest ask only
-   for a kind nobody approved yet. */
-export function defaultRule(channel: ApprovalChannel): ApprovalRule {
-  if ((GOING_OUT_CHANNELS as readonly ApprovalChannel[]).includes(channel)) return { mode: 'none' };
-  return channel === 'commit' ? { mode: 'every' } : { mode: 'new_kinds' };
-}
+/* The rule of any channel nobody set a rule for. */
+export const defaultRule: (channel: ApprovalChannel) => ApprovalRule = () => ({ mode: 'none' });
 
 /* What the database keeps of a rule. */
 export type StoredApprovalRule = { mode: ApprovalMode; limitAmount: number | null; limitUnit: string | null };

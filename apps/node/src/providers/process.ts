@@ -76,10 +76,10 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
       killGroup('SIGTERM');
       setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS).unref();
     };
-    const timer = setTimeout(() => {
+    const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
       stop();
-    }, timeoutMs);
+    }, timeoutMs) : undefined;
     if (signal?.aborted) stop();
     else signal?.addEventListener('abort', stop, { once: true });
     const finish = (res: Finished) => {
