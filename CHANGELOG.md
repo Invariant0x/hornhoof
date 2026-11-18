@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Company templates explain who can act, when to ask a person and how to keep sign-ins private.
 - Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
 
 - Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
