@@ -103,7 +103,7 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30 });
   listsAtStart(host);
   /* Someone has the agent's terminal open, as one who types there does, so its program stays up between turns. */
-  if (watched) host['wanted'].set('watching', { key: 'receipt', size: { cols: 80, rows: 24 } });
+  if (watched) host['viewSessions']['wanted'].set('watching', { key: 'receipt', size: { cols: 80, rows: 24 } });
   const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
   if (mode === 'bridge') await host.start();
   const run = () => {

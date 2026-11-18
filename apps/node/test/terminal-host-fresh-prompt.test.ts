@@ -61,7 +61,7 @@ function assistant({ operator = false } = {}) {
   });
   listsAtStart(host);
   /* Its owner has its window open, so the program stays up between turns. */
-  host['wanted'].set('watching', { key: KEY, size: { cols: 80, rows: 24 } });
+  host['viewSessions']['wanted'].set('watching', { key: KEY, size: { cols: 80, rows: 24 } });
   cleanups.push(async () => {
     clearInterval(host['operatorTimer'] ?? undefined);
     up = false;

@@ -45,7 +45,7 @@ describe("a view's size", () => {
     /* The viewer is this test's process, and the client a process it started, as script starts tmux attach. */
     Object.assign(view, { pid: process.pid });
     machine.parents.set(CLIENT, process.pid);
-    const shown = () => (t.host as unknown as { views: Map<string, { applied: { cols: number; rows: number }; tty: string | null }> }).views.get('v1')!;
+    const shown = () => (t.host as unknown as { viewSessions: { views: Map<string, { applied: { cols: number; rows: number }; tty: string | null }> } }).viewSessions.views.get('v1')!;
     /* The browser's terminal fits its window a moment after it opens, before the client is there, as on a machine short of
        memory: the node cannot find the client then. */
     await t.on(t.host.resize({ type: 'term.resize', termId: 'v1', cols: 120, rows: 42 }));

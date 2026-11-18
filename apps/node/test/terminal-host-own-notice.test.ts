@@ -63,7 +63,7 @@ function program() {
     operator: { dir: join(home, 'operator'), send: frame => { frames.push(frame); return true; }, connected: () => true, now: () => Date.now() },
   });
   /* Someone has the terminal open, so the program stays up between turns, as both programs did. */
-  host['wanted'].set('watching', { key, size: { cols: 160, rows: 48 } });
+  host['viewSessions']['wanted'].set('watching', { key, size: { cols: 160, rows: 48 } });
   const agent = () => host['agents'].get(key)!;
   /* Claude Code ends a turn with its Stop hook and the turn's duration in its log. */
   const notice = () => {
