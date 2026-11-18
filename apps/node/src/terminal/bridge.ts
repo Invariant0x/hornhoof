@@ -109,8 +109,15 @@ export class Bridge {
     this.port = (server.address() as AddressInfo).port;
   }
 
+  /* With no capture of its own the owner check reads the socket table itself. A table this early look cannot read, as on
+     a machine with no proc filesystem, leaves the connection uncaptured instead of failing the call: the owner check
+     still decides, and a Linux check that cannot read the table says so itself. */
   private capture(peer: Peer): ReturnType<Capture> {
-    return this.options.capture ? this.options.capture(peer) : socketOf(this.options.proc ?? '/proc', peer).then(acceptedInode => ({ acceptedInode }));
+    if (this.options.capture) return this.options.capture(peer);
+    return socketOf(this.options.proc ?? '/proc', peer).then(
+      acceptedInode => ({ acceptedInode }),
+      (error: unknown) => { if (error instanceof OwnerUnknown) return { acceptedInode: undefined }; throw error; },
+    );
   }
 
   stop(): void {
