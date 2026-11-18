@@ -842,6 +842,7 @@ describe('numbered node messages', () => {
       'job.event': event,
       'job.done': { type: 'job.done', jobId: 'j', ok: true, sessionId: null, result: '', tail: '', error: null },
       'tests.started': { type: 'tests.started', partId: 'p' },
+      'tests.silent': { type: 'tests.silent', partId: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' },
       'tests.done': { type: 'tests.done', partId: 'p', ok: true, exitCode: 0, error: null, commit: null, log: '' },
       'cred.sealed': { type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [] },
       'login.done': { type: 'login.done', ok: true, error: null },
@@ -854,7 +855,7 @@ describe('numbered node messages', () => {
       'agent.restarted': { type: 'agent.restarted', agentKey: 'a', jobId: 'j', ok: true, reason: null },
       'node.stopping': { type: 'node.stopping', startedAt: '2026-11-04T10:00:00.000Z', exit: { kind: 'planned', reason: 'stopped', startedAt: null, at: null, log: '' } },
     };
-    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
+    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
     for (const [type, sample] of Object.entries(samples)) {
       const parsed = nodeMessage({ ...sample, n: 7 });
       expect(parsed, type).not.toBeNull();

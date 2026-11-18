@@ -9,7 +9,8 @@ const sending = new WeakMap<Ctx, Set<string>>();
 
 /* A repeat attempt has a new id. Operations hear once for the part in its run, including across a reconnect or restart. */
 export async function alertSilentPart(ctx: Ctx, node: NodeIdentity, partId: string): Promise<void> {
-  const [row] = await ctx.db.select({ part: testParts.part, machine: testParts.machineName, run: testRuns, task: tasks.number }).from(testParts)
+  const { id, kind, number, companyId, agentId, taskId } = testRuns;
+  const [row] = await ctx.db.select({ part: testParts.part, machine: testParts.machineName, run: { id, kind, number, companyId, agentId, taskId }, task: tasks.number }).from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId)).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), isNotNull(testParts.startedAt), partsOfNode(ctx, node)));
   if (!row) return;
