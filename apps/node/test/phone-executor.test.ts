@@ -21,7 +21,7 @@ const PHOTO = screencap(true);
 const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL) {
+function phone(png = SCREEN, serial = SERIAL, baseline = '') {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -36,6 +36,7 @@ function phone(png = SCREEN, serial = SERIAL) {
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
     if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(tree(`12:0${ticks++}`));
     if (a.endsWith('screencap -p')) return png;
+    if (a.endsWith('shell sh')) return Buffer.from(baseline);
     return Buffer.alloc(0);
   });
   const out: (PhoneReply | PhoneFrame)[] = [];
@@ -51,6 +52,47 @@ function phone(png = SCREEN, serial = SERIAL) {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('phone messages on the execution node', () => {
+  it('sets and reads back readiness only on the registered phone and reports what needs attention', async () => {
+    const p = phone(SCREEN, SERIAL, 'lock\nbrightness\nready-check-complete\n');
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(1), binding: p.grant.binding });
+    const check = p.calls.find(c => c.args.join(' ') === `-s ${SERIAL} shell sh`);
+    expect(check?.input).toContain('stay_on_while_plugged_in 7');
+    expect(check?.input).toContain('screen_off_timeout 2147483647');
+    expect(check?.input).toContain('screen_brightness_mode 0');
+    expect(check?.input).toContain('screen_brightness 0 brightness');
+    expect(check?.input).toContain('settings --user current get');
+    expect(check?.input).toContain('locksettings get-disabled');
+    expect(check?.input).toContain('locksettings set-disabled true');
+    expect(check?.input).toContain('dumpsys deviceidle disable');
+    expect(check?.input).toContain('dumpsys deviceidle enabled deep');
+    expect(check?.input).toContain('dumpsys deviceidle whitelist');
+    expect(check?.input).toContain('cmd power set-mode 0');
+    expect(check?.input).toContain('adaptive_battery_management_enabled 0');
+    expect(check?.input).toContain('app_standby_enabled 0');
+    expect(check?.input).toContain('adb_allowed_connection_time 0');
+    expect(p.reply(1)).toMatchObject({ status: 'ok', readiness: ['lock', 'brightness'] });
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(2), binding: { ...p.grant.binding, hardwareKey: 'b'.repeat(64) } });
+    expect(p.reply(2)?.status).toBe('needs_person');
+    expect(p.calls.filter(c => c.args.join(' ').endsWith('shell sh'))).toHaveLength(1);
+  });
+
+  it('leaves the phone alone while an agent holds a session', async () => {
+    const p = phone();
+    await p.open();
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(1), binding: p.grant.binding });
+    expect(p.reply(1)?.status).toBe('busy');
+    expect(p.calls.some(c => c.args.join(' ').endsWith('shell sh'))).toBe(false);
+    p.phones.close();
+  });
+
+  it('reports a failed check when adb returns no complete readback after the restart', async () => {
+    const p = phone(SCREEN, 'ZF525LRDQS', 'lock\n');
+    const binding = { ...p.grant.binding };
+    await p.phones.handle({ type: 'phone.baseline', requestId: id(1), binding });
+    expect(p.reply(1)).toMatchObject({ status: 'ok', readiness: ['check'] });
+    expect(p.calls.some(c => c.args[0] === 'connect')).toBe(false);
+  });
+
   it('probes the registered network phone without opening a session', async () => {
     const p = phone();
     await p.phones.handle({ type: 'phone.probe', requestId: id(1), endpoint: SERIAL });

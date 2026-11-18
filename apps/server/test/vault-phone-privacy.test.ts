@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
 import { INVOCATION } from '../src/modules/tools/calls.js';
 import { recordPhoneFrame } from '../src/modules/phones/recording.js';
-import { attachments, phoneFrames, toolCalls } from '../src/db/schema.js';
+import { agentEvents, attachments, phoneFrames, toolCalls } from '../src/db/schema.js';
 import { as } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { phoneCompany } from './phone-fixture.js';
@@ -46,6 +46,8 @@ it('keeps phone execution private after a vault value, while ordinary replay and
   const typedId = randomUUID();
   const typed = await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'text', text: PASSWORD }, secretExecution: false }, typedId);
   expect(c.calls.flatMap(message => message.type === 'phone.action' && message.operation.kind === 'text' ? [message.operation] : [])).toEqual([{ kind: 'text', text: PASSWORD }]);
+  const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, turn.job.id));
+  expect(events).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ kind: 'tool', name: 'phone_action', input: JSON.stringify({ session: session.id, operation: { kind: 'text', text: '[hidden]' } }) }) }));
   const captureId = randomUUID();
   for (let retry = 0; retry < 2; retry++) await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'capture' } }, captureId);
   expect(c.calls.filter(message => message.type === 'phone.action' && message.operation.kind === 'capture')).toHaveLength(2);

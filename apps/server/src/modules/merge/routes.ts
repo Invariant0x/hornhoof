@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requirePerson, type Person } from '../../auth/session.js';
+import { requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { conflictsOf, pick, type ConflictView } from './picks.js';
 
@@ -20,8 +20,7 @@ const PickBody = z
 /* How many of a merge's conflicts the CEO's card reads at most. */
 const SHOWN = 500;
 
-/* What a merge left for the CEO: the conflicts about people, access, plans, machines and protected records, which
-   only he settles, by himself or through the orchestrator. Nobody else reads them. */
+/* The CEO sees the conflicts on their card. The orchestrator can see the whole merge. */
 export function mergeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   function ceo(me: Person): Person {
@@ -36,8 +35,8 @@ export function mergeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const settled = ListQuery.parse(req.query).settled === '1';
     const conflicts: ConflictView[] = [];
     for (let after: string | undefined; conflicts.length < SHOWN; ) {
-      const page = await conflictsOf(db, { kind: 'ceo', personId: me.id }, { merge: id, settled, after, limit: 100 });
-      conflicts.push(...page.conflicts.filter(conflict => conflict.whose === 'ceo'));
+      const page = await conflictsOf(db, { merge: id, settled, after, limit: 100 });
+      conflicts.push(...page.conflicts.filter(conflict => viaOrchestrator(me) || conflict.whose === 'ceo'));
       if (!page.more) break;
       after = page.conflicts.at(-1)!.id;
     }
@@ -48,6 +47,6 @@ export function mergeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/merges/pick', async req => {
     const me = ceo(await requirePerson(req, db));
     const { ids, merge, table, take, value } = PickBody.parse(req.body);
-    return pick(ctx, { kind: 'ceo', personId: me.id }, { ids, merge, table }, take, value);
+    return pick(ctx, me.via ? { kind: 'orchestrator', agentId: me.via } : { kind: 'ceo', personId: me.id }, { ids, merge, table }, take, value);
   });
 }

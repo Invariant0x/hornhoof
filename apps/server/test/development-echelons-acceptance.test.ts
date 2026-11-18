@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { departments, tasks, turns } from '../src/db/schema.js';
+import { approvalPolicies, departments, tasks, turns } from '../src/db/schema.js';
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
 import { changeReport, testsFixture } from './development-echelons-verification.js';
 
@@ -25,6 +25,25 @@ async function readyFixture(inTurn = true) {
 }
 
 describe('accepting only a checked and integrated candidate', () => {
+  it('accepts a checked main integration when the department has no commit rule', async () => {
+    const f = await readyFixture(false);
+    const moved = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated the checked candidate.', acceptance: f.acceptance });
+    expect(moved.task.status).toBe('done');
+  });
+
+  it('checks a freshly set commit rule before accepting the main integration', async () => {
+    const f = await readyFixture(false);
+    const read = f.ctx.readCommit;
+    f.ctx.readCommit = async (repo, ref, timeout) => {
+      if ('branch' in ref && ref.branch === 'main') {
+        await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
+      }
+      return read(repo, ref, timeout);
+    };
+    await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Hold the integration.', acceptance: f.acceptance })).rejects.toMatchObject({ status: 403 });
+    expect((await loadTask(f.db, f.task.id)).status).not.toBe('done');
+  });
+
   it('closes the ready result for its head after reading the exact turn integration', async () => {
     const f = await readyFixture();
     const moved = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated the checked candidate.', ...{ acceptance: f.acceptance } });
@@ -77,12 +96,16 @@ describe('accepting only a checked and integrated candidate', () => {
     const moved = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated alongside independent work.', ...{ acceptance: { ...f.acceptance, integrationCommit: merged } } });
     expect(moved.task).toMatchObject({ status: 'done', turnId: null });
   });
-  it('requires a real human approval of the exact main integration commit', async () => {
+  it('requires approval of the exact main integration commit under the every rule', async () => {
     const f = await readyFixture(false);
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
+    const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve a different commit.', commit: 'd'.repeat(40) });
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     await expect(report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'No main approval.', ...{ acceptance: f.acceptance } }).then(() => null)).rejects.toMatchObject({ status: 403 });
   });
-  it('accepts the observed main commit only after the normal human approval route', async () => {
+  it("accepts the observed main commit with the responsible person's approval", async () => {
     const f = await readyFixture(false);
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
     const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve this exact main integration.', commit: f.finalCommit });
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     const moved = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Observed the approved main commit.', ...{ acceptance: f.acceptance } });

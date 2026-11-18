@@ -1,5 +1,5 @@
 import { APPROVAL_CHANNELS, ApprovalChannel, ApprovalRule, kindKey, ruleOf } from '@hornhoof/protocol';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -7,20 +7,18 @@ import { accessOf, listsDepartment } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { approvalPolicies, departments, people, requests, tasks } from '../../db/schema.js';
+import { agents, approvalPolicies, departments, people, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import {
   hasAutonomousReleaseEntries,
   isAutonomousReleaseEnabled,
   listAutonomousReleases,
-  maySetAutonomousRelease,
 } from '../tasks/autonomous-release.js';
 import { candidates, departmentOwners } from '../tasks/decisions.js';
 
-/* A department's owner and how its approvals go. The CEO names the owner; the owner, the CEO and the delegate set the rules.
-   Its autonomous release is switched by a signed-in person who runs it, never an agent. The rules belong to the department,
-   so nothing here that changes the owner touches them. */
+/* The CEO names the owner. The people who run a department set its rules and switch autonomous release, also through
+   its head or the orchestrator. The department keeps its rules through a change of owner. */
 
 type DeptRow = typeof departments.$inferSelect;
 
@@ -40,7 +38,7 @@ export async function ownDepartment(db: Pick<Db, 'select'>, companyId: string, i
   return dept;
 }
 
-/* The rule of each channel. One nobody set asks nothing for what goes out, as defaultRule says for the rest. */
+/* An unset channel asks for no approval. */
 export async function departmentRules(db: Pick<Db, 'select'>, departmentId: string) {
   const rows = await db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, departmentId));
   return APPROVAL_CHANNELS.map(channel => ({ channel, ...ruleOf(rows.find(r => r.channel === channel), channel) }));
@@ -66,6 +64,18 @@ export async function kindKnown(db: Pick<Db, 'select'>, companyId: string, depar
   return found !== undefined;
 }
 
+export async function approvalRuleFor(db: Pick<Db, 'select'>, departmentId: string | null, channel: ApprovalChannel) {
+  const [stored] = departmentId
+    ? await db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, departmentId), eq(approvalPolicies.channel, channel)))
+    : [];
+  return ruleOf(stored, channel);
+}
+
+/* Give approval checks and policy changes the same row to lock, including when the commit rule has no row yet. */
+export function departmentPolicyRow(db: Pick<Db, 'select'>, departmentId: string) {
+  return db.select(idOnly(departments)).from(departments).where(eq(departments.id, departmentId));
+}
+
 /* Who may be named: active people with access to the department, other than the CEO, whom no owner already means. */
 async function ownerCandidates(ctx: Pick<Ctx, 'db'>, companyId: string, departmentId: string) {
   const able = (await candidates(ctx, companyId)).filter(p => p.status === 'active' && !p.isOwner && listsDepartment(p.access, departmentId)).map(p => p.id);
@@ -75,15 +85,24 @@ async function ownerCandidates(ctx: Pick<Ctx, 'db'>, companyId: string, departme
 
 export const mayChangeRules = async (db: Pick<Db, 'select'>, me: Person, departmentId: string) => actsAsCeo(me) || (await accessOf(db, me)).owns?.has(departmentId) === true;
 
+async function mayChangeApprovalPolicy(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
+  if (me.status !== 'active' || me.assistant) return false;
+  if (me.viaHead && me.via) {
+    const [head] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, me.via), eq(agents.companyId, me.companyId),
+      eq(agents.departmentId, departmentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+    if (!head) return false;
+  }
+  return mayChangeRules(db, me, departmentId);
+}
+
 async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
   const canSetOwner = actsAsCeo(me);
-  const [owner, canChangePolicy, ownerList, rules, autonomousRelease, canSetAutonomousRelease, hasAutonomousReleases] = await Promise.all([
+  const [owner, canChangePolicy, ownerList, rules, autonomousRelease, hasAutonomousReleases] = await Promise.all([
     departmentOwner(ctx, me.companyId, dept.id),
-    mayChangeRules(ctx.db, me, dept.id),
+    mayChangeApprovalPolicy(ctx.db, me, dept.id),
     canSetOwner ? ownerCandidates(ctx, me.companyId, dept.id) : Promise.resolve([]),
     departmentRules(ctx.db, dept.id),
     isAutonomousReleaseEnabled(ctx.db, dept.id),
-    maySetAutonomousRelease(ctx.db, me, dept.id),
     hasAutonomousReleaseEntries(ctx.db, me.companyId, dept.id),
   ]);
   return {
@@ -92,7 +111,7 @@ async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
     canSetOwner,
     canChangePolicy,
     autonomousRelease,
-    canSetAutonomousRelease,
+    canSetAutonomousRelease: canChangePolicy,
     hasAutonomousReleases,
     candidates: ownerList,
     rules,
@@ -157,8 +176,8 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/departments/:id/approval-policy/autonomous-release', async req => {
     const me = await requirePerson(req, db);
     const dept = await ownDepartment(db, me.companyId, IdParams.parse(req.params).id);
-    if (!(await maySetAutonomousRelease(db, me, dept.id))) {
-      throw new ApiError(403, 'forbidden', 'Only a signed-in person who runs this department, or the CEO, turns its autonomous release on or off; never an agent.', 'autonomous_release_not_allowed');
+    if (!(await mayChangeApprovalPolicy(db, me, dept.id))) {
+      throw new ApiError(403, 'forbidden', 'Only the people who run this department, the CEO or the CEO delegate change its release policy.', 'autonomous_release_not_allowed');
     }
     const { enabled } = AutonomousBody.parse(req.body);
     await db.update(departments).set({ autonomousRelease: enabled }).where(and(eq(departments.id, dept.id), eq(departments.companyId, me.companyId)));
@@ -176,16 +195,14 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id, channel } = RuleParams.parse(req.params);
     const dept = await ownDepartment(db, me.companyId, id);
-    if (!(await mayChangeRules(db, me, dept.id))) throw new ApiError(403, 'forbidden', 'Only this department\'s owner, the CEO or the CEO delegate changes how its approvals go.', 'policy_not_allowed');
+    if (!(await mayChangeApprovalPolicy(db, me, dept.id))) throw new ApiError(403, 'forbidden', 'Only the people who run this department, the CEO or the CEO delegate change its approval policy.', 'policy_not_allowed');
     const rule = parseRule(req.body);
-    if (channel === 'commit' && rule.mode !== 'every') {
-      throw new ApiError(400, 'validation', 'Commit approvals always check the exact commit; a person who runs the department enables autonomous release instead.', 'policy_invalid');
-    }
     const stored = { mode: rule.mode, limitAmount: rule.mode === 'within_limits' ? rule.limit : null, limitUnit: rule.mode === 'within_limits' ? (rule.unit ?? null) : null, updatedBy: me.id, updatedAt: new Date() };
-    await db
-      .insert(approvalPolicies)
-      .values({ companyId: me.companyId, departmentId: dept.id, channel, ...stored })
-      .onConflictDoUpdate({ target: [approvalPolicies.departmentId, approvalPolicies.channel], set: stored });
+    await db.transaction(async tx => {
+      await departmentPolicyRow(tx, dept.id).for('no key update');
+      await tx.insert(approvalPolicies).values({ companyId: me.companyId, departmentId: dept.id, channel, ...stored })
+        .onConflictDoUpdate({ target: [approvalPolicies.departmentId, approvalPolicies.channel], set: stored });
+    });
     logged(req, me, { departmentId: dept.id, channel, rule });
     changed(me.companyId, dept.id);
     return policyView(ctx, me, dept);

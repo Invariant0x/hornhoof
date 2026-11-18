@@ -323,11 +323,14 @@ describe('improvements', () => {
     await user.keyboard('{Enter}');
     const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     const versions = screen.getByRole('button', { name: 'Versions' });
+    const contact = screen.getByRole('button', { name: 'Talk to the orchestrator' });
     const settings = screen.getByRole('button', { name: 'Settings' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
-    /* Top to bottom as Design's reference orders them: Settings, the pages of the whole company, then About and Log out.
+    /* Top to bottom: the talk with the orchestrator, Settings, the pages of the whole company, then About and Log out.
        The themes and the languages are no longer in the menu. */
+    await user.tab();
+    expect(contact).toHaveFocus();
     await user.tab();
     expect(settings).toHaveFocus();
     await user.tab();
@@ -343,6 +346,7 @@ describe('improvements', () => {
     expect(account).toHaveFocus();
     await user.keyboard('{Enter}');
     await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
+    await user.tab();
     await user.tab();
     await user.tab();
     expect(screen.getByRole('button', { name: 'Improvements, 1 to decide' })).toHaveFocus();

@@ -439,7 +439,8 @@ describe('PUT /api/people/:id/ceo-delegate', () => {
     expect((await app.inject({ method: 'PUT', url: `/api/people/${olga.id}/ceo-delegate`, payload: { isCeoDelegate: true, isOwner: true }, ...as(ceo) })).statusCode).toBe(400);
     const [still] = await db.select().from(people).where(eq(people.id, olga.id));
     expect(still!.isCeoDelegate).toBe(false);
-    const viaOrchestrator = await app.inject({ method: 'PUT', url: `/api/people/${maria.id}/ceo-delegate`, payload: { isCeoDelegate: false }, headers: orchestratorHeaders(owner!.id, '00000000-0000-4000-8000-000000000009') });
+    const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const viaOrchestrator = await app.inject({ method: 'PUT', url: `/api/people/${maria.id}/ceo-delegate`, payload: { isCeoDelegate: false }, headers: orchestratorHeaders(maria.id, agent!.id) });
     expect(viaOrchestrator.statusCode).toBe(200);
     expect((await db.select().from(people).where(eq(people.id, maria.id)))[0]!.isCeoDelegate).toBe(false);
   });

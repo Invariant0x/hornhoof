@@ -31,7 +31,7 @@ const publicRoutes = new Map([
   ['DELETE /mcp', 'public method rejection'],
   ['GET /api/assistant/mcp', 'public method rejection'],
   ['DELETE /api/assistant/mcp', 'public method rejection'],
-  ['POST /api/feedback/inbound', "public feedback receiver, only on Hornhoof's own installation: a report of the strict shape, at most 16 KB and 10 an hour from one installation, which adds a signal to the inbox and does nothing else"],
+  ['POST /api/feedback/inbound', "public feedback receiver, only on Hornhoof's own installation: a report of the strict shape, at most 16 KB with a shared ingress budget, which adds a signal to the inbox and does nothing else"],
 ]);
 const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'requirePerson', path: /^\/api\//, rule: 'human session and company scope' },

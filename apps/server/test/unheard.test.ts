@@ -33,7 +33,7 @@ describe('words the program never took', () => {
       const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Zed', email: 'zed@acme.com', status: 'active', scopeKind: 'company' }).returning();
       await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'typed', personId: person!.id, data: {} });
     }
-    if (after === 'pending') expect(await decisionPrincipal(c.db, id)).toBeNull();
+    if (after === 'pending') expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
     const text = after === 'unknown' ? 'Words that were never saved.' : addressed('Approve it.', source.message!);
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: id, text });
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== id)!;

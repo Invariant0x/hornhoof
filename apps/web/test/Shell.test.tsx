@@ -159,8 +159,8 @@ describe('Shell', () => {
   });
 
   it.each([
-    ['who sees the whole company', ME, ['Settings', 'Improvements', 'Versions', 'About', 'Log out']],
-    ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Settings', 'About', 'Log out']],
+    ['who sees the whole company', ME, ['Talk to the orchestrator', 'Settings', 'Improvements', 'Versions', 'About', 'Log out']],
+    ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Talk to the orchestrator', 'Settings', 'About', 'Log out']],
   ])('keeps the account menu short for a person %s: no themes, language or feedback', async (_who, me, items) => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const user = userEvent.setup();
@@ -173,22 +173,22 @@ describe('Shell', () => {
     expect(within(menu).queryByRole('group')).not.toBeInTheDocument();
   });
 
-  /* The window checks its agent's card as it opens; one the server refuses would close it again. */
-  it('opens the orchestrator\'s window at once after setup, and closes it', async () => {
+  it('offers home work at once after setup and sends the option the person picks', async () => {
     const calls = mockApi({
       'GET /api/org': [200, ORG],
-      'GET /api/agents/orchestrator': [200, { id: 'orchestrator' }],
-      'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
-      'POST /api/agents/orchestrator/start': [200, { started: false }],
+      'GET /api/orchestrator/first-contact': [200, { offers: ['findDevices', 'checkDevices', 'householdBooks', 'telegram', 'assistant'] }],
+      'POST /api/orchestrator/first-contact': [202, { jobId: 'j1' }],
+      'GET /api/orchestrator/first-contact/j1': [200, { status: 'done', replies: ['Where do you keep your bills?'] }],
     });
     render(<Shell me={ME} welcome onSignOut={() => {}} />);
-    await screen.findByRole('complementary', { name: 'Orchestrator' });
-    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/agents/orchestrator')).toBe(true));
-    /* One turn of the event loop: the card's answer comes in a chain of promises with no timer, so it has been taken in. */
-    await act(async () => { await new Promise(resolve => { setImmediate(resolve); }); });
-    expect(screen.getByRole('complementary', { name: 'Orchestrator' })).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Talk to the orchestrator' });
+    expect(within(dialog).getByText('What would you like me to do?')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(await within(dialog).findByRole('button', { name: 'Set up Accounting for my bills and papers' }));
+    expect(await within(dialog).findByText('Where do you keep your bills?')).toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/orchestrator/first-contact', body: { offer: 'householdBooks', language: 'en' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Talk to the orchestrator' })).not.toBeInTheDocument();
   });
 
   it('closes the account menu on Escape and on a click outside it', async () => {
@@ -238,7 +238,7 @@ describe('the account menu', () => {
       'GET /api/improvements': [200, { improvements: [OPEN, { ...OPEN, id: 'i2' }, { ...OPEN, id: 'i3', status: 'done' }] }],
     });
     await waitFor(() => expect(rows(menu)).toEqual([
-      'head', '—', 'Give the orchestrator access to this machine (dev-laptop)', '—', 'Settings',
+      'head', '\u2014', 'Give the orchestrator access to this machine (dev-laptop)', '\u2014', 'Talk to the orchestrator', 'Settings',
       '—', 'Improvements + 2', 'Feedback inbox', 'Versions',
       '—', 'About', 'Log out',
     ]));
@@ -250,7 +250,7 @@ describe('the account menu', () => {
 
   it('draws no empty group and no line of its own for a person who sees only some departments', async () => {
     const { menu } = await open(LISTED);
-    await waitFor(() => expect(rows(menu)).toEqual(['head', '—', 'Settings', '—', 'About', 'Log out']));
+    await waitFor(() => expect(rows(menu)).toEqual(['head', '\u2014', 'Talk to the orchestrator', 'Settings', '\u2014', 'About', 'Log out']));
   });
 
   it('draws each row as a line of the panel 44 px high, its words at the start, with no frame', () => {

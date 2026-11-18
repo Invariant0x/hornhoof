@@ -15,8 +15,7 @@ const FILTER = {
 };
 const whenOf = (said: { from?: string; to?: string }) => ({ ...(said.from ? { from: new Date(said.from) } : {}), ...(said.to ? { to: new Date(said.to) } : {}) });
 
-/* The orchestrator's tools for what a merge could not prove: he reads his conflicts with both values and settles them.
-   Those of the CEO's he neither sees nor settles. */
+/* The orchestrator sees every conflict. A pick that permanently deletes a row needs the CEO. */
 export function registerMergeTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   const who: Picker = { kind: 'orchestrator', agentId: job.agentId };
 
@@ -31,7 +30,7 @@ export function registerMergeTools(server: McpServer, ctx: Ctx, job: ToolJob): v
         limit: z.number().int().min(1).max(100).optional(),
       },
     },
-    async ({ merge, table, from, to, settled, after, limit }) => say(JSON.stringify(await conflictsOf(ctx.db, who, { merge, table, ...whenOf({ from, to }), settled, after, limit }))),
+    async ({ merge, table, from, to, settled, after, limit }) => say(JSON.stringify(await conflictsOf(ctx.db, { merge, table, ...whenOf({ from, to }), settled, after, limit }))),
   );
 
   server.registerTool(

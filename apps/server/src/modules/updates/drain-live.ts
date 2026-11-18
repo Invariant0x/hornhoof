@@ -125,7 +125,7 @@ async function nodeSignAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[
 const partLive = (now: number) => (p: RunningPart): boolean => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
 
 function jobLive(ctx: Ctx, job: RunningJob, externalUntil: string | null, activityAt: number | undefined, now: number): boolean {
-  if (job.kind !== 'conversation') return jobTakenAt(job) + job.timeoutMs > now;
+  if (job.kind !== 'conversation') return job.timeoutMs === 0 || jobTakenAt(job) + job.timeoutMs > now;
   return isConversationLive(ctx, job, externalUntil, activityAt, now);
 }
 

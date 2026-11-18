@@ -9,7 +9,6 @@ import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
 import { nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
-import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
 import { BUILTIN } from './builtin.js';
 import { failureCompany } from './failure-company.js';
 import { as } from './helpers.js';
@@ -136,7 +135,14 @@ describe("an agent's tools with no turn of it running", () => {
     expect(logged.map(l => l.data)).toEqual([{ name: 'task', input: '' }, { ok: false, summary: 'Called with no turn running.' }]);
   });
 
-  it('take no decision for a person in a step, which answers nobody, not even the last person who wrote, as a turn of Hornhoof does', async () => {
+  it('changes company settings through named tools in an out-of-turn step', async () => {
+    const c = await company();
+    const invited = await c.outside(c.orchestrator.id, call(1, 'invite_person', { name: 'Eve', email: 'eve@example.test', access: { whole: true } }));
+    expect(invited.body?.result?.isError, textOf(invited)).toBeFalsy();
+    expect((await c.db.select().from(people).where(eq(people.email, 'eve@example.test')))[0]).toMatchObject({ name: 'Eve' });
+  });
+
+  it('marks tasks urgent and removes subscriptions as owner between turns', async () => {
     const c = await company();
     const [done] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.orchestrator.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Hi', status: 'done', timeoutMs: 1000, finishedAt: new Date() }).returning();
     const ceoId = (await c.app.inject({ url: '/api/me', ...as(c.ceo) })).json().person.id as string;
@@ -149,11 +155,11 @@ describe("an agent's tools with no turn of it running", () => {
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job.id));
 
     const urgent = await c.outside(c.orchestrator.id, call(1, 'set_urgent', { task: '#1', urgent: true }));
-    expect(textOf(urgent)).toContain(ONLY_DEPARTMENT_OWNER);
-    expect((await c.db.select(only(tasks, 'urgent')).from(tasks).where(eq(tasks.id, task!.id)))[0]!.urgent).toBe(false);
+    expect(urgent.body?.result?.isError, textOf(urgent)).toBeFalsy();
+    expect((await c.db.select(only(tasks, 'urgent')).from(tasks).where(eq(tasks.id, task!.id)))[0]!.urgent).toBe(true);
     const removed = await c.outside(c.orchestrator.id, call(2, 'remove_subscription', { subscription: c.sub.id }));
-    expect(textOf(removed)).toContain(ONLY_CEO);
-    expect(await c.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.id, c.sub.id))).toHaveLength(1);
+    expect(removed.body?.result?.isError, textOf(removed)).toBeFalsy();
+    expect((await c.db.select(only(subscriptions, 'removedAt')).from(subscriptions).where(eq(subscriptions.id, c.sub.id)))[0]!.removedAt).not.toBeNull();
   });
 
   it('give a switched-off employee its tools as it connects, and refuse its calls until it is on again', async () => {

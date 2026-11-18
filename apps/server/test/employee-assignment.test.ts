@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { listen, setUpCompany, testApp } from './helpers.js';
 
 async function fixture() {
@@ -24,9 +24,9 @@ async function fixture() {
   const head = await hire('head');
   const worker = await hire('worker');
   const other = await hire('worker', sales!.id);
-  const connect = async (agentId: string) => {
+  const connect = async (agentId: string, kind: 'conversation' | 'tools' = 'conversation') => {
     const token = `assignment-test-${agentId}`;
-    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: subscription!.id, agentId, kind: 'conversation', prompt: 'work', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: subscription!.id, agentId, kind, prompt: 'work', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
     const client = new Client({ name: 'assignment-test', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     onTestFinished(() => client.close());
@@ -38,6 +38,7 @@ async function fixture() {
 describe('employee assignment authority', () => {
   it('lets a head change the assignment of its own worker on its own and records the change', async () => {
     const { db, head, worker, connect } = await fixture();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const client = await connect(head.id);
     const names = (await client.listTools()).tools.map(t => t.name);
     expect(names).toContain('set_employee_assignment');
@@ -46,11 +47,30 @@ describe('employee assignment authority', () => {
     expect(result.isError).toBeFalsy();
     const [after] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(after).toEqual({ ...worker, overrides: { ...worker.overrides, base: assignment } });
-    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id))).toMatchObject([{ field: 'prompt', after: { base: assignment } }]);
+    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id))).toMatchObject([{ field: 'prompt', personId: owner!.id, actingAgentId: head.id, after: { base: assignment } }]);
     expect(await db.select().from(agentEvents).where(eq(agentEvents.agentId, head.id))).toMatchObject([{ kind: 'applied', data: { action: 'set_employee_assignment', employee: worker.id } }]);
     expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment: null } })).isError).toBeFalsy();
     const [cleared] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(cleared!.overrides).toEqual(worker.overrides);
+  });
+
+  it('records the head and its standing authority outside a conversation', async () => {
+    const { db, head, worker, connect } = await fixture();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const client = await connect(head.id, 'tools');
+    const assignment = 'Own the current order.';
+    expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment } })).isError).toBeFalsy();
+    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id)))
+      .toMatchObject([{ field: 'prompt', personId: owner!.id, actingAgentId: head.id }]);
+  });
+
+  it('saves the full text of a long assignment from a head', async () => {
+    const { db, head, worker, connect } = await fixture();
+    const client = await connect(head.id);
+    const assignment = 'Own the order queue.\n'.repeat(13_000);
+    expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment } })).isError).toBeFalsy();
+    const [after] = await db.select().from(agents).where(eq(agents.id, worker.id));
+    expect(after!.overrides.base).toBe(assignment);
   });
 
   it('refuses other departments, other companies, heads, removed employees and unrelated patch fields', async () => {
