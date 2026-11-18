@@ -347,8 +347,8 @@ export type AgentCardView = {
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
-  team?: { id: string; name: string } | null;
-  teams?: { id: string; name: string }[];
+  team?: { id: string; name: string; title?: Lang } | null;
+  teams?: { id: string; name: string; title?: Lang }[];
   turnkey?: boolean;
   model: string;
   /* The level a person picked, or null for the Default. */

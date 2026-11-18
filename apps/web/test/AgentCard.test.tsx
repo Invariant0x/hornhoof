@@ -564,6 +564,18 @@ describe('AgentCard', () => {
   });
 });
 
+describe("the sub-unit on an employee's card", () => {
+  it("names a team made from a template in the reader's language", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const teams = [{ id: 'k1', name: 'Turnkey team', title: { en: 'Turnkey team', ru: 'Команда под ключ' } }, { id: 'u1', name: 'Urgent fixes' }];
+    open({ 'GET /api/agents/b1': [200, { ...CARD, team: teams[0], teams }] });
+    const pick = await screen.findByRole('combobox', { name: 'Подотдел' });
+    localStorage.removeItem('hh-lang');
+    expect(within(pick).getAllByRole('option').map(option => option.textContent)).toEqual(['В конвейере', 'Команда под ключ', 'Urgent fixes']);
+    expect(pick).toHaveValue('k1');
+  });
+});
+
 describe('the Telegram bot on a head\'s card', () => {
   const HEAD: AgentCardView = { ...CARD, kind: 'head', name: 'Sasha', telegram: null };
   const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';

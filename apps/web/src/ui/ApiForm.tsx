@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useT } from '../i18n';
+import { deptLabel, errorText, teamLabel, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
 import type { ModelOption, SubView } from '../types';
 import { subName } from './subscription';
@@ -39,6 +39,7 @@ const isApi = (provider: string): provider is ApiProvider => (PROVIDERS as reado
 
 function ScopeField({ value, places, onChange }: { value: string; places: readonly string[] | null; onChange(value: string): void }) {
   const t = useT();
+  const { language } = useLanguage();
   const { org } = useOrg();
   const shown = (org?.departments ?? []).filter(d => places === null || places.includes(d.id));
   return (
@@ -50,7 +51,7 @@ function ScopeField({ value, places, onChange }: { value: string; places: readon
           {shown.map(d => (
             <optgroup key={d.id} label={deptLabel(t, d)}>
               <option value={`department:${d.id}`}>{deptLabel(t, d)}</option>
-              {d.teams.map(team => <option key={team.id} value={`team:${team.id}`}>{`${deptLabel(t, d)}, ${team.name}`}</option>)}
+              {d.teams.map(team => <option key={team.id} value={`team:${team.id}`}>{`${deptLabel(t, d)}, ${teamLabel(team, language)}`}</option>)}
             </optgroup>
           ))}
         </select>

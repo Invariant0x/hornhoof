@@ -1,4 +1,5 @@
 import type { TemplateKey } from '@hornhoof/protocol';
+import type { Lang, Templates } from '../templates/load.js';
 
 /* The English text agents read and the server shows where no language is chosen. People see their own language from the web dictionaries. */
 export const TEMPLATE_TEXT: Record<TemplateKey, { name: string; description: string }> = {
@@ -21,4 +22,11 @@ export const TEMPLATE_TEXT: Record<TemplateKey, { name: string; description: str
 /* A typed name as typed; a template department without one by its template's English name. */
 export function deptName(d: { name: string | null; templateKey: TemplateKey | null }): string {
   return d.name ?? (d.templateKey ? TEMPLATE_TEXT[d.templateKey].name : '');
+}
+
+/* A team still named as its department's template named it has that template's title in both languages, so people read
+   it in their own; a name a person gave it stays only theirs. */
+export function stockTeamTitle(templates: Pick<Templates, 'teamsOf'>, key: TemplateKey | null, name: string): { title?: Lang } {
+  const stock = key ? templates.teamsOf(key).find(team => team.title.en === name) : undefined;
+  return stock ? { title: stock.title } : {};
 }

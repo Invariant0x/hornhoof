@@ -104,6 +104,23 @@ describe('SubUnits', () => {
     expect(calls.find(c => c.path === '/api/departments/d2/teams/u1')?.body).toEqual({ turnkey: true });
   });
 
+  it("names a team made from a template in the reader's language, and a team a person named as they named it", () => {
+    const stock = { ...urgent, id: 'k1', name: 'Turnkey team', title: { en: 'Turnkey team', ru: 'Команда под ключ' }, turnkey: true };
+    const pat = { ...bruno!, id: 'b4', name: 'Pat', teamId: 'k1' };
+    const both = { ...dept, teams: [stock, urgent], employees: [dana!, sam, pat] };
+    expect(employeeGroups(both, 'ru', 'Другие').map(g => g.title)).toEqual(['Команда под ключ', 'Urgent fixes']);
+    expect(employeeGroups(both, 'en', 'Others').map(g => g.title)).toEqual(['Turnkey team', 'Urgent fixes']);
+    localStorage.setItem('hh-lang', 'ru');
+    render(<LanguageProvider><DeptEmployeeList department={both} company /><DeptSubUnits department={both} company /></LanguageProvider>);
+    localStorage.removeItem('hh-lang');
+    expect(screen.getByRole('heading', { name: 'Команда под ключ' })).toBeInTheDocument();
+    expect(screen.queryByText('Turnkey team')).toBeNull();
+    /* Each employee's sub-unit picker, and the sub-unit list. */
+    expect(screen.getAllByRole('option', { name: 'Команда под ключ' })).toHaveLength(2);
+    expect(screen.getAllByRole('option', { name: 'Urgent fixes' })).toHaveLength(2);
+    expect(within(screen.getByRole('region', { name: 'Подотделы' })).getByText('Команда под ключ', { selector: 'b' })).toBeInTheDocument();
+  });
+
   it('shows a sub-unit marked turnkey as such, and only to someone who may change it', () => {
     const marked = { ...dept, teams: [{ ...urgent, turnkey: true }] };
     const { unmount } = render(<LanguageProvider><DeptSubUnits department={marked} company /></LanguageProvider>);

@@ -15,7 +15,7 @@ import { liveSubscription, programNode } from '../conversation/placement.js';
 import { planHeld, planHoldView } from '../conversation/state.js';
 import { pump, pumpWaiting } from '../conversation/queue.js';
 import { onAgent } from '../conversation/line.js';
-import { deptName } from '../departments/templates.js';
+import { deptName, stockTeamTitle } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
@@ -47,8 +47,8 @@ export type AgentCard = FailureState & {
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
-  team: { id: string; name: string } | null;
-  teams: { id: string; name: string }[];
+  team: { id: string; name: string; title?: Lang } | null;
+  teams: { id: string; name: string; title?: Lang }[];
   turnkey: boolean;
   model: string;
   /* The level a person picked, or null to follow its role. */
@@ -123,10 +123,11 @@ const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
   retry: i.retryOf !== null,
 });
 
-async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<Pick<AgentCard, 'team' | 'teams' | 'turnkey'>> {
+async function teamCard({ db, templates }: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<Pick<AgentCard, 'team' | 'teams' | 'turnkey'>> {
   if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [], turnkey: false };
+  const [dept] = await db.select({ templateKey: departments.templateKey }).from(departments).where(eq(departments.id, agent.departmentId));
   const deptTeams = await db.select({ id: teams.id, name: teams.name, turnkey: teams.turnkey }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
-  const options = deptTeams.map(({ id, name }) => ({ id, name }));
+  const options = deptTeams.map(({ id, name }) => ({ id, name, ...stockTeamTitle(templates, dept?.templateKey ?? null, name) }));
   return { team: options.find(t => t.id === agent.teamId) ?? null, teams: options, turnkey: deptTeams.some(t => t.id === agent.teamId && t.turnkey) };
 }
 
@@ -287,7 +288,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     role: role ? { id: role.id, title: role.title, description: role.description, effort: role.effort } : null,
     department: named(agent.departmentId),
     product: named(agent.productId),
-    ...(await teamCard(db, agent)),
+    ...(await teamCard(ctx, agent)),
     model: agent.model,
     effort: agent.effort,
     subscription: cardSubscription(agent, views),

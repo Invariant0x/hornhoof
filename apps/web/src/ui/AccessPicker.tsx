@@ -1,12 +1,12 @@
 import { useId } from 'react';
-import { deptLabel, useT, type Messages } from '../i18n';
+import { deptLabel, teamLabel, useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { AccessInput, AccessView, Org } from '../types';
 
 /* A person's access as the picker holds it. */
 export const accessInput = (a: AccessView): AccessInput => (a.whole ? { whole: true } : { departments: a.departments.map(d => d.id), teams: a.teams.map(t => t.id) });
 
 /* What a person reaches in a few words: "Whole company", or departments and teams by name in the person's language. */
-export function accessText(t: Messages, a: AccessView, org: Org | null): string {
+export function accessText(t: Messages, a: AccessView, org: Org | null, language?: Language): string {
   if (a.whole) return t.people.wholeCompany;
   const dept = (id: string) => org?.departments.find(d => d.id === id);
   return [
@@ -16,7 +16,9 @@ export function accessText(t: Messages, a: AccessView, org: Org | null): string 
     }),
     ...a.teams.map(team => {
       const known = dept(team.departmentId);
-      return known ? `${deptLabel(t, known)} / ${team.name}` : team.name;
+      const own = known?.teams.find(x => x.id === team.id);
+      const name = own && language ? teamLabel(own, language) : team.name;
+      return known ? `${deptLabel(t, known)} / ${name}` : name;
     }),
   ].join(', ');
 }
@@ -27,6 +29,7 @@ export const accessEmpty = (v: AccessInput) => !('whole' in v) && !v.departments
    its name in the label column, the ticks beside it. */
 export function AccessPicker({ org, value, onChange }: { org: Org | null; value: AccessInput; onChange(v: AccessInput): void }) {
   const t = useT();
+  const { language } = useLanguage();
   const id = useId();
   const whole = 'whole' in value;
   const list = 'whole' in value ? { departments: [], teams: [] } : value;
@@ -71,7 +74,7 @@ export function AccessPicker({ org, value, onChange }: { org: Org | null; value:
                         <li key={team.id}>
                           <label>
                             <input type="checkbox" checked={on || list.teams.includes(team.id)} disabled={on} onChange={e => pick(new Set(list.departments), toggle(list.teams, team.id, e.target.checked))} />
-                            {team.name}
+                            {teamLabel(team, language)}
                           </label>
                         </li>
                       ))}

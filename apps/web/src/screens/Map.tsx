@@ -1,7 +1,7 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
@@ -343,21 +343,22 @@ function LineHits({ lines, title, onHit }: { lines: MapLine[]; title: string; on
 }
 
 /* The line under a person's name: their title, else the department they belong to or what they reach. */
-function personDetail(t: Messages, p: MapPerson, org: Org): string {
+function personDetail(t: Messages, p: MapPerson, org: Org, language: Language): string {
   if (p.title) return p.title;
   if (p.home) return deptLabel(t, p.home);
-  return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
+  return p.deputy ? t.map.deputy(accessText(t, p.access, org, language)) : t.map.wholeCompany;
 }
 
 function PersonChipCard({ org, person, w, h, cut, onOpen }: { org: Org; person: MapPerson; w: number; h: number; cut: number; onOpen(personId: string): void }) {
   const t = useT();
+  const { language } = useLanguage();
   return (
     <PersonButton person={person} frame={{ w, h, cut }} onOpen={() => onOpen(person.id)}>
       <Edge cut={cut} className="chip" halo>
         <PersonIcon label={t.map.person} />
         <span>
           <b>{person.name}</b>
-          <small>{personDetail(t, person, org)}</small>
+          <small>{personDetail(t, person, org, language)}</small>
         </span>
       </Edge>
     </PersonButton>

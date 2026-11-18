@@ -106,11 +106,16 @@ describe('POST /api/setup staffs the template', () => {
     expect(video.pipelines.map((p: { catalogKey: string }) => p.catalogKey).sort()).toEqual(['video-character-sheet', 'video-production', 'video-reshoot', 'video-short-clip']);
     /* The turnkey team keeps its template's title in both languages until a person renames it. */
     expect(video.teams).toEqual([expect.objectContaining({ name: 'Turnkey team', title: { en: 'Turnkey team', ru: 'Команда под ключ' }, turnkey: true })]);
+    const member = video.employees.find((e: { teamId?: string }) => e.teamId);
+    const card = (await app.inject({ url: `/api/agents/${member.id}`, ...as(ceo) })).json();
+    expect(card.team).toEqual({ id: video.teams[0].id, name: 'Turnkey team', title: { en: 'Turnkey team', ru: 'Команда под ключ' } });
+    expect(card.teams).toEqual([card.team]);
     const renamed = await app.inject({ method: 'PATCH', url: `/api/departments/${video.id}/teams/${video.teams[0].id}`, payload: { name: 'Clip makers' }, ...as(ceo) });
     expect(renamed.statusCode, renamed.body).toBeLessThan(300);
     const after = (await app.inject({ url: '/api/org', ...as(ceo) })).json().departments[1].teams;
     expect(after).toEqual([expect.objectContaining({ name: 'Clip makers' })]);
     expect(after[0]).not.toHaveProperty('title');
+    expect((await app.inject({ url: `/api/agents/${member.id}`, ...as(ceo) })).json().team).toEqual({ id: video.teams[0].id, name: 'Clip makers' });
   });
 
   it('hires every employee of the template, with its role, skills and the model its tier asks for on the key', async () => {

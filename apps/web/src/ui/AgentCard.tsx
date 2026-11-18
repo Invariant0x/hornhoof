@@ -1,7 +1,7 @@
 import { OfflinePlan } from './OfflineMachine';
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Messages } from '../i18n';
+import { errorText, teamLabel, useLanguage, useT, type Messages } from '../i18n';
 import { cutLine } from '../restarts';
 import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
@@ -116,6 +116,7 @@ const hasSubUnits = (card: AgentCardView) => card.kind === 'worker' && Boolean(c
 
 function SubUnitField({ card, inputId, editable, onChange }: { card: AgentCardView; inputId: string; editable: boolean; onChange(team: string | null): void }) {
   const t = useT();
+  const { language } = useLanguage();
   if (!hasSubUnits(card)) return null;
   return (
     <div className="field">
@@ -124,7 +125,7 @@ function SubUnitField({ card, inputId, editable, onChange }: { card: AgentCardVi
         <option value="">{t.agent.inPipeline}</option>
         {(card.teams ?? []).map(tm => (
           <option key={tm.id} value={tm.id}>
-            {tm.name}
+            {teamLabel(tm, language)}
           </option>
         ))}
       </select>

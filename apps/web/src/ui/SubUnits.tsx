@@ -20,7 +20,7 @@ export function employeeGroups(d: Department, language: 'en' | 'ru', othersLabel
   const members = d.employees.filter(e => e.kind !== 'head');
   const teamIds = new Set(d.teams.map(t => t.id));
   const byTeam = d.teams
-    .map(tm => ({ key: `team:${tm.id}`, title: tm.name, members: members.filter(e => e.teamId === tm.id) }))
+    .map(tm => ({ key: `team:${tm.id}`, title: teamLabel(tm, language), members: members.filter(e => e.teamId === tm.id) }))
     .filter(g => g.members.length > 0);
   const inPipe = members.filter(e => !e.teamId || !teamIds.has(e.teamId));
   const known = new Set(d.roles.filter(r => inPipe.some(e => e.roleId === r.id)).map(r => r.id));
@@ -58,7 +58,7 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
                     <option value="">{t.dept.inPipeline}</option>
                     {d.teams.map(tm => (
                       <option key={tm.id} value={tm.id}>
-                        {tm.name}
+                        {teamLabel(tm, language)}
                       </option>
                     ))}
                   </select>

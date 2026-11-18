@@ -266,12 +266,13 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
 
 function PersonDetails({ person, org, onClose }: { person: PersonView; org: Org | null; onClose: () => void }) {
   const t = useT();
+  const { language } = useLanguage();
   return <Edge className="panel form-card" cut={12}>
     <div className="form-head">
       <h2 className="form-title">{person.assistant ? <AgentIcon /> : <PersonIcon />}{person.name}</h2>
     </div>
     <p>{person.title}</p>
-    <p>{person.assistant ? t.people.actsFor(person.assistant.owner.name) : accessText(t, person.access, org)}</p>
+    <p>{person.assistant ? t.people.actsFor(person.assistant.owner.name) : accessText(t, person.access, org, language)}</p>
     {telegramOf(person) && <p>{t.people.telegram}: {telegramOf(person)}</p>}
     <div className="form-foot">
       <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
@@ -371,12 +372,13 @@ function rowRights(me: Me, p: PersonView, people: PersonView[]) {
 
 function PersonRow({ p, me, org, people, routed, openPerson, newLink, setStatus, askDelete }: Row) {
   const t = useT();
+  const { language } = useLanguage();
   const { edits, links, manageable, deletes } = rowRights(me, p, people);
   return (
     <tr className={p.status}>
       <td data-label={t.people.columns.name}><NameCell p={p} routed={routed} openPerson={openPerson} /></td>
       <td data-label={t.people.columns.title}>{p.title}</td>
-      <td data-label={t.people.columns.access}>{p.assistant ? t.people.sameAs(p.assistant.owner.name) : accessText(t, p.access, org)}</td>
+      <td data-label={t.people.columns.access}>{p.assistant ? t.people.sameAs(p.assistant.owner.name) : accessText(t, p.access, org, language)}</td>
       <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
       <td className="row-actions" data-label={t.people.columns.actions}>
         <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>

@@ -6,6 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { AgentWindowContext } from '../src/screens/AgentWindowContext';
 import { People } from '../src/screens/People';
+import { AccessPicker, accessText } from '../src/ui/AccessPicker';
 import { AgentIcon, PersonIcon } from '../src/ui/icons';
 import type { Me, PersonView, SubView } from '../src/types';
 import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
@@ -1015,5 +1016,24 @@ describe('the forms to add and edit people', () => {
     expect(screen.getByRole('radio', { name: 'Личный ИИ-ассистент' })).toHaveAccessibleDescription('Подключение своей программы по ключу');
     expect(screen.getByRole('button', { name: 'Создать ссылку' })).toBeInTheDocument();
     localStorage.clear();
+  });
+});
+
+describe("a template's team in a person's access", () => {
+  const stock = { id: 't1', name: 'Turnkey team', title: { en: 'Turnkey team', ru: 'Команда под ключ' }, about: '', stage: 0, gate: false, turnkey: true };
+  const org = { ...ORG_WITH_TEAMS, departments: [{ ...ORG_WITH_TEAMS.departments[0]!, teams: [stock, ORG_WITH_TEAMS.departments[0]!.teams[1]!] }, ORG_WITH_TEAMS.departments[1]!] };
+  const access = { whole: false, departments: [], teams: [{ id: 't1', name: 'Turnkey team', departmentId: 'd1' }] };
+
+  it("reads in the reader's language, and as named where the company is not known", () => {
+    expect(accessText(ru, access, org, 'ru')).toBe('Marketing / Команда под ключ');
+    expect(accessText(ru, access, null, 'ru')).toBe('Turnkey team');
+  });
+
+  it("is ticked by the template's title in the reader's language", () => {
+    localStorage.setItem('hh-lang', 'ru');
+    render(<LanguageProvider><AccessPicker org={org} value={{ departments: [], teams: ['t1'] }} onChange={() => {}} /></LanguageProvider>);
+    localStorage.clear();
+    expect(screen.getByRole('checkbox', { name: 'Команда под ключ' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Content' })).not.toBeChecked();
   });
 });
