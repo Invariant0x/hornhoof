@@ -22,10 +22,10 @@ type Screen =
 
 export function App() {
   return (
-    <>
-      <Screens />
+    <div className="app-layout">
+      <div className="app-screen"><Screens /></div>
       <VersionMark />
-    </>
+    </div>
   );
 }
 
@@ -91,7 +91,7 @@ function Screens() {
     case 'loading':
       return null;
     case 'invite':
-      return <AcceptInvite token={screen.token} onDone={() => home()} />;
+      return <AcceptInvite token={screen.token} onDone={home} />;
     case 'setup':
       return <Setup linkDomain={screen.linkDomain} recovering={screen.recovering} onDone={({ welcome }) => home(welcome)} />;
     case 'login':

@@ -69,7 +69,7 @@ async function messaging() {
     const message = JSON.parse(String(raw)) as ServerMessage;
     if (message.type === 'agent.say') node.send({ type: 'agent.said', ref: message.ref, ok: true });
   });
-  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true, skillFiles: true });
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
   await until(() => c.ctx.hub.isReady(identityOf(c.sub, null, null, BUILTIN)!));
   return { ...c, node };
 }

@@ -68,14 +68,14 @@ export type LinkEnd = { link: string; at: Date; cause: ConnectionEnd; code: numb
 
 /* greeted: Hornhoof has handled the node's hello, so a job sent now cannot be mistaken for one lost in a restart.
    terminals: the node said it runs agents in sessions people can watch. work: it runs parts of any work, not only of
-   test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
+   test runs. load: how busy its machine was when it last said. noRuns: why
    it takes no part of any run. browserError: why Playwright's browser failed to start on the node. build: the node build its
    image is, none from a node built by hand or from before. link: this connection in the node's history. chain: what this
    socket has to do one after another, as job.started is stored before job.done. ending: what the server knows of why the
    socket is closing. ended: the end of the connection is on its way to the history. stream: the node's numbering of its
    messages, from the socket's first hello that names one. refused: a message of this socket could not be taken, so
    nothing that waits behind it runs, and the node sends it all again on its next socket. */
-type Entry = { stream: string | null; refused: boolean; programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; heardAt: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
+type Entry = { stream: string | null; refused: boolean; programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; heardAt: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -150,7 +150,7 @@ export class NodeHub {
     const report = (err: unknown) => this.opts.onError?.(err);
     const link = randomUUID();
     const started = this.opts.onConnected?.(id, link, at).catch(report) ?? Promise.resolve();
-    const entry: Entry = { stream: null, refused: false, link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, heardAt: at.getTime(), greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
+    const entry: Entry = { stream: null, refused: false, link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, heardAt: at.getTime(), greeted: false, terminals: false, work: false, load: null, noRuns: null, browserError: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     this.seen.set(key, at.getTime());
@@ -257,7 +257,6 @@ export class NodeHub {
   greet(
     id: NodeIdentity,
     terminals = false,
-    skillFiles = false,
     work = false,
     noRuns: string | null = null,
     build: string | null = null,
@@ -267,7 +266,6 @@ export class NodeHub {
     if (!entry) return;
     entry.greeted = true;
     entry.terminals = terminals;
-    entry.skillFiles = skillFiles;
     entry.work = work;
     entry.noRuns = noRuns;
     entry.browserError = browserError;
@@ -374,19 +372,15 @@ export class NodeHub {
     return this.isReady(id) && this.sockets.get(keyOf(id))!.terminals;
   }
 
-  /* Said in its hello that it writes a turn's skills as files. */
-  takesSkillFiles(id: NodeIdentity): boolean {
-    return this.sockets.get(keyOf(id))?.skillFiles === true;
-  }
-
   hasProgramOperator(id: NodeIdentity): boolean {
     return this.hasTerminals(id) && this.sockets.get(keyOf(id))?.programOperatorV1 === true;
   }
 
-  send(id: NodeIdentity, msg: ProgramServerMessage): boolean {
+  /* True means queued on this socket; written reports its local write, not the node's receipt. */
+  send(id: NodeIdentity, msg: ProgramServerMessage, written?: (error?: Error) => void): boolean {
     const entry = this.sockets.get(keyOf(id));
     if (entry?.socket.readyState !== 1) return false;
-    entry.socket.send(JSON.stringify(msg));
+    entry.socket.send(JSON.stringify(msg), written);
     return true;
   }
 

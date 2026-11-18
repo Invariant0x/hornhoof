@@ -1,23 +1,11 @@
 ---
 id: home-real-world-approval
-title: { en: "Wait for a person before acting", ru: "Спроси человека перед действием" }
-description: { en: "Reading and suggesting are free; anything that changes the real home waits for a person's approval.", ru: "Читать и предлагать можно свободно; все, что меняет реальный дом, ждет одобрения человека." }
+title: { en: "Work on the home", ru: "Работа по дому" }
+description: { en: "Carries out household work within the home's rules and brings irreversible deletions to the CEO.", ru: "Выполняет работу по правилам дома и обращается к CEO перед удалением без возможности восстановления." }
 kind: procedure
 ---
-When a job touches a family's real home, a mistake touches their real life. Split every job into two kinds.
+Read the home's notebook and what the responsible person asked for. Go ahead with the assigned work the notebook allows, including reversible settings, updates and cleanup. Check what the change affects, keep a way back, and verify the result on the actual device.
 
-Within the access already granted, no action approval is needed for:
-- Reading device and network metadata or the calendar, bills and supplies. Camera streams, microphone content and recordings are not device metadata.
-- Making lists, drafts and plans.
-- Suggesting a change and saying what it would do.
+Only irreversible deletion needs the CEO's yes. Name exactly what will be lost before asking. A person pays or signs in the company's name. The department handles its own bookings, messages and calls within its rules. When a device needs a physical step or a detail only someone at home knows, ask for that step or detail.
 
-Waits for a person's approval through your head, every time:
-- Changing a router's, network's or device's settings.
-- Turning devices or scenes on or off in the real home.
-- Buying, ordering or booking anything, and paying or renewing a paid plan.
-- Unlocking or locking doors, gates or anything physical.
-- Anything that opens a camera stream, listens to microphone content, or reads or moves camera or microphone recordings.
-
-When a job needs approval, stop before the acting step. Write the exact action, target device or record, proposed setting or amount, recipient if any, time, purpose and risk, and hand it to your head as a request for a person. Record what the person approved and do only that, within existing access rights; a broader suggestion or an earlier approval is not approval for another action. People make payments in their own accounts. When unsure whether something counts as acting on the real home, treat it as acting and ask first.
-
-Keep family records and what you learn private to the home. Read only what the assignment needs. Never ask for or store card, bank or account secrets. This ability is a check on a proposed action, not a grant of permission or a requirement to perform it.
+Use only the records and device access needed for the work. Cameras and microphones need a separate assignment and working access before you open their content. Keep family information private and use sign-ins from the vault.

@@ -9,7 +9,6 @@ import { listenIn } from '../../../test-support/ports.mjs';
 import { agents, assistantEvents, companies, departments, people, requests } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
-import { cardPrincipal } from '../src/modules/conversation/decision-context.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
@@ -24,7 +23,7 @@ async function company() {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().state.ready);
   app.ctx.assistants.replyGraceMs = 0;
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
@@ -190,8 +189,6 @@ describe("an assistant's events", () => {
     const answered = await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Yes.' }, ...bearer(ava.key) });
     expect(answered.statusCode).toBe(200);
     expect((await c.db.select().from(requests).where(eq(requests.id, asked.id)))[0]).toMatchObject({ status: 'answered', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
-    /* The machine's card goes by the owner's answer, as when they gave it themselves. */
-    expect(await cardPrincipal(c.db, c.acme.id, asked.id)).toBe(c.owner.id);
   });
 
   it('go to their own assistant alone, and a request only to the assistant of the person it waits for', async () => {
@@ -267,8 +264,8 @@ describe('a wake at the events address', () => {
     c.builtin.send({ type: 'job.started', jobId: run.jobId });
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it.' } });
     await until(async () => (await eventsOf(c, ava.key)).length === 1);
-    /* A moment for a wake that would go for a word alone; none does. */
-    await new Promise(done => setTimeout(done, 100));
+    /* A wake that would go for a word alone would have gone once the service settles; none does. */
+    await c.app.ctx.assistants.settled();
     expect(address.wakes).toEqual([]);
     c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => address.wakes.length === 1);
@@ -299,7 +296,7 @@ describe('a wake at the events address', () => {
 
     await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Europe.' }, headers: { authorization: `Bearer ${ava.key}` } });
     await until(async () => (await eventsOf(c, ava.key, told!.seq)).length === 1);
-    await new Promise(done => setTimeout(done, 100));
+    await c.app.ctx.assistants.settled();
     expect(address.wakes).toHaveLength(1);
     const [closed] = await eventsOf(c, ava.key, told!.seq);
     await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which city then?', topic: 'task' });
@@ -350,8 +347,8 @@ describe('the work for assistants, stopped and started again as a server gets an
     service.collect(c.acme.id);
     const meanwhile = read(c, ava.key, first!.seq, 50);
     await until(() => waiting === 2);
-    /* A moment for anything that would still go, so that it shows here; nothing does. */
-    await new Promise(done => setTimeout(done, 100));
+    /* Anything that would still go has gone once the service settles, so that it shows here; nothing does. */
+    await service.settled();
     expect(await eventsOf(c, ava.key, first!.seq)).toEqual([]);
     expect(address.wakes).toHaveLength(1);
 

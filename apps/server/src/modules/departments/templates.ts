@@ -13,7 +13,7 @@ export const TEMPLATE_TEXT: Record<TemplateKey, { name: string; description: str
   design: { name: 'Design', description: 'Interfaces, brand and visual materials.' },
   support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
   finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
-  home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning. Acting on a device waits for a person.' },
+  home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning.' },
   household: { name: 'Household', description: 'Runs the household: shopping lists and supplies, bills and subscriptions, chores, the family calendar and reminders. Buying or paying waits for a person.' },
 };
 

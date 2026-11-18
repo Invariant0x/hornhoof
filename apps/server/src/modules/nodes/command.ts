@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { Person } from '../../auth/session.js';
+import { viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Config } from '../../config.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -15,13 +15,8 @@ export const updateCommand = (publicUrl: string): string => `curl -fsSL ${public
 /* The one command a person runs on their computer. The installer sets up Docker if needed, then the node. */
 export const installCommand = (publicUrl: string, code: string): string => `${updateCommand(publicUrl)} -s -- --join ${code}`;
 
-/* What the orchestrator hears of a command he asked for. */
-export const SHOWN_TO_CEO = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
-
-/* A command reaches only the person it was made for. Their own click gets it in the answer and keeps it sealed for their
-   screen until the machine joins, the day is over or they cancel it. One the orchestrator asked for is kept sealed for
-   the CEO's screen, which shows it in his window, and he hears only that it is there: so the code never reaches an agent,
-   its conversation or its terminal. */
+/* The command is sealed for the person's screen and returned to the person or the orchestrator that requested it.
+   Any other mediated caller receives only the delivery status. */
 export async function commandFor(
   db: Db,
   config: Config,
@@ -35,7 +30,7 @@ export async function commandFor(
     .set({ commandEnc: encryptSecret(command, config.secret) })
     .where(eq(nodeCodes.codeHash, id))
     .returning({ expiresAt: nodeCodes.expiresAt });
-  if (me.via) return { shown: SHOWN_TO_CEO };
+  if (me.via && !viaOrchestrator(me)) return { shown: 'The command is shown to the person it was made for.' };
   return { id, command, expiresAt: row!.expiresAt.toISOString() };
 }
 

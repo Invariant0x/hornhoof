@@ -8,6 +8,7 @@ export const ORCHESTRATOR_INSTRUCTIONS =
   'You are the Orchestrator who runs the company with its CEO, can do anything in the company and in Hornhoof itself, sees everything and can change its own system.';
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
+export const FIRST_CONTACT_ACTION = 'first_contact';
 
 /* The greeting when the CEO started from a ready-made template that brought its people: the company is complete, so
    what is left is a subscription for whoever still waits for one, not hiring. */

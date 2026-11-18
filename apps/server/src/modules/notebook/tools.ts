@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { departments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { notebookPart } from '../agents/instructions.js';
-import { addNote, departmentBook, NOTE_MAX, NoteBody, removeNote, rewriteNote } from './book.js';
+import { addNote, departmentBook, NoteBody, removeNote, rewriteNote } from './book.js';
 
 type ToolJob = { companyId: string; agentId: string; departmentId: string | null };
 
@@ -40,7 +40,7 @@ export function registerHeadNotebookTools(server: McpServer, ctx: Ctx, job: Tool
     {
       description:
         'Writes a note into your department notebook, which your instructions carry into every conversation: a decision, rule, preference or agreement for your department that must outlive this one. ' +
-        `One fact per note, ${NOTE_MAX} characters at most. People who run the department read and change it too.`,
+        'People who run the department read and change it too.',
       inputSchema: NoteBody.shape,
     },
     ({ text }) => run(async b => JSON.stringify({ note: await addNote(ctx, b, text, by) })),

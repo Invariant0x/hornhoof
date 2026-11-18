@@ -147,7 +147,7 @@ export function TurnsAndReleases({ tasks, places, rows }: { tasks: TaskLine[] | 
   const shown = inDepartment(tasks ?? [], department);
   const shownTurns = (turns ?? []).filter(turn => department === ALL_DEPARTMENTS || turn.departmentId === department);
   return (
-    <section className="board" aria-label={t.tracker.side.turns}>
+    <section className="board tr-releases" aria-label={t.tracker.side.turns}>
       {choices.length > 1 && <div className="board-tools"><DepartmentPicker choices={choices} value={department} onChange={setPicked} /></div>}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {tasks && turns && <Releases tasks={shown} turns={shownTurns} rows={rows} department={department} places={places} />}

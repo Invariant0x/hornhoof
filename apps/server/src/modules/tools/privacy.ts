@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { markSensitiveTool, sensitiveTurn } from '../events/store.js';
+import { jobs } from '../../db/schema.js';
+import { appendTurnEvent, sensitiveTurn } from '../events/store.js';
 import type { ToolProtection } from './calls.js';
 import { privateTurn, rememberPrivateTurn } from './private-turns.js';
 
@@ -19,14 +21,16 @@ function turnMasks(db: Ctx['db'], jobId: string): Pick<ToolProtection, 'input' |
 function sensitiveObserver(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string): ToolProtection['sensitive'] {
   return async (name, policy, input, answer) => {
     const state = rememberPrivateTurn(ctx.db, jobId);
+    const scope = eq(jobs.id, jobId);
     if (!answer) {
       state.input(name, input, policy);
-      await markSensitiveTool(ctx, jobId, name);
+      await appendTurnEvent(ctx, jobId, { kind: 'tool', name, input: JSON.stringify(state.values.hide(input)) ?? '', sensitive: true, issued: true }, scope);
     } else for (const content of answer.content) {
       if (content.type !== 'text') continue;
       let value: unknown = content.text;
       try { value = JSON.parse(content.text); } catch { /* A sensitive tool may return plain text. */ }
       state.result(value, policy);
+      await appendTurnEvent(ctx, jobId, { kind: 'tool_result', ok: answer.isError !== true, summary: state.values.hide(content.text) }, scope);
     }
   };
 }

@@ -14,4 +14,4 @@ Compare the resources named in the assignment with the planned workload. Nodes a
 5. Propose the smallest remedy for each gap, with verified cost and tradeoffs: authorized cleanup, added capacity, quieter scheduling or a different plan.
 6. Return the measurements, sources, forecast assumptions and proposals to the task's decision maker.
 
-Keep dated measurements so trends can be compared. Buying a plan or adding a machine needs the CEO's approval. This analysis grants no authority to move subscriptions, delete work or change access.
+Keep dated measurements so trends can be compared. Buying a plan costs money and waits for a person to pay; adding a machine is the orchestrator's work, for whoever asked. This analysis grants no authority to move subscriptions, delete work or change access.

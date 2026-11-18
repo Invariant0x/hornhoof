@@ -1,8 +1,9 @@
+import { externalWaitFact, isPersonWait, type TaskWaitFact } from '@hornhoof/protocol/waits';
 import type { TaskLine, TurnView } from './types';
 
 /* The state of a task in plain words, as the tracker shows it: the table of the Design department, and paused, which a person
    says. */
-export type HumanStatus = 'notStarted' | 'working' | 'review' | 'waiting' | 'waitingYou' | 'stopped' | 'paused' | 'done' | 'cancelled';
+export type HumanStatus = 'notStarted' | 'working' | 'review' | 'waiting' | 'waitingYou' | 'failure' | 'stopped' | 'paused' | 'done' | 'cancelled';
 
 /* A task with the work under it: how many related tasks right under it are done of those that count, and how far it is,
    from 0 to 1. */
@@ -21,15 +22,40 @@ export type Releases = { preparing: Preparing[]; outside: Split; released: Relea
 export const NO_DEPARTMENT = 'none';
 export const ALL_DEPARTMENTS = 'all';
 
-const closed = (task: TaskLine) => task.status === 'done' || task.status === 'cancelled';
+const closed = (task: Pick<TaskLine, 'status'>) => task.status === 'done' || task.status === 'cancelled';
+
+export type WaitTask = Pick<TaskLine, 'time' | 'status' | 'externalWait'> & Partial<Pick<TaskLine, 'executor' | 'assignee' | 'waitsFor'>>;
+
+export const matchesExternalWait = (fact: TaskWaitFact, external: NonNullable<WaitTask['externalWait']>) =>
+  fact.since === external.since && (fact.until === external.until || (fact.until === undefined && ['external', 'run', 'work'].includes(fact.kind)));
+
+export function taskWaits(task: WaitTask, now = Date.now()): TaskWaitFact[] {
+  if (closed(task)) return [];
+  const waits = [...(task.time?.waitsOn ?? [])];
+  const external = task.externalWait;
+  if (external) {
+    const index = waits.findIndex(fact => matchesExternalWait(fact, external));
+    if (index < 0) waits.push(externalWaitFact(external, now));
+    else waits[index] = externalWaitFact(external, now, waits[index]);
+  }
+  const dependencies = new Set(waits.filter(wait => wait.kind === 'after').map(wait => wait.reason));
+  for (const number of task.waitsFor ?? []) {
+    const reason = `#${number}`;
+    if (!dependencies.has(reason)) waits.push({ kind: 'after', reason, who: null, since: task.time?.inStatusSince ?? new Date(now).toISOString() });
+  }
+  return waits.sort((a, b) => Number(!!b.failure) - Number(!!a.failure) || Number(isPersonWait(b)) - Number(isPersonWait(a)) || a.since.localeCompare(b.since));
+}
 
 /* asksYou: an open question on the task is the person's to answer. */
-export function humanStatus(task: TaskLine, asksYou = false): HumanStatus {
-  if (task.status === 'done' || task.status === 'cancelled') return task.status;
+export function humanStatus(task: WaitTask & Pick<TaskLine, 'paused'>, asksYou = false): HumanStatus {
+  if (closed(task)) return task.status === 'done' ? 'done' : 'cancelled';
   if (task.paused) return 'paused';
+  const facts = taskWaits(task);
+  if (facts.some(fact => fact.failure)) return 'failure';
   if (asksYou) return 'waitingYou';
+  if (facts.some(isPersonWait)) return 'waiting';
   if (task.status === 'blocked') return 'stopped';
-  if (task.externalWait || task.status === 'waiting') return 'waiting';
+  if (facts.some(fact => fact.kind !== 'review') || task.status === 'waiting') return 'working';
   if (task.status === 'review') return 'review';
   return task.status === 'open' ? 'notStarted' : 'working';
 }
@@ -58,7 +84,7 @@ export function askingTask(goal: Goal, asksYou?: Asks): TaskLine | null {
 export const stateOf = (goal: Goal, asksYou?: Asks): HumanStatus => goalStatus(goal, askingTask(goal, asksYou) !== null);
 
 /* What needs people first, then what stopped, is being checked, moves and has not started, and what stands still. */
-const ORDER: HumanStatus[] = ['waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
+const ORDER: HumanStatus[] = ['failure', 'waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
 const byNeed = (asksYou?: Asks) => (a: Goal, b: Goal) => ORDER.indexOf(stateOf(a, asksYou)) - ORDER.indexOf(stateOf(b, asksYou)) || b.task.number - a.task.number;
 const newestFirst = (a: Goal, b: Goal) => b.task.number - a.task.number;
 

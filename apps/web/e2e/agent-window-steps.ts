@@ -17,7 +17,7 @@ export const VIEWERS = {
 export type Viewer = keyof typeof VIEWERS;
 
 export const ORCHESTRATOR: Org['orchestrator'] = { id: 'a1', name: 'Orchestrator', model: 'gpt-6', effort: null, subscription: SUB, context: null, program: null, alarm: null, retry: null, failure: null };
-export const ORCHESTRATOR_CARD: Partial<AgentCardView> = { id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, model: 'gpt-6', effort: null, subscription: SUB, machine: null, state: 'sleeping', currentTask: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null };
+export const ORCHESTRATOR_CARD: Partial<AgentCardView> = { id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, model: 'gpt-6', effort: null, subscription: SUB, machine: null, state: 'sleeping', currentTask: null, skills: [], parts: [], raw: '', runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null };
 
 export async function open(page: Page, agent: Agent, lang: Settings['lang']): Promise<Locator> {
   const t = lang === 'en' ? en : ru;

@@ -1,9 +1,10 @@
-import { lastBytes, PRIVATE_TOOL_NOTE, privateToolEvent, type Limits, type NodeMessage, type PrivateValues } from '@hornhoof/protocol';
+import { lastBytes, ToolPrivacy, type Limits, type NodeMessage } from '@hornhoof/protocol';
+import { hideCredentials } from '@hornhoof/protocol/redaction';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
-import { countOnly, idOnly, only } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { ON_NODE } from '../jobs/dispatch.js';
@@ -18,7 +19,7 @@ import { turnsHeld } from '../tasks/orphan-turns.js';
 import { turnSign } from '../tasks/turn-signs.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
-import { appendTurnEvent, publishWorking, sensitiveTurn } from '../events/store.js';
+import { appendTurnEvent, cleanTurnEvent, publishWorking, sensitiveTurn } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -69,12 +70,6 @@ export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   const ofKeys = inArray(jobs.subscriptionId, ctx.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
   return and(ofKeys, here)!;
-}
-
-/* The turns that run on the node now, as Hornhoof has them. */
-async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
-  const [row] = await ctx.db.select(countOnly()).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
-  return Number(row?.n ?? 0);
 }
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
@@ -289,8 +284,9 @@ async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promis
   if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
   const [known] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.id, jobId));
   if (known) return false;
-  /* The unknown turn's privacy state arrives with its database later. Until then no raw program data is safe to keep. */
-  await park(ctx.db, { jobId, node: id, kind, body: privateTurnMessage(ctx, msg, true) });
+  /* The node masks the values it knows before sending. We can still mask recognizable credentials while awaiting the row. */
+  const body = msg.type === 'job.done' ? maskCompletion(msg, hideCredentials) : msg;
+  await park(ctx.db, { jobId, node: id, kind, body });
   if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
   return true;
 }
@@ -337,28 +333,22 @@ async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: 
   if (pending) for (const job of open) if (job.status === 'queued') await jobStarted(ctx, id, job.id, now);
 }
 
-function privateTurnMessage(ctx: Pick<Ctx, 'db'>, msg: NodeMessage, sensitive: boolean): NodeMessage {
-  if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
-  const values = privateTurn(ctx.db, msg.jobId)?.values;
-  if (msg.type === 'job.event') return privateEvent(msg, sensitive, values);
-  if (sensitive) return privateCompletion(msg, values);
-  return msg;
-}
-
-function privateEvent(msg: Extract<NodeMessage, { type: 'job.event' }>, sensitive: boolean, values?: PrivateValues): NodeMessage {
-  /* Only MCP marks an issued value. A node can ask for masking, never invent issuance. */
-  const incoming = msg.event.kind === 'tool' ? { kind: 'tool' as const, name: msg.event.name, input: msg.event.input, ...(msg.event.sensitive ? { sensitive: true as const } : {}) } : msg.event;
-  const event = privateToolEvent(incoming, sensitive, !values);
-  return { ...msg, event: values?.hide(event) ?? event };
-}
-
-function privateCompletion(msg: Extract<NodeMessage, { type: 'job.done' }>, values?: PrivateValues): NodeMessage {
-  return { ...msg, result: values?.text(msg.result) ?? PRIVATE_TOOL_NOTE, tail: PRIVATE_TOOL_NOTE, ...(msg.failure ? { failure: { ...msg.failure, text: values?.text(msg.failure.text) ?? PRIVATE_TOOL_NOTE } } : {}) };
+function maskCompletion(msg: Extract<NodeMessage, { type: 'job.done' }>, mask: (text: string) => string): NodeMessage {
+  return { ...msg, result: mask(msg.result), tail: mask(msg.tail), ...(msg.failure ? { failure: { ...msg.failure, text: mask(msg.failure.text) } } : {}) };
 }
 
 async function privateIncoming(ctx: Pick<Ctx, 'db'>, msg: NodeMessage): Promise<NodeMessage> {
   if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
-  return privateTurnMessage(ctx, msg, await sensitiveTurn(ctx.db, msg.jobId));
+  const values = privateTurn(ctx.db, msg.jobId)?.values;
+  if (msg.type === 'job.event') {
+    /* Only MCP marks an issued value. A node can ask for masking, never invent issuance. */
+    const incoming = msg.event.kind === 'tool' ? { kind: 'tool' as const, name: msg.event.name, input: msg.event.input, ...(msg.event.sensitive ? { sensitive: true as const } : {}) } : msg.event;
+    const event = new ToolPrivacy().event(incoming);
+    return { ...msg, event: cleanTurnEvent(values?.hide(event) ?? event) };
+  }
+  if (values) return maskCompletion(msg, text => values.text(text));
+  if (await sensitiveTurn(ctx.db, msg.jobId)) return maskCompletion(msg, hideCredentials);
+  return msg;
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
@@ -400,10 +390,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         await settleAndPlace(ctx, plan);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
-      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
+      ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
       /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
-      programsLive(ctx, id, msg.live, await workingOn(ctx, id));
+      programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
       await settleListed(ctx, id, msg.running, now);
@@ -433,9 +423,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       ctx.hub.report(id, load);
       await touchNodeSeen(ctx, id, now);
       await checkQueueLoad(ctx, id);
-      /* A machine that freed up takes a part that waits, and starts the programs that waited for its memory. */
+      /* A machine that freed up takes a part that waits, and one whose kernel killed nothing more for want of memory starts
+         the programs that waited. */
       await pumpTests(ctx);
-      for (const agentId of programsLive(ctx, id, live, await workingOn(ctx, id))) await pump(ctx, agentId);
+      for (const agentId of programsLive(ctx, id, live)) await pump(ctx, agentId);
       return;
     }
 

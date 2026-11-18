@@ -1,5 +1,5 @@
-import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
+import { effortsOf, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { alias } from 'drizzle-orm/pg-core';
@@ -24,8 +24,9 @@ import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import { modelOnPlan, tierIn } from './role-model.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
+import { companySkill } from '../tools/staff.js';
 import { agentFor, type AgentRow } from './find.js';
-import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type Part } from './instructions.js';
+import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
@@ -43,6 +44,7 @@ export type AgentCard = FailureState & {
   product: { id: string; name: string } | null;
   team: { id: string; name: string } | null;
   teams: { id: string; name: string }[];
+  turnkey: boolean;
   model: string;
   /* The level a person picked, or null to follow its role. */
   effort: string | null;
@@ -62,8 +64,6 @@ export type AgentCard = FailureState & {
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
   raw: string;
-  /* How long the text every turn sends is, and the most it may be. */
-  instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
   /* Its latest turns a node restart cut off: why, when, on which node (none for the built-in one) and task, and whether the
@@ -83,7 +83,6 @@ export type AgentCard = FailureState & {
   telegram: TelegramView;
 };
 
-const Text = z.string().max(8000);
 export const AgentPatch = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
@@ -92,8 +91,8 @@ export const AgentPatch = z
     subscription: z.uuid().nullable().optional(),
     team: z.uuid().nullable().optional(),
     skills: z.record(z.string().max(80), z.boolean()).optional(),
-    base: Text.nullable().optional(),
-    skillText: z.record(z.string().max(80), Text.nullable()).optional(),
+    base: z.string().nullable().optional(),
+    skillText: z.record(z.string().max(80), z.string().nullable()).optional(),
     on: z.boolean().optional(),
     timer: z
       .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
@@ -119,10 +118,11 @@ const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
   retry: i.retryOf !== null,
 });
 
-async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<{ team: { id: string; name: string } | null; teams: { id: string; name: string }[] }> {
-  if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [] };
-  const deptTeams = await db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
-  return { team: deptTeams.find(t => t.id === agent.teamId) ?? null, teams: deptTeams };
+async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<Pick<AgentCard, 'team' | 'teams' | 'turnkey'>> {
+  if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [], turnkey: false };
+  const deptTeams = await db.select({ id: teams.id, name: teams.name, turnkey: teams.turnkey }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
+  const options = deptTeams.map(({ id, name }) => ({ id, name }));
+  return { team: options.find(t => t.id === agent.teamId) ?? null, teams: options, turnkey: deptTeams.some(t => t.id === agent.teamId && t.turnkey) };
 }
 
 async function applyTeamPatch(db: Ctx['db'], agent: AgentRow, next: AgentRow, team: string | null | undefined, invalid: (message: string, reason: ErrorReason) => ApiError): Promise<void> {
@@ -256,10 +256,8 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
-  /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
-     counts all the same in what every turn sends. */
-  const told = await instructionsOf(ctx, agent);
-  const { parts, raw } = agent.kind === 'orchestrator' ? told : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
+  /* A head's department notebook has its own window and its own access. */
+  const { parts, raw } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
   const offered = offeredSkills(agent, role);
   const actingAgent = alias(agents, 'acting_agent');
   const changes = await db
@@ -299,7 +297,6 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     skills: offered.flatMap(s => cardSkill(ctx, agent, s)),
     parts,
     raw,
-    instructions: { length: told.text.length, max: MAX_INSTRUCTIONS },
     runsOn: await cardServing(ctx, agent, views),
     changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
     interrupted: interrupted.map(interruptedView),
@@ -404,8 +401,7 @@ function patchEffort(agent: AgentRow, next: AgentRow, body: PatchBody, before: P
 }
 
 const lockedOff = (role: Role | undefined, id: string, on: boolean) => !on && role?.skills.some(s => s.id === id && s.locked);
-/* A head never turns one on, for itself or another, on anyone's word: it reaches past its department. */
-const companyOnlySkill = (me: Person, next: AgentRow, skill: Skill, id: string, on: boolean) => on && skill.grants.length && !next.skills.includes(id) && (me.scopeKind !== 'company' || me.viaHead === true);
+const companyOnlySkill = (me: Person, next: AgentRow, skill: Skill, id: string, on: boolean) => on && companySkill(skill) && !next.skills.includes(id) && (me.scopeKind !== 'company' || me.viaHead === true);
 
 function patchSkill(ctx: Ctx, me: Person, next: AgentRow, role: Role | undefined, id: string, on: boolean): void {
   const skill = ctx.templates.skills.get(id);
@@ -435,38 +431,32 @@ function patchOverrides(ctx: Ctx, next: AgentRow, body: PatchBody): void {
   if (!Object.keys(next.overrides.skills!).length) delete next.overrides.skills;
 }
 
-async function checkInstructionLength(ctx: Ctx, next: AgentRow, orchestrator: boolean): Promise<void> {
-  const text = orchestrator ? orchestratorSteady(ctx.templates, next.overrides.base).text : renderInstructions(ctx.templates, next, await placeOf(ctx.db, next)).text;
-  if (text.length > MAX_INSTRUCTIONS) {
-    throw invalid(`The instructions would be longer than ${MAX_INSTRUCTIONS} characters. Shorten the text or turn a skill off.`, 'instructions_too_long');
-  }
-}
-
-async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: AgentRow, changed: ReturnType<typeof diffAgent>): Promise<void> {
+async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: AgentRow, changed: ReturnType<typeof diffAgent>): Promise<AgentRow> {
   if (changed.length) {
-    await db.transaction(async tx => {
-      await tx
-        .update(agents)
-        .set({
-          name: next.name,
-          model: next.model,
-          effort: next.effort,
-          subscriptionId: next.subscriptionId,
-          teamId: next.teamId,
-          skills: next.skills,
-          overrides: next.overrides,
-          templateHashes: next.templateHashes,
-          switchedOffAt: next.switchedOffAt,
-          timerMinutes: next.timerMinutes,
-          timerOrder: next.timerOrder,
-          timerAt: next.timerAt,
-          timerNudgedAt: next.timerNudgedAt,
-          timerForWork: next.timerForWork,
-        })
-        .where(eq(agents.id, agent.id));
+    return db.transaction(async tx => {
+      const fields = new Set(changed.map(c => c.field));
+      const resetTimer = next.timerMinutes !== agent.timerMinutes;
+      const [saved] = await tx.update(agents).set({
+        name: fields.has('name') ? next.name : undefined,
+        model: fields.has('model') ? next.model : undefined,
+        effort: fields.has('effort') ? next.effort : undefined,
+        subscriptionId: fields.has('subscription') ? next.subscriptionId : undefined,
+        teamId: fields.has('team') ? next.teamId : undefined,
+        skills: fields.has('skills') ? next.skills : undefined,
+        overrides: fields.has('prompt') ? next.overrides : undefined,
+        templateHashes: fields.has('skills') ? next.templateHashes : undefined,
+        switchedOffAt: fields.has('switch') ? next.switchedOffAt : undefined,
+        timerMinutes: resetTimer ? next.timerMinutes : undefined,
+        timerOrder: fields.has('timer') ? next.timerOrder : undefined,
+        timerAt: resetTimer ? next.timerAt : undefined,
+        timerNudgedAt: resetTimer ? next.timerNudgedAt : undefined,
+        timerForWork: fields.has('timer') ? next.timerForWork : undefined,
+      }).where(eq(agents.id, agent.id)).returning();
       await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), ...c })));
+      return saved!;
     });
   }
+  return next;
 }
 
 /* Applies a card change to the agent as it is now and records each changed field. */
@@ -490,12 +480,11 @@ async function patched(ctx: Ctx, me: Person, agent: AgentRow, body: z.infer<type
 
   for (const [id, on] of Object.entries(body.skills ?? {})) patchSkill(ctx, me, next, role, id, on);
   patchOverrides(ctx, next, body);
-  await checkInstructionLength(ctx, next, orchestrator);
 
   /* One row per changed field, with who changed it. */
   const changed = diffAgent(agent, next);
-  await savePatch(db, me, agent, next, changed);
-  return { agent, next, changed: changed.length > 0 };
+  const saved = await savePatch(db, me, agent, next, changed);
+  return { agent, next: saved, changed: changed.length > 0 };
 }
 
 type AgentRequest = Awaited<ReturnType<typeof agentFor>>;
@@ -564,13 +553,13 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
       await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
       /* Its bot goes with it, and with the bot what it still owed to chats. */
       await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id));
-      const failed = await tx
+      const ended = await tx
         .update(jobs)
-        .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
+        .set({ status: sql`case when ${jobs.status} = 'queued' then 'obsolete' else 'failed' end`, error: 'removed', finishedAt: new Date() })
         .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))))
         .returning({ id: jobs.id, kind: jobs.kind, subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine });
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'removed', before: null, after: null });
-      return failed;
+      return ended;
     });
     await stopSteps(ctx, ended.filter(job => job.kind === 'tools'));
     const left = await leaveWork(ctx, actorOf(me), agent);

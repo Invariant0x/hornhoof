@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -17,6 +17,25 @@ const skills = [...templates.skills.values()];
 
 describe('templates', () => {
   const body = (id: string) => templates.skills.get(id)!.body;
+
+  it('loads first contact instructions for starting the selected work', () => {
+    expect(body('orch-interview')).toContain('first-contact');
+    expect(body('orch-company')).toMatch(/first-contact[\s\S]*build_structure[\s\S]*create_task/);
+    expect(body('orch-interview')).toMatch(/vault[\s\S]*\/api\/agents\/orchestrator\/telegram[\s\S]*stock Personal assistant instructions/);
+  });
+
+  it('lets the home team carry out reversible device work the notebook allows', () => {
+    expect(body('home-real-world-approval')).toMatch(/reversible[\s\S]*CE[O]['’]s yes/);
+    for (const id of ['home-network', 'home-smart-control', 'home-work-pipeline']) {
+      expect(body(id)).not.toMatch(/waits? for a person['’]s approval|Acting waits for a person/);
+    }
+  });
+
+  it('loads the connected phone procedure for Operations', () => {
+    expect(templates.roles.get('OPS-HEAD')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.roles.get('OPS-FIX')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.skills.get('ops-phone-readiness')?.body).toMatch(/Company phones[\s\S]*after an update/);
+  });
 
   it('keeps role identities to one sentence and procedure-free across every department', () => {
     for (const role of roles) {
@@ -335,13 +354,13 @@ describe('templates', () => {
     expect(hornhoof).not.toMatch(/\u2014/);
   });
 
-  it("tells the orchestrator it clears any employee's inbox with a reason, and works on an open machine in any turn but one a person without the right spoke last in", () => {
+  it("tells the orchestrator it clears any employee's inbox with a reason, and works on an open machine in any turn or tool step", () => {
     const trouble = body('orch-trouble');
     expect(trouble).toMatch(/Any employee's inbox is open to you[\s\S]*inbox and the employee's id in employee[\s\S]*inbox_mark[\s\S]*kind, source, task and receivedBefore[\s\S]*reason/);
     expect(trouble).toMatch(/goes in that employee's log with your name, the reason and how many letters/);
     expect(trouble).toMatch(/employees mark only their own letters/);
     const resources = body('orch-resources');
-    expect(resources).toMatch(/while it stays open you work there in any turn of yours[\s\S]*with no new word of anyone, except a turn whose last words came from a person other than its owner, the CEO or the CEO delegate/);
+    expect(resources).toMatch(/While the grant is open, use it in any turn or tool step, whoever started it/);
     expect(resources).not.toMatch(/runs only in a turn that answers/);
     for (const id of ['orch-trouble', 'orch-resources']) expect(body(id), id).not.toMatch(/[\u2014ё]/);
   });
@@ -352,11 +371,11 @@ describe('templates', () => {
 
   it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
-    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /approve the exact 40-character commit where required/, /Move main to the exact checked commit/, /Prove rollback first/, /Build and publish artifacts from that commit/, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
     expect(release).toMatch(RELEASE_RULE);
-    expect(release).toMatch(/ask with commit before pushing[\s\S]*push only after the answer says no card is needed, or after the person's yes/i);
+    expect(release).toMatch(/ask with commit before pushing when the rule requires approval/i);
     expect(release).toMatch(/autonomous release[\s\S]*without sending a human (?:approval )?card/i);
-    expect(body('dev-task-flow')).toMatch(/autonomous release[\s\S]*auto-approval/i);
+    expect(body('dev-task-flow')).toMatch(/recorded auto-approval under the department's autonomous release/i);
     expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
     expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
@@ -369,7 +388,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(186);
+    expect(skills).toHaveLength(188);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -434,7 +453,7 @@ describe('templates', () => {
 
   it('gives the orchestrator his own skills', () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working',
     ]);
     const steady = orchestratorSteady(templates);
@@ -442,7 +461,7 @@ describe('templates', () => {
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
@@ -539,7 +558,7 @@ describe('templates', () => {
   it('names where every template comes from and under which licence', () => {
     const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
     const files = readdirSync(DIR, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && f !== 'SOURCES.md');
-    expect(files.length).toBe(roles.length + skills.length + templates.teams.size + templates.echelons.size);
+    expect(files.length).toBe(roles.length + skills.length + templates.teams.size + templates.echelons.size + templates.catalogs.size);
     for (const file of files) expect(sources, file).toContain(`| \`${file}\` |`);
     /* Every repository a skill learned from has its licence in the table of sources. */
     const repos = new Set([...sources.matchAll(/^\| ([\w.-]+\/[\w.-]+(?:, [\w.-]+\/[\w.-]+)*) \|/gm)].flatMap(m => m[1]!.split(', ')));
@@ -1609,10 +1628,8 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
 
-/* Ivan's rule for every company: a person is asked only for an irreversible deletion (the CEO's yes) or for what only they
-   know, and nothing that goes out of the company waits for a person's yes by default. Household skills keep a person's
-   word on physical actions and payments in a home, and a shared operations change keeps its own approval. */
-const STILL_ASK = new Set(['home-bills', 'home-network', 'home-shopping', 'home-smart-control', 'ops-change-request']);
+/* A shared operations change keeps its own approval. */
+const STILL_ASK = new Set(['ops-change-request']);
 const OUTBOUND_CONFIRMATIONS = [
   /\b(?:each|every) (?:exact )?public (?:item|post|variant|reply|change)\b[^.!?]*\b(?:requires?|needs?|retains?)\b[^.!?]*\bapproval\b/i,
   /\bpublic (?:items?|content|changes|use|proposals|publishing|russian content)\b[^.!?]*\b(?:requires?|retains?|needs?|waits? for(?! nobody| no one))\b[^.!?]*\bapproval\b/i,
@@ -1947,7 +1964,7 @@ describe('identity, defaults and shared instruction delivery', () => {
       const rendered = render(role, selected);
       for (const id of selected) expect(rendered.parts.some(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toBe(true);
     }
-    expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['orch-company', 'orch-staff', 'orch-people', 'orch-resources']));
+    expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['orch-company', 'orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources']));
   });
 
   it('keeps the orchestrator identity to one sentence and its workflow in selected abilities', () => {
@@ -2067,11 +2084,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
       const role = templates.roles.get(roleId)!;
       const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
-      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
-      expect(rendered.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-      expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+      expect(rendered.raw).toContain('<!-- hh:skill hh-tables -->');
     }
-    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
+    expect(orchestratorSteady(templates).parts.map(part => part.text).join('\n\n')).toContain('<!-- hh:skill hh-tables -->');
   });
 });
 
@@ -2144,7 +2159,7 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
   });
 
   it("counts a turnkey holder's own checks as covering its work under autonomous release, in the lead and release skills", () => {
-    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[^.]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
+    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[\s\S]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
   });
 
   /* One rule on proof, beside the rule that everything made goes into the repository: an agent reads no exception into

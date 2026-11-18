@@ -1,7 +1,8 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, goals, jobs, people, subscriptions, taskEvents, tasks, taskWaits } from '../src/db/schema.js';
+import { agents, companies, departments, goals, jobs, people, subscriptions, taskEvents, tasks, taskWaits, testParts, testRuns } from '../src/db/schema.js';
 import { answer, ask, cancel, createTask, startWork } from '../src/modules/tasks/engine.js';
+import { checkExternalWaits } from '../src/modules/tasks/external-wait.js';
 import { giveTasks } from '../src/modules/tasks/turns.js';
 import { as, echelonsTurn, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -79,7 +80,7 @@ describe('time facts', () => {
     expect(time.inStatusSince).toBe(at.toISOString());
     expect(time.workSeconds).toBeGreaterThanOrEqual(240);
     expect(time.workSeconds).toBeLessThan(260);
-    expect(time.waitsOn).toEqual([{ who: { kind: 'person', id: olegId, name: 'Oleg' }, since: since.toISOString() }]);
+    expect(time.waitsOn).toEqual([{ kind: 'person', reason: null, who: { kind: 'person', id: olegId, name: 'Oleg' }, since: since.toISOString() }]);
   });
 
   it('takes the time of the last status change over later words', async () => {
@@ -120,4 +121,45 @@ describe('the person responsible for a new task', () => {
     const [given] = await ctx.db.select().from(tasks).where(eq(tasks.title, 'Price list'));
     expect(given!.responsiblePersonId).toBe(olegId);
   });
+});
+
+it('names the CEO in task time facts only while the time for their action is open', async () => {
+  const { db, work, get, ivanId } = await company();
+  const { task } = await work();
+  const since = '2026-11-16T12:00:00.000Z';
+  const record = { reason: 'Approve the wording', since, on: { kind: 'external', event: 'ceo' } as const };
+  await db.update(tasks).set({ externalWait: { ...record, until: '2099-11-18T12:00:00.000Z' } }).where(eq(tasks.id, task.id));
+  const active = await get(`/api/tasks/${task.id}`);
+  expect(active.statusCode, active.body).toBe(200);
+  expect(active.json().task.time.waitsOn).toContainEqual(expect.objectContaining({ kind: 'person', who: { kind: 'person', id: ivanId, name: 'Ivan' }, since }));
+  await db.update(tasks).set({ externalWait: { ...record, until: since } }).where(eq(tasks.id, task.id));
+  const expired = await get(`/api/tasks/${task.id}`);
+  expect(expired.json().task.time.waitsOn).toContainEqual(expect.objectContaining({ kind: 'external', failure: 'expired', reason: record.reason }));
+});
+
+it('keeps an expired wait as a failure after its wake and keeps past timers out of failures', async () => {
+  const { ctx, db, work, get } = await company();
+  const { task } = await work();
+  const { task: timer } = await work();
+  const since = '2026-11-16T12:00:00.000Z';
+  const until = '2026-11-16T13:00:00.000Z';
+  await db.update(tasks).set({ externalWait: { reason: 'Get the delivery result', since, until } }).where(eq(tasks.id, task.id));
+  await db.update(tasks).set({ externalWait: { reason: 'Publish the draft', since, until, on: { kind: 'external', event: 'time' } } }).where(eq(tasks.id, timer.id));
+  expect(await checkExternalWaits(ctx, new Date(until))).toBe(2);
+  const read = async (id: string) => (await get(`/api/tasks/${id}`)).json().task;
+  expect(await read(task.id)).toMatchObject({ externalWait: null, time: { waitsOn: [expect.objectContaining({ failure: 'expired', reason: 'Get the delivery result' })] } });
+  expect(await read(timer.id)).toMatchObject({ externalWait: null, time: { waitsOn: [] } });
+});
+
+it('shows a failed run after its wait has cleared and clears the failure on a successful rerun', async () => {
+  const { db, companyId, sub, bruno, work, get } = await company();
+  const { task } = await work();
+  const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, prompt: 'Check', timeoutMs: 1 }).returning();
+  const run = { companyId, agentId: bruno.id, taskId: task.id, jobId: job!.id, command: 'test', timeoutMs: 1 };
+  const [failed] = await db.insert(testRuns).values({ ...run, number: 1, status: 'failed', finishedAt: new Date(task.createdAt.getTime() + 60_000) }).returning();
+  await db.insert(testParts).values({ companyId, runId: failed!.id, part: 1, status: 'failed', error: 'machine_offline' });
+  const facts = async () => (await get(`/api/tasks/${task.id}`)).json().task.time.waitsOn;
+  expect(await facts()).toEqual([expect.objectContaining({ kind: 'run', reason: '1', failure: 'run', runError: 'machine' })]);
+  await db.insert(testRuns).values({ ...run, number: 2, status: 'passed', finishedAt: new Date(task.createdAt.getTime() + 60_000) });
+  expect(await facts()).toEqual([]);
 });

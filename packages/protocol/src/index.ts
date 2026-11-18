@@ -18,7 +18,7 @@ import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductComm
 import { HarnessSynced } from './harness.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
 export * from './phones.js';
-import { PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
+import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -28,6 +28,9 @@ export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } fro
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
 export { PROVIDER_IDS, type ProviderId };
+
+export const TASK_PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export { API_PROTOCOLS, API_PROVIDERS, apiEndpoint, isApiProvider, type ApiEndpoint, type ApiProtocol, type ApiProvider } from './providers.js';
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
@@ -90,12 +93,6 @@ export function lastBytes(text: string, bytes = TAIL_BYTES): string {
   const buf = new TextEncoder().encode(text);
   return buf.length <= bytes ? text : new TextDecoder().decode(buf.subarray(buf.length - bytes));
 }
-/* The longest standing instructions a job may carry, now that skills go as files; Hornhoof refuses edits that would go
-   past it. */
-export const MAX_INSTRUCTIONS = 200_000;
-/* What a node from before skill files takes: it drops a job with longer instructions. */
-export const OLD_NODE_INSTRUCTIONS = 20_000;
-
 const LimitWindow = z.object({
   name: z.string().min(1).max(40),
   utilization: z.number().min(0).max(1).nullable(),
@@ -367,7 +364,9 @@ export const isTerminalReport = (data: string): boolean => TERMINAL_REPORT.test(
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
    bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.
    Newer nodes also name the machine's processor and the free and total space of the disk their folders are on, and
-   identify the physical host together with its own processors, load and memory. */
+   identify the physical host together with its own processors, load and memory. memoryShort: the machine's kernel
+   killed a process for want of memory since the node's report before, so Hornhoof starts no new agent program there
+   until a report without one; older nodes and machines that do not count such kills never say so. */
 const Load = z.object({
   cpus: z.number().int().min(1).max(4096),
   load: z.number().min(0).max(100_000),
@@ -383,11 +382,12 @@ const Load = z.object({
   hostLoad: z.number().min(0).max(100_000).optional(),
   hostMemFree: z.number().int().min(0).optional(),
   hostMemory: z.number().int().min(0).optional(),
+  memoryShort: z.boolean().optional(),
 });
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
 /* The agents whose programs run on a node now, which a node that runs them in terminals names with its hello and each load:
-   Hornhoof starts no new program on a machine short of free memory. A list that is not one counts as none said. */
+   Hornhoof starts no new program on a machine short of memory. A list that is not one counts as none said. */
 const Live = z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(200).optional().catch(undefined);
 
 /* Installed agent programs and an update in progress on the connected node. repair: the program was installed but does
@@ -494,8 +494,6 @@ const NodeMessage = z.discriminatedUnion('type', [
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
-  /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
-     the instructions. */
   z.object({
     type: z.literal('hello'),
     version: z.string().max(40),
@@ -506,6 +504,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     models: Models.optional(),
     terminals: z.boolean().optional(),
     phones: z.boolean().optional(),
+    /* It answers phone.list with what its adb lists of the phones asked about. Without it, its phones show as its computer does. */
+    phoneList: z.boolean().optional(),
+    phoneBaseline: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
@@ -520,7 +521,6 @@ const NodeMessage = z.discriminatedUnion('type', [
     load: Load.optional(),
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
-    skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
     account: Account.nullable().optional(),
@@ -707,9 +707,7 @@ export const MAX_OPEN_TASKS = 10_000;
 export const TaskStates = z.object({ open: z.array(z.number().int().positive()).max(MAX_OPEN_TASKS), upTo: z.number().int().min(0) });
 export type TaskStates = z.infer<typeof TaskStates>;
 const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional(), tasks: TaskStates.optional() });
-/* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
-export const MAX_SKILLS = 200;
-const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });
+const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1), body: z.string() });
 export type SkillFile = z.infer<typeof SkillFile>;
 export type Workspace = z.infer<typeof Workspace>;
 
@@ -725,8 +723,10 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
   return !message.command && message.commitSha === description.commitSha && JSON.stringify(message.repositoryScope) === JSON.stringify(description.repositoryScope);
 }
 
+export const MAX_JOB_TIMEOUT_MS = 2 ** 31 - 1;
+
 const ServerMessage = z.discriminatedUnion('type', [
-  CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
+  CheckQueueReply, PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,
@@ -742,14 +742,14 @@ const ServerMessage = z.discriminatedUnion('type', [
     effort: Effort.nullable().optional(),
     /* How full Claude Code's context gets before it compacts the conversation, in tokens; left out, its own window. */
     compactWindow: z.number().int().min(100_000).max(1_000_000).optional(),
-    /* Node's timers wait at most this long; a longer one fires at once. */
-    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    /* Zero means an untimed one-shot call. Node's timers cannot wait past the signed integer limit. */
+    timeoutMs: z.number().int().nonnegative().max(MAX_JOB_TIMEOUT_MS),
     secret: z.string().nullable(),
     /* For an API key: where its program sends its calls and in which protocol. A node from before runs the Claude and
        OpenAI APIs at their own addresses without it. */
     api: ApiConnection.optional(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
-    instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
+    instructions: z.string().nullable(),
     toolToken: z.string().max(200).nullable(),
     /* The conversation from before, for a program that starts a new session on a turn that types nothing: it goes with
        the instructions when the program starts and is no change of them. */
@@ -757,12 +757,12 @@ const ServerMessage = z.discriminatedUnion('type', [
     /* The agent's own folder on the node and the repository it works in; a test job has none. */
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
-    skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
+    skills: z.array(SkillFile).optional(),
     /* A one-shot call: the program runs once in its mode that answers and exits, in a fresh folder of the call's own with
        the workspace's repository cloned in it, which the node removes after. It keeps no session, has no inbox and takes
        its turn by the machine's memory: it starts, and says so, once the machine has memory for its program. */
     call: z.literal(true).optional(),
-  }),
+  }).refine(job => job.timeoutMs > 0 || job.call === true),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has every numbered message of the node's stream up to this number, applied or failed for good; the node

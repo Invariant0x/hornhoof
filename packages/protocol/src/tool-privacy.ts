@@ -1,15 +1,15 @@
 import type { AgentEvent } from './index.js';
+import { HIDDEN, secretForms } from './redaction.js';
 
 export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean; secretExecution?: boolean; delegatesTool?: boolean };
 /* Registration and telemetry use the same definitions. No secret value belongs to replay or a transcript. */
 export const PRIVATE_TOOLS = {
-  entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: [], secretOutput: ['password', 'code'] } },
+  entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: ['password', 'code'] } },
   save: { name: 'vault_save', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: [] } },
   phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },
   delegate: { name: 'use_tool', _meta: { delegatesTool: true } },
 } as const;
 
-export const PRIVATE_TOOL_NOTE = 'Sensitive tool data and raw terminal output hidden.';
 export const PRIVATE_COMMAND_REFUSED = 'This command contains a vault secret and was not sent or recorded. Type the password with your own program on the machine instead.';
 export const PRIVATE_TURN_LOST = 'The server restarted after this turn used a vault secret. Its temporary value masks are gone, so no new changes can be recorded. End this turn and start a new one.';
 
@@ -38,13 +38,17 @@ const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidat
 const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql', 'caption', 'comment', 'delta']);
 const opaqueMedia = (value: unknown): boolean => Boolean(value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio'));
 
-/* Values live only in the current turn's memory, for text that must still reach people. Short passwords and OTPs count
+/* Values live only in memory, for text that must still reach people. Short passwords and OTPs count
    too. JSON-escaped forms cover text nested in tool replies without putting a value in a persistent redactor. */
 export class PrivateValues {
   private readonly values = new Set<string>();
+  private strings: string[] = [];
+  private pattern: RegExp | null = null;
+
+  forms(): string[] { return this.strings; }
 
   /* An upper bound on UTF-8 bytes to withhold while examining a streamed attachment. */
-  get retainedBytes(): number { return Math.max(0, ...[...this.values].map(value => value.length * 4)); }
+  get retainedBytes(): number { return (this.strings[0]?.length ?? 0) * 4; }
 
   remember(value: unknown, fields?: readonly string[]): void {
     if (fields) return this.rememberFields(value, fields);
@@ -59,14 +63,19 @@ export class PrivateValues {
   }
 
   private rememberText(value: string): void {
-    this.values.add(value);
+    if (value === HIDDEN || this.values.has(value)) return;
+    for (const form of secretForms([value], 'literal')) this.values.add(form);
+    if (value.includes('\n')) this.values.add(value.replace(/(?<!\r)\n/g, '\r\n'));
     let form = value;
     for (let i = 0; i < 3; i++) { form = JSON.stringify(form).slice(1, -1); this.values.add(form); }
+    this.strings = [...this.values].sort((a, b) => b.length - a.length);
+    this.pattern = null;
   }
 
   text(text: string): string {
-    const forms = [...this.values].sort((a, b) => b.length - a.length).map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    return forms.length ? text.replace(new RegExp(forms.join('|'), 'g'), '[hidden]') : text;
+    if (!this.strings.length) return text;
+    this.pattern ??= new RegExp([HIDDEN, ...this.strings].map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    return text.replace(this.pattern, HIDDEN);
   }
 
   contains(value: unknown): boolean {
@@ -87,7 +96,7 @@ export class PrivateValues {
   }
 
   private hiddenString(value: string): string {
-    if (this.values.has(value)) return '[hidden]';
+    if (this.values.has(value)) return HIDDEN;
     if (/^\s*[[{]/.test(value)) {
       try { return JSON.stringify(this.hide(JSON.parse(value))); }
       catch { /* A plain report may begin with a bracket. */ }
@@ -106,31 +115,13 @@ export class PrivateValues {
 
 const parsed = (value: string): unknown => { try { return JSON.parse(value); } catch { return value; } };
 
-/* Results have no call identity. After a sensitive call, subsequent inputs and results can contain it, including
-   commands that type it into a form. Text and reports still reach people, with exact values hidden. */
-export function privateToolEvent(event: AgentEvent, sensitive: boolean, untracked = false): AgentEvent {
-  if (!sensitive && !sensitiveEvent(event)) return event;
-  if (event.kind === 'tool') return { ...event, input: PRIVATE_TOOL_NOTE, sensitive: true };
-  if (event.kind === 'tool_result') return { ...event, summary: PRIVATE_TOOL_NOTE };
-  return untracked ? hiddenText(event) : event;
-}
-
-function sensitiveEvent(event: AgentEvent): boolean {
-  return event.kind === 'tool' && (event.sensitive === true || privateToolCall(event.name, parsed(event.input)).policy?.sensitive === true);
-}
-
-function hiddenText(event: AgentEvent): AgentEvent {
-  if (event.kind === 'text') return { ...event, text: PRIVATE_TOOL_NOTE };
-  if (event.kind === 'todo') return { ...event, items: [] };
-  return event;
-}
-
 export class ToolPrivacy {
   sensitive = false;
-  readonly values = new PrivateValues();
   private readonly outputFields = new Set<string>();
   private plainOutput = false;
   private readonly executions = new Set<string>();
+
+  constructor(readonly values = new PrivateValues()) {}
 
   /* Only the server's remembered vault values enable execution. Once typed, later captures of the same tool can show
      the value too. The program cannot opt into this by passing a flag. */
@@ -156,17 +147,24 @@ export class ToolPrivacy {
   }
 
   event(event: AgentEvent, policy?: ToolPrivacyPolicy, resolve = toolPrivacy): AgentEvent {
-    this.observe(event, policy, resolve);
-    return this.values.hide(privateToolEvent(event, this.sensitive));
+    if (event.kind === 'tool' && this.observeTool(event, policy, resolve)) event = { ...event, sensitive: true };
+    if (event.kind === 'tool_result') this.observeResult(parsed(event.summary));
+    return this.values.hide(event);
   }
 
-  private observe(event: AgentEvent, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): void {
-    if (event.kind === 'tool') this.observeTool(event, policy, resolve);
-    if (this.sensitive && event.kind === 'tool_result') this.result(parsed(event.summary), { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
-  }
-
-  private observeTool(event: Extract<AgentEvent, { kind: 'tool' }>, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): void {
+  private observeTool(event: Extract<AgentEvent, { kind: 'tool' }>, policy: ToolPrivacyPolicy | undefined, resolve: typeof toolPrivacy): boolean {
     const call = privateToolCall(event.name, parsed(event.input), name => name === event.name && policy ? policy : resolve(name));
-    if (event.sensitive || call.policy?.sensitive) this.input(call.name, call.input, { ...call.policy, sensitive: true });
+    if (!event.sensitive && !call.policy?.sensitive) return false;
+    this.input(call.name, call.input, { ...call.policy, sensitive: true });
+    return true;
+  }
+
+  private observeResult(value: unknown): void {
+    /* A forwarded vault result may outlive the call event, for example while a server restarts. */
+    const entry = value as { name?: unknown; site?: unknown; login?: unknown } | null;
+    if (entry && [entry.name, entry.site, entry.login].every(part => typeof part === 'string')) this.values.remember(value, PRIVATE_TOOLS.entry._meta.secretOutput);
+    if (this.sensitive) this.result(value, { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
+    this.outputFields.clear();
+    this.plainOutput = false;
   }
 }

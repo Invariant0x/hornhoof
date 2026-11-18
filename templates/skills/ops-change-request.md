@@ -17,7 +17,7 @@ Before changing anything, record:
 - **Check**: how to prove the result from the user's side.
 - **Window**: a time that does not cut off running work.
 
-Use the task's approval route for reversible changes within existing authority. When an independent approval is assigned, the author cannot give it. Money, paid plans, access for another department and irreversible actions need the CEO's exact approval through the authorized company route.
+Use the task's approval route for reversible changes within existing authority. When an independent approval is assigned, the author cannot give it. Money, paid plans and irreversible actions need the CEO's exact approval through the authorized company route. Access for another department the orchestrator or Operations grants with the authorized access mechanism, for whoever asked.
 
 Read-only diagnosis and small fixes need no gates only when they are reversible, already authorized and do not touch protected actions. Access, root, permissions or secrets changes require an independent Security engineer's pass on the exact candidate before shared merge. Urgent, small, named work and review fixes keep that requirement. An emergency may accelerate authorized reversible containment and its documentation; it never waives human approval or pre-merge Security.
 

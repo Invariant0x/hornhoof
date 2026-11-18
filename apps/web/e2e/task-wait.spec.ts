@@ -29,14 +29,15 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
     await openTaskCard(page, 1);
     const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-    const text = language === 'en' ? `waits for ${employee}: Acceptance on node-a, until 16:30` : `ждет: Acceptance on node-a; сотрудник: ${employee}, до 16:30`;
-    await expect(panel.getByText(text, { exact: true })).toBeVisible();
+    const text = panel.getByText('Acceptance on node-a');
+    await expect(text).toContainText(employee);
+    await expect(panel.getByText(language === 'en' ? 'set by Bruno, until 16:30' : 'ожидание поставил Bruno, до 16:30', { exact: true })).toBeVisible();
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`task-wait-${language}-${theme}-${width}.png`), fullPage: true });
     await panel.getByLabel(language === 'en' ? 'Comment' : 'Комментарий', { exact: true }).fill('Acceptance is available.');
     await panel.getByRole('button', { name: language === 'en' ? 'Add comment' : 'Добавить комментарий', exact: true }).click();
-    await expect(panel.getByText(text, { exact: true })).toHaveCount(0);
+    await expect(text).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

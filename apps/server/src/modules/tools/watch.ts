@@ -108,7 +108,6 @@ async function cannotRun(ctx: Pick<Ctx, 'db' | 'hub'>, me: Agent, target: Agent,
   return `${target.name} cannot run now: ${machine}. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move ${target.name} to a plan of the department that is online.`;
 }
 
-export const TURN_NUDGES = 10;
 const TAIL = 400;
 /* The end of what a holder said when it stopped: a long report ends with its concerns and its next step. */
 const WHY_TAIL = 500;
@@ -131,11 +130,6 @@ const STUMBLES_MAX = 1000;
 const STOPS_MAX = 50;
 const UNDELIVERED_MAX = 50;
 const GROUPS_MAX = 30;
-
-/* Messages each running turn sent, counted before the next one goes out so two at once cannot both pass; the oldest turns
-   are forgotten. */
-const sent = new WeakMap<Ctx, Map<string, number>>();
-const SENT_KEPT = 500;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -314,7 +308,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine reported a shortage of memory, so its program does not start there now (memoryWait: its turns wait and start by themselves with the next report of the machine without one, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
           "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it. " +
           'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
@@ -479,31 +473,6 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
-  /* Whether this turn may send one more message, counted at once. */
-  async function counted(me: string): Promise<boolean> {
-    const counts = sent.get(ctx) ?? new Map<string, number>();
-    sent.set(ctx, counts);
-    /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
-    if (!counts.has(job.id)) {
-      const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-      /* Only the quota matters, even when an older turn already sent more. The literal kind also matches the partial index. */
-      const messages = db
-        .select({ one: sql`1`.as('one') })
-        .from(agentEvents)
-        .where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.kind} = 'message'`, sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))))
-        .limit(TURN_NUDGES).as('sent_messages');
-      const [before] = await db.select({ n: sql<number>`count(*)` }).from(messages);
-      if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
-    }
-    /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
-    const n = counts.get(job.id)!;
-    if (n >= TURN_NUDGES) return false;
-    counts.delete(job.id);
-    counts.set(job.id, n + 1);
-    if (counts.size > SENT_KEPT) counts.delete(counts.keys().next().value!);
-    return true;
-  }
-
   if (job.agentKind === 'head') {
     server.registerTool(
       'tell_orchestrator',
@@ -511,7 +480,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'Writes to the orchestrator, as you, into its window, which the CEO reads: what came of your work outside the tasks it gave you, such as a timer round, what you need decided beyond your department, what blocks it. ' +
           'Not for your department\'s own staff, units, products, tasks, approval and wait policies: what a person who runs it decides, you do yourself. ' +
-          `It decides with the CEO or the employee concerned. One turn sends at most ${TURN_NUDGES} messages.`,
+          'It decides with the CEO or the employee concerned.',
         inputSchema: { text: Text.trim().min(1) },
       },
       async ({ text }) => {
@@ -519,7 +488,6 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
         const orchestrator = await orchestratorOf(ctx, job.companyId);
         if (!me || !orchestrator) return say('This company has no orchestrator.', true);
-        if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
         const back = givingBack(ctx, job.companyId, me.id, orchestrator.id);
         await enqueueTurn(ctx, {
           companyId: job.companyId,
@@ -566,8 +534,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     'message_employee',
     {
       description: (anywhere
-        ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
-        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) +
+        ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head.`
+        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head.`) +
         ' It also answers the one who wrote to you last, in any department, with one message: an answer in your window reaches only people, never an agent.' +
         ' Write to the orchestrator with it at any time: it helps every employee.' +
         MESSAGE_TASK_HINT,
@@ -581,7 +549,6 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       const state = await agentState(ctx, target.id);
       const unable = await cannotTake(ctx, me, target, state);
       if (unable) return refused(ctx, job, unable, employee, ref);
-      if (!(await counted(me.id))) return refused(ctx, job, { reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return sendTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,

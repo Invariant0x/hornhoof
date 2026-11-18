@@ -2,6 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
+import { ghostSlots } from '../ghost-slots';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
@@ -23,6 +24,7 @@ import { FrameBreathe, MapPulse, MapWayOverlay, pauseMapAnimations } from '../ui
 import { motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
+import { employeeKind, WorkerLegend, WorkerMark } from '../ui/WorkerMark';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 
@@ -229,7 +231,7 @@ function deptDetail(t: Messages, d: Department): string {
   return d.teams.length ? t.map.teams(d.teams.length) : '';
 }
 
-/* One square per employee on a department's card, colored by what it does. */
+/* One mark per employee on a department's card, colored by what it does. */
 const CELL: Record<EmployeeStatus, string> = { working: 'w', queued: 'q', handed: 'r', waiting: 'h', idle: '', off: 'o' };
 
 /* onChange: someone's status changed since the last look. */
@@ -253,27 +255,36 @@ function Cells({ employees, onChange }: { employees: Employee[]; onChange?(): vo
   }, [employees]);
   if (!employees.length) return null;
   return (
-    <span className="cells" role="img" aria-label={t.dept.statusSummary(employees.reduce<Partial<Record<EmployeeStatus, number>>>((n, e) => ({ ...n, [e.status]: (n[e.status] ?? 0) + 1 }), {}))}>
+    <span className="cells" role="group" aria-label={t.dept.statusSummary(employees.reduce<Partial<Record<EmployeeStatus, number>>>((n, e) => ({ ...n, [e.status]: (n[e.status] ?? 0) + 1 }), {}))}>
       {employees.map((e, k) => (
-        <i key={e.id} className={`cell ${CELL[e.status]}${pinged.has(e.id) ? ' ping' : ''}`.trim()} style={{ animationDelay: `${-((k * 37) % 220) / 100}s` }} />
+        <WorkerMark key={e.id} kind={employeeKind(e.turnkey)} detail={`${e.name}. ${t.dept.status[e.status]}`}
+          className={`cell ${CELL[e.status]}${pinged.has(e.id) ? ' ping' : ''}`.trim()} style={{ animationDelay: `${-((k * 37) % 220) / 100}s` }} />
       ))}
     </span>
   );
 }
 
-/* One mark per one-shot call of the department while it lives: lit while it runs, pale while it waits for memory on its
-   machine. */
+/* The route's ghost places stay visible between tasks. A live call gives its place a running or waiting state. */
 function CallMarks({ d }: { d: Department }) {
   const t = useT();
+  const slots = ghostSlots(d);
+  if (!slots.length) return null;
   const calls = d.calls ?? [];
-  if (!calls.length) return null;
   const running = calls.filter(c => c.startedAt).length;
   const by = (id: string) => d.employees.find(e => e.id === id)?.name ?? '';
   return (
-    <span className="cells calls" role="img" aria-label={t.map.calls(running, calls.length - running)}>
-      {calls.map(c => (
-        <i key={c.id} className={`cell ${c.startedAt ? 'w' : 'q'}`} title={c.judge ? t.map.judgeCall(c.task, by(c.by)) : t.map.call(c.number, c.task, by(c.by))} />
-      ))}
+    <span className="cells calls" role="group" aria-label={calls.length ? t.map.calls(running, calls.length - running) : t.workers.ghost}>
+      {slots.map(slot => {
+        const { key, call } = slot;
+        if (!call) {
+          const stage = t.tasks.echelons.stages[slot.stage];
+          const name = slot.judge ? t.workers.judge(stage) : t.workers.slot(stage, slot.number);
+          return <WorkerMark key={key} kind="ghost" detail={`${name}. ${t.workers.idle}`} className="cell" />;
+        }
+        const name = call.judge ? t.map.judgeCall(call.task, by(call.by)) : t.map.call(call.number, call.task, by(call.by));
+        const state = call.startedAt ? t.workers.running : t.workers.waiting;
+        return <WorkerMark key={key} kind="ghost" detail={`${name}. ${state}`} className={`cell ${call.startedAt ? 'w' : 'q'}`} />;
+      })}
     </span>
   );
 }
@@ -672,9 +683,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     if (!el || !el.clientWidth || !org || !shown || inside) return;
     const { x0, y0, x1, y1 } = arrangedBounds(shown, org);
     /* The header floats over the top of the map and the zoom over the bottom. */
-    const padX = 32, padTop = 76, padBottom = 72;
+    const padX = 32, padTop = 76, padBottom = el.clientWidth <= 720 ? 124 : 72;
     const { left, width } = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
-    const room = el.clientHeight - padTop - padBottom;
+    const room = Math.max(1, el.clientHeight - padTop - padBottom);
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
     setMinZoom(Math.min(MIN_K, k));
     setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
@@ -826,7 +837,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     </>
   );
 
-  return (
+  const canvas = (
     <div className="map" ref={box} inert={inside} {...handlers}>
       <div
         className="world"
@@ -1008,6 +1019,13 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           )}
         </div>
       )}
+    </div>
+  );
+
+  return (
+    <div className="map-workspace" inert={inside} aria-hidden={inside || undefined}>
+      {canvas}
+      <WorkerLegend />
     </div>
   );
 }

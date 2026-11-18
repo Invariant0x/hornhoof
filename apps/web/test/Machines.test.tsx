@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Machines } from '../src/screens/Machines';
@@ -43,6 +43,17 @@ const meter = (node: HTMLElement, label: string) => within(node).getByText(label
 const fact = (within_: HTMLElement, label: string) => within(within_).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent;
 
 afterEach(() => localStorage.clear());
+
+it.each(LANGUAGES)('shows phone settings that need attention in $name', async ({ id }) => {
+  localStorage.setItem('hh-lang', id);
+  const words = { en, ru }[id].phones;
+  lists({ 'GET /api/phones': [200, { phones: [{ id: 'p1', name: 'Phone', owner: { id: ME.person.id, name: ME.person.name }, machineId: MACHINES[0]!.id, lending: true, online: true, state: 'available', queued: 0, stopping: false, readiness: ['lock'] }] }] });
+  render(<LanguageProvider><Machines me={ME} onHome={() => {}} /></LanguageProvider>);
+  const phones = await screen.findByRole('region', { name: words.heading });
+  const phone = await within(phones).findByRole('article', { name: 'Phone' });
+  expect(within(phone).getByText(words.readiness.lock)).toBeInTheDocument();
+  expect(within(phone).queryByText(words.readiness.brightness)).not.toBeInTheDocument();
+});
 
 const DAY = 24 * 3600_000;
 const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
@@ -1343,23 +1354,19 @@ describe("computer access on a machine's card", () => {
     expect(within(own).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
   });
 
-  it('opens access for every agent only after its owner says yes once more, and Escape opens nothing', async () => {
+  it('opens access when the owner chooses every agent, and Escape opens nothing', async () => {
     const calls = showLive([mac()], server(), { open: () => [200, ofServer({ until: UNTIL, scope: 'all_agents' })] });
     const access = part(await openCard('debian'));
     const user = userEvent.setup();
     await user.click(within(access).getByRole('button', { name: 'Open access' }));
     expect(within(access).getByRole('heading', { name: 'Who gets access?' })).toHaveFocus();
-    await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
-    expect(within(access).getByRole('heading', { name: 'Open full access for the whole team?' })).toHaveFocus();
-    expect(within(access).getByText('Who: every company agent')).toBeInTheDocument();
     await user.keyboard('{Escape}');
-    expect(within(access).queryByText('Open full access for the whole team?')).not.toBeInTheDocument();
+    expect(within(access).queryByText('Who gets access?')).not.toBeInTheDocument();
     expect(within(access).getByRole('button', { name: 'Open access' })).toHaveFocus();
     expect(calls.some(call => call.method === 'POST')).toBe(false);
     await user.click(within(access).getByRole('button', { name: 'Open access' }));
     await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
-    await user.click(within(access).getByRole('button', { name: 'Open full access' }));
-    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'all_agents', duration: '1h', confirm: true } }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'all_agents', duration: '1h' } }));
     expect(await within(access).findByText('Full access for the team')).toBeInTheDocument();
   });
 
