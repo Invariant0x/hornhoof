@@ -35,7 +35,13 @@ KEEP_MEDIA_RESULTS=1 npm --prefix apps/web run media
 
 `.github/workflows/media.yml` renders the scenes for a push to any `media-*` branch and keeps the new GIFs as the `media-gifs` artifact, and the videos, marks, failure shots and log as `media-results`. Where the repository variables `BUILD_RUNS_ON` and `BUILDKIT_ENDPOINT` name our own runner and its BuildKit, the scenes run in a build of `apps/web/media/Dockerfile` there, as that runner has no Docker daemon; otherwise a GitHub machine runs `run.sh` with Docker. Download the GIFs with `gh run download <run> -n media-gifs`, look at their frames, and commit the ones you want into `.github/assets/`.
 
-`run.sh` also runs inside the Playwright image itself with `MEDIA_IN_CONTAINER=1`, and writes the GIFs to `MEDIA_ASSETS_DIR` when it is set. A failed scene no longer stops the others from being converted; the run still fails at the end.
+`run.sh` also runs inside the Playwright image itself with `MEDIA_IN_CONTAINER=1`, and writes the GIFs to `MEDIA_ASSETS_DIR` when it is set.
+
+### Marketing cuts
+
+A scene named `marketing-*` is a cut for posts: one continuous take of 10 to 30 s at the size the network shows, so nothing is scaled up or down. `scenes/marketing-map.spec.ts` takes two: `marketing-map-linkedin` at 1080x1350 (4:5, the phone layout at 540x675 and device scale 2) and `marketing-map-x` at 1920x1080 (16:9, 1280x720 at 1.5; from 761 to about 1000 CSS px wide the department's name runs into the tabs). The take goes: the map at rest with its lines running, the pointer coming to Development and Sam Rivera and clicking, Development with its agents at work or idle and its Speed panel, the move to the tracker, the tracker held still for 3 s. Development is seeded with some agents idle so both show.
+
+These scenes do not use the video recorder, which captures the page at its CSS size. `moonfern/film.ts` takes every frame as a full-resolution screenshot on a controlled clock: each frame moves the page's clock and every CSS, Web Animations and SVG animation by 40 ms (25 fps), and `moonfern/cursor.ts` draws the pointer. The frames go to `results/frames/<name>/` and the timing marks, with the named moments of the take, to `results/marks/<name>.json`. For each cut `run.sh` makes the raw video `results/videos/<name>.webm` (VP9, CRF 10), and from the frames a GIF at full size (12 fps, up to 15 MB) and an H.264 MP4 (yuv420p, BT.709, CRF 16, `+faststart`) in `MEDIA_VIDEOS_DIR` (by default `results/marketing`, kept with `KEEP_MEDIA_RESULTS=1`), with `ffprobe.txt` and six frames of each MP4 in `frames/`; then it removes the frames. On GitHub the cuts are the `media-videos` artifact and the raw videos and marks are in `media-results`. `MEDIA_STILLS=<dir>` saves a screenshot at each step to check a cut by eye where no ffmpeg is at hand, and `MEDIA_SHAPE=<name>` takes one shape only.
 
 Typecheck all media data files and scene specs against `apps/web/src/types.ts`:
 
