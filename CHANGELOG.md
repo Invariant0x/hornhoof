@@ -92,6 +92,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
 - Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
+- The node's provider and terminal code no longer load each other in a ring: each provider owns how its program runs in a terminal, and people's terminal views and a session's privacy have their own modules outside the terminal host.
 
 ## [0.32.1] - 2026-11-17
 

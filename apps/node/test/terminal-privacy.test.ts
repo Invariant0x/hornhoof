@@ -36,6 +36,11 @@ describe('the privacy of an agent\'s session', () => {
     const turn: { privacy?: ToolPrivacy } = {};
     await s.privacy.tool(SESSION, turn, 'vault_entry', { entry: 'Partner' }, 'pw-Loose-3');
     expect(turn.privacy?.values.text('pw-Loose-3')).toBe('pw-Loose-3');
+    /* No reply at all, or one that failed without a result, still counts the call and masks the recording. */
+    await s.privacy.tool(SESSION, turn, 'vault_entry', { entry: 'Partner' }, null);
+    await s.privacy.tool(SESSION, turn, 'vault_entry', { entry: 'Partner' }, { error: { message: 'pw-Loose-3' } });
+    expect(turn.privacy?.sensitive).toBe(true);
+    expect(s.tmux.maskRecording).toHaveBeenCalledTimes(3);
   });
 
   it('masks a known value in what the program says, and tells the recording only of a new value', async () => {
