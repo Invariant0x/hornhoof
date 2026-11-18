@@ -6,7 +6,7 @@ import { errorText, useT } from '../i18n';
    until the update ends, so a load the server refused for that has nothing to add. */
 export const UpdateSaysIt = createContext(false);
 
-export const maintenanceRefusal = (failure: unknown): boolean => failure instanceof ApiFailure && failure.reason === 'maintenance';
+const maintenanceRefusal = (failure: unknown): boolean => failure instanceof ApiFailure && failure.reason === 'maintenance';
 
 /* What a screen shows of a failed load: nothing for a maintenance refusal while the update panel says it, since the load
    asks again by itself once the update ends; any other failure as it is. */
