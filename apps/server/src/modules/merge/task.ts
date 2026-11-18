@@ -5,7 +5,8 @@ import { wakeAll } from '../tasks/wake.js';
 import type { CodeLine, Counts } from './apply.js';
 import { queryOf } from './leader.js';
 import type { Path } from './plan.js';
-import { ceos } from './rules.js';
+import { DELETION_CONFLICT } from './picks.js';
+import { protectedSummary } from './rules.js';
 import { rangeWords, timeWords } from './words.js';
 
 /* How many conflicts a task's text holds; the tool lists the rest. */
@@ -18,7 +19,7 @@ const NUMBERED: Record<string, (here: number, was: number, label: string) => str
 };
 
 type MergeRow = { id: string; label: string; path: Path | null; counts: Partial<Counts>; code: CodeLine[]; from_at: string | Date | null; to_at: string | Date | null; task_id: string | null };
-type ConflictRow = { tbl: string; why: string; task_id: string | null };
+type ConflictRow = { tbl: string; why: string; task_id: string | null; would_delete: boolean };
 
 const dateOf = (value: string | Date | null): Date | null => (value === null ? null : new Date(value));
 const listed = (labels: string[]): string => (labels.length < 2 ? labels.join('') : `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`);
@@ -72,10 +73,11 @@ export async function bodyOf(db: Db, mergeIds: string[]): Promise<string> {
   const parts: string[] = [];
   const merges = await mergesOf(db, mergeIds);
   const open = await q<ConflictRow & { merge: string }>(
-    'SELECT merge, tbl, why, task_id FROM net.merge_conflicts WHERE picked IS NULL AND merge IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb)) ORDER BY task_id NULLS LAST, tbl, created_at, id',
+    `SELECT merge, tbl, why, task_id, ${DELETION_CONFLICT} AS would_delete FROM net.merge_conflicts c WHERE picked IS NULL AND merge IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb)) ORDER BY task_id NULLS LAST, tbl, created_at, id`,
     [JSON.stringify(mergeIds)],
   );
-  const mine = open.filter(conflict => !ceos(conflict.tbl));
+  const mine = open.filter(conflict => !conflict.would_delete);
+  const shareable = mine.filter(conflict => !protectedSummary(conflict.tbl));
   for (const merge of merges) {
     const [from, to] = [dateOf(merge.from_at), dateOf(merge.to_at)];
     const when = from && to ? ` from ${rangeWords(from, to)}` : '';
@@ -87,10 +89,10 @@ export async function bodyOf(db: Db, mergeIds: string[]): Promise<string> {
     const code = await codeLines(db, merge);
     if (code.length > 0) parts.push(['Code:', ...code].join('\n'));
   }
-  parts.push(`To settle: ${mine.length} for you; ${open.length - mine.length} for the CEO (people, access, plans, machines or protected records), which wait on his screen.`);
-  if (mine.length > 0) {
+  parts.push(`To settle: ${mine.length} for you; ${open.length - mine.length} proposed permanent deletions for the CEO.`);
+  if (shareable.length > 0) {
     const tasks = new Map<string, string>();
-    const ids = [...new Set(mine.flatMap(conflict => conflict.task_id ?? []))];
+    const ids = [...new Set(shareable.flatMap(conflict => conflict.task_id ?? []))];
     if (ids.length > 0) {
       for (const task of await q<{ id: string; number: number; title: string }>('SELECT id, number, title FROM public.tasks WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))', [JSON.stringify(ids)])) {
         tasks.set(task.id, `Task #${task.number} "${task.title.slice(0, 200)}"`);
@@ -98,17 +100,17 @@ export async function bodyOf(db: Db, mergeIds: string[]): Promise<string> {
     }
     const lines: string[] = [];
     let under = '';
-    for (const conflict of mine.slice(0, LISTED)) {
+    for (const conflict of shareable.slice(0, LISTED)) {
       const head = `${(conflict.task_id && tasks.get(conflict.task_id)) || 'No task'}, ${conflict.tbl}:`;
       if (head !== under) lines.push((under = head));
       lines.push(`  ${conflict.why}`);
     }
-    if (mine.length > LISTED) lines.push(`and ${mine.length - LISTED} more; merge_conflicts lists them.`);
+    if (shareable.length > LISTED) lines.push(`and ${shareable.length - LISTED} more; merge_conflicts lists them.`);
     parts.push(lines.join('\n'));
   }
   parts.push(
     'What to do: read the conflicts with merge_conflicts and settle each with merge_pick (here keeps what this company has now, there takes the other side, value writes yours). ' +
-      'Move the code of the tasks named above onto their branches here. Tell the holders of the tasks that changed. Then report to the CEO what was kept and what he decided.',
+    'Get the CEO’s yes for an exact permanent deletion. Keep any protected values out of the task and conversation. Restore the work on its branches and tell the people whose tasks changed.',
   );
   return parts.join('\n\n');
 }
@@ -122,9 +124,9 @@ export async function taskFor(ctx: Ctx, mergeId: string): Promise<string | null>
   const [merge] = await mergesOf(db, [mergeId]);
   if (!merge) return null;
   if (merge.task_id) return merge.task_id;
-  const open = await q<{ tbl: string }>('SELECT tbl FROM net.merge_conflicts WHERE merge = $1::uuid AND picked IS NULL', [mergeId]);
+  const open = await q<{ id: string }>(`SELECT id FROM net.merge_conflicts c WHERE merge = $1::uuid AND picked IS NULL AND NOT ${DELETION_CONFLICT} LIMIT 1`, [mergeId]);
   const numbers = await renumbered(db, merge);
-  if (!open.some(conflict => !ceos(conflict.tbl)) && numbers.length === 0 && (merge.code ?? []).length === 0) return null;
+  if (!open.length && numbers.length === 0 && (merge.code ?? []).length === 0) return null;
   const [orchestrator] = await q<{ id: string }>("SELECT id FROM public.agents WHERE kind = 'orchestrator' AND removed_at IS NULL LIMIT 1");
   if (!orchestrator) throw new Error('The company has no orchestrator to give the task of a merge to.');
   /* More than two sides merge one at a time into the same task, while it is open. */
