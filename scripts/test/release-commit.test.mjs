@@ -20,6 +20,8 @@ function lock({ root = '0.5.0', top = root, cart = '0.5.0', pad = PAD, cartEntry
       'node_modules/@shop/cart': { resolved: 'packages/cart', link: true },
       'node_modules/left-pad': pad,
       'packages/cart': bump(cartEntry, cart),
+      /* A package of the repository with a version of its own, which a release leaves as it was. */
+      'packages/tools': { name: '@shop/tools', version: '1.0.0' },
     },
   };
 }
@@ -84,6 +86,8 @@ test("the lock moves a package's version only with its package.json, and to the 
   assert.match(beyond({ ...RELEASE, 'package-lock.json': change(lock(), lock({ root: '0.6.0', cart: '0.6.1' })) }), /packages\/cart/);
   assert.match(beyond(without(RELEASE, 'package.json')), /root/);
   assert.match(beyond({ ...RELEASE, 'package-lock.json': change(lock(), lock({ root: '0.6.0', top: '0.6.1', cart: '0.6.0' })) }), /package-lock\.json/);
+  const topAlone = { ...without(RELEASE, 'package.json'), 'package-lock.json': change(lock(), lock({ top: '0.6.0', cart: '0.6.0' })) };
+  assert.match(beyond(topAlone), /package-lock\.json changes its own version/);
 });
 
 test('a package.json version without the lock is more', () => {
@@ -107,12 +111,21 @@ test('a reformatted file is more, though its JSON reads the same', () => {
 
 test('a version line that is not JSON of an object is more', () => {
   assert.match(beyond({ ...RELEASE, 'package.json': change('"version": "0.5.0"\n', '"version": "0.6.0"\n') }), /^package\.json /);
+  assert.match(beyond({ ...RELEASE, 'package.json': change('[]\n', '[]\n') }), /^package\.json /);
+});
+
+test('a lock with no packages, or no JSON object at all, is more', () => {
+  const bare = version => json({ name: 'shop', version, lockfileVersion: 3 });
+  assert.match(beyond({ ...RELEASE, 'package-lock.json': change(bare('0.5.0'), bare('0.6.0')) }), /package-lock\.json/);
+  const notJson = change('"version": "0.5.0"\n', '"version": "0.6.0"\n');
+  assert.match(beyond({ ...RELEASE, 'package-lock.json': notJson }), /^package\.json is no package of the repository in package-lock\.json/);
+  assert.match(beyond({ 'package-lock.json': notJson }), /^package-lock\.json is not a lockfile/);
 });
 
 test('a notes file or package.json added, deleted or turned into another kind of file is more', () => {
-  for (const status of ['A', 'D', 'T']) {
-    assert.match(beyond(RELEASE, { 'CHANGELOG.md': status }), /CHANGELOG\.md/, status);
-    assert.match(beyond(RELEASE, { 'packages/cart/package.json': status }), /packages\/cart\/package\.json/, status);
+  for (const [status, what] of [['A', 'added'], ['D', 'deleted'], ['T', 'turned into another kind of file']]) {
+    assert.equal(beyond(RELEASE, { 'CHANGELOG.md': status }), `CHANGELOG.md is ${what}`);
+    assert.equal(beyond(RELEASE, { 'packages/cart/package.json': status }), `packages/cart/package.json is ${what}`);
   }
 });
 

@@ -50,11 +50,13 @@ function otherPath(changes) {
 function manifestProblem({ path, before, after }, lock) {
   if (!before || !after) return `${path} is not a JSON object`;
   if (!same(withoutVersion(before), withoutVersion(after))) return `${path} changes more than its version`;
-  if (!lock) return `${path} changes its version without ${LOCK}`;
-  const folder = folderOf(path), entry = lock.after?.packages?.[folder];
+  return lock ? lockEntryProblem(path, after.version, lock.after) : `${path} changes its version without ${LOCK}`;
+}
+
+function lockEntryProblem(path, version, lock) {
+  const folder = folderOf(path), entry = lock?.packages?.[folder];
   if (!isOwnPackage(folder) || !isObject(entry)) return `${path} is no package of the repository in ${LOCK}`;
-  if (entry.version !== after.version) return `${LOCK} does not give ${path} its version ${after.version}`;
-  return null;
+  return entry.version === version ? null : `${LOCK} does not give ${path} its version ${version}`;
 }
 
 /* The lockfile without the versions of the repository's own packages and its own: what a release leaves as it was. */
@@ -63,15 +65,26 @@ function lockWithoutVersions(lock) {
   return { ...withoutVersion(lock), packages: Object.fromEntries(packages) };
 }
 
+const isLockfile = lock => isObject(lock?.packages);
+const versionIn = (lock, key) => lock.packages[key]?.version;
+
+/* A package of the repository whose version the lockfile moves, though no package.json the commit changes moves to it. */
+function movedAlone(before, after, manifests) {
+  const moved = Object.keys(after.packages).filter(key => isOwnPackage(key) && versionIn(after, key) !== versionIn(before, key));
+  const alone = moved.find(key => manifests.get(key)?.version !== versionIn(after, key));
+  return alone === undefined ? null : `${LOCK} changes the version of ${alone || 'the root'} without the same version in its package.json`;
+}
+
+function ownVersionProblem(before, after, manifests) {
+  if (after.version === before.version || after.version === manifests.get('')?.version) return null;
+  return `${LOCK} changes its own version to ${after.version}, which the root package.json does not`;
+}
+
 /* Each version the lockfile moves is the new version of a package.json the commit changes with it. */
 function lockProblem({ before, after }, manifests) {
-  if (!isObject(before?.packages) || !isObject(after?.packages)) return `${LOCK} is not a lockfile with packages`;
+  if (!isLockfile(before) || !isLockfile(after)) return `${LOCK} is not a lockfile with packages`;
   if (!same(lockWithoutVersions(before), lockWithoutVersions(after))) return `${LOCK} changes more than the versions of the repository's own packages`;
-  const moved = Object.keys(after.packages).filter(key => isOwnPackage(key) && after.packages[key]?.version !== before.packages[key]?.version);
-  const alone = moved.find(key => manifests.get(key)?.version !== after.packages[key].version);
-  if (alone !== undefined) return `${LOCK} changes the version of ${alone || 'the root'} without the same version in its package.json`;
-  if (after.version !== before.version && after.version !== manifests.get('')?.version) return `${LOCK} changes its own version to ${after.version}, which the root package.json does not`;
-  return null;
+  return movedAlone(before, after, manifests) ?? ownVersionProblem(before, after, manifests);
 }
 
 /* What the commit changes beyond the versions and the notes, in words; null when nothing. */

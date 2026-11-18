@@ -332,6 +332,14 @@ describe('whether a mark spares this commit the tests', () => {
       expect((await decide(dir, sha, hub.api)).out).toBe(PROVED);
     });
 
+    it('runs the tests for the first commit, which has no parent to take a mark from', async () => {
+      const dir = repository();
+      const hub = await github({});
+      const { out, said } = await decide(dir, git(dir, 'rev-parse', 'main'), hub.api);
+      expect(out).toBe(NOT_PROVED);
+      expect(said).toContain('first commit');
+    });
+
     it('runs the release check on the files of that commit, not on those checked out', async () => {
       const { dir, parent } = shop();
       const sha = release(dir, () => {}, '## [0.6.0] on 18 November');
