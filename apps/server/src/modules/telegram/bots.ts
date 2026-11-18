@@ -78,8 +78,7 @@ class Listener {
   private readonly token: string;
   private readonly loop: Promise<void>;
   private readonly unsubscribe: () => void;
-  private readonly typing = new Map<string, number>();
-  private readonly typingTimer: NodeJS.Timeout;
+  private readonly typing = new Map<string, NodeJS.Timeout>();
   private sending: Promise<void> = Promise.resolve();
   private sendingAgain = false;
   private settleNext = false;
@@ -95,14 +94,14 @@ class Listener {
     this.unsubscribe = ctx.bus.subscribe(bot.companyId, m => {
       if (m.type === 'working' || (m.type === 'agent_event' && m.agentId === bot.agentId)) this.answer();
     });
-    this.typingTimer = setInterval(() => { if (this.typing.size) this.answer(); }, TYPING_MS);
     this.loop = this.listen();
     this.answer();
   }
 
   async stop(): Promise<void> {
     this.abort.abort();
-    clearInterval(this.typingTimer);
+    for (const timer of this.typing.values()) clearTimeout(timer);
+    this.typing.clear();
     this.unsubscribe();
     await this.loop;
     await this.sending;
@@ -220,18 +219,25 @@ class Listener {
   }
 
   private async showTyping(row: ReplyRow): Promise<void> {
-    const now = Date.now();
-    if ((this.typing.get(row.id) ?? 0) > now) return;
-    this.typing.set(row.id, now + TYPING_MS);
+    if (this.typing.has(row.id)) return;
+    this.typing.set(row.id, setTimeout(() => {
+      this.typing.delete(row.id);
+      this.answer();
+    }, TYPING_MS));
     await sendTyping(this.ctx.config.telegramApiUrl, this.token, row.chatId, this.abort.signal)
       .catch(err => { if (!this.stopped && !chatGone(err)) this.warn(err, 'Could not show typing in Telegram.'); });
+  }
+
+  private stopTyping(id: string): void {
+    clearTimeout(this.typing.get(id));
+    this.typing.delete(id);
   }
 
   private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
     const { db } = this.ctx;
     const person = await authorizedRecipient(db, this.bot, row.chatId);
     if (!person) {
-      this.typing.delete(row.id);
+      this.stopTyping(row.id);
       this.ended.delete(row.id);
       await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
       return;
@@ -239,7 +245,7 @@ class Listener {
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
     const [job] = await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
     if (job?.status === 'running') return this.showTyping(row);
-    this.typing.delete(row.id);
+    this.stopTyping(row.id);
     if (job?.status === 'queued') return;
     const next = await turnGoingOn(this.ctx, row.jobId);
     if (next) {

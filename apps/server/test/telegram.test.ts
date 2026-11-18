@@ -339,7 +339,7 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain("Wes wrote this in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
-  it.each(['agent_failed', 'cancelled'])('sends only the failure words when a turn ends with %s after progress', async error => {
+  it.each(['agent_failed', 'cancelled'] as const)('sends only the failure words when a turn ends with %s after progress', async error => {
     const { app, db, ceo, owner, tg, builtin } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');
     await connectBot(app, ceo, 'orchestrator', TOKEN);

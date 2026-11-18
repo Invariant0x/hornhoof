@@ -208,6 +208,7 @@ it('shows typing and carries earlier attachments once with the final answer', as
   await appendEvent(app.ctx, { ...event, data: { text: 'Собираю отчет.', pictures } });
   await appendEvent(app.ctx, { ...event, data: { text: 'Ваш отчет готов.' } });
   await appendEvent(app.ctx, { ...event, data: { text: '', pictures } });
+  await until(() => tg.calls.includes('sendChatAction'));
   const calls = tg.calls.filter(call => call === 'getUpdates').length;
   tg.write(TOKEN, IVAN, 'In a group.', { id: -100200, type: 'group' });
   await until(() => tg.calls.filter(call => call === 'getUpdates').length > calls);
@@ -215,10 +216,10 @@ it('shows typing and carries earlier attachments once with the final answer', as
   expect(tg.sentDocuments).toEqual([]);
 
   builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
-  await until(() => tg.sent.length > 0 && tg.sentDocuments.length > 0);
+  await until(() => builtin.acks.includes(run.jobId));
+  await until(async () => (await db.select().from(telegramReplies)).length === 0);
   expect(tg.sent.map(s => s.text)).toEqual(['Ваш отчет готов.']);
   expect(tg.sentDocuments).toMatchObject([{ chat_id: IVAN.id, file_name: 'report.zip', bytes: ZIP }]);
-  expect(tg.calls).toContain('sendChatAction');
 });
 
 describe('the sender of a Telegram file', () => {
