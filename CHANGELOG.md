@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- People listed one under another (in Russian on a wide screen, in every language on a phone) are as high in Chromium, Firefox and Safari: a name leaves no room under its line, and each label sits on the line of its value.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed
