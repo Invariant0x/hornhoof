@@ -184,8 +184,12 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
   const status = humanStatus(task, asksYou);
   return (
     <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
-      <span className="tr-no">#{task.number}</span>
-      <h3 className="tr-card-title"><button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button></h3>
+      <h3 className="tr-card-title">
+        <button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>
+          <span className="tr-no" aria-hidden="true">#{task.number}</span>
+          <span>{task.title}</span>
+        </button>
+      </h3>
       {(stage || status === 'waitingYou' || status === 'paused' || status === 'stopped') && <StateWord status={status} />}
       <ul className="tr-card-facts">
         {/* Each fact is a whole phrase in its own direction, so its dot and the parts of its date stay in place in RTL. */}

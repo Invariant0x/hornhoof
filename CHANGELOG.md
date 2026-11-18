@@ -34,6 +34,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Owners of one-shot stages get guidance on briefing the calls and using their answers and the judge's verdict.
 - Worker marks also appear in the department staff list, employee card and tracker, and the task route marks its one-shot stages.
 ### Changed
+- Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Home device helpers carry out reversible cleanup and settings changes allowed by the household rules.
 - The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
 - Task rows show what they wait for and which tasks from other departments need them.

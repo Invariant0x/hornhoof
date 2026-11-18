@@ -1976,23 +1976,26 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-col-head { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: baseline; gap: 4px 8px; margin: 0; font-size: 14px; text-align: start; }
 .tr-col-head > span { min-inline-size: 0; }
 .tr-col > p { margin: 0; font-size: 12.5px; }
-.tr-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-inline-size: 0; padding: 10px 12px; padding-inline-start: 14px; background: var(--surface); border: 1px solid var(--line); }
-.tr-col, .tr-card-title .linkish, .tr-card .tr-wait { overflow-wrap: break-word; }
+.tr-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-inline-size: 0; padding: 8px; padding-inline-start: 10px; background: var(--surface); border: 1px solid var(--line); line-height: 1.4; }
+.tr-col, .tr-card { overflow-wrap: break-word; }
 .tr-card::before { content: ''; position: absolute; inset-block: -1px; inset-inline-start: -1px; inline-size: 3px; background: var(--line2); }
 .tr-card.working::before, .tr-card.review::before { background: var(--cyan); }
 .tr-card.waiting::before, .tr-card.blocked::before { background: var(--amber); }
 .tr-card.failure::before, .tr-node.failure::before { background: var(--pink); }
 .tr-card.done::before { background: var(--ok); }
 .tr-card.on { border-color: var(--cyan); }
-.tr-card-title { margin: 0; font-size: 14px; font-weight: 600; }
-.tr-card-title .linkish { color: var(--ink); text-align: start; }
+.tr-card-title { margin: 0; font-family: var(--f-body); font-size: 13px; font-weight: 500; line-height: inherit; }
+.tr-card-title .linkish { display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 2px; inline-size: 100%; min-block-size: 44px; color: var(--ink); text-align: start; }
+.tr-card-title .tr-no { font-weight: 400; }
 .tr-card-title .linkish:hover { color: var(--cyan-ink); }
 .tr-card-activity:empty { display: none; }
 :is(.tracker, .tp-state) .tstate { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
-.tr-card .tstate { overflow-wrap: break-word; }
+.tr-card .tstate { font-size: 11px; padding: 2px 6px; overflow-wrap: break-word; }
 .tstate.failure { color: var(--pink-ink); border-color: currentColor; }
-.tr-card-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
+.tr-card-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
 .tr-card-person { display: inline-block; max-inline-size: 100%; vertical-align: top; }
+.tr-card .tr-wait { display: block; font-size: inherit; overflow-wrap: inherit; }
+.tr-card > .entry-actions > .act { inline-size: max-content; min-inline-size: 44px; padding: 4px 6px; font-size: 12px; }
 
 /* The graph: the breadcrumb back up, what to draw with a pipeline, and the map's canvas with its zoom bar. */
 .tr-graph { display: grid; gap: 10px; min-width: 0; }
@@ -2002,7 +2005,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-crumbs .linkish, .tp-path .linkish { overflow-wrap: anywhere; }
 /* A link that stands alone takes a finger: at least 44 px high, its words in the middle as before. Links inside a line of
    words keep the line's height. */
-:is(.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-block-size: 44px; }
+:is(.tr-title, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-block-size: 44px; }
 .tr-crumbs [aria-current] { font-weight: 600; }
 .tr-modes { max-width: 420px; }
 .tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }

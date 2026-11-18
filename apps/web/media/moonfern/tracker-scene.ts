@@ -98,7 +98,7 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             const person = region.getByRole('region', { name: t.tracker.statuses.waits });
             await expect(person.locator('.tr-card .tr-wait.person').first()).toHaveText(t.tracker.time.minutes(49));
             await expect(region.getByRole('region', { name: t.tracker.statuses.failure })).toHaveCount(0);
-            await assertBoard(region, wide);
+            await assertBoard(region, wide, t);
             await expectOneLine(region.locator('bdi').filter({ hasText: /^Sam Rivera$/ }).first());
           }
           if (view === 'turns') await assertTurnQuestion(region, t);
@@ -139,7 +139,7 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             await frame.goto('/tasks?department=dept-dev&pipeline=pl-beta&view=board');
             await expect(region.locator('.tr-col').nth(1)).toBeVisible();
             await expect(region.getByRole('region', { name: 'TestFlight smoke test' })).toBeVisible();
-            await assertBoard(region, wide);
+            await assertBoard(region, wide, t);
             await assertTrackerFit(frame);
             await frame.screenshot({ path: info.outputPath(`pipeline-${id}-${theme}-${size.width}.png`) });
 
@@ -151,7 +151,7 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             const failed = failures.getByRole('article', { name: '#224 Sunlight meter calibration on iPhone' });
             await expect(failed).toBeVisible();
             await expect(failed.locator('.tr-wait.failure')).toHaveText(t.tracker.wait.failedRun('17', false));
-            await assertBoard(region, wide);
+            await assertBoard(region, wide, t);
             await assertTrackerFit(frame);
             if (!wide) await failures.scrollIntoViewIfNeeded();
             await frame.screenshot({ path: info.outputPath(`board-failure-${id}-${theme}-${size.width}.png`) });
@@ -229,7 +229,7 @@ async function assertTurnQuestion(region: Locator, t: Messages): Promise<void> {
   await expect(other.locator('.tr-wait')).toHaveText(t.tracker.wait.person('Leo Park', t.tracker.time.minutes(40)));
 }
 
-async function assertBoard(board: Locator, wide: boolean): Promise<void> {
+async function assertBoard(board: Locator, wide: boolean, t: Messages): Promise<void> {
   await expect(board.locator('.tr-columns')).toHaveAttribute('data-layout', wide ? 'row' : 'stack');
   const columns = await board.locator('.tr-col').evaluateAll(nodes => nodes.map(node => {
     const { x, y, bottom } = node.getBoundingClientRect();
@@ -246,6 +246,7 @@ async function assertBoard(board: Locator, wide: boolean): Promise<void> {
       expect(Math.abs(column.x - previous.x)).toBeLessThanOrEqual(1);
     }
   }
+  await expectOneLine(board.getByRole('button', { name: t.tracker.wait.question, exact: true }).first());
 }
 
 async function assertTrackerFit(page: Page): Promise<void> {
