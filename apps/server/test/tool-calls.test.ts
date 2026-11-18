@@ -13,7 +13,7 @@ import { NotConfirmed } from '../src/db/confirm.js';
 import { agents, companies, jobs, notebookNotes, people, subscriptions, toolCalls } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { listed, outsideSources } from '../src/db/sources.js';
-import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
+import { READ_ONLY_MESSAGE } from '../src/errors.js';
 import { ALREADY_RAN, ANSWER_MAX, currentInvocation, guardTools, ID_TAKEN, INVOCATION, MAY_HAVE_RUN, PENDING, STARTS_FIRST, TOO_LARGE } from '../src/modules/tools/calls.js';
 import { listen, setLease, setUpCompany, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';

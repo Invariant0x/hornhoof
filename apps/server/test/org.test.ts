@@ -12,6 +12,21 @@ import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { as, echelonsTurn, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 describe('GET /api/org', () => {
+  it('shows the same turnkey membership on the employee card as on the map', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dept] = await db.insert(departments).values({ companyId: company!.id, name: 'Work', roleCode: 'WORK' }).returning();
+    const [team] = await db.insert(teams).values({ companyId: company!.id, departmentId: dept!.id, name: 'Whole tasks', turnkey: true }).returning();
+    const [worker] = await db.insert(agents).values({ companyId: company!.id, departmentId: dept!.id, teamId: team!.id, kind: 'worker', name: 'Alex', model: '' }).returning();
+
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments[0].employees).toContainEqual(expect.objectContaining({ id: worker!.id, turnkey: true }));
+    const card = await app.inject({ url: `/api/agents/${worker!.id}`, ...as(ceo) });
+    expect(card.statusCode).toBe(200);
+    expect(card.json()).toMatchObject({ team: { id: team!.id }, turnkey: true });
+  });
+
   it('reads failure state with the same number of queries as the company grows', async () => {
     const c = await failureCompany();
     const seen = statements();

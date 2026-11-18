@@ -10,6 +10,12 @@ import { releasing } from './turn-release-fixture.js';
 import { LATER, OTHER, released } from './turn-tag-close-fixture.js';
 
 describe('the server closes a turn by the tag of its release', () => {
+  it('closes a recorded release without an approval card when the department has no commit rule', async () => {
+    const f = await released({ approval: false });
+    await f.round();
+    expect(await f.departmentTurns()).toContainEqual(expect.objectContaining({ id: f.turn.id, status: 'closed', commit: f.R }));
+  });
+
   it('takes the newest tag as where a turn starts on its first look, and closes nothing', async () => {
     const f = await releasing();
     f.repo.tags['v1.5.0'] = '2'.repeat(40);

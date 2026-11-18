@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS } from '../src/redaction.js';
+import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS, redactExact, secretForms } from '../src/redaction.js';
 import mixed from './fixtures/redaction-mixed.json' with { type: 'json' };
 
 describe('stored prose, masked as it is written', () => {
@@ -30,8 +30,19 @@ describe('stored prose, masked as it is written', () => {
     ]) expect(hideCredentials(plain), plain).toBe(plain);
   });
 
-  it('hides an exact value only from eight characters on', () => {
+  it('shares the minimum of eight characters for general diagnostics and encoded forms', () => {
     expect(MIN_SECRET_LENGTH).toBe(8);
+    const short = 'm'.repeat(MIN_SECRET_LENGTH - 1);
+    const long = 'ÿ'.repeat(MIN_SECRET_LENGTH);
+    const base64 = Buffer.from(long).toString('base64');
+    const unpadded = base64.replace(/=+$/, '');
+    const base64url = Buffer.from(long).toString('base64url');
+    const shortEncoded = Buffer.from(short).toString('base64');
+    const text = [long, base64, unpadded, base64url, short, shortEncoded].join(' ');
+    const hidden = [HIDDEN, HIDDEN, HIDDEN, HIDDEN];
+    expect(secretForms([short, long, '', long], 'literal')).toEqual([base64, unpadded, base64url, long, short]);
+    expect(redactExact(text, [short, long], 'ignore')).toBe([...hidden, short, shortEncoded].join(' '));
+    expect(redactExact(text, [short, long], 'literal')).toBe([...hidden, HIDDEN, shortEncoded].join(' '));
   });
 
   it('keeps a maximum-size assistant conversation and masks a following URL password', () => {

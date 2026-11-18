@@ -21,7 +21,7 @@ const CARD: AgentCardView = {
   id: WORKER.id, name: WORKER.name, kind: 'worker', role: null, department: { id: 'd2', name: 'Development' },
   currentTask: null, product: null, team: null, teams: [], model: '', effort: null, subscription: null, machine: null,
   state: 'sleeping', program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '',
-  instructions: { length: 0, max: 200_000 }, runsOn: [], interrupted: [], canEdit: false, canRemove: false, timer: null,
+  runsOn: [], interrupted: [], canEdit: false, canRemove: false, timer: null,
   changes: [
     { field: 'name', personName: PERSON, actingAgent: { id: 'removed-head', name: HEAD }, byOrchestrator: false, at: AT },
     { field: 'skills', personName: 'Ivan', actingAgent: null, byOrchestrator: false, at: AT },

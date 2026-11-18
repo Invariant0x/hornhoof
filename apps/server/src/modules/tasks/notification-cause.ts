@@ -9,6 +9,7 @@ export type WakeCause = {
   action?: string;
   source?: NotificationSource;
   eventId?: number;
+  callBatch?: string;
   task?: { id: string; number: number };
   report?: string;
   wait?: { setter: string; until: string };

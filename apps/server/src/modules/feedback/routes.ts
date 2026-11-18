@@ -1,24 +1,20 @@
+import { createHmac } from 'node:crypto';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentHidden, seesAgentId, viewerOf } from '../../auth/agent-view.js';
-import { limiter } from '../../auth/limit.js';
 import { requireCompanyPerson, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { feedbackInbox, improvements, repoHosts } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
+import { feedbackInbox, feedbackSubmissions, improvements, repoHosts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { improvementsChanged, moveImprovement } from '../improvements/store.js';
+import { improvementsChanged, moveImprovementTx } from '../improvements/store.js';
 import { ISSUE_REPOSITORY, issueOf } from './github-issue.js';
 import { fingerprintOfReport, inboxChanged, listInbox, receive } from './inbox.js';
-import { answerOf, factsOf, installationOf, REPEATS_MAX, Report, shownOf, Written, type IssueLink } from './report.js';
+import { answerOf, factsOf, installationOf, REPEATS_MAX, Report, shownOf, Written, type IssueLink, type Shown } from './report.js';
 
 /* A body the inbox takes from the relay at most. */
 const INBOUND_BYTES = 16 * 1024;
-const HOUR = 60 * 60 * 1000;
-/* What one person may send in an hour. */
-const SENT_PER_HOUR = 10;
 const ISSUE_OWNER = ISSUE_REPOSITORY.split('/')[0]!;
 
 const Send = Written.extend({ digest: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -52,20 +48,37 @@ async function findingFor(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, id: strin
 /* The issue an answer of the inbox names, as a finding keeps it. */
 const issueColumns = (issue: IssueLink | null) => (issue ? { issueNumber: issue.number, issueUrl: issue.url } : {});
 
-/* Tells Hornhoof's developers how many more rounds found a finding sent to them: the same report, word for word, with that
-   count, only ever on a person's press. Their inbox counts them as signals of it and answers with its issue, if there is
-   one now. Nothing else goes. */
-async function reportRepeats(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'links'>, companyId: string, id: string): Promise<void> {
-  const [found] = await ctx.db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
-  if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+/* The relay sees a stable submission id without learning who sent it or what it came from. */
+function submissionOf(ctx: Pick<Ctx, 'config'>, ...parts: (string | number)[]): string {
+  return createHmac('sha256', ctx.config.secret).update(JSON.stringify(parts)).digest('hex');
+}
+
+function sendReport(ctx: Ctx, submission: string, report: Shown, repeats?: number) {
+  const signed = { v: 1 as const, installation: installationOf(ctx.config.secret), submission, ...report, repeats };
+  return ctx.config.feedbackInbox ? receive(ctx, signed, false) : ctx.links.relay.feedback(signed).then(answerOf);
+}
+
+const receiptKey = (submission: string) => `out:${submission}`;
+
+/* A repeat batch keeps its size when a send fails. New findings belong to the next batch. */
+async function reportRepeats(ctx: Ctx, companyId: string, found: typeof improvements.$inferSelect): Promise<void> {
   if (found.status !== 'sent' || !found.sentReport || found.reportedSeen === null || ctx.config.feedbackInbox) throw new ApiError(409, 'conflict', "This finding was not sent to Hornhoof's developers.", 'feedback_not_sent');
   const repeats = Math.min(found.seen - found.reportedSeen, REPEATS_MAX);
   if (repeats < 1) throw new ApiError(409, 'conflict', 'No round found it again since its developers last heard of it.', 'feedback_no_repeats');
-  const answer = answerOf(await ctx.links.relay.feedback({ v: 1, installation: installationOf(ctx.config.secret), ...found.sentReport, repeats }));
-  await ctx.db
-    .update(improvements)
-    .set({ reportedSeen: sql`${improvements.reportedSeen} + ${repeats}`, reportNumber: found.reportNumber ?? answer.number, ...issueColumns(answer.issue) })
-    .where(eq(improvements.id, found.id));
+  const submission = submissionOf(ctx, 'feedback repeats', companyId, found.id, found.reportedSeen);
+  const key = receiptKey(submission);
+  await ctx.db.insert(feedbackSubmissions).values({ key, repeats }).onConflictDoNothing();
+  const [receipt] = await ctx.db.select().from(feedbackSubmissions).where(eq(feedbackSubmissions.key, key));
+  if (receipt!.sent) return;
+  const count = receipt!.repeats!;
+  const answer = await sendReport(ctx, submission, found.sentReport, count);
+  await ctx.db.transaction(async tx => {
+    const [marked] = await tx.update(feedbackSubmissions).set({ sent: true })
+      .where(and(eq(feedbackSubmissions.key, key), eq(feedbackSubmissions.sent, false))).returning();
+    if (marked) await tx.update(improvements)
+      .set({ reportedSeen: sql`${improvements.reportedSeen} + ${count}`, reportNumber: found.reportNumber ?? answer.number, ...issueColumns(answer.issue) })
+      .where(eq(improvements.id, found.id));
+  });
   improvementsChanged(ctx, companyId);
 }
 
@@ -82,7 +95,16 @@ async function shown(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, written: Writt
    company turn its cards into GitHub issues. */
 export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
-  const sentBy = limiter({ max: SENT_PER_HOUR, windowMs: HOUR });
+  const sending = new Map<string, Promise<void>>();
+
+  /* Concurrent presses share one send on this server. The receiving inbox recognizes the same submission after a restart. */
+  function once(key: string, send: () => Promise<void>): Promise<void> {
+    const pending = sending.get(key);
+    if (pending) return pending;
+    const result = send().finally(() => sending.delete(key));
+    sending.set(key, result);
+    return result;
+  }
 
   app.get('/api/feedback', async req => {
     await requirePerson(req, db);
@@ -101,54 +123,51 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = Send.parse(req.body);
     const { finding, report, digest } = await shown(ctx, me, body);
     if (digest !== body.digest) throw new ApiError(409, 'conflict', 'What would be sent changed since you looked at it. Look at it again.', 'feedback_changed');
-    const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());
-    if (!allowed) passWait(reply, new ApiError(429, 'too_many', 'You sent many reports this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS }));
-    const signed = { v: 1 as const, installation: installationOf(config.secret), ...report };
-    let answer: ReturnType<typeof answerOf> = { number: null, issue: null };
+    const submission = submissionOf(ctx, 'feedback report', me.companyId, finding?.id ?? me.id, digest);
     try {
-      answer = config.feedbackInbox ? await receive(ctx, signed) : answerOf(await ctx.links.relay.feedback(signed));
+      await once(submission, async () => {
+        const key = receiptKey(submission);
+        const [receipt] = await db.select().from(feedbackSubmissions).where(eq(feedbackSubmissions.key, key));
+        if (receipt?.sent) return;
+        const answer = await sendReport(ctx, submission, report);
+        await db.transaction(async tx => {
+          const [added] = await tx.insert(feedbackSubmissions).values({ key, sent: true }).onConflictDoNothing().returning();
+          if (added && finding) await moveImprovementTx(tx, me.companyId, finding.id, 'open', {
+            status: 'sent',
+            decidedBy: me.id,
+            sentAt: new Date(ctx.clock()),
+            sentReport: report,
+            sentFingerprint: fingerprintOfReport(report),
+            reportNumber: answer.number,
+            ...issueColumns(answer.issue),
+            reportedSeen: sql`${improvements.seen}`,
+          });
+        });
+        if (finding) improvementsChanged(ctx, me.companyId);
+      });
     } catch (err) {
       passWait(reply, err);
     }
-    if (finding)
-      await moveImprovement(ctx, me.companyId, finding.id, 'open', {
-        status: 'sent',
-        decidedBy: me.id,
-        sentAt: new Date(ctx.clock()),
-        sentReport: report,
-        sentFingerprint: fingerprintOfReport(report),
-        reportNumber: answer.number,
-        ...issueColumns(answer.issue),
-        reportedSeen: sql`${improvements.seen}`,
-      });
     return { sent: true };
   });
-
-  /* Findings whose repeats are being told now, so two presses at once tell them once. */
-  const telling = new Set<string>();
 
   app.post('/api/feedback/repeats', async (req, reply) => {
     const me = await requireCompanyPerson(req, db);
     humanOnly(me);
     const { improvement } = Repeats.parse(req.body);
-    const [found] = await db.select(only(improvements, 'agentId')).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
-    if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
-    if (telling.has(improvement)) throw new ApiError(409, 'conflict', 'Its repeats are being told already.', 'feedback_no_repeats');
-    const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());
-    if (!allowed) passWait(reply, new ApiError(429, 'too_many', 'You sent many reports this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS }));
-    telling.add(improvement);
+    const [found] = await db.select().from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
+    if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+    if (!seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
     try {
-      await reportRepeats(ctx, me.companyId, improvement);
+      await once(`repeats:${improvement}:${found.reportedSeen}`, () => reportRepeats(ctx, me.companyId, found));
     } catch (err) {
       passWait(reply, err);
-    } finally {
-      telling.delete(improvement);
     }
     return { sent: true };
   });
 
   /* What the relay passes on from every installation. No session: what it takes is checked here, by its shape, its size
-     and how many came from its installation. */
+     and the shared protection against a flood. */
   app.post('/api/feedback/inbound', { bodyLimit: INBOUND_BYTES }, async (req, reply) => {
     if (!config.feedbackInbox) throw notHere();
     const report = Report.safeParse(req.body);

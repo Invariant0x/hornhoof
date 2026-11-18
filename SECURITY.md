@@ -27,7 +27,7 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 - You sign in to each plan yourself, on your own machine. The sign-in is sealed to your machines: Hornhoof stores it so that the server and the copies of the company cannot open it, and only your own machines can. An Antigravity sign-in stays on the machine it was made on. A personal plan's work goes only to its owner's machines.
 - Before anything leaves a machine, the node puts `[hidden]` in place of its own key, the plans' tokens, API keys and repository tokens, in terminals and in every output.
 - API keys, repository tokens and the link's key are stored encrypted with AES-256-GCM, under the secret in your `.env`. Passwords are stored as scrypt hashes. Sessions, invite links, install commands and the keys nodes connect with are kept only as SHA-256 hashes.
-- The command that connects a machine works once, for 24 hours. When the orchestrator makes one, its code shows only on the CEO's screen and never reaches an agent.
+- The command that connects a machine works once, for 24 hours. When the orchestrator makes one, it shows on the CEO's screen and in the orchestrator's tool answer, and the saved conversation keeps its code hidden. No other agent gets it.
 - "Disconnect" on a machine's card takes its keys away at once, so a lost or stolen machine can no longer reach the company.
 
 ## People see only what they are given
@@ -38,9 +38,9 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 - A change, or a terminal connection, that comes from another site's page is refused, even with your cookie.
 - Each person sees only the departments they are given.
 - Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
-- The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
+- The orchestrator changes people, access, plans, machines, repositories, the public link and updates in any turn, for whoever asked, an employee too. He always acts as the company's owner, in a turn and between turns, and each change goes through the same check as the CEO's click. What the company does not want him to do goes in its notebook. Paying and signing in the company's name wait for a person, and deleting for good waits for the CEO's yes.
 - The orchestrator's database tool runs as Hornhoof itself: it reads and changes every table, every column and the schema. The head of Operations only reads, and never sees passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
-- Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
+- Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to agents only while access to it is open, for one day at most: to the orchestrator, or to every agent when it is open for all of them. A machine that holds its owner's key opens only with that owner's signature, so nobody else can open it, the CEO included. The server's own machine opens without one while it holds no owner key. While access is open, the orchestrator works there in any turn of his and between turns. Another agent never works there in a turn whose last words came from a person other than the CEO, the CEO delegate or the machine's owner, or from someone Hornhoof cannot name.
 
 ## The hornhoof.org link
 

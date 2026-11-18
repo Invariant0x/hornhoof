@@ -10,7 +10,7 @@ export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
    tasks, or all the company's goals and tasks; a department, its pipeline, a goal, the task the graph grows from and a
    person who answers for the work; and the view. personId: whose screen is looked at. A card is a task's, or with card a
    goal's. */
-export const TRACKER_SHOWS = ['waits', 'working', 'turns', 'company'] as const;
+export const TRACKER_SHOWS = ['waits', 'working', 'failures', 'turns', 'company'] as const;
 export type TrackerShow = (typeof TRACKER_SHOWS)[number];
 export type TrackerPlace = { show?: TrackerShow; department?: string; product?: string; pipeline?: string; goal?: string; root?: string; responsible?: string; personId?: string; view?: TrackerView };
 export type TasksRoute = { kind: 'tasks'; id?: string; card?: 'goal' } & TrackerPlace;

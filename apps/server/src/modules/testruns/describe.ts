@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
+import { hasCode } from '../../db/errors.js';
 import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
@@ -121,6 +122,26 @@ async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, 
 }
 const pendingDescription = (id: string) => and(eq(testRuns.id, id), eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot));
 const requestMatches = (id: string, requestId: string) => and(pendingDescription(id), sql`${testRuns.environmentRequest}->>'requestId' = ${requestId}`);
+class DescriptionMismatch extends Error {}
+
+/* Only validating the node's evidence can call it incompatible. Planning and storage failures belong to the server. */
+async function checkedSnapshot(run: Run, value: EnvironmentDescription): Promise<EnvironmentSnapshot> {
+  try {
+    const description = await validateEnvironmentDescription(value);
+    if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(run.environmentRequest!.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
+    const snapshot = snapshotFor(description);
+    requestedUnits(snapshot, run.environmentRequest!.suite);
+    return snapshot;
+  } catch (cause) {
+    throw new DescriptionMismatch('The node returned invalid or incompatible pinned environment evidence.', { cause });
+  }
+}
+
+function descriptionError(error: unknown): EnvironmentProblem {
+  if (error instanceof DescriptionMismatch) return { code: 'description_mismatch', detail: error.message };
+  if (hasCode(error, '25P04')) return { code: 'transaction_timeout', detail: 'The database ended the environment description lookup or save at its 5 s transaction limit.' };
+  return { code: 'save_failed', detail: 'The server could not prepare or save the environment description.' };
+}
 async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<Run | undefined> {
   const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest}->>'requestId' = ${message.requestId}`));
   const request = run?.environmentRequest, assigned = request && requestNode(ctx, request);
@@ -140,7 +161,7 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
-    if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
+    if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new DescriptionMismatch('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
     await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache, timeoutMs }).where(eq(testRuns.id, run.id));
     await addParts(tx, run, leaves);
@@ -157,9 +178,7 @@ function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[]): Promise<EnvironmentProblem | null> {
-  const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
-  if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const snapshot = snapshotFor(description);
+  const request = run.environmentRequest!, snapshot = await checkedSnapshot(run, value), { description } = snapshot;
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
   const problem = unrunnable(snapshot);
   if (problem) return problem;
@@ -178,7 +197,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
   const problem = await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [])
-    .catch((): EnvironmentProblem => ({ code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }));
+    .catch(descriptionError);
   if (problem) await descriptionProblem(ctx, run, message, problem);
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {

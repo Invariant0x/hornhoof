@@ -184,7 +184,7 @@ describe('orchestrator instructions', () => {
     expect(ability('orch-trouble')).toMatch(/never ask a person to type SQL or shell commands/i);
     expect(ability('orch-resources')).toMatch(/ask_computer_access[\s\S]*wait for its actual authorization/i);
     expect(ability('orch-resources')).toMatch(/do not reuse another machine owner's access approval/i);
-    expect(ability('orch-resources')).toMatch(/call machines[\s\S]*only that machine's owner opens it/i);
+    expect(ability('orch-resources')).toMatch(/call machines[\s\S]*opens only with that owner's signature/i);
     expect(ability('orch-resources')).toMatch(/never ask the CEO to type shell commands/i);
   });
 

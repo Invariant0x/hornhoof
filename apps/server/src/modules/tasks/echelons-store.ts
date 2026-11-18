@@ -2,10 +2,10 @@ import { turnCleanupDefault } from './echelons-update.js';
 import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { departments, taskRoutes } from '../../db/schema.js';
+import { departments, pipelines, taskRoutes } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
-import type { StageRoute } from '../templates/load.js';
+import { catalogRoute, type StageRoute } from '../templates/load.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { validScopePaths } from './review-schema.js';
 import { throughEchelons } from './turnkey.js';
@@ -112,9 +112,12 @@ async function turnkeyRoute(tx: Tx, task: Task, paths: string[]): Promise<void> 
 }
 
 /* The stages the work of a department goes through, as its template lays them out. */
-export async function departmentStages(ctx: Pick<Ctx, 'db' | 'templates'>, departmentId: string | null): Promise<StageRoute> {
+export async function departmentStages(ctx: Pick<Ctx, 'db' | 'templates'>, departmentId: string | null, pipelineId?: string | null): Promise<StageRoute> {
   const [department] = departmentId ? await ctx.db.select({ key: departments.templateKey }).from(departments).where(eq(departments.id, departmentId)) : [];
-  return ctx.templates.stagesOf(department?.key ?? null);
+  const [pipeline] = pipelineId && departmentId
+    ? await ctx.db.select({ catalogKey: pipelines.catalogKey }).from(pipelines).where(and(eq(pipelines.id, pipelineId), eq(pipelines.departmentId, departmentId)))
+    : [];
+  return catalogRoute(ctx.templates, department?.key ?? null, pipeline?.catalogKey ?? null);
 }
 
 /* A result made of the accepted results under it: no stage and no candidate of its own. */

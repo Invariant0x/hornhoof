@@ -51,18 +51,19 @@ async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promi
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
 }
 
-/* A command starts only while the machine's access is open, in any turn of the orchestrator but one whose last words came
-   from a person other than the CEO, the CEO delegate or the machine's owner, kept under the input lock from words that
-   would change it meanwhile: its id, or why it did not start. */
-function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
-  return withInputLock(ctx, job.agentId, async () => {
+/* A command starts only while the machine's grant allows it. A head or worker also needs an allowed speaker. */
+async function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
+  const run = async () => {
     if (!(await ctx.computer.openUntil(machine.id, job.agentKind))) return say(closed(machine.name, job.agentKind !== 'orchestrator'), true);
-    if (!(await machinePrincipal(ctx.db, job.id, machine.personId, machine.id))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
+    if (job.agentKind !== 'orchestrator' && !(await machinePrincipal(ctx.db, job.id, machine.personId, machine.id))) {
+      return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
+    }
     if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
-    const run = await ctx.computer.start(job, machine.id, command, seconds);
-    if (run === 'closed') return say(closed(machine.name, job.agentKind !== 'orchestrator'), true);
-    return run === 'none' ? say(noSuch(machine.name), true) : run;
-  });
+    const started = await ctx.computer.start(job, machine.id, command, seconds);
+    if (started === 'closed') return say(closed(machine.name, job.agentKind !== 'orchestrator'), true);
+    return started === 'none' ? say(noSuch(machine.name), true) : started;
+  };
+  return job.agentKind === 'orchestrator' ? run() : withInputLock(ctx, job.agentId, run);
 }
 
 /* One machine in a line, for the orchestrator. */
@@ -110,9 +111,7 @@ function registerAccessRequest(server: McpServer, ctx: Ctx, job: ToolJob): void 
   );
 }
 
-/* The orchestrator's way out of its container: it asks a machine's owner for that machine, and while the owner keeps
-   access open it runs commands there as root, in any turn of its own but one whose last words are of a person who may
-   not direct it there. */
+/* A machine's grant opens it to the orchestrator, or to company agents as a group. */
 export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'machines',
@@ -139,7 +138,9 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       _meta: { secretCommand: true },
       description:
         'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
-        'It works in any turn of yours for as long as access stays open, with no new word of anyone, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine\'s owner, their task, comment or answer included, or from someone Hornhoof cannot name. ' +
+        (job.agentKind === 'orchestrator'
+          ? 'The grant applies in any turn and in tool steps between turns. '
+          : "A department agent also needs a turn whose speaker may direct commands on that machine. ") +
         "It runs in a helper container with every privilege, in the machine's processes and network: docker reaches the machine's Docker, the machine's files are at /host, " +
         "and chroot /host sh -c '...' runs a command on the machine itself (Linux; on a Mac the machine is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
         'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran, where and why.',

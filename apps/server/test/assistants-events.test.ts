@@ -9,7 +9,6 @@ import { listenIn } from '../../../test-support/ports.mjs';
 import { agents, assistantEvents, companies, departments, people, requests } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
-import { cardPrincipal } from '../src/modules/conversation/decision-context.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
@@ -190,8 +189,6 @@ describe("an assistant's events", () => {
     const answered = await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Yes.' }, ...bearer(ava.key) });
     expect(answered.statusCode).toBe(200);
     expect((await c.db.select().from(requests).where(eq(requests.id, asked.id)))[0]).toMatchObject({ status: 'answered', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
-    /* The machine's card goes by the owner's answer, as when they gave it themselves. */
-    expect(await cardPrincipal(c.db, c.acme.id, asked.id)).toBe(c.owner.id);
   });
 
   it('go to their own assistant alone, and a request only to the assistant of the person it waits for', async () => {

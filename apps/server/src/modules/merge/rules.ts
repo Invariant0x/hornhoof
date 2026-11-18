@@ -1,4 +1,4 @@
-import { HIDDEN, SECRET } from '../../db/agent-sql.js';
+import { SECRET } from '../../db/agent-sql.js';
 
 /* Whose a conflict is. The first five are the CEO's: people, what they reach, the plans and the machines the company
    runs on, and protected, the records only a person's guarded route or one of Hornhoof's own gateways writes (what
@@ -127,10 +127,10 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates'], rows('protected')),
   ...each(OUTBOUND.filter(name => name !== 'outbound_messages'), rows('protected')),
 
-  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
-  ...each(['feedback_inbox', 'feedback_signals'], rows('work')),
+  ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),
   tasks: rows('work', { number: ['company_id'], task: 'id' }),
   goals: rows('work', { number: ['company_id'] }),
   ...each(['pipelines', 'pipeline_stages'], rows('work')),
@@ -223,11 +223,10 @@ export function ceosConflict(table: string): boolean {
   return CEO_TOPICS.includes(ruleOf(table).topic);
 }
 
-/* Whose a conflict is, wherever that is asked: the CEO's by its topic, whatever the orchestrator's own SQL may not
-   see, and a table this build has no rule for, as a conflict carried from another build may name. */
+/* The screen groups a conflict by its topic. An older build may have kept one for a table this build lacks. */
 export function ceos(table: string): boolean {
   const rule = TABLE_RULES[table];
-  return !rule || CEO_TOPICS.includes(rule.topic) || HIDDEN.includes(table);
+  return !rule || CEO_TOPICS.includes(rule.topic);
 }
 /* The tables whose conflicts the orchestrator settles. */
 export const ORCHESTRATORS_TABLES = (): string[] => Object.keys(TABLE_RULES).filter(table => !ceos(table));

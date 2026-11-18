@@ -1,7 +1,7 @@
 /* What the tests of turn-tag-close.test.ts start from, also the ones that take a database of their own. */
 import { and, asc, eq } from 'drizzle-orm';
 import { expect } from 'vitest';
-import { departments, tasks, turns } from '../src/db/schema.js';
+import { approvalPolicies, departments, tasks, turns } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { BASE } from './development-echelons-fixture.js';
 import { releasing, turnkeyAfterR } from './turn-release-fixture.js';
@@ -10,7 +10,7 @@ export const LATER = '4'.repeat(40);
 export const OTHER = '3'.repeat(40);
 
 /* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
-export async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
+export async function released(options: { approval?: boolean; record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
   const f = await releasing();
   const errors: string[] = [];
   const round = () => minuteRound(f.ctx, new Date(), what => () => { errors.push(what); });
@@ -21,8 +21,10 @@ export async function released(options: { record?: boolean; tag?: string; at?: s
   const commit = work?.head ?? f.R;
   const run = await f.fullRun({ commit });
   /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
-  if (options.autonomous) await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
-  else await f.approve(commit);
+  if (options.autonomous) {
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
+    await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
+  } else if (options.approval !== false) await f.approve(commit);
   if (options.record !== false) expect((await f.recordRelease({ commit, runId: run.id })).isError).toBe(false);
   f.repo.heads.main = commit;
   f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? commit;

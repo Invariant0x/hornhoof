@@ -128,7 +128,7 @@ describe("an assistant's own agent", () => {
     expect(await c.db.select().from(agents).where(eq(agents.kind, 'assistant'))).toHaveLength(1);
   });
 
-  it('is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant', async () => {
+  it('is written to by its owner alone and seen by the orchestrator too: not the CEO, not another assistant', async () => {
     const c = await company();
     const ava = await assistantOf(c, c.olgaSession, c.olga.id);
     expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
@@ -137,18 +137,19 @@ describe("an assistant's own agent", () => {
     expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.ceo) })).statusCode).toBe(403);
     expect((await c.app.inject({ method: 'POST', url: `/api/agents/${agent.id}/messages`, payload: { text: 'Hi' }, ...as(c.ceo) })).statusCode).toBe(403);
     expect((await c.app.inject({ url: '/api/org', ...as(c.ceo) })).body).not.toContain(agent.id);
-    expect(await canViewAgent(c.db, { ...c.olga, via: c.orchestrator.id }, agent)).toBe(false);
+    /* The orchestrator inspects every assistant; only its own person talks to it (people-delete.test.ts). */
+    expect(await canViewAgent(c.db, { ...c.olga, via: c.orchestrator.id }, agent)).toBe(true);
     const max = await assistantOf(c, c.ceo, c.owner.id, 'Max');
     const listed = (await c.app.inject({ url: '/api/assistant/agents', ...bearer(max.key) })).json().agents.map((a: { id: string }) => a.id);
     expect(listed).not.toContain(agent.id);
     expect((await write(c, max.key, { agentId: agent.id, text: 'Hi' })).statusCode).toBe(403);
   });
 
-  it("is the CEO's own when the CEO owns it, still out of the orchestrator's reach", async () => {
+  it("is the CEO's own when the CEO owns it, and the orchestrator sees it too", async () => {
     const c = await company();
     const { agent } = await talking(c);
     expect(await canViewAgent(c.db, c.owner, agent)).toBe(true);
-    expect(await canViewAgent(c.db, { ...c.owner, via: c.orchestrator.id }, agent)).toBe(false);
+    expect(await canViewAgent(c.db, { ...c.owner, via: c.orchestrator.id }, agent)).toBe(true);
     expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.olgaSession) })).statusCode).toBe(403);
   });
 
@@ -253,18 +254,17 @@ describe("an assistant's own agent, out of everyone else's sight", () => {
     expect(olga.messages.map(m => m.type)).toEqual(expect.arrayContaining(['agent_event', 'pulse', 'context']));
   });
 
-  it('is nobody at the other end of a message for the CEO and the orchestrator, as an agent they do not see', async () => {
+  it('is nobody at the other end of a message for the CEO, as an agent the CEO does not see, and itself for the orchestrator', async () => {
     const c = await company();
     const { agent } = await olgasAgent(c);
     const ava = { kind: 'agent' as const, id: agent.id, name: 'Ava', role: null, department: null, agentKind: 'assistant' as const };
     const head = { kind: 'agent' as const, id: c.orchestrator.id, name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' as const };
     const message = { direction: 'in' as const, from: ava, to: head, senders: [ava] };
-    for (const who of [c.owner, { ...c.owner, via: c.orchestrator.id }]) {
-      const masked = maskEnvelope(await viewerOf(c.db, who), message);
-      expect(masked.from).toMatchObject({ id: null, name: 'Employee' });
-      expect(masked.senders![0]).toMatchObject({ id: null, name: 'Employee' });
-      expect(masked.to.id).toBe(c.orchestrator.id);
-    }
+    const masked = maskEnvelope(await viewerOf(c.db, c.owner), message);
+    expect(masked.from).toMatchObject({ id: null, name: 'Employee' });
+    expect(masked.senders![0]).toMatchObject({ id: null, name: 'Employee' });
+    expect(masked.to.id).toBe(c.orchestrator.id);
+    expect(maskEnvelope(await viewerOf(c.db, { ...c.owner, via: c.orchestrator.id }), message).from).toMatchObject({ id: agent.id, name: 'Ava' });
     expect(maskEnvelope(await viewerOf(c.db, c.olga), message).from.id).toBe(agent.id);
   });
 

@@ -11,8 +11,10 @@ export async function programAccess(ctx: Ctx, me: Person, agent: AgentRow) {
   return { plan, sees: await canViewAgent(ctx.db, me, agent, plan?.id ?? agent.subscriptionId) };
 }
 
+export const mayTypeTo = (me: Person, agent: AgentRow): boolean => agent.kind !== 'assistant' || !me.via;
+
 /* What a person's window of the agent can do with its terminal. */
 export async function terminalRights(ctx: Ctx, me: Person, agent: AgentRow, terminal: boolean) {
   const { plan, sees } = await programAccess(ctx, me, agent);
-  return { terminal: terminal && sees, canType: sees && plan?.ownerPersonId === me.id };
+  return { terminal: terminal && sees, canType: sees && mayTypeTo(me, agent) && plan?.ownerPersonId === me.id };
 }
