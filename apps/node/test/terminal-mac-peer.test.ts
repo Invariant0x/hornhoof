@@ -139,6 +139,8 @@ describe('macOS hook ownership without proc', () => {
     expect(await post(c.url, c.agent, 55)).toBe(403);
     expect(await post(c.url, c.agent, 77)).toBe(403);
     expect(await post(c.url, c.agent, 'zero')).toBe(403);
+    /* A new connection: this one keeps its refusal of pid 55. */
+    c.agent.destroy();
     for (const mode of ['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error']) {
       c.mode(mode);
       expect(await post(c.url, c.agent, 55, 'tool')).toBe(502);

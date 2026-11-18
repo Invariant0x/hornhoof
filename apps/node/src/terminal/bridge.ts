@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
+import { OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
@@ -42,6 +42,8 @@ const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
 const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
+/* What the owner check found for a connection: its agent's program, or why not. */
+type Verdict = { owner: true } | { owner: false; why: string };
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* The agent's secret a program sends as a bearer token to the tools address that carries none. */
@@ -68,7 +70,7 @@ export class Bridge {
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
   /* What the check found for each open connection and agent: a connection's process does not change. */
-  private readonly checked = new WeakMap<Socket, Map<string, Promise<boolean>>>();
+  private readonly checked = new WeakMap<Socket, Map<string, Promise<Verdict>>>();
 
   private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
   private readonly calls = new HookCalls();
@@ -187,17 +189,37 @@ export class Bridge {
     });
   }
 
-  private fromOwner(key: string, socket: Socket, peer: Peer): Promise<boolean> {
-    if (!this.owns) return Promise.resolve(true);
-    const known = this.checked.get(socket) ?? new Map<string, Promise<boolean>>();
+  private fromOwner(key: string, socket: Socket, peer: Peer): Promise<Verdict> {
+    if (!this.owns) return Promise.resolve({ owner: true });
+    const known = this.checked.get(socket) ?? new Map<string, Promise<Verdict>>();
     this.checked.set(socket, known);
     const hint = `${key}:${peer.pid ?? 'legacy'}`;
     let found = known.get(hint);
     if (!found) {
-      found = this.owns(key, peer).catch(error => { known.delete(hint); throw error; });
+      let why = '';
+      found = this.owns(key, peer, reason => { why = reason; })
+        .then((owner): Verdict => (owner ? { owner } : { owner, why }))
+        .catch(error => { known.delete(hint); throw error; });
       known.set(hint, found);
     }
     return found;
+  }
+
+  /* Whether the call comes from the agent's own program. When not, it is answered here and the node's log says why: a
+     look at the machine that gave no answer is a failure to try again, which the connection keeps nothing of. */
+  private async ownCall(res: ServerResponse, key: string, kind: string, event: string | undefined, owned: Promise<Verdict>): Promise<boolean> {
+    const found = await owned.catch((error: unknown) => { if (error instanceof OwnerUnknown) return error; throw error; });
+    if (found instanceof OwnerUnknown) return this.notOwned(res, key, kind, event, 502, `owner check unavailable: ${found.message}`);
+    if (found.owner) return true;
+    if (kind === 'hook' && event) this.options.unowned?.(key, event);
+    return this.notOwned(res, key, kind, event, 403, found.why ? `owner check failed: ${found.why}` : 'owner check failed');
+  }
+
+  /* A hook is named by its event, any other call by its kind. */
+  private notOwned(res: ServerResponse, key: string, kind: string, event: string | undefined, status: number, reason: string): false {
+    this.failures.reject(key, kind === 'hook' ? hookEvent(event) : kind, reason);
+    reply(res, status, '');
+    return false;
   }
 
   private async peer(req: IncomingMessage): Promise<Peer> {
@@ -210,7 +232,7 @@ export class Bridge {
 
   private refused(req: IncomingMessage, res: ServerResponse, status: number, reason: string): void {
     const [, kind, secret, rawEvent] = (req.url ?? '').split('?')[0]!.split('/');
-    if (kind === 'hook') this.failures.reject(this.bySecret.get(secret ?? '') ?? null, HOOKS.has(rawEvent ?? '') ? rawEvent! : 'unknown', reason);
+    if (kind === 'hook') this.failures.reject(this.bySecret.get(secret ?? '') ?? null, hookEvent(rawEvent), reason);
     reply(res, status, '');
   }
 
@@ -247,6 +269,8 @@ export class Bridge {
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
+    /* A check nobody waits for, at an address with nothing under it, fails nothing. */
+    void owned.catch(() => {});
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
     if (!attachmentPath(kind, event)) return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
@@ -254,10 +278,7 @@ export class Bridge {
        then, and goes on to Hornhoof as it comes. */
     const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
     void reading?.catch(() => {});
-    if (!(await owned)) {
-      if (kind === 'hook' && event) this.options.unowned?.(key, event);
-      return this.refused(req, res, 403, 'owner check failed');
-    }
+    if (!(await this.ownCall(res, key, kind, event, owned))) return;
     const body = reading ? await reading : Buffer.alloc(0);
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
@@ -531,6 +552,7 @@ function hookFailure(status: number): string {
 }
 
 const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+const hookEvent = (event: string | undefined): string => (HOOKS.has(event ?? '') ? event! : 'unknown');
 const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';
 
 function observedCall(body: Buffer): { name: string; input: unknown } | null {

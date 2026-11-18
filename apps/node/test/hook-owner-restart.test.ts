@@ -153,6 +153,7 @@ describe('hooks of a program the node started again', () => {
     expect(await node.hook('stop')).toBe(403);
     node.calls({ ...sample.before, belongs: true });
     expect(await node.hook('status')).toBe(403);
-    expect(rejected(node.sent).map(m => m.type === 'agent.hook_rejected' && [m.event, m.reason])).toEqual([['stop', 'owner check failed'], ['status', 'owner check failed']]);
+    const outside = "owner check failed: the caller is not under the agent's pane";
+    expect(rejected(node.sent).map(m => m.type === 'agent.hook_rejected' && [m.event, m.reason])).toEqual([['stop', outside], ['status', outside]]);
   });
 });
