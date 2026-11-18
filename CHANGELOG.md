@@ -11,6 +11,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
+- A Video production department template and a Video studio kit: a character and style keeper holds every character's look from shot to shot, and the video model works through an API key with a spend limit.
+- Marketing keeps the same look for every character when it makes video, and hands the video to Video production where the company has it.
 
 ### Changed
 

@@ -182,7 +182,7 @@ describe('Department view', () => {
       ['Check continuity', 'VID-KEEP', { en: 'Character and style keeper', ru: 'Хранитель персонажей и стиля' }],
     ];
     const stages = owners.map(([name, ownerRole, ownerTitle], position) => ({ id: `s${position}`, parentId: position ? `s${position - 1}` : null, name, ownerRole, ownerTitle, owner: null, position,
-      ...(name === 'Generate draft shots' ? { echelon: 'development', oneShot: { fanOut: 3, judge: true } } : {}) }));
+      ...(name === 'Generate draft shots' ? { echelon: 'development' as const, oneShot: { fanOut: 3, judge: true } } : {}) }));
     const pipeline = { id: 'video', department: { id: video.id, name: 'Video production' }, catalogKey: 'video-production', name: 'Video production',
       why: '', archived: false, isDefault: true, version: 1, stages };
     render(<LanguageProvider><DepartmentView me={ME} department={{ ...video, pipelines: [pipeline] }} deputies={[]} selected={null}
