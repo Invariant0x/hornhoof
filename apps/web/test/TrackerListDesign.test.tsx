@@ -176,6 +176,24 @@ it('shares compact desktop columns with the heading and places the first line ab
   expect.soft(decl('.tr-title', 'overflow-wrap')).toBe('anywhere');
 });
 
+it.each([null, 'plan'])('sizes the people columns to their badges with selection %s', selected => {
+  const example = task();
+  const rows = { selected, onOpenTask: vi.fn() };
+  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const desktop = 'tr-list (width > 640px)';
+  const people = '.tr-cell.tr-cell-person';
+  for (const name of [executor.name, responsible.name]) {
+    expect.soft(within(row).getByRole('img', { name }).closest(people)).toBeInTheDocument();
+  }
+  expect.soft(decl('.tr-list-grid', 'grid-template-columns', desktop)).toBe(
+    'minmax(0, 1fr) repeat(2, fit-content(var(--tracker-target-fine))) fit-content(12%) fit-content(20%) fit-content(12%)',
+  );
+  expect.soft(decl(people, 'min-inline-size', desktop)).toBe('min-content');
+  expect.soft(decl('.tr-cell-person .tr-mark', 'white-space', desktop)).toBe('nowrap');
+  expect(row.firstElementChild?.classList.contains('on')).toBe(Boolean(selected));
+});
+
 it('keeps complete names and labels with long task text in the stacked row', () => {
   const longTitle = 'UnbrokenTitle'.repeat(9);
   list([task({ title: longTitle, dueAt: '2020-01-01T00:00:00.000Z' })]);

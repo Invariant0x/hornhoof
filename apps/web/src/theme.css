@@ -1995,7 +1995,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-v { display: block; min-inline-size: 0; color: var(--muted); }
 .tr-id-name { display: none; }
 @container tr-list (width > 640px) {
-  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, fit-content(12%)) fit-content(20%) fit-content(12%); column-gap: 12px; }
+  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, fit-content(var(--tracker-target-fine))) fit-content(12%) fit-content(20%) fit-content(12%); column-gap: 12px; }
+  .tr-cell.tr-cell-person { min-inline-size: min-content; }
+  .tr-cell-person .tr-mark { white-space: nowrap; }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
   .tr-group-head, .tr-add-task { grid-column: 1 / -1; }
   .tr-add-task { justify-self: start; }
