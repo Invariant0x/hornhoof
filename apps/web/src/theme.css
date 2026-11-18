@@ -1803,16 +1803,16 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-make { justify-content: flex-start; }
 .tr-bar { display: grid; gap: 8px; min-inline-size: 0; }
 .tr-views { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0 4px; min-inline-size: 0; margin: 0; padding: 0; border: 0; border-block-end: 1px solid var(--line); }
-.tr-views label, .tr-add-view { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-inline-size: 100%; min-block-size: 40px; margin: 0; padding: 6px 12px; border: 0; border-block-end: 2px solid transparent; background: none; color: var(--muted); font: 600 14px var(--f-display); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-views label, .tr-add-view { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-inline-size: 100%; min-block-size: 44px; margin: 0; padding: 6px 12px; border: 0; border-block-end: 2px solid transparent; background: none; color: var(--muted); font: 600 14px var(--f-display); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .tr-views label.on { border-block-end-color: var(--tracker-working-ring); color: var(--ink); }
 .tr-views label:hover, .tr-add-view:hover { color: var(--ink); background: var(--surface2); }
 .tr-views label:focus-within, .tr-chip:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
 .tr-view-empty { margin: 0; padding: 8px 12px; border: 1px solid var(--line); overflow-wrap: anywhere; }
 .tr-chips { display: flex; flex-wrap: wrap; gap: 8px; min-inline-size: 0; }
-.tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 32px; margin: 0; padding: 4px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 13px; color: var(--muted); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 44px; margin: 0; padding: 4px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 13px; color: var(--muted); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .tr-chip:hover { color: var(--ink); }
 .tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
-.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: min(100%, 180px); min-block-size: 40px; padding: 6px 10px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
+.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: min(100%, 180px); min-block-size: 44px; padding: 6px 10px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
 .tr-person-picker .ic { transform: rotate(90deg); }
 .tr-person-picker:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .tr-chip select, .tr-person-picker select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
@@ -1899,7 +1899,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-group, .tr-rows, .tr-row { min-inline-size: 0; }
 .tr-group { border-block-end: 1px solid var(--line); }
 .tr-group-head { margin: 0; padding-block-start: 8px; font-size: 14px; }
-.tr-group-toggle, .tr-add-task { display: flex; align-items: center; gap: 8px; min-block-size: 36px; max-inline-size: 100%; margin: 0; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.tr-group-toggle, .tr-add-task { display: flex; align-items: center; gap: 8px; min-block-size: 44px; max-inline-size: 100%; margin: 0; padding: 4px 8px; border: 0; background: none; color: var(--muted); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .tr-group-toggle:hover, .tr-add-task:hover { background: var(--surface2); color: var(--cyan-ink); }
 .tr-group-arrow { inline-size: 0; block-size: 0; border: 4px solid transparent; border-inline-start-color: currentColor; }
 .tr-group-toggle[aria-expanded="true"] .tr-group-arrow { border-inline-start-color: transparent; border-block-start-color: currentColor; }
@@ -1917,7 +1917,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-head > span { overflow-wrap: anywhere; }
 .tr-task-name { display: grid; justify-items: start; gap: 4px; min-inline-size: 0; padding-inline-start: min(calc(var(--tr-depth) * 16px), 18%); }
 .tr-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; inline-size: 100%; min-inline-size: 0; font-size: 14px; }
-.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: 24px; min-block-size: 24px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.tr-row-caret { display: inline-grid; place-items: center; flex: none; inline-size: 44px; min-block-size: 44px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .tr-row-caret:hover { color: var(--cyan-ink); background: var(--surface2); }
 .tr-row-caret[aria-expanded="true"] .ic { transform: rotate(90deg); }
 [dir="rtl"] .tr-row-caret[aria-expanded="false"] .ic, [dir="rtl"] .tr-pipelines .ic { transform: scaleX(-1); }
@@ -1932,7 +1932,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-status-dot.open, .tr-status-dot.cancelled { border-style: dashed; }
 .tr-task-name > .tr-wait, .tr-row-line .tp-late { color: var(--pink-ink); }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-row-line .tr-title { min-block-size: 24px; }
+/* What a finger presses is at least 44 px high at every width, as the style book's touch rule asks: the row's title, its
+   caret and its goal link too, with the views, chips and buttons of the bar above. */
+.tr-row-line .tr-title, .tr-goal-link { min-block-size: 44px; }
+.tr-goal-link { display: inline-flex; align-items: center; }
 .tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover, .tr-goal-link { color: var(--cyan-ink); }
 .tr-name .badge { white-space: normal; }
@@ -1952,8 +1955,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-v { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: 100%; color: var(--ink); }
   .tr-id-name { display: inline; min-inline-size: 0; overflow-wrap: anywhere; }
   .tr-title, .tr-name { font-size: 16px; }
-  .tr-row-line .tr-title, .tr-row-caret, .tr-goal-link { min-block-size: 44px; }
-  .tr-goal-link { display: inline-flex; align-items: center; }
 }
 
 /* The board: as many columns side by side as the width holds, each with its name and count, cards one under another. */
@@ -2025,8 +2026,6 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
   .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
   .tr-where { flex: 1 1 200px; }
   .tr-view-as { flex: 1 1 100%; }
-  .tr-views label, .tr-add-view, .tr-chip, .tr-group-toggle, .tr-add-task, .tr-person-picker { min-block-size: 44px; }
-  .tr-row-caret { inline-size: 44px; }
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
   .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-block-size: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
   .tr-side.open { display: grid; }
