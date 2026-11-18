@@ -540,7 +540,8 @@ const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 function beforeHookGivesUp<T>(check: Promise<T>, asked: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new OwnerUnknown('owner check timed out')), Math.max(0, asked + HOOK_OWNER_MS - Date.now()));
+    /* A time already past is as soon as possible, as Node takes it. */
+    timer = setTimeout(() => reject(new OwnerUnknown('owner check timed out')), asked + HOOK_OWNER_MS - Date.now());
   });
   return Promise.race([check, late]).finally(() => clearTimeout(timer));
 }

@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { Agent as HttpAgent, request } from 'node:http';
+import { connect } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent, OwnerUnknown, socketOf, type Peer } from '../src/terminal/peer.js';
@@ -170,6 +172,17 @@ describe('hook delivery through the bridge', () => {
     });
     return { call, sockets };
   }
+
+  it("captures the caller's end as its connection opens, before any call comes", async () => {
+    const captured: Peer[] = [];
+    const bridge = new Bridge('http://127.0.0.1:9', () => {}, async () => true, { capture: async peer => { captured.push(peer);return { acceptedInode: '7' }; } });
+    await bridge.start();close.push(() => bridge.stop());
+    const port = Number(new URL(bridge.agent('agent-1').hookUrl).port);
+    const socket = connect(port, '127.0.0.1');close.push(() => void socket.destroy());
+    await once(socket, 'connect');
+    await eventually(() => captured.length > 0);
+    expect(captured).toEqual([{ port: socket.localPort, bridgePort: port }]);
+  });
 
   it('asks a refused caller again on its kept connection, so it passes once its pane has its program again', async () => {
     let adopted = false;const heard: string[] = [];
