@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { box, openTaskCard } from './api';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { box, openTaskAction, openTaskCard } from './api';
 import { expectStripsApart, openCompany, overlaps, pastePicture } from './agent-windows-api';
 import { SETTINGS } from './computer-strip-api';
 
@@ -29,10 +31,13 @@ for (const settings of SETTINGS) {
 
     test('the open window minimizes itself when another agent opens', async ({ page }, info) => {
       const { words, errors, windowOf, stripOf, anyStrip, barButton, openEmployee } = await openCompany(page, settings);
+      const t = lang === 'en' ? en : ru;
       await openEmployee('Clara');
       await expect(anyStrip).toHaveCount(0);
       await barButton('Clara', words.task).click();
-      await windowOf('Clara').getByRole('button', { name: words.openTerminalOf('Dana'), exact: true }).click();
+      const task = windowOf('Clara').getByRole('complementary', { name: '#2 Work of Clara', exact: true });
+      await openTaskAction(task, t, t.tasks.details);
+      await task.getByRole('region', { name: t.tasks.questions, exact: true }).getByRole('button', { name: words.openTerminalOf('Dana'), exact: true }).click();
       await expect(windowOf('Dana')).toBeVisible();
       await expect(windowOf('Clara')).toBeHidden();
       await expect(stripOf('Clara')).toBeVisible();
