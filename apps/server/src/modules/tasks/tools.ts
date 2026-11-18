@@ -500,15 +500,18 @@ class TaskTools {
       'turns',
       {
         description: this.boss
-          ? "Each department's turns, which are its releases: its last released turn with its version and commit, and its open one, getting the next release ready, each with its department, title, main point and the results accepted into it."
-          : "Your department's turns, which are its releases: the last released one with its version and commit, and the open one, getting the next release ready, each with its title, main point and the results accepted into it.",
+          ? "Each department's turns, which are its releases: its last released turn with its version and commit, and its open one, getting the next release ready, each with its department, title, main point and the results accepted into it, and for a turn closed with no version, why."
+          : "Your department's turns, which are its releases: the last released one with its version and commit, and the open one, getting the next release ready, each with its title, main point and the results accepted into it, and for a turn closed with no version, why.",
         inputSchema: {},
       },
       async () => {
         const scope = await this.turnScope();
         const all = await turnRows(this.ctx, this.job.companyId, scope ?? undefined);
         const rows = all.filter((t, i) => t.status !== 'closed' || !all.slice(i + 1).some(later => later.status === 'closed' && later.departmentId === t.departmentId));
-        const top = rows.length ? await this.db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
+        /* Each result accepted into a turn, but a subtask that goes with its parent in the same turn: a member of a coordination
+           task is accepted alone while its parent joins no turn. */
+        const held = rows.length ? await this.db.select().from(tasks).where(inArray(tasks.turnId, rows.map(t => t.id))).orderBy(asc(tasks.number)) : [];
+        const top = held.filter(t => !held.some(parent => parent.id === t.parentId && parent.turnId === t.turnId));
         const agent = await this.me();
         const lines = await taskLines(this.ctx, top, t => sees(agent, t));
         const ids = [...new Set(rows.flatMap(t => t.departmentId ?? []))];
@@ -517,7 +520,7 @@ class TaskTools {
           const place = places.find(d => d.id === id);
           return place ? { id: place.id, name: deptName(place) } : null;
         };
-        return json(rows.map(t => ({ number: t.number, department: department(t.departmentId), title: t.title || t.goal, goal: t.goal, status: t.status, version: t.version, commit: t.commit, baseVersion: t.baseVersion, startCommit: t.startCommit, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
+        return json(rows.map(t => ({ number: t.number, department: department(t.departmentId), title: t.title || t.goal, goal: t.goal, status: t.status, version: t.version, commit: t.commit, baseVersion: t.baseVersion, startCommit: t.startCommit, ...(t.closedBecause ? { closedBecause: t.closedBecause } : {}), tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );
   }

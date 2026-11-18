@@ -35,7 +35,7 @@ async function siteDepartment(f: Releasing) {
   const companyId = f.task.companyId;
   const [department] = await f.db.insert(departments).values({ companyId, name: 'Characters site', templateKey: 'development', roleCode: 'SITE', repoUrl: SITE }).returning();
   const [head] = await f.db.insert(agents).values({ companyId, departmentId: department!.id, name: 'Site head', kind: 'head', roleKey: 'DEV-HEAD', subscriptionId: f.claude.id, model: 'claude-opus-5-5' }).returning();
-  const turn = await f.db.transaction(tx => ensureOpenTurn(tx, companyId, department!.id));
+  const turn = (await f.db.transaction(tx => ensureOpenTurn(tx, companyId, department!.id)))!;
   const { task: release } = await createTask(f.ctx, { agentId: head!.id }, {
     title: 'Release the site', brief: 'Release the open turn of the site.', body: 'Fast-forward main to the turn and tag it.',
     departmentId: department!.id, assigneeAgentId: head!.id, executor: false, resultKind: 'coordination', small: true, riskClass: 'none',
