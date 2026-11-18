@@ -16,9 +16,10 @@ await prepareApp();
 /* Recorded transport events, without a socket, a port or a wall-clock wait. */
 function socket() {
   const frames: { message: ServerMessage; complete?: (error?: Error) => void }[] = [];
-  return Object.assign(new EventEmitter(), {
+  const emitter = new EventEmitter();
+  return Object.assign(emitter, {
     readyState: 1, frames, failure: null as Error | null,
-    close() { this.readyState = 3; this.emit('close', 1006); },
+    close() { this.readyState = 3; emitter.emit('close', 1006); },
     ping() {},
     send(frame: string, complete?: (error?: Error) => void) {
       if (this.failure) { const error = this.failure; this.failure = null; throw error; }
@@ -32,7 +33,7 @@ async function fixture() {
   await setUpCompany(app);
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-11-18T03:00:00Z'));
-  onTestFinished(() => vi.useRealTimers());
+  onTestFinished(() => { vi.useRealTimers(); });
   const hub = new NodeHub({ pingMs: 2_147_483_647, onClose: async () => {}, onMessage: async () => {} });
   onTestFinished(() => hub.stop());
   const ctx = { ...app.ctx, hub };
@@ -52,7 +53,7 @@ async function fixture() {
   };
   const transport = connect();
   const place: Place = { key: 'builtin', node: BUILTIN, name: 'Fixture', machineId: null, nodeId: null, builtin: true, builtinMachine: null, lent: true, busy: false, running: 0, load, access: null, works: true };
-  const pump = () => pumpDescriptions(ctx, async () => [place], async () => ({ department: department!, repo: { url: department!.repoUrl! } }), async () => {});
+  const pump = () => pumpDescriptions(ctx, async () => [place], async () => ({ department: department!, repo: { url: department!.repoUrl!, branch: 'main', token: '' } }), async () => {});
   const stored = async () => (await db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]!;
   return { ctx, db, transport, connect, pump, stored, runtimes };
 }
