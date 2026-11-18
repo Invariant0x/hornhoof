@@ -39,7 +39,9 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect((await rows('SELECT wrapped, salt, iv FROM person_keys')).rows).toEqual([{ wrapped: 'w', salt: 's', iv: 'i' }]);
     expect((await rows(`INSERT INTO machine_online (machine_id, day, seconds) VALUES ('${machine.id}', '2026-11-11', 20)`)).changed).toBe(1);
     expect((await rows(`INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) VALUES ('${company.id}', '${machine.id}', 'id', 300)`)).changed).toBe(1);
-    expect((await rows(`UPDATE machine_access SET until = now() + interval '1 hour'`)).changed).toBe(1);
+    expect((await rows('SELECT scope, employees FROM machine_access')).rows).toEqual([{ scope: 'orchestrator', employees: [] }]);
+    expect((await rows(`UPDATE machine_access SET scope = 'all_agents'`)).changed).toBe(1);
+    expect((await rows('SELECT scope FROM machine_access')).rows).toEqual([{ scope: 'all_agents' }]);
     for (const table of ['machine_tickets', 'machine_online', 'person_keys', 'computer_runs', 'machine_access']) expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(1);
   });
 
@@ -50,6 +52,8 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect((await rows('DELETE FROM recovery_keys')).changed).toBe(1);
     expect((await rows('SELECT * FROM net.backups')).rows).toEqual([]);
     expect((await rows('UPDATE machines SET keeps_backups = false')).changed).toBe(1);
+    expect((await rows('UPDATE machines SET computer_closed = true')).changed).toBe(1);
+    expect((await rows('SELECT computer_closed FROM machines')).rows).toEqual([{ computer_closed: true }]);
     expect((await rows(`UPDATE machines SET age_key = 'age1mine', role = 'worker'`)).changed).toBe(1);
   });
 });
