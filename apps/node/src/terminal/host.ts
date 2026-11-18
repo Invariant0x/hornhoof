@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
-import { ToolPrivacy, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
+import type { ToolPrivacy, ToolPrivacyPolicy } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { toldPlace } from '../program-folder.js';
@@ -21,6 +21,7 @@ import { Bridge, type AgentUrls, type OpensCheck, type Outside } from './bridge.
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
 import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
 import { ViewSessions } from './views.js';
+import { SessionPrivacy } from './privacy.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
 import type { LaunchSpec, TermProgram } from './programs.js';
@@ -380,6 +381,7 @@ export class TerminalHost {
   private readonly operatorTimer: NodeJS.Timeout | null;
   private readonly agents = new Map<string, Agent>();
   private readonly viewSessions: ViewSessions;
+  private readonly privacy: SessionPrivacy;
   private readonly bridge: Bridge;
   private readonly fs: AgentFs;
   private readonly readyMs: number;
@@ -414,6 +416,7 @@ export class TerminalHost {
     this.readyMs = set.readyMs;
     this.pollMs = set.pollMs;
     this.openMs = set.openMs;
+    this.privacy = new SessionPrivacy(opts.tmux, message => this.log(message));
     this.viewSessions = new ViewSessions(opts, {
       openMs: this.openMs,
       agent: key => this.agent(key),
@@ -433,26 +436,10 @@ export class TerminalHost {
     this.operatorTimer = this.operatorTicks();
   }
 
-  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): Promise<void> {
+  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy): Promise<void> {
     const agent = this.agents.get(key);
     if (!agent) return;
-    const turn = activeTurn(agent);
-    const values = this.opts.tmux.outputValues(agent.name);
-    const privacy = turn ? (turn.privacy ??= new ToolPrivacy(values)) : new ToolPrivacy(values);
-    privacy.input(name, input, policy);
-    this.rememberSensitiveReply(privacy, answer, policy);
-    await this.opts.tmux.maskRecording(agent.name);
-  }
-
-  private rememberSensitiveReply(privacy: ToolPrivacy, answer: unknown, policy: ToolPrivacyPolicy | undefined): void {
-    if (!answer || typeof answer !== 'object') return;
-    const content = (answer as { result?: { content?: { text?: string }[] } }).result?.content ?? [];
-    for (const block of content) {
-      if (typeof block.text !== 'string') continue;
-      let value: unknown = block.text;
-      try { value = JSON.parse(block.text); } catch { /* Plain sensitive replies are values too. */ }
-      privacy.result(value, policy);
-    }
+    await this.privacy.tool(agent.name, activeTurn(agent), name, input, answer, policy);
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
@@ -736,7 +723,7 @@ export class TerminalHost {
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn = requestedTurn(job, this.requestedWords(a, job), starting !== null);
-    turn.privacy = new ToolPrivacy(this.opts.tmux.outputValues(a.name));
+    turn.privacy = this.privacy.fresh(a.name);
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -2296,18 +2283,10 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    event = this.privateEvent(a, turn, event);
+    event = this.privacy.event(a.name, turn, event, name => this.bridge.toolPolicy(a.key, name));
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
-  }
-
-  private privateEvent(agent: Agent, turn: Turn, event: AgentEvent): AgentEvent {
-    const privacy = (turn.privacy ??= new ToolPrivacy(this.opts.tmux.outputValues(agent.name)));
-    const before = privacy.values.forms();
-    const masked = privacy.event(event, undefined, name => this.bridge.toolPolicy(agent.key, name));
-    if (before !== privacy.values.forms()) void this.opts.tmux.maskRecording(agent.name).catch(() => this.log('Terminal recorder did not receive its masks.'));
-    return masked;
   }
 
   private typedEvent(turn: Turn, event: AgentEvent): void {
@@ -2547,7 +2526,7 @@ export class TerminalHost {
     this.beginTurn(a);
     a.ends.started(id);
     a.programTurnId = id;
-    const turn: Turn = { privacy: new ToolPrivacy(this.opts.tmux.outputValues(a.name)), jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
+    const turn: Turn = { privacy: this.privacy.fresh(a.name), jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
     turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
