@@ -52,11 +52,11 @@ function GoogleSheetsForm({ google, busy, change, onCancel }: { google: GoogleSh
           />
         )}
       </Field>
-      <div className="repo-actions">
-        <button className="btn small" type="submit" disabled={busy || (!google && !credentials.trim())}>
+      <div className="form-foot">
+        <button className="btn" type="submit" disabled={busy || (!google && !credentials.trim())}>
           {t.common.save}
         </button>
-        <button className="btn small ghost" type="button" onClick={onCancel}>
+        <button className="btn ghost" type="button" onClick={onCancel}>
           {t.common.cancel}
         </button>
       </div>

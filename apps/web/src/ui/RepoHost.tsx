@@ -67,9 +67,9 @@ function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
         <Field label={t.repoHost.key} hint={saved ? t.repoHost.keyKeep : t.repoHost.keyHint}>
           {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
         </Field>
-        <div className="repo-actions">
-          <button className="btn small" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
-          <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
+        <div className="form-foot">
+          <button className="btn" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
+          <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
         </div>
         {alert}
       </form>

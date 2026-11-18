@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Org, Repository } from '../src/types';
@@ -174,13 +174,20 @@ for (const lang of ['en', 'ru'] as const) {
   }
 }
 
-/* A repository form's own buttons stand in one row at its end edge, as in every other form (Design, #1321): Save and
-   Cancel when the department's repository changes, Add and Cancel when another one is added. Neither shipped language is
-   right to left, so right to left is the same panel in a synthetic direction. */
+/* A repository form's own buttons stand in one row at its end edge, as in every other form, and each is a target of 44 px
+   (Design, #1321): Save and Cancel when the department's repository changes, Add and Cancel when another one is added.
+   Neither shipped language is right to left, so right to left is the same panel in a synthetic direction. */
+async function tallEnough(form: Locator, names: readonly string[]) {
+  for (const name of names) {
+    const box = await form.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box?.height ?? 0, `${name} is a target of 44 px`).toBeGreaterThanOrEqual(44);
+  }
+}
+
 for (const lang of ['en', 'ru'] as const) {
   for (const width of [1440, 375]) {
     for (const dir of ['ltr', 'rtl'] as const) {
-      test(`a repository form's buttons stand in one row at the end edge, in ${lang}, ${dir}, at ${width}px`, async ({ page, browserName }, info) => {
+      test(`a repository form's buttons stand in one row at the end edge, 44 px tall, in ${lang}, ${dir}, at ${width}px`, async ({ page, browserName }, info) => {
         const t = MESSAGES[lang];
         const { errors } = await open(page, lang, 'light', width);
         await page.evaluate(dir => { document.documentElement.dir = dir; }, dir);
@@ -189,6 +196,7 @@ for (const lang of ['en', 'ru'] as const) {
         const edit = part.locator('form').filter({ has: page.getByLabel(t.dept.fullCommand, { exact: true }) });
         await expect(edit).toBeVisible();
         await inOneRowAtEnd(edit, [t.common.save, t.common.cancel]);
+        await tallEnough(edit, [t.common.save, t.common.cancel]);
         await fitsTheScreen(page, width);
         if (browserName === 'chromium') await edit.screenshot({ path: info.outputPath(`repo-edit-buttons-${lang}-${dir}-${width}.png`) });
         await edit.getByRole('button', { name: t.common.cancel, exact: true }).click();
@@ -197,6 +205,7 @@ for (const lang of ['en', 'ru'] as const) {
         const add = part.getByRole('form', { name: t.dept.addRepository });
         await expect(add).toBeVisible();
         await inOneRowAtEnd(add, [t.dept.addThis, t.common.cancel]);
+        await tallEnough(add, [t.dept.addThis, t.common.cancel]);
         await fitsTheScreen(page, width);
         if (browserName === 'chromium') await add.screenshot({ path: info.outputPath(`repo-add-buttons-${lang}-${dir}-${width}.png`) });
         expect(errors).toEqual([]);

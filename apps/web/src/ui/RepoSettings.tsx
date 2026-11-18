@@ -95,9 +95,9 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
         <Field label={t.dept.authorEmail}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
         <Field label={t.dept.testMemory} hint={t.dept.testMemoryHint}>{p => <input {...p} {...NOT_A_LOGIN} type="number" min={1} max={512} step={1} value={memory} onChange={e => setMemory(e.target.value)} autoComplete="off" />}</Field>
         <Field label={t.dept.fullCommand} hint={t.dept.fullCommandHint}>{p => <input {...p} {...NOT_A_LOGIN} value={fullCommand} onChange={e => setFullCommand(e.target.value)} maxLength={4000} autoComplete="off" />}</Field>
-        <div className="repo-actions">
-          <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
-          <button className="btn small ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
+        <div className="form-foot">
+          <button className="btn" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
+          <button className="btn ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
         </div>
         {alert}
       </form>
@@ -201,9 +201,9 @@ function AddRepository({ departmentId }: { departmentId: string }) {
       </Field>
       <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} {...NOT_A_LOGIN} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} autoComplete="off" />}</Field>
       <Field label={t.dept.authorEmail}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
-      <div className="repo-actions">
-        <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.dept.addThis}</button>
-        <button className="btn small ghost" type="button" onClick={close}>{t.common.cancel}</button>
+      <div className="form-foot">
+        <button className="btn" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.dept.addThis}</button>
+        <button className="btn ghost" type="button" onClick={close}>{t.common.cancel}</button>
       </div>
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </form>
