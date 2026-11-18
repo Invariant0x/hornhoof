@@ -17,6 +17,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Removed computer access details from agent windows, including the orchestrator's window.
 - The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
 - Telegram sends only the finished answer and its files, in the language you write to the bot.
+- Pull requests from forks run without access to private runners or installer credentials.
 
 ### Added
 
