@@ -3,7 +3,7 @@ import { EnvironmentSnapshot, hashTestEnvironment, parseTestEnvironment, type Re
 /* A whole run of a product's tests as the machines leave it, for tests that need a run a release accepts: the snapshot of the
    product described on a commit, and each part's selection and receipt. Nothing here starts an app or opens a database. */
 
-export const PRODUCT_FILES = ['test/a.test.ts', 'test/b.test.ts'];
+export const PRODUCT_FILES = ['checks/a.test.ts', 'checks/b.test.ts'];
 const RUNTIMES = [{ id: 'node', version: '22.0.0', fingerprint: 'e'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'f'.repeat(64) }];
 
 /* What the machine that described a commit said of the product: its manifest, whose full run is the profile full, and its test files. */
@@ -12,7 +12,7 @@ export async function productSnapshot(repositoryScope: RepositoryScope, commitSh
     version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
     profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-    suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' } }],
+    suites: [{ id: 'unit', root: '.', files: ['checks/*.test.ts'], profiles: ['fast', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' } }],
     impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
     mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
     execution: { version: 2, fullRun: { replaces: 'fast', profile: 'full' } },

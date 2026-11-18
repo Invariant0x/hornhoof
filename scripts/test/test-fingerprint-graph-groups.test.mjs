@@ -18,6 +18,21 @@ test('a change stays in its group: the frontend, the backend and the node leave 
   assert.ok(unitsOf('node').filter(unit => node.has(unit)).length <= unitsOf('node').length / 2, 'one file of the node should not rerun most of its tests');
 });
 
+/* The painter, as the SQL parser, loaded its package in its worker by a name the graph cannot read, so a test that reached it took
+   the whole server and ran again for any test of the server changed. */
+test('a test of the painter keeps its result when another test of the server changes', async () => {
+  assert.ok(!(await changedBy('apps/server/test/agent-switch.test.ts')).has('server:apps/server/test/program-operator-painter.test.ts'));
+});
+
+/* The tests of test runs describe a product of their own, whose test folder was named test/ as the server's own is: the graph read
+   each of its patterns as every test of the server. */
+test('a test of test runs reads no test of the server by the patterns of the product it makes up', () => {
+  const graph = fingerprint.testGraph(input);
+  for (const test of ['test-runs.test.ts', 'test-run-file-results.test.ts', 'test-run-preparation.test.ts', 'test-run-machine-pace.test.ts']) {
+    assert.ok(!graph.closure(`apps/server/test/${test}`).has('apps/server/test/agent-switch.test.ts'), test);
+  }
+});
+
 /* A scenario opens the app and drives it, so whatever screen the app may show on the way can break it: the department screen
    once read a route the scenarios' mock did not answer, and six scenarios of other names failed. */
 test('a scenario follows every screen of the app, and a screen takes every scenario but no test of another group', async () => {
