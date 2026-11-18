@@ -9,6 +9,17 @@ const NOW = Date.parse('2026-11-16T12:00:00Z');
 const machine: MachineView = { id: 'm1', hostname: 'Company computer', os: 'linux', arch: 'arm64', owner: { id: ME.person.id, name: ME.person.name }, online: true, lastSeenAt: null, plans: [], load: null, lendsTests: false, running: { agents: [], parts: [] } };
 const phone: PhoneView = { id: 'ph1', name: 'Android компании с длинным названием телефона', machineId: machine.id, owner: { id: ME.person.id, name: ME.person.name }, lending: true, online: true, stopping: false, state: 'available', queued: 2 };
 const missing: PhoneView = { ...phone, online: false, state: 'offline', connection: 'not_connected' };
+const ready: PhoneView = { ...phone, connection: 'ready' };
+const away: PhoneView = { ...phone, online: false, state: 'offline', connection: 'computer_offline' };
+
+/* Each state of a phone's card the style book draws as a status: its words, the token of its role for the words and the
+   frame, the line on what to do, and why Watch screen is off where it is. */
+type CardState = { title: string; file: string; phone: PhoneView; words: (t: Messages) => string; ink: string; frame: string; hint?: (t: Messages) => string; noScreen?: (t: Messages) => string };
+const CARD_STATES: CardState[] = [
+  { title: 'a phone its computer does not see', file: 'not-connected', phone: missing, words: t => t.phones.notConnected.state, ink: '--amber-ink', frame: '--amber-ink', hint: t => t.phones.notConnected.hint, noScreen: t => t.phones.noScreen.not_connected },
+  { title: 'a phone available to assistants', file: 'available', phone: ready, words: t => t.phones.states.available, ink: '--ok', frame: '--ok' },
+  { title: 'a phone whose computer is offline', file: 'computer-offline', phone: away, words: t => t.phones.states.offline, ink: '--muted', frame: '--line2', noScreen: t => t.phones.noScreen.computer_offline },
+];
 
 async function words(language: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
@@ -113,32 +124,37 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
   });
 }
 
-/* The card of a phone its computer's adb does not list: its state, the line on what to do, and both inside the card. */
-for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const language of LANGUAGES) {
-  test(`a phone its computer does not see at ${width}px in the ${skin.id} theme, ${language.name}`, async ({ page }, info) => {
+/* The card in each of those states: the state in its role's colours while the owner stays a muted line, Watch screen off
+   with its reason where the phone cannot be watched, Stop on, and everything inside the card in both directions. */
+for (const shown of CARD_STATES) for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const language of LANGUAGES) {
+  test(`${shown.title} at ${width}px in the ${skin.id} theme, ${language.name}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 });
-    const t = await setup(page, language.id, skin.id, missing);
+    const t = await setup(page, language.id, skin.id, shown.phone);
     const section = page.getByRole('region', { name: t.phones.heading });
-    const card = section.getByRole('article', { name: missing.name });
-    /* A state to wait or act on, in the amber of the book's statuses, while the owner stays a muted line. */
-    const state = card.locator('.stline').getByText(t.phones.notConnected.state, { exact: true });
-    const amber = await tokenColour(page, '--amber-ink');
-    await expect(state).toHaveCSS('color', amber);
-    await expect(state).toHaveCSS('border-top-color', amber);
-    await expect(card.locator('.stline').getByText(t.phones.owner(missing.owner.name), { exact: true })).toHaveCSS('color', await tokenColour(page, '--muted'));
-    const hint = card.getByText(t.phones.notConnected.hint, { exact: true });
-    await expect(hint).toBeVisible();
+    const card = section.getByRole('article', { name: shown.phone.name });
+    const state = card.locator('.stline').getByText(shown.words(t), { exact: true });
+    await expect(state).toHaveCSS('color', await tokenColour(page, shown.ink));
+    await expect(state).toHaveCSS('border-top-color', await tokenColour(page, shown.frame));
+    await expect(card.locator('.stline').getByText(t.phones.owner(shown.phone.owner.name), { exact: true })).toHaveCSS('color', await tokenColour(page, '--muted'));
+    const texts: Locator[] = [];
+    if (shown.hint) texts.push(card.getByText(shown.hint(t), { exact: true }));
+    else await expect(card.getByText(t.phones.notConnected.hint, { exact: true })).toHaveCount(0);
     const watch = card.getByRole('button', { name: t.phones.watch });
-    await expect(watch).toBeDisabled();
-    await expect(watch).toHaveAccessibleDescription(t.phones.notConnected.noScreen);
-    const reason = card.getByText(t.phones.notConnected.noScreen, { exact: true });
-    await expect(reason).toBeVisible();
+    if (shown.noScreen) {
+      await expect(watch).toBeDisabled();
+      await expect(watch).toHaveAccessibleDescription(shown.noScreen(t));
+      texts.push(card.getByText(shown.noScreen(t), { exact: true }));
+    } else {
+      await expect(watch).toBeEnabled();
+      await expect(watch).toHaveAccessibleDescription('');
+    }
+    for (const text of texts) await expect(text).toBeVisible();
     await expect(card.getByRole('button', { name: t.phones.stop, exact: true })).toBeEnabled();
     for (const direction of ['ltr', 'rtl']) {
       await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
       await fits(card);
       const outer = await card.boundingBox();
-      for (const text of [hint, reason]) {
+      for (const text of texts) {
         const inner = await text.boundingBox();
         expect(inner!.x).toBeGreaterThanOrEqual(outer!.x - 1);
         expect(inner!.x + inner!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
@@ -147,7 +163,7 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
       expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
     await page.evaluate(() => { document.documentElement.dir = 'ltr'; });
-    if (info.project.name === 'phones-chromium' && ['light', 'cyberpunk'].includes(skin.id)) await card.screenshot({ path: info.outputPath(`not-connected-${skin.id}-${language.id}-${width}.png`) });
+    if (info.project.name === 'phones-chromium' && ['light', 'cyberpunk'].includes(skin.id)) await card.screenshot({ path: info.outputPath(`${shown.file}-${skin.id}-${language.id}-${width}.png`) });
   });
 }
 

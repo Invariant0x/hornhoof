@@ -137,8 +137,8 @@ it.each([['en', en], ['ru', ru]] as const)('in %s shows a phone its computer doe
   expect(within(card).getByText(t.phones.owner(ME.person.name))).not.toHaveClass('status');
   const watch = within(card).getByRole('button', { name: t.phones.watch });
   expect(watch).toBeDisabled();
-  expect(watch).toHaveAccessibleDescription(t.phones.notConnected.noScreen);
-  expect(within(card).getByText(t.phones.notConnected.noScreen)).toBeVisible();
+  expect(watch).toHaveAccessibleDescription(t.phones.noScreen.not_connected);
+  expect(within(card).getByText(t.phones.noScreen.not_connected)).toBeVisible();
   const stop = within(card).getByRole('button', { name: t.phones.stop });
   expect(stop).toBeEnabled();
   fireEvent.click(stop);
@@ -147,10 +147,14 @@ it.each([['en', en], ['ru', ru]] as const)('in %s shows a phone its computer doe
   expect(within(ready).getByText(t.phones.states.available)).not.toHaveClass('not_connected');
   expect(within(ready).getByRole('button', { name: t.phones.watch })).toBeEnabled();
   expect(within(ready).getByRole('button', { name: t.phones.watch })).not.toHaveAccessibleDescription();
-  expect(within(ready).queryByText(t.phones.notConnected.noScreen)).toBeNull();
+  expect(within(ready).queryByText(t.phones.noScreen.not_connected)).toBeNull();
 });
 
-it('closes the screen when its computer stops seeing the phone, and leaves it closed when the phone comes back', async () => {
+/* The phone leaves its computer, or the computer itself goes offline: the screen closes either way. */
+it.each([
+  ['its computer stops seeing the phone', { connection: 'not_connected' }],
+  ['its computer goes offline', { connection: 'computer_offline' }],
+] as const)('closes the screen when %s, and leaves it closed when the phone comes back', async (_, away) => {
   let listed = PHONE;
   mockApi({
     'GET /api/phones': () => [200, { phones: [listed] }],
@@ -159,9 +163,9 @@ it('closes the screen when its computer stops seeing the phone, and leaves it cl
   render(<Phones me={ME} machines={[MACHINE]} />);
   fireEvent.click(await until(() => screen.queryByRole('button', { name: en.phones.watch })));
   await until(() => screen.queryByRole('img'));
-  listed = { ...PHONE, online: false, state: 'offline', connection: 'not_connected' };
+  listed = { ...PHONE, online: false, state: 'offline', ...away };
   await act(() => vi.advanceTimersByTimeAsync(5000));
-  await until(() => screen.queryByText(en.phones.notConnected.state));
+  await until(() => screen.queryByText(en.phones.noScreen[away.connection]));
   expect(screen.queryByRole('img')).toBeNull();
   expect(screen.getByRole('button', { name: en.phones.watch })).toHaveAttribute('aria-expanded', 'false');
   listed = PHONE;
@@ -170,4 +174,32 @@ it('closes the screen when its computer stops seeing the phone, and leaves it cl
   expect(screen.getByRole('button', { name: en.phones.watch })).toBeEnabled();
   expect(screen.getByRole('button', { name: en.phones.watch })).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('img')).toBeNull();
+});
+
+/* The states the style book draws: available is good, a computer offline is off, and its screen waits for the computer. */
+it.each([['en', en], ['ru', ru]] as const)('in %s shows available as a good status and a computer offline as an off one, with Watch off and its reason', async (language, t) => {
+  localStorage.setItem('hh-lang', language);
+  onTestFinished(() => { localStorage.removeItem('hh-lang'); });
+  const here: PhoneView = { ...PHONE, id: 'ph3', name: 'Phone in place' };
+  const away: PhoneView = { ...PHONE, id: 'ph2', name: 'Phone on a sleeping computer', online: false, state: 'offline', connection: 'computer_offline', queued: 1 };
+  const calls = mockApi({
+    'GET /api/phones': [200, { phones: [here, away] }],
+    'POST /api/phones/ph2/stop': [200, { ...away, lending: false, state: 'owner', queued: 0 }],
+  });
+  render(<LanguageProvider><Phones me={ME} machines={[MACHINE]} /></LanguageProvider>);
+  const ready = await until(() => screen.queryByRole('article', { name: here.name }));
+  expect(within(ready).getByText(t.phones.states.available)).toHaveClass('status', 'active');
+  expect(within(ready).getByText(t.phones.owner(ME.person.name))).not.toHaveClass('status');
+  const off = screen.getByRole('article', { name: away.name });
+  expect(within(off).getByText(t.phones.states.offline)).toHaveClass('status', 'offline');
+  expect(within(off).getByText(t.phones.owner(ME.person.name))).not.toHaveClass('status');
+  const watch = within(off).getByRole('button', { name: t.phones.watch });
+  expect(watch).toBeDisabled();
+  expect(watch).toHaveAccessibleDescription(t.phones.noScreen.computer_offline);
+  expect(within(off).getByText(t.phones.noScreen.computer_offline)).toBeVisible();
+  expect(within(off).queryByText(t.phones.notConnected.hint)).toBeNull();
+  const stop = within(off).getByRole('button', { name: t.phones.stop });
+  expect(stop).toBeEnabled();
+  fireEvent.click(stop);
+  await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph2/stop'));
 });

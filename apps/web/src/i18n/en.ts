@@ -28,7 +28,9 @@ export const en = {
     nameProblem: 'Give the phone a name.', computerProblem: 'Choose an online computer.', addressProblem: 'Enter the address and port shown on the phone.', codeProblem: 'Enter the six digits and the pairing address shown on the phone.',
     loading: 'Loading phones…', working: 'Connecting…', saving: 'Adding phone…', retry: 'Try again', empty: 'No phones yet.', emptyHint: 'Add a phone from a computer connected to your company.', noComputers: 'Connect a computer to the company first.', noDevices: 'No approved phone was found. Unlock the phone, check the connection and approve this computer, then try again.',
     device: (model: string | null, serial: string) => `${model ?? 'Android'} (${serial})`, owner: (name: string) => `Owner: ${name}`, waiting: (n: number) => `Waiting: ${n}`,
-    notConnected: { state: 'Phone not connected', hint: 'Plug the phone into this computer by USB, or turn on Wireless debugging on it and add it again with its address.', noScreen: 'The screen can be watched once the computer sees the phone.' },
+    notConnected: { state: 'Phone not connected', hint: 'Plug the phone into this computer by USB, or turn on Wireless debugging on it and add it again with its address.' },
+    /* Why Watch screen is off: the computer does not see the phone, or the computer itself is offline. */
+    noScreen: { not_connected: 'The screen can be watched once the computer sees the phone.', computer_offline: 'The screen can be watched once the computer is online.' },
     devices: { device: 'Ready', unauthorized: 'Approve on the phone', offline: 'Not connected', unverified: 'Could not verify this phone' },
     states: { available: 'Available to assistants', busy: 'An assistant is using it', owner: 'In your hands', offline: 'Computer is offline' },
     control: 'Screen and control', watch: 'Watch screen', hide: 'Hide screen', stop: 'Stop', resume: 'Lend to assistants', stopping: 'Stop requested. Waiting for the computer to confirm.',

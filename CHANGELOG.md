@@ -9,7 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
-- A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
+- A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back, and while its computer is offline. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
 
 ## [0.32.1] - 2026-11-17
 
