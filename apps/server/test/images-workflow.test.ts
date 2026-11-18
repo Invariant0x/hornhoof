@@ -324,9 +324,17 @@ describe('whether a mark spares this commit the tests', () => {
       expect(hub.asked.map(a => a.url)).toEqual([statusOf(sha)]);
     });
 
-    it('runs the tests when the checkout is not that commit, as its release check would read another', async () => {
+    it('takes it as well when another commit is checked out, as the choice of tests asks of the commits before it', async () => {
       const { dir, parent } = shop();
       const sha = release(dir);
+      git(dir, 'checkout', '--quiet', parent);
+      const hub = await github({ [parent]: MARKED });
+      expect((await decide(dir, sha, hub.api)).out).toBe(PROVED);
+    });
+
+    it('runs the release check on the files of that commit, not on those checked out', async () => {
+      const { dir, parent } = shop();
+      const sha = release(dir, () => {}, '## [0.6.0] on 18 November');
       git(dir, 'checkout', '--quiet', parent);
       const hub = await github({ [parent]: MARKED });
       expect((await decide(dir, sha, hub.api)).out).toBe(NOT_PROVED);

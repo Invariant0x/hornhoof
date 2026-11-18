@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { checkRelease } from '../release/check.mjs';
 import { readProject } from '../release/project.mjs';
 import { beyondVersionAndNotes } from './release-commit.mjs';
@@ -41,15 +44,26 @@ function changesOver(parent, sha) {
   return changes;
 }
 
+/* The files the release check reads: the package.json files of the root and of its workspaces, and the notes. No folder
+   name starts with a dot, so none is .. and every file stays in the folder it is written to. */
+const RELEASE_CHECK_READS = /^(?:package\.json|CHANGELOG\.md|[^/.][^/]*\/[^/.][^/]*\/package\.json)$/;
+
 /* The release check reads the versions and the notes, the only files such a commit changes, and runs in the tests' first
-   part: so it runs here instead, in the checkout of exactly that commit. Null when it passed. */
+   part: so it runs here instead, on those files of the commit written out of git. It then says the same of a commit
+   whether or not it is the one checked out, as the choice of tests asks of the commits before it. Null when it passed. */
 function releaseCheckProblem(sha) {
-  if (git('rev-parse', 'HEAD') !== sha) return `the checkout is not ${sha}, so its release check cannot run`;
+  const root = mkdtempSync(join(tmpdir(), 'hh-release-check-'));
   try {
-    checkRelease(readProject(process.cwd()), { local: true });
+    for (const path of git('ls-tree', '-r', '--name-only', '-z', sha).split('\0').filter(path => RELEASE_CHECK_READS.test(path))) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), gitText('show', `${sha}:${path}`));
+    }
+    checkRelease(readProject(root), { local: true });
     return null;
   } catch (error) {
     return `its release check fails: ${error.message}`;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
