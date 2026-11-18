@@ -54,12 +54,13 @@ async function socketOwner(peer: Peer, run: Command): Promise<number | null> {
 }
 
 /* The caller and its ancestors, from one look at the process table taken before a pane lookup can outlast the caller,
-   as the Linux inode check does. A caller gone by then has none. */
+   as the Linux inode check does. A caller gone by then has none, and a line that is no pair of numbers leads nowhere: the
+   walk stops at anything that is not a process. */
 async function lineageOf(pid: number, run: Command): Promise<Set<number>> {
   const parents = new Map<number, number>();
   for (const line of (await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid='])).split('\n')) {
     const [child, parent] = line.trim().split(/\s+/).map(Number);
-    if (Number.isSafeInteger(child) && Number.isSafeInteger(parent)) parents.set(child!, parent!);
+    parents.set(child!, parent!);
   }
   const seen = new Set<number>();
   for (let at: number | undefined = pid; at !== undefined && at > 0 && !seen.has(at); at = parents.get(at)) seen.add(at);
