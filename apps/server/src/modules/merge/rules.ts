@@ -91,6 +91,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
   /* A bot's token is a way from outside to an agent of the company. */
   telegram_bots: rows('access'),
+  /* The language a person writes to a bot in is a setting of that chat, compared like any row. */
+  telegram_chat_languages: rows('work'),
   /* An assistant's key is a way in from outside, under its owner's rights. */
   assistants: rows('access'),
   /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
