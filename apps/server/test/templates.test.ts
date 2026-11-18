@@ -48,7 +48,7 @@ describe('templates', () => {
     const direction = body('dsn-design-direction');
     expect(direction).toMatch(/generating pictures[\s\S]*one look[\s\S]*approved references[\s\S]*character sheets/i);
     expect(direction).toMatch(/included credits[\s\S]*before pay-per-use/i);
-    expect(direction).toMatch(/provider permits it and the account holder authorizes it[\s\S]*documented API or official connector/i);
+    expect(direction).toMatch(/account holder authorizes it and the provider's terms do not forbid it[\s\S]*one job at a time[\s\S]*terms forbid[\s\S]*documented API or official connector/i);
     expect(direction).toMatch(/spending limit[\s\S]*for the order[\s\S]*maker's current prompt guide[\s\S]*model's structure/i);
     expect(direction).toMatch(/route, model, settings[\s\S]*actual cost[\s\S]*cost per accepted picture/i);
   });

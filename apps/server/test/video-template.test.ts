@@ -44,6 +44,18 @@ describe('the laws of video production', () => {
     expect(laws).toMatch(/shared set plan[\s\S]*where the layout matters/i);
     expect(laws).toMatch(/hardest moment[\s\S]*materially different risk/i);
     expect(laws).toMatch(/destination's verified format, viewing area and playback conditions/i);
+    /* The brief's words keep their ordinary meaning, and nothing carries over from an earlier order. */
+    expect(laws).toMatch(/film or cinematic look[\s\S]*live action[\s\S]*cartoon[\s\S]*animation/i);
+    expect(laws).toMatch(/each order starts from its own brief[\s\S]*earlier video/i);
+    /* Planning drawings explain the scenes; the video is made fresh. */
+    expect(laws).toMatch(/never the material the shots are made from[\s\S]*never copied frame by frame/i);
+    /* A key event is shown, not implied by a cut, and pace comes from inside the shots. */
+    expect(laws).toMatch(/inside a shot[\s\S]*never left to a cut between two shots/i);
+    expect(laws).toMatch(/pace comes from the action and the camera inside the shots/i);
+    /* The set is a measured layout with named markers. */
+    expect(laws).toMatch(/measured 3D layout[\s\S]*named markers/i);
+    /* Exact geometry is made in the edit, not left to generation. */
+    expect(laws).toMatch(/exact geometry[\s\S]*in the edit/i);
   });
 
   it('assigns clip acceptance explicitly and reserves text judging for written proposals', () => {
@@ -109,12 +121,12 @@ describe('the laws of video production', () => {
     expect(work).toMatch(/record the route, model, settings[\s\S]*actual cost/i);
   });
 
-  it('allows studio automation only with provider permission and the account holder authorization', () => {
+  it('lets an agent work a browser studio like a person when the account holder allows it and the terms do not forbid it', () => {
     const laws = templates.skills.get('vid-laws')!.body.split('## Law 7.')[1]?.split('## Law 8.')[0];
     expect(laws).toMatch(/authorized tool and access route/i);
     const work = templates.skills.get('vid-work-pipeline')!.body;
     expect(work).toMatch(/check[\s\S]*models, prices, limits and terms[\s\S]*on the day/i);
-    expect(work).toMatch(/agent may operate the browser studio only when the provider permits it and the account holder authorizes it[\s\S]*person[\s\S]*documented API or official connector/i);
+    expect(work).toMatch(/agent may operate a browser studio when the account holder authorizes it and the provider's terms do not forbid it[\s\S]*one job at a time[\s\S]*stops at any warning[\s\S]*terms forbid[\s\S]*person[\s\S]*documented API or official connector/i);
     expect(work).toMatch(/operator[\s\S]*named vault entry[\s\S]*signs in[\s\S]*protected sign-in surface/i);
     expect(work).toMatch(/check the existing job before retrying/i);
   });
