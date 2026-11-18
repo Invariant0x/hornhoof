@@ -52,10 +52,10 @@ describe('POST /api/setup staffs the template', () => {
     const route = video.pipelines.find((p: { isDefault: boolean }) => p.isDefault);
     expect(route.catalogKey).toBe('video-production');
     expect(route.stages.map((s: { name: string; ownerRole: string }) => [s.name, s.ownerRole])).toEqual([
-      ['Write the brief', 'VID-HEAD'], ['Write the script and shot list', 'VID-WRITE'], ['Draw the storyboard', 'VID-BOARD'],
+      ['Write the brief', 'VID-HEAD'], ['Write the story and script', 'VID-WRITE'], ['Plan the shots and draw the storyboard', 'VID-BOARD'],
       ['Make character and style sheets', 'VID-KEEP'], ['Build the set and markers', 'VID-BOARD'], ['Prove the hardest shot', 'VID-HEAD'],
-      ['Generate draft shots', 'VID-GEN'], ['Check shot continuity', 'VID-KEEP'], ['Edit the draft cut', 'VID-EDIT'],
-      ['Check the cut', 'VID-QA'], ['Generate final shots', 'VID-GEN'], ['Accept and deliver the video', 'VID-HEAD'],
+      ['Make or capture draft shots', 'VID-GEN'], ['Check shot continuity', 'VID-KEEP'], ['Edit the draft cut', 'VID-EDIT'],
+      ['Check the cut', 'VID-QA'], ['Prepare final shots and required pickups', 'VID-GEN'], ['Accept and deliver the video', 'VID-HEAD'],
     ]);
     expect(route.stages[6]).toMatchObject({ echelon: 'development', oneShot: { fanOut: 2, judge: true } });
     expect(route.stages[7]).toMatchObject({ echelon: 'review', parentId: route.stages[6].id });

@@ -61,6 +61,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Video briefs choose how shots are made, and the crew keeps usable drafts and recordings.
+- Video directors own one story line, the shot plan, performances and the final cut.
+- Video crews plan coverage, light and sound for the chosen look and keep continuity records that explain deliberate breaks.
+- Video crews review each cut and play the exported master before delivery.
+- Video crews use eligible plan credits first and record the approved tool route and cost within each order's spending limit.
+- Video operators follow each model's prompt guide and use accepted shots to compare tools.
+- Design teams use approved references, plan credits and model guides when generating pictures and check the exact images at their intended size.
 - The company map shows only employee squares again, in their original status colors and with their usual blinking.
 - The company map has no worker kinds legend.
 - The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.

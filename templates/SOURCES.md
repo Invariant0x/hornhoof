@@ -34,6 +34,15 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | alirezarezvani/claude-skills | MIT | Business development, partnerships, proposals, RFPs, SaaS metrics. |
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
+| ScreenSkills [director](https://www.screenskills.com/job-profiles/browse/film-and-tv-drama/development-film-and-tv-drama-job-profiles/director-film-and-tv-drama/) and [script supervisor](https://www.screenskills.com/skills-checklists/scripted-film-and-tv/script-supervisor-department/script-supervisor-skills/) | Facts only | Director and crew duties, continuity records, take decisions and editorial handoff. |
+| Sundance Collab [screenwriting](https://collab.sundance.org/catalog/Screenwriting-From-Outline-to-First-Draft-of-Your-Screenplay/April-2025) and Sundance Institute [exhibition guidance](https://www.sundance.org/wp-content/uploads/2023/10/2024-Technical-Specifications-For-Festival-Presentation.pdf) | Facts only | Story development and playback of the actual screening copy. |
+| Disney Animation [layout](https://www.disneyanimation.com/process/layout/) and [hand-drawn animation](https://disneyanimation.com/process/hand-drawn-animation/) | Facts only | Blocking, shot choices, early playback and timing of key drawings. |
+| The Science Behind Pixar [story and art](https://sciencebehindpixar.org/pipeline/story-and-art) | Facts only | Look development and the color script. |
+| University of Arkansas, Moving Pictures [cinematography](https://uark.pressbooks.pub/movingpictures/chapter/cinematography/) and [sound](https://uark.pressbooks.pub/movingpictures/chapter/sound/) | Facts only | Lens, light, dialogue, ambience and sound across edits. |
+| Frame.io [editing stages](https://workflow.frame.io/guide/editing-stages) and Adobe [J and L cuts](https://helpx.adobe.com/premiere/desktop/edit-projects/trim-clips/perform-j-cuts-and-l-cuts.html) | Facts only | Edit passes and sound carried across picture cuts. |
+| Runway [official connector](https://runway.com/mcp) and Google's [developer benefits](https://developers.google.com/profile/help/benefits?hl=en) | Facts only | Plans can include credits for authorized connectors or eligible developer use. |
+| Runway [video prompt guide](https://help.runwayml.com/hc/en-us/articles/39789879462419-Gen-4-Video-Prompting-Guide) and Google Cloud [video prompt guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/video-gen-prompt-guide) | Facts only | Model-specific prompt structures, image inputs and motion and sound controls. |
+| Runway [image references](https://help.runwayml.com/hc/en-us/articles/40042718905875-Creating-with-Gen-4-Image-References) | Facts only | Reusing approved subjects, settings and style references across pictures. |
 
 The development testing and environment procedures are project-owned adaptations. The current procedures define their use.
 
@@ -145,10 +154,10 @@ The development testing and environment procedures are project-owned adaptations
 | `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
 | `skills/dev-write-plan.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md; obra/superpowers skills/writing-plans/SKILL.md; anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md | Hornhoof |
 | `skills/dsn-accessibility-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md; wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md; affaan-m/ECC agents/a11y-architect.md | Hornhoof |
-| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md; anthropics/skills skills/brand-guidelines/SKILL.md | Hornhoof |
+| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md, anthropics/skills skills/brand-guidelines/SKILL.md and Runway image references | Hornhoof |
 | `skills/dsn-component-spec.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md; wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md | Hornhoof |
 | `skills/dsn-design-critique.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-critique/SKILL.md | Hornhoof |
-| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
+| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md and Runway documentation for image references and tool access | Hornhoof |
 | `skills/dsn-design-md.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-generic-ui-check.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-handoff.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md | Hornhoof |
@@ -159,7 +168,7 @@ The development testing and environment procedures are project-owned adaptations
 | `skills/dsn-ui-rules.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md; wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md | Hornhoof |
 | `skills/dsn-ux-copy.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md | Hornhoof |
 | `skills/dsn-visual-qa.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
-| `skills/dsn-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-work-pipeline.md` | Written for Hornhoof | Hornhoof's procedure, with Runway documentation for generated image references | Hornhoof |
 | `skills/fin-accruals.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/month-end-closer | Hornhoof |
 | `skills/fin-audit-support.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance | Hornhoof |
 | `skills/fin-budget-forecast.md` | Written for Hornhoof | msitarzewski/agency-agents finance/finance-fpa-analyst.md | Hornhoof |
@@ -336,7 +345,7 @@ The development testing and environment procedures are project-owned adaptations
 | `roles/video_production/VID-WRITE.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
 | `teams/video_production/VID-TEAM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
 | `echelons/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `pipelines/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-continuity.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-laws.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `pipelines/video_production.md` | Written for Hornhoof | ScreenSkills, Sundance Institute and Frame.io for crew decisions, edit passes and export checks | Hornhoof |
+| `skills/vid-continuity.md` | Written for Hornhoof | ScreenSkills for continuity, take records and the handoff to the editor | Hornhoof |
+| `skills/vid-laws.md` | Written for Hornhoof | ScreenSkills and Sundance Institute for continuity and playback, and provider documentation for tool routes | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | Film craft sources above for production and editing, and Runway and Google documentation for access, credits and prompts | Hornhoof |
