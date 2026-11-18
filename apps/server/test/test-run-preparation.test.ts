@@ -59,6 +59,7 @@ it('starts a batch at once beside the preparation, on the computer the preparati
   expect(running[0]!.nodeId).not.toBe(preparation.nodeId);
   const given = await nextOf(on(running[0]!).node, 'tests.run');
   expect(given.environment!.selection.kind).toBe('batch');
+  expect(given.vitestWorkers).toBe(1);
   await call('stop_tests', { run: run.number });
 });
 
