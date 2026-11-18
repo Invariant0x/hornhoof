@@ -1,7 +1,7 @@
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
-/* A drawn mouse pointer for marketing scenes: the recorded video holds no system cursor, so the page draws one that
-   follows the mouse events Playwright sends, and shows a ring where it clicks. It catches no clicks of its own. */
+/* A drawn mouse pointer for marketing scenes: a screenshot holds no system cursor, so the page draws one that follows the
+   mouse events Playwright sends, and shows a ring where it presses. It catches no clicks of its own. */
 export async function installSceneCursor(page: Page, start: { x: number; y: number }): Promise<void> {
   await page.addInitScript(({ x, y }) => {
     const draw = () => {
@@ -23,27 +23,4 @@ export async function installSceneCursor(page: Page, start: { x: number; y: numb
     if (document.body) draw();
     else document.addEventListener('DOMContentLoaded', draw, { once: true });
   }, start);
-}
-
-const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-
-/* Glides the pointer from where it is to the middle of a target, at a pace the eye can follow. */
-export async function glideTo(page: Page, from: { x: number; y: number }, target: Locator, ms = 900): Promise<{ x: number; y: number }> {
-  const box = await target.boundingBox();
-  if (!box) throw new Error('the cursor target is not on screen');
-  const to = { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
-  const steps = Math.max(8, Math.round(ms / 20));
-  for (let i = 1; i <= steps; i++) {
-    const t = ease(i / steps);
-    await page.mouse.move(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
-    await page.waitForTimeout(ms / steps);
-  }
-  return to;
-}
-
-/* Presses where the pointer is, slowly enough for the ring to show. */
-export async function clickHere(page: Page): Promise<void> {
-  await page.mouse.down();
-  await page.waitForTimeout(90);
-  await page.mouse.up();
 }

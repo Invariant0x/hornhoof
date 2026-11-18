@@ -94,78 +94,102 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
   [ -e "$mark" ] || continue
   name="$(basename "$mark" .json)"
   webm="$RESULTS_DIR/videos/$name.webm"
+  frames="$RESULTS_DIR/frames/$name"
   out_gif="$ASSETS_DIR/$name.gif"
 
-  if [ ! -f "$webm" ]; then
-    echo "error: missing video $webm for scene $name" >&2
-    exit 1
-  fi
-
-  webm_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$webm")"
-  trim_args="$(node -e '
-    const fs = require("node:fs");
-    const mark = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const webmDur = Number(process.argv[2]);
-    const start = Math.max(0, mark.startSec);
-    const maxAvail = Number.isFinite(webmDur) && webmDur > start ? webmDur - start : mark.durationSec;
-    const wantDur = Math.max(1, Math.min(mark.durationSec, maxAvail));
-    process.stdout.write(`${start.toFixed(3)} ${wantDur.toFixed(3)}`);
-  ' "$mark" "$webm_dur")"
-
-  start_sec="${trim_args% *}"
-  dur_sec="${trim_args#* }"
-
-  # A README picture is 1200 wide and under 6 MB. A marketing cut keeps the size it was recorded at, the size the
-  # network shows, so nothing is scaled down, and may weigh up to 15 MB, the most X takes for a GIF.
+  # A marketing cut (marketing-*) comes as frames taken at full resolution on a controlled clock (moonfern/film.ts),
+  # not as the recorder's video: its raw .webm for an editor to cut is made here, and its GIF and MP4 come from the
+  # frames themselves, so nothing is scaled and nothing is compressed twice.
   case "$name" in
-    marketing-*) gif_scale="" gif_limit=15000000 color_steps="128 96 64 48 32" ;;
-    *) gif_scale="scale=1200:-1:flags=lanczos," gif_limit="$MAX_GIF_BYTES" color_steps="64 48 32 24 16" ;;
+    marketing-*)
+      if [ ! -d "$frames" ]; then
+        echo "error: missing frames $frames for scene $name" >&2
+        exit 1
+      fi
+      fps="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).fps))' "$mark")"
+      mkdir -p "$RESULTS_DIR/videos" "$VIDEOS_DIR/frames"
+      ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
+        -vf "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p" \
+        -c:v libvpx-vp9 -crf 10 -b:v 0 -deadline good -cpu-used 4 -row-mt 1 \
+        -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -an "$webm"
+
+      # The GIF at the size of the frames, the size the network shows, at 12 fps and up to 15 MB, the most X takes.
+      gif_limit=15000000
+      for max_colors in 128 96 64 48 32; do
+        ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
+          -vf "fps=12,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
+          -loop 0 "$out_gif"
+        gif_bytes="$(wc -c < "$out_gif" | tr -d ' ')"
+        if [ "$gif_bytes" -lt "$gif_limit" ]; then
+          break
+        fi
+      done
+
+      # The MP4 that LinkedIn and X take: H.264 High, 4:2:0 in TV range with BT.709 named, the way phones expect it so
+      # the colours do not wash out, at the frames' own rate, with its index at the front so it plays before it loads.
+      out_mp4="$VIDEOS_DIR/$name.mp4"
+      ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
+        -vf "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p" \
+        -c:v libx264 -preset slow -tune animation -crf 16 -profile:v high -level:v 4.2 \
+        -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+        -movflags +faststart -an "$out_mp4"
+      cp "$out_gif" "$VIDEOS_DIR/$name.gif"
+      for file in "$out_mp4" "$VIDEOS_DIR/$name.gif" "$webm"; do
+        echo "== $(basename "$file") ($(wc -c < "$file" | tr -d ' ') bytes)" >> "$VIDEOS_DIR/ffprobe.txt"
+        ffprobe -v error -show_entries stream=codec_name,profile,width,height,pix_fmt,color_range,color_space,r_frame_rate,nb_frames:format=duration,size,bit_rate \
+          -of default=nw=1 "$file" >> "$VIDEOS_DIR/ffprobe.txt"
+      done
+      mp4_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_mp4")"
+      # Six frames of the MP4 as it plays, to check the encode at 100%.
+      for part in 1 2 3 4 5 6; do
+        at="$(node -e 'process.stdout.write((Number(process.argv[1]) * (Number(process.argv[2]) - 0.5) / 6).toFixed(2))' "$mp4_dur" "$part")"
+        ffmpeg -hide_banner -loglevel error -y -ss "$at" -i "$out_mp4" -frames:v 1 "$VIDEOS_DIR/frames/$name-$part.png"
+      done
+      printf "  %-28s %6ss  %s bytes\n" "$name.mp4" "$mp4_dur" "$(wc -c < "$out_mp4" | tr -d ' ')"
+      node -e '
+        const [name, durStr] = process.argv.slice(1);
+        const dur = Number(durStr);
+        if (!(dur >= 10 && dur <= 30)) {
+          console.error(`error: ${name}.mp4 duration ${dur}s is outside 10..30s`);
+          process.exit(1);
+        }
+      ' "$name" "$mp4_dur" || check_status=1
+      # The frames are big and made all of the above; the artifacts keep the raw video, the marks and the cuts.
+      rm -rf "${frames:?}"
+      ;;
+    *)
+      if [ ! -f "$webm" ]; then
+        echo "error: missing video $webm for scene $name" >&2
+        exit 1
+      fi
+
+      webm_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$webm")"
+      trim_args="$(node -e '
+        const fs = require("node:fs");
+        const mark = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        const webmDur = Number(process.argv[2]);
+        const start = Math.max(0, mark.startSec);
+        const maxAvail = Number.isFinite(webmDur) && webmDur > start ? webmDur - start : mark.durationSec;
+        const wantDur = Math.max(1, Math.min(mark.durationSec, maxAvail));
+        process.stdout.write(`${start.toFixed(3)} ${wantDur.toFixed(3)}`);
+      ' "$mark" "$webm_dur")"
+
+      start_sec="${trim_args% *}"
+      dur_sec="${trim_args#* }"
+
+      gif_limit="$MAX_GIF_BYTES"
+      for max_colors in 64 48 32 24 16; do
+        ffmpeg -hide_banner -loglevel error -y \
+          -i "$webm" -ss "$start_sec" -t "$dur_sec" \
+          -vf "fps=12,scale=1200:-1:flags=lanczos,atadenoise=0a=0.04:0b=0.08:1a=0.04:1b=0.08:2a=0.04:2b=0.08,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+          -loop 0 "$out_gif"
+        gif_bytes="$(wc -c < "$out_gif" | tr -d ' ')"
+        if [ "$gif_bytes" -lt "$MAX_GIF_BYTES" ]; then
+          break
+        fi
+      done
+      ;;
   esac
-
-  for max_colors in $color_steps; do
-    ffmpeg -hide_banner -loglevel error -y \
-      -i "$webm" -ss "$start_sec" -t "$dur_sec" \
-      -vf "fps=12,${gif_scale}atadenoise=0a=0.04:0b=0.08:1a=0.04:1b=0.08:2a=0.04:2b=0.08,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
-      -loop 0 "$out_gif"
-    gif_bytes="$(wc -c < "$out_gif" | tr -d ' ')"
-    if [ "$gif_bytes" -lt "$gif_limit" ]; then
-      break
-    fi
-  done
-
-  # A marketing cut also goes out as H.264 MP4, which LinkedIn and X take: 4:2:0 in TV range with BT.709 named, the
-  # way phones expect it so the colours do not wash out, the recorder's own frame rate, and the index at the front so
-  # it starts playing before it has loaded.
-  if [ "${name#marketing-}" != "$name" ]; then
-    mkdir -p "$VIDEOS_DIR/frames"
-    out_mp4="$VIDEOS_DIR/$name.mp4"
-    ffmpeg -hide_banner -loglevel error -y \
-      -i "$webm" -ss "$start_sec" -t "$dur_sec" \
-      -vf "scale=in_color_matrix=bt601:out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p" \
-      -c:v libx264 -preset slow -tune animation -crf 16 -profile:v high -level:v 4.2 \
-      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
-      -movflags +faststart -an "$out_mp4"
-    cp "$out_gif" "$VIDEOS_DIR/$name.gif"
-    for file in "$out_mp4" "$VIDEOS_DIR/$name.gif"; do
-      echo "== $(basename "$file") ($(wc -c < "$file" | tr -d ' ') bytes)" >> "$VIDEOS_DIR/ffprobe.txt"
-      ffprobe -v error -show_entries stream=codec_name,profile,width,height,pix_fmt,color_range,color_space,r_frame_rate,nb_frames:format=duration,size,bit_rate \
-        -of default=nw=1 "$file" >> "$VIDEOS_DIR/ffprobe.txt"
-    done
-    mp4_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_mp4")"
-    for part in 1 2 3 4 5 6; do
-      at="$(node -e 'process.stdout.write((Number(process.argv[1]) * (Number(process.argv[2]) - 0.5) / 6).toFixed(2))' "$mp4_dur" "$part")"
-      ffmpeg -hide_banner -loglevel error -y -ss "$at" -i "$out_mp4" -frames:v 1 "$VIDEOS_DIR/frames/$name-$part.png"
-    done
-    printf "  %-28s %6ss  %s bytes\n" "$name.mp4" "$mp4_dur" "$(wc -c < "$out_mp4" | tr -d ' ')"
-    node -e '
-      const [name, durStr] = process.argv.slice(1);
-      const dur = Number(durStr);
-      if (!(dur >= 10 && dur <= 30)) {
-        console.error(`error: ${name}.mp4 duration ${dur}s is outside 10..30s`);
-        process.exit(1);
-      }
-    ' "$name" "$mp4_dur" || check_status=1
-  fi
 
   gif_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_gif")"
   gif_mb="$(node -e 'process.stdout.write((Number(process.argv[1]) / (1024 * 1024)).toFixed(2))' "$gif_bytes")"
