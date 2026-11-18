@@ -24,3 +24,47 @@ export async function installSceneCursor(page: Page, start: { x: number; y: numb
     else document.addEventListener('DOMContentLoaded', draw, { once: true });
   }, start);
 }
+
+/* The words the drawn pointer at `at` covers, with a few pixels around it: a pointer at rest leaves counters and names
+   readable. Words under something drawn on top of them, cut off by their box or scrolled out of it do not count. */
+export async function wordsUnderPointer(page: Page, at: { x: number; y: number }): Promise<string[]> {
+  return page.evaluate(({ x, y }) => {
+    const box = { left: x - 2, top: y - 3, right: x + 24, bottom: y + 31 };
+    /* The part of the screen the boxes around a word let it show in. */
+    const shownIn = (el: Element) => {
+      const area = { ...box };
+      for (let up: Element | null = el; up && up !== document.body; up = up.parentElement) {
+        const style = getComputedStyle(up);
+        if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+        const r = up.getBoundingClientRect();
+        area.left = Math.max(area.left, r.left);
+        area.top = Math.max(area.top, r.top);
+        area.right = Math.min(area.right, r.right);
+        area.bottom = Math.min(area.bottom, r.bottom);
+      }
+      return area;
+    };
+    const found: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim();
+      const parent = node.parentElement;
+      if (!text || !parent || getComputedStyle(parent).visibility === 'hidden') continue;
+      const area = shownIn(parent);
+      if (area.right <= area.left || area.bottom <= area.top) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of Array.from(range.getClientRects())) {
+        const left = Math.max(r.left, area.left), right = Math.min(r.right, area.right);
+        const top = Math.max(r.top, area.top), bottom = Math.min(r.bottom, area.bottom);
+        if (right <= left || bottom <= top) continue;
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        if (hit && (hit === parent || parent.contains(hit) || (hit.contains(parent) && hit !== document.body))) {
+          found.push(text);
+          break;
+        }
+      }
+    }
+    return found;
+  }, at);
+}

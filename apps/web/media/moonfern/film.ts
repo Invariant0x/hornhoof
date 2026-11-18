@@ -61,6 +61,32 @@ export async function settle(page: Page, watched: Locator, tries = 60): Promise<
   }
 }
 
+/* The zoom's readout as a number: "80%" is 80. */
+async function percentOf(shown: Locator): Promise<number> {
+  return Number((await shown.textContent())?.replace('%', ''));
+}
+
+/* Turns the wheel under the pointer until the zoom's readout says percent: first by move(turn), then by small turns that
+   set it exactly. Before a take, move is a single turn of the wheel. */
+export async function wheelZoomTo(page: Page, percent: number, shown: Locator, move?: (turn: number) => Promise<void>): Promise<void> {
+  const scale = await page.evaluate(() => devicePixelRatio);
+  const turnTo = async () => (-Math.log(percent / (await percentOf(shown))) / 0.0015) * scale;
+  const settled = async (was: number) => {
+    for (let i = 0; i < 20 && (await percentOf(shown)) === was; i++) await page.waitForTimeout(25);
+  };
+  let was = await percentOf(shown);
+  if (was !== percent) {
+    if (move) await move(await turnTo());
+    else await page.mouse.wheel(0, await turnTo());
+    await settled(was);
+  }
+  for (let i = 0; i < 6 && (was = await percentOf(shown)) !== percent; i++) {
+    await page.mouse.wheel(0, await turnTo());
+    await settled(was);
+  }
+  if ((await percentOf(shown)) !== percent) throw new Error(`the map did not come to ${percent}%, it shows ${await percentOf(shown)}%`);
+}
+
 export class Film {
   private frame = 0;
   private ms = 0;
@@ -140,15 +166,27 @@ export class Film {
     this.pointer = { x: from.x + dx, y: from.y + dy };
   }
 
-  /* Zooms the canvas under the pointer by factor with the wheel; the canvas zooms by e^(-deltaY * 0.0015) a wheel step
-     (apps/web/src/ui/canvas.tsx). */
-  async wheelZoom(factor: number, ms = 800): Promise<void> {
+  /* Scrolls a box to top the way a wheel under the pointer does, smoothly, one frame at a time. */
+  async scroll(box: Locator, top: number, ms = 1500): Promise<void> {
+    const from = await box.evaluate(el => el.scrollTop);
     const steps = Math.max(2, Math.round(ms / STEP_MS));
-    const delta = -Math.log(factor) / 0.0015 / steps;
-    for (let i = 0; i < steps; i++) {
-      await this.page.mouse.wheel(0, delta);
+    for (let i = 1; i <= steps; i++) {
+      await box.evaluate((el, y) => el.scrollTo({ top: y, behavior: 'instant' }), Math.round(from + (top - from) * ease(i / steps)));
       await this.shot();
     }
+  }
+
+  /* Zooms the canvas under the pointer with the wheel until shown, the zoom's own readout, says percent. The canvas zooms
+     by e^(-deltaY * 0.0015) a wheel step (apps/web/src/ui/canvas.tsx), and the page gets the wheel's turn divided by the
+     device scale. The last turn, if one is needed, sets the readout exactly. */
+  async wheelZoomTo(percent: number, shown: Locator, ms = 800): Promise<void> {
+    await wheelZoomTo(this.page, percent, shown, async turn => {
+      const steps = Math.max(2, Math.round(ms / STEP_MS));
+      for (let i = 0; i < steps; i++) {
+        await this.page.mouse.wheel(0, turn / steps);
+        await this.shot();
+      }
+    });
   }
 
   /* The timing marks beside the frames: run.sh reads the frame rate and length, the editor the named moments. */

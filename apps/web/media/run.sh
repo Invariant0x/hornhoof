@@ -96,6 +96,18 @@ rm -f "$ASSETS_DIR/machines.png" "$ASSETS_DIR/subscriptions.png"
 MAX_GIF_BYTES=6000000
 check_status=0
 
+# One pass of a marketing cut's MP4 from its frames: encode_mp4 <pass> <where the pass writes>.
+encode_mp4() {
+  pass="$1"
+  shift
+  ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
+    -vf "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p" \
+    -c:v libx264 -preset slow -tune animation -b:v 10M -maxrate 12M -bufsize 20M -g 2 -keyint_min 2 -sc_threshold 0 \
+    -profile:v high -level:v 4.2 -pass "$pass" -passlogfile "$RESULTS_DIR/x264-$name" \
+    -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+    -an "$@"
+}
+
 for mark in "$RESULTS_DIR"/marks/*.json; do
   [ -e "$mark" ] || continue
   name="$(basename "$mark" .json)"
@@ -119,11 +131,13 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
         -c:v libvpx-vp9 -crf 10 -b:v 0 -deadline good -cpu-used 4 -row-mt 1 \
         -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -an "$webm"
 
-      # The GIF at the size of the frames, the size the network shows, at 12 fps and up to 15 MB, the most X takes.
+      # The GIF at the size of the frames, the size the network shows, at 12 fps and up to 15 MB, the most X takes. Its
+      # palette is made from the whole picture, as most of a frame is text that stands still, with all 256 colours
+      # first and fewer only if the GIF would be too big.
       gif_limit=15000000
-      for max_colors in 128 96 64 48 32; do
+      for max_colors in 256 192 128 96 64; do
         ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
-          -vf "fps=12,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
+          -vf "fps=12,split[s0][s1];[s0]palettegen=stats_mode=full:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
           -loop 0 "$out_gif"
         gif_bytes="$(wc -c < "$out_gif" | tr -d ' ')"
         if [ "$gif_bytes" -lt "$gif_limit" ]; then
@@ -133,16 +147,17 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
 
       # The MP4 that LinkedIn and X take: H.264 High, 4:2:0 in TV range with BT.709 named, the way phones expect it so
       # the colours do not wash out, at the frames' own rate, with its index at the front so it plays before it loads.
+      # It comes at 10 Mbit/s in two passes, as the networks encode it again and text stays sharp from 8 to 12 Mbit/s.
+      # Frames of a screen are so clean that with keyframes far apart even a lossless take stays near 2 Mbit/s, so every
+      # second frame is a keyframe: each frame is then kept almost without loss and the rate comes to 10 Mbit/s.
       out_mp4="$VIDEOS_DIR/$name.mp4"
-      ffmpeg -hide_banner -loglevel error -y -framerate "$fps" -i "$frames/%05d.png" \
-        -vf "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p" \
-        -c:v libx264 -preset slow -tune animation -crf 16 -profile:v high -level:v 4.2 \
-        -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
-        -movflags +faststart -an "$out_mp4"
+      encode_mp4 1 -f null /dev/null
+      encode_mp4 2 -movflags +faststart "$out_mp4"
+      rm -f "$RESULTS_DIR/x264-$name"*
       cp "$out_gif" "$VIDEOS_DIR/$name.gif"
       for file in "$out_mp4" "$VIDEOS_DIR/$name.gif" "$webm"; do
         echo "== $(basename "$file") ($(wc -c < "$file" | tr -d ' ') bytes)" >> "$VIDEOS_DIR/ffprobe.txt"
-        ffprobe -v error -show_entries stream=codec_name,profile,width,height,pix_fmt,color_range,color_space,r_frame_rate,nb_frames:format=duration,size,bit_rate \
+        ffprobe -v error -show_entries stream=codec_name,profile,width,height,pix_fmt,color_range,color_space,r_frame_rate,nb_frames,bit_rate:format=duration,size,bit_rate \
           -of default=nw=1 "$file" >> "$VIDEOS_DIR/ffprobe.txt"
       done
       mp4_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_mp4")"
@@ -151,15 +166,23 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
         at="$(node -e 'process.stdout.write((Number(process.argv[1]) * (Number(process.argv[2]) - 0.5) / 6).toFixed(2))' "$mp4_dur" "$part")"
         ffmpeg -hide_banner -loglevel error -y -ss "$at" -i "$out_mp4" -frames:v 1 "$VIDEOS_DIR/frames/$name-$part.png"
       done
-      printf "  %-28s %6ss  %s bytes\n" "$name.mp4" "$mp4_dur" "$(wc -c < "$out_mp4" | tr -d ' ')"
+      mp4_rate="$(ffprobe -v error -select_streams v:0 -show_entries stream=bit_rate -of default=nw=1:nk=1 "$out_mp4")"
+      printf "  %-28s %6ss  %s bytes  %s bit/s\n" "$name.mp4" "$mp4_dur" "$(wc -c < "$out_mp4" | tr -d ' ')" "$mp4_rate"
       node -e '
-        const [name, durStr] = process.argv.slice(1);
+        const [name, durStr, rateStr] = process.argv.slice(1);
         const dur = Number(durStr);
+        const rate = Number(rateStr);
+        let ok = true;
         if (!(dur >= 10 && dur <= 30)) {
           console.error(`error: ${name}.mp4 duration ${dur}s is outside 10..30s`);
-          process.exit(1);
+          ok = false;
         }
-      ' "$name" "$mp4_dur" || check_status=1
+        if (!(rate >= 8e6 && rate <= 12e6)) {
+          console.error(`error: ${name}.mp4 video bit rate ${rate} bit/s is outside 8..12 Mbit/s`);
+          ok = false;
+        }
+        if (!ok) process.exit(1);
+      ' "$name" "$mp4_dur" "$mp4_rate" || check_status=1
       # The frames are big and made all of the above; the artifacts keep the raw video, the marks and the cuts.
       rm -rf "${frames:?}"
       ;;
