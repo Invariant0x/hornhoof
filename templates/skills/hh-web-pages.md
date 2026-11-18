@@ -10,4 +10,4 @@ When a plain download shows too little, run `hh-browse URL`; `--screenshot FILE.
 
 At `login_required`, sign in yourself, as a person does: find the site's sign-in with vault_entries, take it with vault_entry and type the login, the password and the one-time code, when the entry gives one, into the site's page in a real browser on your machine, as `hh-browse` signs in nowhere. Never write them into a task, comment, file, commit or report. When the sign-in asks for a code the site sends to a person's phone, or the vault has no sign-in for the site, ask the holder to complete that confirmation or add the missing sign-in to the vault. Go on with the other addresses meanwhile.
 
-At `robot_check`, stop at the challenge. Record the barrier and use a permitted alternative or refer a provider-required action to the account holder.
+At `robot_check`, stop at the challenge. Never bypass it or ask anyone for a way around it. Record the address and barrier for the account holder when a provider-required action is needed. Go on with the other addresses or use a permitted alternative.
