@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Work templates keep running work visible and assign repairs and checks to the people who own them.
 - Company templates explain who can act, when to ask a person and how to keep sign-ins private.
 - Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
 
