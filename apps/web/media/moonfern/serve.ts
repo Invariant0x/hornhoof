@@ -36,12 +36,12 @@ import {
   oakTaskDetail,
 } from './oak-lane';
 import { MOONFERN_ME, MOONFERN_PEOPLE } from './people';
+import { starterKitOrg } from './starter-kit';
 import { pushStream } from './stream';
 import {
   buildDecisions,
   INITIAL_MOONFERN_REQUESTS,
   MOONFERN_GOALS,
-  MOONFERN_PIPELINE,
   MOONFERN_TASK_DEPARTMENTS,
   MOONFERN_TASKS,
   MOONFERN_TURNS,
@@ -169,7 +169,7 @@ export async function serveMoonfern(page: Page, opts: ServeMoonfernOptions = {})
     const goalId = /^\/api\/goals\/([^/]+)$/.exec(pathname)?.[1];
     const goal = goalId ? MOONFERN_GOALS.find(g => g.id === goalId) : undefined;
     if (goal) return route.fulfill({ json: { goal, log: [] } });
-    if (pathname === '/api/pipelines') return route.fulfill({ json: { pipelines: [MOONFERN_PIPELINE] } });
+    if (pathname === '/api/pipelines') return route.fulfill({ json: { pipelines: org.departments.flatMap(d => d.pipelines ?? []) } });
     if (pathname === '/api/task-departments') return route.fulfill({ json: MOONFERN_TASK_DEPARTMENTS });
     if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(pathname)) return route.fulfill({ json: { recordings: [] } });
     if (/^\/api\/departments\/[^/]+\/backlog$/.test(pathname)) return route.fulfill({ json: { items: [] } });
@@ -193,6 +193,14 @@ export async function serveMoonfern(page: Page, opts: ServeMoonfernOptions = {})
       return route.fulfill({ json: { needed: setupNeeded, linkDomain: 'hornhoof.org' } });
     }
     if (pathname === '/api/setup' && method === 'POST') {
+      const { template, companyName } = JSON.parse(req.postData() ?? '{}') as { template?: string; companyName?: string };
+      if (template === 'startup') {
+        org = starterKitOrg(companyName ?? 'Moonfern');
+        requests = [];
+        turns = [];
+        tasks = [];
+        subs = [];
+      }
       setupNeeded = false;
       return route.fulfill({ json: {} });
     }
@@ -200,8 +208,11 @@ export async function serveMoonfern(page: Page, opts: ServeMoonfernOptions = {})
       const name = decodeURIComponent(pathname.slice('/api/setup/names/'.length));
       return route.fulfill({ json: { name, free: true } });
     }
+    if (pathname === '/api/orchestrator/first-contact') {
+      return route.fulfill({ json: { offers: ['planLaunch', 'sketchProduct', 'findCustomers', 'setUpPipeline', 'telegram', 'assistant'] } });
+    }
     if (pathname === '/api/me') {
-      return route.fulfill({ json: MOONFERN_ME });
+      return route.fulfill({ json: { ...MOONFERN_ME, company: org.company } });
     }
     if (pathname === '/api/org') {
       return route.fulfill({ json: org });
@@ -275,7 +286,7 @@ export async function serveMoonfern(page: Page, opts: ServeMoonfernOptions = {})
     }
     if (pathname.startsWith('/api/tasks/')) {
       const taskId = pathname.slice('/api/tasks/'.length);
-      const detail = moonfernTaskDetail(taskId);
+      const detail = moonfernTaskDetail(taskId, tasks);
       if (detail) return route.fulfill({ json: { task: detail } });
     }
     if (/^\/api\/departments\/[^/]+\/tree$/.test(pathname)) {
@@ -399,6 +410,11 @@ export async function serveOakLane(page: Page): Promise<OakLaneController> {
     if (pathname === '/api/setup') return route.fulfill({ json: { needed: false, linkDomain: 'hornhoof.org' } });
     if (pathname === '/api/me') return route.fulfill({ json: OAK_ME });
     if (pathname === '/api/org') return route.fulfill({ json: org });
+    if (pathname === '/api/goals') return route.fulfill({ json: { goals: [] } });
+    if (pathname === '/api/pipelines') return route.fulfill({ json: { pipelines: [] } });
+    if (pathname === '/api/task-departments') return route.fulfill({ json: {
+      whole: true, departments: org.departments.map(({ id, name, templateKey }) => ({ id, name, templateKey, mine: true })),
+    } });
     if (pathname === '/api/people') return route.fulfill({ json: { people: OAK_PEOPLE } });
     if (pathname === '/api/subscriptions') return route.fulfill({ json: { subscriptions: OAK_SUBSCRIPTIONS } });
     if (pathname === '/api/machines') return route.fulfill({ json: { machines: OAK_MACHINES, builtin: OAK_BUILTIN } });
