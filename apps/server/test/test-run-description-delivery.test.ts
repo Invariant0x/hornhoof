@@ -41,7 +41,7 @@ async function fixture() {
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://example.test/fixture.git' }).returning();
   const [task] = await db.insert(tasks).values({ companyId, departmentId: department!.id, number: 1, title: 'Delivery fixture' }).returning();
   const [job] = await db.insert(jobs).values({ companyId, subscriptionId: agent!.subscriptionId!, agentId: agent!.id, taskId: task!.id, prompt: 'Fixture', timeoutMs: 10_000, status: 'running' }).returning();
-  const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number: 1, command: '', commitSha: TEST_COMMIT, timeoutMs: 10_000,
+  const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number: 1, command: '', commitSha: TEST_COMMIT, timeoutMs: 10_000, createdAt: new Date(),
     environmentRequest: newEnvironmentRequest(repositoryScope(companyId, department!.id, department!.repoUrl!), { mode: 'product' }) }).returning();
   const load = { cpus: 8, load: 0.1, memFree: 16 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 0, jobs: 0 };
   const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'python', version: '3.12.0', fingerprint: 'c'.repeat(64) }];
@@ -66,6 +66,10 @@ it.each(['The operation was aborted', 'WebSocket is not open: readyState 2 (CLOS
   await f.pump();
   expect(f.transport.frames.map(frame => frame.message)).toEqual([first.message, first.message]);
   expect((await f.stored()).environmentRequest).toMatchObject({ requestId: (first.message as { requestId: string }).requestId, attempts: 1, problem: null });
+  f.transport.close();
+  const next = f.connect(); resetDescriptionDelivery(f.ctx);
+  await f.pump();
+  expect(next.frames.map(frame => frame.message)).toEqual([first.message]);
 });
 
 it('keeps a thrown socket write retryable instead of aborting the description pump', async () => {
