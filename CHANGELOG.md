@@ -67,6 +67,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
+
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.

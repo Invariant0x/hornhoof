@@ -13,7 +13,7 @@ import { canViewComputer, type AccessView, type Asked } from '../computer/access
 import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './state.js';
-import { seesTask, type TaskPlace } from './sight.js';
+import { seesTask, type TaskPlace } from './visibility.js';
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
    this person may take it (auth/decisions.ts). */
 

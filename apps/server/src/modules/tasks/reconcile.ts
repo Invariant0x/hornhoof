@@ -2,7 +2,7 @@ import { and, eq, gt, gte, inArray, isNull, lte, notInArray, or, sql } from 'dri
 import type { Ctx } from '../../app.js';
 import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { agentState } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
 import { goesElsewhere, liveSubscription } from '../conversation/placement.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/job-failures.js';

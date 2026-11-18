@@ -213,4 +213,4 @@ async function nodeWait(ctx: Ctx, companyId: string, { node, view }: Drain, plac
 }
 
 const placeOrder = (wait: NodeWait): string => (wait.hostname === null ? '' : `${wait.hostname} ${wait.provider ?? ''} ${wait.node}`);
-export { states, nodeDrain, nodeHeld, nodeHeldLong, nodeHeldFrom, machineDrain, requestNodeDrain, cancelNodeDrain, nodeDrainHello } from './drain-state.js';
+export { nodeDrain, nodeHeld, nodeHeldLong, nodeHeldFrom, machineDrain, requestNodeDrain, cancelNodeDrain, nodeDrainHello } from './drain-state.js';

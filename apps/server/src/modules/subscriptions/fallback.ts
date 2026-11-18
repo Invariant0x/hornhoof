@@ -7,7 +7,10 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import { budgetUntil, enqueueTurn, insertTurn, limitUntil, orchestratorOf, planHeld, planWaitsFor, pump } from '../conversation/queue.js';
+import { budgetUntil, limitUntil } from '../conversation/limits.js';
+import { enqueueTurn, insertTurn, pump } from '../conversation/queue.js';
+import { planHeld, planWaitsFor } from '../conversation/state.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 import { orchestratorServing, runsTier, servingSubscriptions } from '../tools/staff.js';
 
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */

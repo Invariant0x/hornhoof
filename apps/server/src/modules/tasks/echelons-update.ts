@@ -1,7 +1,6 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, taskEvents, tasks } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
+import { agents, tasks } from '../../db/schema.js';
 import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
@@ -11,9 +10,8 @@ import { CLOSED, refuse, type Task, type Tx, type Wake } from './state.js';
 import { note, published } from './events.js';
 import { type TaskChange } from './engine.js';
 import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
-import { openTurnOf, workOfOpenTurn } from './turn-department.js';
+import { workOfOpenTurn } from './turn-department.js';
 import { futureOwner } from './echelons-future.js';
-
 export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, agentId: string): Promise<void> {
   const [actor] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!actor || (actor.kind !== 'orchestrator' && !(actor.kind === 'head' && actor.departmentId === task.departmentId))) throw refuse(403, 'task_not_yours', 'Only this department head or the orchestrator may revise the route.');
@@ -111,15 +109,6 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
   return { state: next, set };
 }
 
-/* A head decision belongs to its department until its next release, the open turn; it is an event, not a compatibility
-   switch. */
-export async function turnCleanupDefault(tx: Tx, task: Task): Promise<boolean> {
-  const turnId = task.turnId ?? (await openTurnOf(tx, task.companyId, task.departmentId))?.id;
-  if (!turnId) return false;
-  const [event] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
-  return (event?.data.turnCleanup as { enabled?: boolean } | undefined)?.enabled === true;
-}
-
 export async function applyTurnCleanup(tx: Tx, task: Task, turnId: string, agentId: string, enabled: boolean, wakes: Wake[]): Promise<Task[]> {
   const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, task.companyId), workOfOpenTurn(turnId), eq(tasks.departmentId, task.departmentId!))).orderBy(tasks.id).for('update');
   const changed: Task[] = [];
@@ -137,3 +126,4 @@ export async function applyTurnCleanup(tx: Tx, task: Task, turnId: string, agent
 }
 
 export const publishRouteChanges = (ctx: Pick<Ctx, 'bus'>, rows: Task[]) => rows.forEach(row => published(ctx, row));
+export { turnCleanupDefault } from './cleanup-policy.js';

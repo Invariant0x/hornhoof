@@ -109,4 +109,4 @@ export async function noteWorkFolder(ctx: Ctx, nodeId: string, error: string | n
   const held = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.nodeId, nodeId), eq(programOperatorCases.reason, NODE), eq(programOperatorCases.recoveryHold, true)));
   for (const row of held) await lift(ctx, row, { outcome: 'writes_again', text: 'The node writes its work folder again, so the turns that waited go on.' });
 }
-export { nodesOnHold, NODE, workErrorsOf, workErrors, keptBeforeStart } from './start-holds.js';
+export { nodesOnHold, keptBeforeStart } from './start-holds.js';

@@ -7,7 +7,7 @@ import { agents, attachments, companyPhones, jobs, phoneFrames, phoneSessions, t
 import { ApiError } from '../../errors.js';
 import { checkRoom } from '../tasks/file-policy.js';
 import { pictureType } from '../tasks/attachments.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask } from '../tasks/visibility.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { finishPhoneSession } from './queue.js';
 import { phoneById, phoneDenied, phoneMissing, phoneOwner, type PhoneSession } from './store.js';

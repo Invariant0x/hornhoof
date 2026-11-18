@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { requireDepartmentHad } from '../../auth/departments.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 import { scheduleBacklog } from '../tasks/turns.js';
 import { wakeAll } from '../tasks/wake.js';
 import { addBacklogItem, backlogChanged, listBacklog, removeBacklogItem, reorderBacklog } from './store.js';

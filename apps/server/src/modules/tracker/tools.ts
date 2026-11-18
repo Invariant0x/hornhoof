@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { agents, goals, GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { refuse, taskSpot, type Task } from '../tasks/state.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask } from '../tasks/visibility.js';
 import { taskByRef } from '../tasks/lookup.js';
 import { catalogRoute, type Grant } from '../templates/load.js';
 import type { ToolJob } from '../tools/job.js';

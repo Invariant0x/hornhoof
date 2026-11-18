@@ -15,7 +15,7 @@ import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Pers
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { resolveStuck } from './stuck.js';
@@ -33,7 +33,8 @@ import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
-import { actsOnTask, detailFor, factsFor, linesFor, seesTask } from './sight.js';
+import { actsOnTask, seesTask } from './visibility.js';
+import { detailFor, factsFor, linesFor } from './sight.js';
 import { acknowledgeCard, waitCards } from './wait-cards.js';
 import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';

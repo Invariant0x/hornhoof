@@ -1,3 +1,4 @@
+import { taskFor, logName, type Run } from './run-records.js';
 import { WORK_MEMORY_GB, TEST_MINUTES, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
@@ -8,7 +9,7 @@ import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodeHeld } from '../updates/drain.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type ExternalWait, type LostRun } from '../../db/schema.js';
+import { agents, attachments, companies, departments, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type ExternalWait, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
@@ -20,7 +21,6 @@ import { note, published } from '../tasks/events.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
 import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
-import { taskByRef } from '../tasks/lookup.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
@@ -34,7 +34,6 @@ import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reu
 import { keepPartTimings } from './timings.js';
 import { heldMachines, holdsBuiltin, holdsMachine } from '../network/follow.js';
 import { builtinName } from '../nodes/builtin.js';
-type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
 type Department = typeof departments.$inferSelect;
 type Repo = NonNullable<Workspace['repo']>;
@@ -68,9 +67,6 @@ const toolsOf = (kind: RunKind) => (kind === 'work' ? { state: 'work_run', stop:
 
 /* Where an agent reads a run again, part by part. */
 const readAgain = (run: Pick<Run, 'kind' | 'number'>) => `${toolsOf(run.kind).state} ${run.number} shows it part by part.`;
-
-/* The files of a run on its task: each part's log, and what a part of work made. */
-export const logName = (run: Pick<Run, 'kind' | 'number'>, part: number) => `${run.kind}-${run.number}-${part}.log`;
 export const madeName = (run: Pick<Run, 'number'>, part: number, name: string) => `work-${run.number}-${part}-${name}`;
 const filesOf = (run: Pick<Run, 'kind' | 'number'>) => like(attachments.name, `${run.kind}-${run.number}-%`);
 export const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
@@ -626,19 +622,6 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
 export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
 
-/* The task a run is for: the one named, else the one the turn is on. */
-export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
-  if (ref === undefined) {
-    const [turn] = await ctx.db.select(only(jobs, 'taskId')).from(jobs).where(eq(jobs.id, job.id));
-    const [task] = turn?.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, turn.taskId)) : [];
-    if (!task) throw refuse(400, 'task_invalid', `This turn is on no task: name the task ${kind === 'work' ? 'the work is for' : 'whose branch to test'} with task.`);
-    return task;
-  }
-  const task = await taskByRef(ctx, job.companyId, ref);
-  if (!task || !onTask(job, task)) throw refuse(404, 'task_unknown', `There is no task ${ref} you work on.`);
-  return task;
-}
-
 /* The department whose people's machines may take a run without a repository of its own. */
 const taskDepartment = async (ctx: Ctx, task: Pick<Task, 'productId' | 'departmentId'>, kind: RunKind) =>
   (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
@@ -987,3 +970,4 @@ function sameRunTarget(run: Run, target: Awaited<ReturnType<typeof targetOf>>): 
   return scope.companyId === run.companyId && scope.repositoryOwnerId === target.department.id && scope.repoUrlHash === hashToken(target.repo.url);
 }
 export { WORK_MEMORY_GB, TEST_MINUTES, TEST_MINUTES_MAX, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
+export { taskFor, logName } from './run-records.js';

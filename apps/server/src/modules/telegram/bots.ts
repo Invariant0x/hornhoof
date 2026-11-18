@@ -8,7 +8,7 @@ import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from
 import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { fileLink } from '../assistants/files.js';
-import { turnGoingOn } from '../conversation/queue.js';
+import { turnGoingOn } from '../conversation/turn-records.js';
 import { publicUrl } from '../link/link.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';

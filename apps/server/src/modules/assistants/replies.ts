@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, assistantReplies, jobs, type AssistantEventKind } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import type { MessagePicture } from '../conversation/pictures.js';
-import { turnGoingOn } from '../conversation/queue.js';
+import { turnGoingOn } from '../conversation/turn-records.js';
 import { publicUrl } from '../link/link.js';
 import { storeEvent } from './events.js';
 import { fileLink } from './files.js';

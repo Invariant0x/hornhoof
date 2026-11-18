@@ -1,10 +1,12 @@
-import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
+import { recoveryHolds } from './recovery-state.js';
+import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { conversationOf, liveSubscription } from '../conversation/placement.js';
-import { insertTurn, NoSubscription, turnGoingOn } from '../conversation/queue.js';
+import { insertTurn } from '../conversation/queue.js';
+import { NoSubscription, turnGoingOn } from '../conversation/turn-records.js';
 import { GONE_ALONG, STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import type { MessageParty } from '../events/parties.js';
@@ -12,7 +14,6 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { repeatWake, type TaskWake } from '../tasks/wake-state.js';
 import { operatorTransaction } from './transactions.js';
 import { notStep } from '../tools/steps.js';
-
 type Case = typeof programOperatorCases.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 /* How a hold ended. A closed case proves a recovery only with its continuation: the outcome says which it was. */
@@ -37,17 +38,8 @@ export async function runsATurn(ctx: Ctx, agentId: string): Promise<boolean> {
   return Boolean(running);
 }
 
-export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
-  return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
-}
-
 export async function operatorHandledFailure(ctx: Ctx, jobId: string): Promise<boolean> {
   return recoveryHolds(ctx, eq(programOperatorCases.jobId, jobId));
-}
-
-async function recoveryHolds(ctx: Ctx, scope: SQL): Promise<boolean> {
-  const [held] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(scope, eq(programOperatorCases.recoveryHold, true))).limit(1);
-  return Boolean(held);
 }
 
 /* The case of a failed turn whose words the program never recorded, with what they went out by. A stopped turn says nothing
@@ -235,3 +227,4 @@ export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: s
     }
   });
 }
+export { operatorRecoveryHolds } from './recovery-state.js';

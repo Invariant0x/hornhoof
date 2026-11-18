@@ -1,5 +1,5 @@
 import { type Route } from './route-records.js';
-import { turnCleanupDefault } from './echelons-update.js';
+import { turnCleanupDefault } from './cleanup-policy.js';
 import type { EchelonStep } from '@hornhoof/protocol/echelons';
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';

@@ -6,7 +6,7 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
-import { agentProgramState, signInTurn } from './silent.js';
+import { agentProgramState, signInTurn } from './program-state.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
 

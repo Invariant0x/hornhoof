@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, subscriptions, tasks, type jobs } from '../../db/schema.js';
 import { publishWorking } from '../events/store.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
-import { agentProgramState, clearTurnProgram } from './silent.js';
+import { agentProgramState, clearTurnProgram } from './program-state.js';
 import { recordStale, repeatWake } from './wake-state.js';
 
 /* The same policy that discards queued wakes also stops obsolete running work before a restart or an alarm. */

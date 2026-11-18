@@ -14,8 +14,8 @@ await prepareApp();
 
 /* Which employees' lanes were asked for, in order: a change to an employee waits in its lane while another is written. */
 const lanes = vi.hoisted(() => [] as string[]);
-vi.mock('../src/modules/conversation/queue.js', async importOriginal => {
-  const real = await importOriginal<typeof import('../src/modules/conversation/queue.js')>();
+vi.mock('../src/modules/conversation/line.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/modules/conversation/line.js')>();
   return { ...real, onAgent: ((ctx, agentId, fn) => { lanes.push(agentId); return real.onAgent(ctx, agentId, fn); }) as typeof real.onAgent };
 });
 

@@ -11,7 +11,8 @@ import { queuedRunState } from '../nodes/check-slot-view.js';
 import { repoAt } from '../departments/repository.js';
 import { harnessState } from './harness.js';
 import { FULL_RUN_MINUTES } from './describe.js';
-import { startRun, stopRun, taskFor } from './runs.js';
+import { startRun, stopRun } from './runs.js';
+import { taskFor } from './run-records.js';
 import { TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './constants.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });

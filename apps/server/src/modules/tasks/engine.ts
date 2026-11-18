@@ -1223,10 +1223,10 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   }
   return wakes;
 }
-export { CLOSED, SILENT_TURNS, GOING_ON_TURNS, COMMIT, STATUS_CODES, refuse, notYours, loadTask, stillOpen, joined, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, workingAgent, requireOwner, mayAsk, requestSubject } from './state.js';
-export type { Task, Request, Actor, WakeWhy, Wake, Moved, Tx, Live } from './state.js';
-export { actorColumns, note, ownNote, published, NOT_A_MOVE, lastMove, uncountedSinceMove } from './events.js';
-export type { Note } from './events.js';
-export { move, lockMovePrerequisites, refuseCircle, lockClosingParent, doneWhole, refuseOpenUnder, statusNoted, givesBack, letStuckGo, workUnderDone, startAfter, comingAfter, linesMoved } from './transitions.js';
+export { CLOSED, SILENT_TURNS, GOING_ON_TURNS, refuse, loadTask, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, mayAsk, requestSubject } from './state.js';
+export type { Task, Request, Actor, WakeWhy, Wake, Moved, Tx } from './state.js';
+export { note, ownNote, published, NOT_A_MOVE, lastMove, uncountedSinceMove } from './events.js';
+
+export { move } from './transitions.js';
 export { startWork } from './progress.js';
-export { comment, logComment, commentWakes, unblockByComment, gaveOut, openedByComment, NEW_PIECE, resumeByComment } from './comments.js';
+export { comment } from './comments.js';

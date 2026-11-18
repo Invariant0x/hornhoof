@@ -11,7 +11,8 @@ import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
-import { clearNodeWords, holdForWords, limitUntil, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
+import { clearNodeWords, holdForWords, pump, pumpWaiting, startProgram, wordsSettled } from '../conversation/queue.js';
+import { limitUntil, refusedLimits } from '../conversation/limits.js';
 import { nodeOfAgent } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { workStarts } from '../org/map-state.js';
@@ -520,4 +521,4 @@ async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Pr
   }
 }
 export { jobsOf } from './jobs.js';
-export { failOpenJobs, completionValue, cutOf } from './job-failures.js';
+export { failOpenJobs } from './job-failures.js';

@@ -22,7 +22,7 @@ import { jobOf, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './state.js';
-import { seesTask } from './sight.js';
+import { seesTask } from './visibility.js';
 import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 const PER_TURN = 30;
@@ -488,6 +488,6 @@ async function uploadValues(db: Db, jobId: string) {
   if (!values && await sensitiveTurn(db, jobId, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
   return values;
 }
-export { PICTURE_BYTES, FILE_BYTES, TASK_FILES_BYTES, GB, sizeText, ELSEWHERE, smallerRoom, checkUploadRoom, companyFull, companyRoom, checkPictureRoom, checkRoom, onTask } from './file-policy.js';
+export { PICTURE_BYTES, FILE_BYTES, TASK_FILES_BYTES, checkPictureRoom, checkRoom, onTask } from './file-policy.js';
 export type { UploadRoom } from './file-policy.js';
 export { onDisk, filesOf, commitUrl, picturesOf } from './file-views.js';

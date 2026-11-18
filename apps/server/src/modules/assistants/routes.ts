@@ -12,7 +12,7 @@ import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { AgentRow } from '../agents/find.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
-import { agentState } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
 import { checkPictureRoom } from '../tasks/file-policy.js';
