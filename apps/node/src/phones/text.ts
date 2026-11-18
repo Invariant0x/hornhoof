@@ -63,9 +63,12 @@ export function checkPhoneText(before: string, after: string, input: string): Ph
   const observed = [...normalize(readback.text)];
   const wanted = [...normalize(input)];
   if (field.text === readback.text) return { kind: 'typing_unverified' };
+  if (observed.join('') === wanted.join('')) return undefined;
 
   const prefix = matchingEdge(initial, observed);
   const suffix = matchingEdge(initial.toReversed(), observed.toReversed());
+  // An empty field reports its hint as its text. The hint is gone after typing, so compare with the whole field.
+  if (prefix + suffix < initial.length) return missingText(wanted, observed);
   const added = observed.length - initial.length;
   if (added === wanted.length) {
     // Repeated text can leave several possible insertion positions.

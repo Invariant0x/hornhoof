@@ -123,7 +123,8 @@ describe('phone messages on the execution node', () => {
     await p.act(8, { kind: 'text', text: 'Pass word 1079!' });
     expect(p.shells()).toEqual(['input tap 827 1454\n', "set -e\ninput text 'nora@acme.test'\nsleep 0.06\n", "set -e\ninput text 'Pass%sword%s1079!'\nsleep 0.06\n"]);
     expect(p.reply(6)?.status).toBe('ok');
-    expect(p.reply(8)).toMatchObject({ status: 'failed', typing: { kind: 'typing_unverified' } });
+    // The password went in; the field shows only dots, so the reply says it was not verified without calling it a failure.
+    expect(p.reply(8)).toMatchObject({ status: 'ok', typing: { kind: 'typing_unverified' } });
     p.phones.close();
   });
 
@@ -151,13 +152,28 @@ describe('phone messages on the execution node', () => {
   });
 
   it.each([
-    ['', 'typing_unverified'],
-    ['unexpected', 'typing_mismatch'],
-  ])('reports the outcome when the readback is "%s"', async (after, kind) => {
+    ['What do you want to talk about?', 'Is it?', 'Is it?', undefined],
+    ['Write a comment', 'Wow', 'Wow', undefined],
+    ['Search', 'Searching', 'Searching', undefined],
+    ['What do you want to talk about?', 'Is t?', 'Is it?', [{ start: 3, count: 1 }]],
+  ])('compares the whole field with the typed text when an empty field showed its hint "%s"', async (hint, after, text, missing) => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField(hint), editableField(after)] });
+    await p.open();
+    await p.act(6, { kind: 'text', text });
+    if (missing) expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_dropped', missing } });
+    else expect(p.reply(6)).toMatchObject({ status: 'ok' });
+    if (!missing) expect(p.reply(6)?.typing).toBeUndefined();
+    p.phones.close();
+  });
+
+  it.each([
+    ['', 'typing_unverified', 'ok'],
+    ['unexpected', 'typing_mismatch', 'failed'],
+  ])('reports the outcome when the readback is "%s"', async (after, kind, status) => {
     const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField(''), editableField(after)] });
     await p.open();
     await p.act(6, { kind: 'text', text: 'intended' });
-    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind } });
+    expect(p.reply(6)).toMatchObject({ status, typing: { kind } });
     p.phones.close();
   });
 

@@ -129,7 +129,8 @@ export class PhoneExecutor {
       });
       const state = this.#sessions.view(m.sessionId, m.generation);
       if (result.capture) this.emitFrame(state.grant, result.capture);
-      return reply(result.typing ? 'failed' : 'ok', result);
+      // Text that went in but could not be read back is not a failure: typing it again would double a password.
+      return reply(result.typing && result.typing.kind !== 'typing_unverified' ? 'failed' : 'ok', result);
     } catch (error) {
       if (m.operation.kind !== 'text' || error instanceof PhoneDeviceChanged || await this.textSessionGone(m)) return reply('session_gone');
       const reason = error instanceof Error && error.message === 'phone_keyboard_unavailable' ? 'phone_keyboard_unavailable' : 'phone_adb_failed';
