@@ -1,16 +1,11 @@
 import { appendFileSync, chmodSync, existsSync, lchownSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ServerMessage } from '@hornhoof/protocol';
-import { adapterFor } from './providers/index.js';
-import type { ProviderAdapter } from './runner.js';
 import { OUTBOX_FILE } from './outbox.js';
 
 /* The built-in node runs every company key's jobs under a Linux user of its own, so one key's agent never reads another's folders or the node's env. */
 
 export type JobUser = { uid: number; gid: number };
 export const FIRST_UID = 20000;
-
-type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
 export const isRootUser = () => process.getuid?.() === 0;
 
@@ -130,27 +125,4 @@ export function ensurePasswd(user: JobUser, home: string, files: SystemFiles = S
   const name = `hh${user.uid}`;
   if (!hasId(files.passwd, user.uid)) appendLine(files.passwd, `${name}:x:${user.uid}:${user.gid}:Hornhoof agent:${home}:/bin/bash`);
   if (!hasId(files.group, user.gid)) appendLine(files.group, `${name}:x:${user.gid}:`);
-}
-
-type BuiltinOptions = { isRoot?: boolean; ops?: FolderOps; files?: SystemFiles };
-
-/* The built-in node's adapter for a job: a user and home of its own for each agent, in agents/<key>, and for a key's test
-   jobs in subs/<id>, and a work folder handed to that user. A company key needs no sign-in to share, so agents of one key
-   never read each other's tool tokens. */
-export function builtinAdapters(dir: string, tools: string, { isRoot = isRootUser(), ops = REAL_OPS, files = SYSTEM_FILES }: BuiltinOptions = {}) {
-  return (job: JobRun): ProviderAdapter => {
-    const agent = job.workspace?.key ?? null;
-    const user = userFor(dir, agent ? `agent:${agent}` : job.subscriptionId, isRoot);
-    const home = prepareFolder(agent ? join(dir, 'agents', agent) : join(dir, 'subs', job.subscriptionId), user, ops);
-    if (user) ensurePasswd(user, home, files);
-    const adapter = adapterFor(job.provider, { home, tools, user, api: job.api ?? null });
-    return {
-      ...adapter,
-      owner: { user, home, prepare: path => void prepareFolder(path, user, ops) },
-      run: input => {
-        prepareFolder(input.workDir, user, ops);
-        return adapter.run(input);
-      },
-    };
-  };
 }

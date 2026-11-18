@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { agentUser, builtinAdapters, ensurePasswd, FIRST_UID, prepareFolder, secureNode, userFor, type FolderOps } from '../src/isolation.js';
+import { agentUser, ensurePasswd, FIRST_UID, prepareFolder, secureNode, userFor, type FolderOps } from '../src/isolation.js';
+import { builtinAdapters } from '../src/providers/index.js';
 import { claudeAdapter } from '../src/providers/claude.js';
 import { codexAdapter } from '../src/providers/codex.js';
 import { kimiAdapter } from '../src/providers/kimi.js';

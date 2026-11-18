@@ -1,5 +1,6 @@
-import type { ApiEndpoint, ProviderId } from '@hornhoof/protocol';
-import type { JobUser } from '../isolation.js';
+import { join } from 'node:path';
+import type { ApiEndpoint, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import { ensurePasswd, isRootUser, prepareFolder, userFor, type FolderOps, type JobUser, type SystemFiles } from '../isolation.js';
 import type { ProviderAdapter } from '../runner.js';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
@@ -64,5 +65,29 @@ function noAddress(): ProviderAdapter {
     login: async () => {},
     run: async () => ({ ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null }),
     secrets: async () => [],
+  };
+}
+
+type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+type BuiltinOptions = { isRoot?: boolean; ops?: FolderOps; files?: SystemFiles };
+
+/* The built-in node's adapter for a job: a user and home of its own for each agent, in agents/<key>, and for a key's test
+   jobs in subs/<id>, and a work folder handed to that user. A company key needs no sign-in to share, so agents of one key
+   never read each other's tool tokens. */
+export function builtinAdapters(dir: string, tools: string, { isRoot = isRootUser(), ops, files }: BuiltinOptions = {}) {
+  return (job: JobRun): ProviderAdapter => {
+    const agent = job.workspace?.key ?? null;
+    const user = userFor(dir, agent ? `agent:${agent}` : job.subscriptionId, isRoot);
+    const home = prepareFolder(agent ? join(dir, 'agents', agent) : join(dir, 'subs', job.subscriptionId), user, ops);
+    if (user) ensurePasswd(user, home, files);
+    const adapter = adapterFor(job.provider, { home, tools, user, api: job.api ?? null });
+    return {
+      ...adapter,
+      owner: { user, home, prepare: path => void prepareFolder(path, user, ops) },
+      run: input => {
+        prepareFolder(input.workDir, user, ops);
+        return adapter.run(input);
+      },
+    };
   };
 }
