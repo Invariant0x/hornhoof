@@ -1,8 +1,8 @@
-import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
+import type { CheckLeaseSnapshot, CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
 import { and, desc, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, nodes, machines, testParts, type RestartCause } from '../../db/schema.js';
-import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
+import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity, type NodeTransport } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator, checkPartId, type CheckSnapshot } from './check-slots-queue.js';
@@ -19,13 +19,16 @@ function queueFor(ctx: Ctx): CheckCoordinator {
   return queue;
 }
 
-export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity): Promise<void> {
+export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity, snapshot?: CheckLeaseSnapshot, transport?: NodeTransport): Promise<void> {
   const load = ctx.hub.loadOf(id);
   if (!load) return;
   const fallback = await machineKey(ctx, id);
   if (!fallback) return;
+  // A handler can finish after a newer socket has replaced the one that sent this snapshot.
+  if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
   const host = load.host && /^[0-9a-f]{64}$/.test(load.host) ? `host:${load.host}` : fallback;
-  queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at });
+  const checkLeases = snapshot && { ...snapshot, receivedAt: transport?.receivedAt ?? load.at, linkId: transport?.linkId };
+  queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at, checkLeases });
 }
 
 /* The computer a node's checks share their slots on. A built-in node of another machine than this server's is on that

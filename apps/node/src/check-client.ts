@@ -12,6 +12,8 @@ export class CheckClient {
   private refusal: string | null = null;
   refusalChanged: (() => void) | undefined;
   isOnline(): boolean { return this.connected; }
+  /* Pending claims can be granted at any time. Aborted holders still own their slot during cleanup. */
+  leaseIds(): string[] { return [...this.entries.keys()]; }
   refused(): string | null { return this.refusal; }
   refuse(reason: string | null): void {
     if (reason === this.refusal) return;
@@ -22,7 +24,7 @@ export class CheckClient {
     this.refusalChanged?.();
   }
   private readonly entries = new Map<string, Pending>();
-  /* Leases let go while the node was away, which the server hears of once it is back. */
+  /* Releases that did not reach the server, retried when the socket reopens. */
   private readonly letGo = new Set<string>();
   private away: NodeJS.Timeout | undefined;
   constructor(private readonly send: (frame: CheckQueueRequest) => boolean, private readonly graceMs = CHECK_LEASE_MS) {}
@@ -44,13 +46,12 @@ export class CheckClient {
 
   private back(): void {
     clearTimeout(this.away); this.away = undefined;
-    for (const id of this.letGo) this.send({ type: 'check.release', id });
-    this.letGo.clear();
+    for (const id of this.letGo) if (this.sendRelease(id)) this.letGo.delete(id);
     for (const [id, entry] of this.entries) if (!entry.stop.signal.aborted) this.publish(id, entry, { ...entry.frame, resume: true } as CheckQueueRequest);
   }
 
   private gone(): void {
-    this.away = undefined; this.letGo.clear();
+    this.away = undefined;
     for (const [id, entry] of this.entries) this.lost(id, entry);
   }
 
@@ -74,7 +75,7 @@ export class CheckClient {
 
   private publish(id: string, entry: Pending, frame: CheckQueueRequest): void {
     try { if (!this.send(frame)) this.lost(id, entry); }
-    catch (error) { entry.detach(); this.entries.delete(id); entry.stop.abort(error); entry.reject(error); }
+    catch (error) { this.lost(id, entry, error); }
   }
 
   receive(reply: CheckQueueReply): void {
@@ -101,12 +102,16 @@ export class CheckClient {
     const entry = this.entries.get(id);
     if (!entry) return;
     entry.detach(); this.entries.delete(id);
-    if (this.connected) this.send({ type: 'check.release', id });
-    else if (this.away) this.letGo.add(id);
+    const sent = this.connected && this.sendRelease(id);
+    if (!sent) this.letGo.add(id);
   }
 
-  private lost(id: string, entry: Pending): void {
-    const reason = new Error('Machine check queue lease was lost.');
+  private sendRelease(id: string): boolean {
+    try { return this.send({ type: 'check.release', id }); }
+    catch { return false; }
+  }
+
+  private lost(id: string, entry: Pending, reason: unknown = new Error('Machine check queue lease was lost.')): void {
     entry.stop.abort(reason); entry.detach();
     if (entry.state === 'queued') { this.entries.delete(id); entry.reject(reason); }
   }

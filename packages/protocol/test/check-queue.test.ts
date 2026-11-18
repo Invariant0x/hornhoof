@@ -16,4 +16,14 @@ describe('check admission measured CPU budget', () => {
     expect(parseNodeMessage(JSON.stringify(request))).toEqual(request);
     expect(parseServerMessage(JSON.stringify(reply))).toEqual(reply);
   });
+  it('carries optional check snapshots outside the machine load and tolerates older or invalid reports', () => {
+    const load = { cpus: 1, load: 0, memFree: 1, memTotal: 2, tests: 0, jobs: 0 };
+    const checkLeases = { sequence: 1, ids: ['10000000-0000-4000-8000-000000000001'] };
+    const hello = { type: 'hello', version: '0.34.0', loggedIn: true, running: [], load, checkLeases };
+    const reporting = { type: 'load', ...load };
+    expect(parseNodeMessage(JSON.stringify(hello))).toMatchObject({ load, checkLeases });
+    expect(parseNodeMessage(JSON.stringify({ ...reporting, checkLeases }))).toEqual({ ...reporting, checkLeases });
+    expect(parseNodeMessage(JSON.stringify(reporting))).toEqual(reporting);
+    expect(parseNodeMessage(JSON.stringify({ ...reporting, checkLeases: { ...checkLeases, ids: ['invalid'] } }))).toEqual(reporting);
+  });
 });

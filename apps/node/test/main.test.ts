@@ -1240,12 +1240,15 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {}, loadMs: 40 });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    expect(server.received[0]!.load).toMatchObject({ cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 });
+    expect(server.received[0]).toMatchObject({
+      load: { cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 },
+      checkLeases: { sequence: 1, ids: [] },
+    });
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.started'));
     await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
-    expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
+    expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0, checkLeases: { sequence: 2, ids: [] } });
     /* It runs no programs in terminals, so it names none. */
     expect(server.received.filter(m => m.type === 'hello' || m.type === 'load').every(m => !('live' in m))).toBe(true);
     server.send({ type: 'job.cancel', jobId: 'j1' });
