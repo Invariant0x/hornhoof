@@ -9,6 +9,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 - The selected department uses the full sidebar row, and department, pipeline, and board card text wraps at spaces when possible.
 - The board shows Failures and Stopped columns only when they have tasks and keeps each person's name together when it fits.
+- In Turns and releases, each question button sits directly under its task's wait time.
+- Wait lines name the person before the elapsed time and show only the time when the status already says the task waits for you.
 - Task lists, boards, cards, and turns show who needs to act, what work is running, when a timer fires, and why work failed.
 - The tracker counts failures separately and counts each task needing your answer once.
 - Tracker boards keep all columns in one row when they fit and stack every column in order when space runs short.

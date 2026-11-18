@@ -75,7 +75,7 @@ it('shows typed waits for tasks and people and the other department that needs t
     time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'after', who: null, reason: '#267', since }] } });
   list([blocker, waiting]);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  expect(within(row).getByText('Waits for Max for 3 days')).toHaveClass('tr-wait');
+  expect(within(row).getByText('Waits for Max, 3 days')).toHaveClass('tr-wait');
   expect(within(row).getByText('needed for #413 Sales')).toBeInTheDocument();
   expect(row).not.toHaveTextContent('waits for Luisa');
   expect(within(screen.getByRole('listitem', { name: '#413 Send' })).getByText('After #267')).toHaveClass('tr-relation');

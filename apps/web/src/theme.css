@@ -1717,14 +1717,15 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 /* Related tasks and the goals of a release in one short line each: state, title, who has it. */
 .goal-rows { display: grid; margin: 0; padding: 0; list-style: none; min-width: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .goal-subs > .goal-row { padding-inline: 8px; }
-.goal-row { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); align-items: center; gap: 2px 10px; min-width: 0; min-height: 44px; padding: 6px 12px; }
+.goal-row { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); align-items: start; gap: 10px; min-inline-size: 0; min-block-size: 44px; padding: 6px 12px; }
 .goal-row.on { outline: 1px solid var(--cyan); outline-offset: -1px; }
-.goal-row > .tstate { grid-row: span 2; }
-.goal-row-title { justify-self: start; color: var(--ink); font-weight: 500; text-align: start; overflow-wrap: anywhere; }
+.goal-rows > .goal-row + .goal-row { border-block-start: 1px solid var(--line); }
+.goal-row-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-inline-size: 0; overflow-wrap: break-word; }
+.goal-row-title { justify-self: start; min-inline-size: 0; margin: 0; color: var(--ink); font-weight: 500; text-align: start; overflow-wrap: inherit; }
 .goal-row-title:hover { color: var(--cyan-ink); }
-.goal-row-who { grid-column: 2; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.goal-row > .tr-wait { grid-column: 2; }
-.goal-row-actions { grid-column: 1 / -1; }
+.goal-row-who { font-size: 12px; color: var(--muted); }
+.goal-row-main .tr-wait { overflow-wrap: inherit; }
+.goal-row-main .goal-row-actions { justify-content: flex-start; margin-block-start: 4px; }
 .goal-row-title:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* Turns and releases: releases or the work outside them, and the closed releases as one folded line each. */
 /* The three views as three equal tabs on any screen, a long name wrapping inside its own tab. */

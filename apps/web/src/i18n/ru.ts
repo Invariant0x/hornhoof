@@ -2070,10 +2070,10 @@ export const ru: Messages = {
     noGoal: 'Без цели',
     late: (day: string) => `${day}, срок прошел`,
     wait: {
-      person: (name, span) => `Ждет ${span} (${name})`,
+      person: (name, span) => `Ждет ${name} ${span}`,
       you: span => `Ждет вас ${span}`,
-      someone: 'нужен человек',
-      ceo: 'нужен руководитель компании',
+      someone: 'человека',
+      ceo: 'руководителя компании',
       question: 'Открыть вопрос',
       after: task => `После ${task || 'другой задачи'}`,
       review: name => name ? `Идет проверка (${name})` : 'Идет проверка',

@@ -40,18 +40,21 @@ function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
+  const status = goalStatus(goal, asking?.id === task.id);
   return (
     <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
-      <StateWord status={goalStatus(goal, asking?.id === task.id)} />
-      <button className="linkish goal-row-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-      <span className="goal-row-who">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
-      <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} />
-      {(asking || goal.children.length > 0) && (
-        <div className="entry-actions goal-row-actions">
-          {asking ? <QuestionButton onOpen={() => rows.onOpenTask(asking.id)} />
-            : <button className="act" type="button" onClick={() => rows.onOpenTask(task.id)}>{t.tasks.board.openTask}</button>}
-        </div>
-      )}
+      <StateWord status={status} />
+      <div className="goal-row-main">
+        <button className="linkish goal-row-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+        <span className="goal-row-who">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
+        <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
+        {(asking || goal.children.length > 0) && (
+          <div className="entry-actions goal-row-actions">
+            {asking ? <QuestionButton onOpen={() => rows.onOpenTask(asking.id)} />
+              : <button className="act" type="button" onClick={() => rows.onOpenTask(task.id)}>{t.tasks.board.openTask}</button>}
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -88,7 +91,7 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
         <span>{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
         <span>{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
       </div>
-      <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} />
+      <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
       {goal.total > 0 && <Progress done={goal.done} total={goal.total} label={t.tasks.board.progress(goal.done, goal.total)} />}
       {goal.children.length > 0 && (
         <>

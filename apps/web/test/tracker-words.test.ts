@@ -37,7 +37,7 @@ describe('what a task is waiting for', () => {
   const reviewer = { kind: 'agent', id: 'hana', name: 'Hana' } as const;
 
   it.each([
-    ['person', person, null, 'Waits for Иван Король for 20 minutes', 'Ждет 20 минут (Иван Король)'],
+    ['person', person, null, 'Waits for Иван Король, 20 minutes', 'Ждет Иван Король 20 минут'],
     ['after', owner, '#42', 'After #42', 'После #42'],
     ['review', reviewer, null, 'Hana is reviewing', 'Идет проверка (Hana)'],
     ['review', owner, null, 'Review in progress', 'Идет проверка'],

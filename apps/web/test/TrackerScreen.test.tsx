@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine } from '../src/types';
@@ -584,6 +584,56 @@ it('shows a failed run in Turns with the full task title and no question action'
   expect(within(row).getByText('Test run 12 failed: Machine unavailable')).toHaveClass('failure');
   expect(within(row).queryByRole('button', { name: 'Open question' })).toBeNull();
   expect(row).not.toHaveTextContent('Waits');
+});
+
+const loginDecisions = decisions([{
+  id: 'login-question', text: 'Which route?', kind: 'question', task: LOGIN, ownerPersonId: IVAN.id, canAnswer: true,
+  agent: BRUNO, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt,
+}]);
+
+it('keeps a question action with its title and wait in Turns', async () => {
+  const user = userEvent.setup();
+  shell('/tasks?show=turns', {
+    'GET /api/tasks?status=all': [200, { tasks: [{ ...LOGIN, turn: TURN.number }, { ...PAY, turn: TURN.number }] }],
+    'GET /api/turns': [200, { turns: [TURN] }],
+    'GET /api/tasks/t24': [200, { task: detail(LOGIN) }],
+    'GET /api/requests': [200, loginDecisions],
+  });
+  const record = await screen.findByRole('listitem', { name: '#24 Fix the login page' });
+  const title = within(record).getByRole('button', { name: LOGIN.title });
+  const question = await within(record).findByRole('button', { name: 'Open question' });
+  const text = title.parentElement;
+  expect(text).not.toBe(record);
+  expect(text).toContainElement(record.querySelector('.tr-wait'));
+  expect(text).toContainElement(question);
+  expect(within(rowOf(screen.getByRole('region', { name: 'Turns and releases' }), '#21 Take card payments')).queryByRole('button', { name: 'Open question' })).toBeNull();
+  await user.click(question);
+  expect(await card('#24 Fix the login page')).toBeInTheDocument();
+});
+
+const waitLanguages = [
+  ['en', 'Waits for you', '49 minutes'],
+  ['ru', 'Ждет вас', '49 минут'],
+] as const;
+
+it.each(waitLanguages.flatMap(words => [
+  ['Turns', '/tasks?show=turns', 'listitem', ...words] as const,
+  ['Board', '/tasks?department=d2&view=board', 'article', ...words] as const,
+]))('%s shows only elapsed time under the personal wait chip (%s)', async (_view, path, role, language, chip, duration) => {
+  localStorage.setItem('hh-lang', language);
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-13T08:49:00.000Z'));
+  try {
+    shell(path, {
+      'GET /api/tasks?status=all': [200, { tasks: [{ ...LOGIN, turn: TURN.number }] }],
+      'GET /api/turns': [200, { turns: [TURN] }],
+      'GET /api/requests': [200, loginDecisions],
+    });
+    const record = within(await screen.findByRole(role, { name: '#24 Fix the login page' }));
+    expect(await record.findByText(chip, { exact: true })).toHaveClass('tstate');
+    expect(record.getByText(duration, { exact: true })).toHaveClass('tr-wait');
+  } finally {
+    now.mockRestore();
+  }
 });
 
 it('keeps complete names together inside board facts', async () => {

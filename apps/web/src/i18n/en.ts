@@ -2074,7 +2074,7 @@ export const en = {
     noGoal: 'No goal',
     late: (day: string) => `${day}, late`,
     wait: {
-      person: (name: string, span: string) => `Waits for ${name} for ${span}`,
+      person: (name: string, span: string) => `Waits for ${name}, ${span}`,
       you: (span: string) => `Waits for you for ${span}`,
       someone: 'a person',
       ceo: 'the CEO',

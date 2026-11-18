@@ -12,12 +12,17 @@ export function StateWord({ status }: { status: HumanStatus }) {
   return <span className={`tstate ${STATE_CLASS[status]}`}>{t.tracker.groups[status]}</span>;
 }
 
-export function WaitLine({ task, asksYou = false, questionAt }: { task: WaitTask; asksYou?: boolean; questionAt?: string }) {
+export function WaitLine({ task, asksYou = false, questionAt, hasStatus = false }: { task: WaitTask; asksYou?: boolean; questionAt?: string; hasStatus?: boolean }) {
   const t = useT();
   const { language } = useLanguage();
   const now = Date.now();
   const wait = taskWaits(task, now)[0];
-  if (asksYou && !wait?.failure && (wait?.kind !== 'person' || wait.event === 'ceo')) {
+  const personWait = wait?.kind === 'person' && wait.event !== 'ceo';
+  if (asksYou && hasStatus && !wait?.failure) {
+    const since = personWait ? wait.since : questionAt;
+    return since ? <small className="tr-wait person" dir="auto">{spanText(t, sinceSeconds(since, now))}</small> : null;
+  }
+  if (asksYou && !wait?.failure && !personWait) {
     if (!questionAt) return <small className="tr-wait person">{t.tracker.groups.waitingYou}</small>;
     return <small className="tr-wait person">{t.tracker.wait.you(spanText(t, sinceSeconds(questionAt, now)))}</small>;
   }

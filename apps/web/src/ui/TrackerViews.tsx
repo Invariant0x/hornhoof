@@ -193,7 +193,7 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
         <li dir="auto">{words.responsible} <bdi className="tr-card-person">{task.responsible?.name ?? t.tracker.nobody}</bdi></li>
         {due && <li className={due.late ? 'tp-late' : undefined} dir="auto">{words.due(due.text)}</li>}
         {tree.total > 0 && <li dir="auto">{words.subtasks(tree.done, tree.total)}</li>}
-        <li className="tr-card-activity"><WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} /></li>
+        <li className="tr-card-activity"><WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} hasStatus /></li>
         {task.urgent && <li><span className="badge urgent">{t.tracker.card.urgent}</span></li>}
       </ul>
       {asksYou && status !== 'done' && status !== 'cancelled' && <div className="entry-actions"><QuestionButton onOpen={() => rows.onOpenTask(task.id)} /></div>}
