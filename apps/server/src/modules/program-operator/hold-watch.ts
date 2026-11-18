@@ -1,7 +1,8 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programOperatorCases } from '../../db/schema.js';
-import { insertTurn, liveSubscription } from '../conversation/queue.js';
+import { insertTurn } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { operationsStaff } from './access.js';
 import { operatorNotification } from './notifications.js';
 import { operatorRecoveryHolds } from './recovery.js';

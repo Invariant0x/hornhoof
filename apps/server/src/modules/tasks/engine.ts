@@ -1,3 +1,4 @@
+import { move, refuseOpenUnder, statusNoted, letStuckGo, comingAfter } from './transitions.js';
 import { note, published, lastMove, type Note } from './events.js';
 import { CLOSED, SILENT_TURNS, GOING_ON_TURNS, COMMIT, refuse, notYours, loadTask, stillOpen, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, workingAgent, requireOwner, mayAsk, requestSubject, type Task, type Request, type Actor, type Wake, type Moved, type Tx, type Live } from './state.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
@@ -6,7 +7,7 @@ import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskH
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { writeEdit, type TaskEdit } from '../tracker/edit.js';
-import { followedStage, holdPipelines, holdPlace } from '../tracker/pipelines.js';
+import { holdPlace } from '../tracker/pipelines.js';
 import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
@@ -18,23 +19,23 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
-import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, endRoutes, skippedData, type Route } from './echelons-store.js';
+import { createRoute, departmentStages, documentCheck, skippedData } from './echelons-store.js';
+import { routeOf, changeRoute, cancelRoutes, endRoutes, type Route } from './route-records.js';
 import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel } from '@hornhoof/protocol';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
-import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause } from './notification-cause.js';
 import { captureReview } from './review-context.js';
@@ -44,29 +45,9 @@ import type { ReviewVerdict } from './review-verdict.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
-import { bindAfter, bindRequest, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
+import { bindAfter, bindRequest, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 import { stuckRecipient } from './stuck-route.js';
 import { removedEmployee, notifyUnfilledStages, replaceFutureOwners, type UnfilledStage } from './echelons-future.js';
-/* Work under a task that is still open: a task is done only once all of it is. */
-async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
-  const open = await db.select(only(tasks, 'number')).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
-  if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
-}
-
-/* Done means all of it: work under it still open would go on under a finished task, and the turn with it. A move that ends
-   the work under it itself is checked once what goes with it ran (ran true), any other before. */
-async function doneWhole(tx: Tx, task: Task, set: Partial<Task>, n: { endsWorkUnder?: true }, ran: boolean): Promise<void> {
-  if (set.status === 'done' && Boolean(n.endsWorkUnder) === ran) await refuseOpenUnder(tx, task);
-}
-
-/* The last child wakes its current parent owner; each executable child already owns its Review. */
-async function workUnderDone(tx: Tx, closed: Task, actorId: string | undefined): Promise<Wake[]> {
-  const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
-  if (!parent?.assigneeAgentId || CLOSED.includes(parent.status) || parent.assigneeAgentId === actorId) return [];
-  const [open] = await tx.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
-  return open || (await openAfter(tx, parent)).length ? [] : [{ agentId: parent.assigneeAgentId, taskId: parent.id, why: 'subtasks' }];
-}
-
 /* A task that still waits for what it comes after takes no work in for it. */
 async function refuseWaiting(db: Db | Tx, task: Task): Promise<void> {
   const open = await openAfter(db, task);
@@ -92,17 +73,6 @@ async function checkAfter(db: Db | Tx, companyId: string, ids: string[], hold = 
   return rows;
 }
 
-/* A task never waits for itself, also not through the tasks it comes after. */
-async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<void> {
-  const seen = new Set<string>();
-  let level = ids;
-  while (level.length) {
-    if (level.includes(task.id)) throw refuse(400, 'task_invalid', `#${task.number} would wait for itself through what it comes after.`);
-    const rows = await db.select(only(tasks, 'after')).from(tasks).where(inArray(tasks.id, level));
-    level = rows.flatMap(r => r.after).filter(id => !seen.has(id) && Boolean(seen.add(id)));
-  }
-}
-
 /* A task never waits for a task it is part of, however far up: that one is done only once the work under it is. */
 async function refuseAbove(db: Db | Tx, parentId: string | null, ids: string[]): Promise<void> {
   for (let id = ids.length ? parentId : null; id; ) {
@@ -126,123 +96,6 @@ async function refuseBelow(db: Db | Tx, task: Task, ids: string[]): Promise<void
 
 /* JSON lists of ids that hold any of these. */
 const holdsAny = (list: typeof tasks.after, ids: string[]) => sql`${list} ?| array[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::text[]`;
-
-/* The open tasks of the company that wait as said, in any turn or none, as a task may come after one of another
-   department's turn: the index on what tasks come after finds them, so the rest of the company's history is not read. */
-const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.companyId), waits, notInArray(tasks.status, [...CLOSED]));
-
-/* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
-   its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
-   open, so the waiting tasks are taken first and the second to be done sees the first. */
-async function startAfter(tx: Tx, done: Task, actor: Actor): Promise<{ wakes: Wake[]; rows: Task[] }> {
-  const waiting = await tx
-    .select()
-    .from(tasks)
-    .where(comingAfter([done], sql`${tasks.after} @> ${JSON.stringify([done.id])}::jsonb`))
-    .orderBy(asc(tasks.number))
-    .for('update');
-  const wakes: Wake[] = [];
-  const rows: Task[] = [];
-  for (const t of waiting) {
-    await endAfter(tx, t, done, actor);
-    if ((await openAfter(tx, t)).length) continue;
-    const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
-    const before = await tx.select(only(tasks, 'number')).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
-    await tx.insert(taskEvents).values({ companyId: t.companyId, taskId: t.id, kind: 'started', text: `${listed(before)} ${before.length === 1 ? 'is' : 'are'} done, so it starts now.` });
-    /* One that waits for a person's answer goes on with the answer. */
-    if (row!.assigneeAgentId && ['open', 'working'].includes(row!.status)) wakes.push({ agentId: row!.assigneeAgentId, taskId: row!.id, why: 'assigned' });
-    rows.push(row!);
-  }
-  return { wakes, rows };
-}
-
-/* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
-async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
-  if (!n.returned || !n.actor.agentId) return null;
-  return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
-}
-
-/* The map reads its lines again when one of them changed, in the company of what changed it. */
-function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
-  if (changed) ctx.bus.publish(changed.companyId, { type: 'org' });
-}
-
-async function lockMovePrerequisites(tx: Tx, task: Task, after: string[]): Promise<void> {
-  await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
-  await tx.select(idOnly(tasks)).from(tasks).where(inArray(tasks.id, after)).orderBy(asc(tasks.id)).for('share');
-  await refuseCircle(tx, task, after);
-}
-
-async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promise<void> {
-  if (!set.status || !CLOSED.includes(set.status) || !task.parentId) return;
-  if (!set.after?.length) await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
-  await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.id, task.parentId)).for('no key update');
-}
-
-/* A change of status says in its line of the log where it went from and to, so the history tells how long each lasted. */
-const statusNoted = (n: Note, from: Task['status'], to: Task['status']): Note => (from === to ? n : { ...n, data: { ...n.data, fromStatus: from, toStatus: to } });
-
-/* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
-/* wakes: the turns the move needs, kept with it until they are queued. hold: the pipelines what goes with the move puts
-   the task on, held before any task. */
-export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = [], hold: (string | null)[] = []): Promise<Task> {
-  let started: Task[] = [];
-  let lit: Task | null = null;
-  let unstuck = false;
-  const row = await ctx.db.transaction(async tx => {
-    /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
-       a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
-       is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
-    /* A result joins a turn as a release closes the turn: the company goes first, then the task rows, as in every move of
-       turns, so the release sees it or it sees the release. */
-    if (n.data?.turnCleanup || n.data?.independentPart || set.turnId) await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
-    /* Its pipelines before any task, as a change of a pipeline takes them: the stage the task follows its holder to, or
-       one what goes with the move names, stays until the move is in. */
-    await holdPipelines(tx, hold);
-    const followed = await followedStage(tx, task, set);
-    if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
-    /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
-       the work under it is closed: one that closes takes its parent first, so they close one after the other. */
-    await lockClosingParent(tx, task, set);
-    const [row] = await tx
-      .update(tasks)
-      .set({ externalWait: null, ...set, ...followed, ...(set.status && CLOSED.includes(set.status) ? { paused: null } : {}), version: task.version + 1, updatedAt: new Date() })
-      .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
-      .returning();
-    if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
-    await doneWhole(tx, task, set, n, false);
-    await dropEarlierWakes(tx, task.id);
-    const event = await note(tx, row, statusNoted(n, task.status, row.status), ctx.config);
-    lit = await givesBack(tx, row, n, event);
-    await also?.(tx, row);
-    await doneWhole(tx, task, set, n, true);
-    if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
-    await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
-    if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
-    /* What waited for it starts with the same move, so its turn is kept with it. */
-    if (row.status === 'done') {
-      const after = await startAfter(tx, row, n.actor);
-      wakes.push(...after.wakes);
-      started = after.rows;
-    }
-    recordCause(wakes, n, event.id, task);
-    await keepWakes(tx, task.companyId, wakes);
-    return row;
-  });
-  published(ctx, row);
-  if (row.status !== task.status) await nudgeTrackerKeepers(ctx, row, n.actor.agentId);
-  if (unstuck) ctx.bus.publish(row.companyId, { type: 'requests', spot: taskSpot(row) });
-  for (const t of started) published(ctx, t);
-  linesMoved(ctx, lit);
-  await handOff(ctx, n.actor, row);
-  return row;
-}
-
-/* Hornhoof's notes that the task stood still are over once it moves again: handed on, handed in or reported. */
-async function letStuckGo(tx: Tx, taskId: string): Promise<boolean> {
-  const gone = await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() }).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), eq(requests.kind, 'stuck'))).returning({ id: requests.id });
-  return gone.length > 0;
-}
 
 /* The notes go with the move, and people hear of it once the move is in. */
 function stuckGoes(ctx: Live, task: Task): { also: (tx: Tx) => Promise<void>; tell: () => void } {
@@ -977,71 +830,6 @@ async function endFormerOwnerTurns(tx: Tx, task: Task, set: Partial<Task>): Prom
   }
 }
 
-/* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor, once in a
-   piece of work: held says it stays blocked as its executor blocked it again after a comment opened it. */
-export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved & { held?: true }> {
-  text = hideCredentialsIn(text);
-  const task = await loadTask(ctx.db, taskId);
-  if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
-  const words = text.trim();
-  if (task.paused) return logComment(ctx, actor, task, words);
-  return (await unblockByComment(ctx, actor, task, words)) ?? (await resumeByComment(ctx, actor, task, words)) ?? logComment(ctx, actor, task, words);
-}
-
-async function unblockByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<(Moved & { held?: true }) | null> {
-  if (!actor.agentId || task.status !== 'blocked' || !task.executorAgentId || task.assigneeAgentId !== task.executorAgentId || !(await gaveOut(ctx.db, task, actor.agentId))) return null;
-  if (await openedByComment(ctx.db, task.id)) return { ...(await logComment(ctx, actor, task, text)), held: true };
-  const wakes: Wake[] = [{ agentId: task.executorAgentId, taskId: task.id, why: 'unblocked', text }];
-  return { task: await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text, data: { unblocked: true } }, undefined, wakes), wakes };
-}
-
-/* What begins a new piece of work on a task: a move of its work, or its words or owner rewritten. */
-const NEW_PIECE: TaskEventKind[] = ['created', 'assigned', 'started', 'submitted', 'verdict', 'report', 'answered'];
-
-/* Whether a comment opened the task again since its last piece of work began: the answer it was blocked for came then. */
-async function openedByComment(db: Db, taskId: string): Promise<boolean> {
-  const [piece] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), or(
-    inArray(taskEvents.kind, NEW_PIECE),
-    and(eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'fields' ?| array['title', 'brief', 'body', 'owner', 'assigneeAgentId']`),
-  ))).orderBy(desc(taskEvents.id)).limit(1);
-  const [opened] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(
-    eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'comment'), sql`${taskEvents.data}->>'unblocked' = 'true'`, gt(taskEvents.id, piece?.id ?? 0),
-  )).limit(1);
-  return Boolean(opened);
-}
-
-async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
-  if (!task.externalWait || !task.assigneeAgentId || actor.agentId === task.assigneeAgentId || CLOSED.includes(task.status)) return null;
-  const wakes = commentWakes(task, actor, text);
-  return { task: await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor, text, data: { externalWait: null } }, undefined, wakes), wakes };
-}
-
-function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
-  if (CLOSED.includes(task.status) || task.paused) return [];
-  if (task.status === 'blocked' && !actor.personId) return [];
-  const recipients = new Set([task.assigneeAgentId]);
-  recipients.delete(actor.agentId ?? null);
-  return [...recipients].filter((id): id is string => id !== null).map(agentId => ({ agentId, taskId: task.id, why: 'comment', text }));
-}
-
-async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved> {
-  const wakes = commentWakes(task, actor, text);
-  await ctx.db.transaction(async tx => {
-    const event = await note(tx, task, { kind: 'comment', actor, text }, ctx.config);
-    recordCause(wakes, { kind: 'comment', actor, text }, event.id, task);
-    await keepWakes(tx, task.companyId, wakes);
-  });
-  published(ctx, task);
-  return { task, wakes };
-}
-
-/* Whoever gave the task out: the agent that made it, or the orchestrator, who runs every task. */
-async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
-  if (task.createdByAgentId === agentId) return true;
-  const [agent] = await db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, agentId));
-  return agent?.kind === 'orchestrator';
-}
-
 /* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent
    with hh-attach, link: where to see the work, topic: what it is about, which says whose decision it is. */
 export type Ask = {
@@ -1435,28 +1223,10 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   }
   return wakes;
 }
-
-/* A turn on a task went out: an open task is being worked on now. */
-export async function startWork(ctx: Live, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, jobId));
-  if (!job?.taskId || !job.agentId) return;
-  /* One that still waits for what it comes after is not at work, whatever turn went out on it. */
-  const [task] = await ctx.db.select(only(tasks, 'after')).from(tasks).where(eq(tasks.id, job.taskId));
-  if (!task || (await openAfter(ctx.db, task)).length) return;
-  const row = await ctx.db.transaction(async tx => {
-    const [started] = await tx
-      .update(tasks)
-      .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(tasks.id, job.taskId!), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId!)))
-      .returning();
-    if (started) await note(tx, started, { kind: 'status', actor: { agentId: job.agentId! }, data: { fromStatus: 'open', toStatus: 'working' } });
-    return started;
-  });
-  if (!row) return;
-  published(ctx, row);
-  await nudgeTrackerKeepers(ctx, row, job.agentId);
-}
 export { CLOSED, SILENT_TURNS, GOING_ON_TURNS, COMMIT, STATUS_CODES, refuse, notYours, loadTask, stillOpen, joined, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, workingAgent, requireOwner, mayAsk, requestSubject } from './state.js';
 export type { Task, Request, Actor, WakeWhy, Wake, Moved, Tx, Live } from './state.js';
 export { actorColumns, note, ownNote, published, NOT_A_MOVE, lastMove, uncountedSinceMove } from './events.js';
 export type { Note } from './events.js';
+export { move, lockMovePrerequisites, refuseCircle, lockClosingParent, doneWhole, refuseOpenUnder, statusNoted, givesBack, letStuckGo, workUnderDone, startAfter, comingAfter, linesMoved } from './transitions.js';
+export { startWork } from './progress.js';
+export { comment, logComment, commentWakes, unblockByComment, gaveOut, openedByComment, NEW_PIECE, resumeByComment } from './comments.js';

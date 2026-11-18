@@ -7,7 +7,9 @@ import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { jobsOf } from '../nodes/jobs.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { withInputLock } from './decision-context.js';
-import { insertTurn, nodeOfAgent, onAgent, pump } from './queue.js';
+import { insertTurn, pump } from './queue.js';
+import { nodeOfAgent } from './placement.js';
+import { onAgent } from './line.js';
 import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from './turn-words.js';
 import { requeueOperatorWords } from '../program-operator/requeue.js';
 

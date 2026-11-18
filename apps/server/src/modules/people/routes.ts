@@ -16,7 +16,7 @@ import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { releaseAssistantAgent, removeAssistantAgent } from '../assistants/setup.js';
-import { onAgent } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines, finishDisconnectedMachines, refuseLeader } from '../nodes/disconnect.js';

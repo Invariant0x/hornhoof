@@ -11,7 +11,7 @@ import { revokeMachineRows, visitorKeyOf } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
 import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
-import { failOpenJobs } from './messages.js';
+import { failOpenJobs } from './job-failures.js';
 import { liveNode, settlePlans } from './nodes.js';
 
 /* The machine that leads does not leave the company: the server moves to another machine first. Asked where a person

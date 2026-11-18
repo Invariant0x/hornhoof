@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
-import { ON_NODE } from '../jobs/dispatch.js';
+import { ON_NODE } from '../jobs/requirements.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 import { FULL_SHA } from '../updates/registry.js';
 import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, type Go, type LeaderBuild } from './build.js';

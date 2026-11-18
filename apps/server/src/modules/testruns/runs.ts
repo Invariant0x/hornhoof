@@ -20,7 +20,7 @@ import { note, published } from '../tasks/events.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
 import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
-import { taskByRef } from '../tasks/views.js';
+import { taskByRef } from '../tasks/lookup.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';

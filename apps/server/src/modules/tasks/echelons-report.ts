@@ -9,9 +9,9 @@ import { currentCandidate } from './echelons-candidates.js';
 import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
 import { requiredStagesComplete } from './echelons-accept.js';
-import { changeRoute, type Route } from './echelons-store.js';
+import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
-import { move } from './engine.js';
+import { move } from './transitions.js';
 import { note } from './events.js';
 
 /* Acceptances and aggregates made before checks went local also name test runs, which are left out. */

@@ -7,7 +7,7 @@ import { agents, taskEvents, tasks, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { published } from './events.js';
 import { refuse, type Task, type Tx } from './state.js';
-import { routeOf, type Route } from './echelons-store.js';
+import { routeOf, type Route } from './route-records.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { pathInScope, RepoPath, ReviewSha } from './review-schema.js';
 

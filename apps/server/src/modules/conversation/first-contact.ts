@@ -8,7 +8,8 @@ import { agentEvents, companies, jobs } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { FIRST_CONTACT_ACTION, quote, turnPrompt } from './prompt.js';
-import { insertTurn, NoSubscription, onAgent, orchestratorOf, pump, turnGoingOn } from './queue.js';
+import { insertTurn, NoSubscription, orchestratorOf, pump, turnGoingOn } from './queue.js';
+import { onAgent } from './line.js';
 
 const WORDS = {
   fixProject: 'Fix a problem in my project', checkSetup: 'Check that my project is ready to run',

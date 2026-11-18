@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
-import { liveSubscription } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { CLOSED } from './state.js';
 import { expireWait } from './external-wait.js';
 

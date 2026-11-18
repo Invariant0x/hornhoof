@@ -1,5 +1,6 @@
+import { NODE, workErrorsOf } from './start-holds.js';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programInstances, programOperatorCases, START_REASONS, type CaseReason } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
@@ -9,24 +10,12 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { callOperations, type HoldWords } from './hold-watch.js';
 import { sayAgain, tellAgainWentAlong } from './recovery.js';
 import { operatorTransaction } from './transactions.js';
-
 type Case = typeof programOperatorCases.$inferSelect;
 type Agent = typeof agents.$inferSelect;
 type End = { outcome: string; text: string; actor?: MessageParty };
-
-const NODE: CaseReason = 'node_cannot_work';
 const STARTS = new Set<string>(START_REASONS);
 /* A hold of a turn that ended before its program started: no program on the node has a case for it. */
 export const fromStart = (row: Pick<Case, 'reason'>): boolean => STARTS.has(row.reason);
-
-/* What each node last said of its work folder: why it cannot write there, while it says so. A node says it again in each
-   hello, so a server that starts anew hears it again. */
-const workErrors = new WeakMap<Ctx['hub'], Map<string, string>>();
-function workErrorsOf(ctx: Ctx): Map<string, string> {
-  const known = workErrors.get(ctx.hub) ?? new Map<string, string>();
-  workErrors.set(ctx.hub, known);
-  return known;
-}
 
 const nodeWords = (row: Case) => row.reason === NODE
   ? `The node cannot write its work folder, so no turn of any agent goes to it now: they all wait. It lifts the hold by itself once a write there works again. `
@@ -79,22 +68,6 @@ export async function holdNotStarted(ctx: Ctx, nodeId: string, jobId: string, sa
   });
 }
 
-/* Whether a failed turn ended before its program started under a hold: its words go on with it, so nothing else decides. */
-export async function keptBeforeStart(ctx: Ctx, jobId: string): Promise<boolean> {
-  const [kept] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases)
-    .where(and(inArray(programOperatorCases.reason, [...START_REASONS]), sql`${programOperatorCases.evidence} @> ${JSON.stringify([{ evidenceKey: jobId }])}::jsonb`)).limit(1);
-  return Boolean(kept);
-}
-
-/* The nodes of these that cannot write their work folder, as they say or as a hold keeps: no turn goes to them meanwhile. */
-export async function nodesOnHold(ctx: Ctx, ids: string[]): Promise<Set<string>> {
-  if (!ids.length) return new Set();
-  const rows = await ctx.db.selectDistinct({ id: programOperatorCases.nodeId }).from(programOperatorCases)
-    .where(and(inArray(programOperatorCases.nodeId, ids), eq(programOperatorCases.reason, NODE), eq(programOperatorCases.recoveryHold, true)));
-  const said = workErrorsOf(ctx);
-  return new Set([...rows.map(row => row.id), ...ids.filter(id => said.has(id))]);
-}
-
 /* Ends a hold of a turn that ended before its program started, with the turn's log saying how. The caller holds the agent. */
 async function liftLocked(ctx: Ctx, id: string, end: End, data: Record<string, unknown> = {}): Promise<boolean> {
   const [row] = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.recoveryHold, true))).for('update');
@@ -136,3 +109,4 @@ export async function noteWorkFolder(ctx: Ctx, nodeId: string, error: string | n
   const held = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.nodeId, nodeId), eq(programOperatorCases.reason, NODE), eq(programOperatorCases.recoveryHold, true)));
   for (const row of held) await lift(ctx, row, { outcome: 'writes_again', text: 'The node writes its work folder again, so the turns that waited go on.' });
 }
+export { nodesOnHold, NODE, workErrorsOf, workErrors, keptBeforeStart } from './start-holds.js';

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { endOwnWait } from '../tasks/external-wait.js';
-import { taskByRef } from '../tasks/views.js';
+import { taskByRef } from '../tasks/lookup.js';
 import { refuse } from '../tasks/state.js';
 import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';

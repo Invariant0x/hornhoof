@@ -4,7 +4,7 @@ import { departments, testRuns, turns } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/state.js';
-import { routeOf } from '../tasks/echelons-store.js';
+import { routeOf } from '../tasks/route-records.js';
 import { openTurnOf } from '../tasks/turn-department.js';
 import { commandShown } from './commit-proof.js';
 import type { CommitAt } from './refs.js';

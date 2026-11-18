@@ -15,7 +15,7 @@ import {
   isAutonomousReleaseEnabled,
   listAutonomousReleases,
 } from '../tasks/autonomous-release.js';
-import { candidates, departmentOwners } from '../tasks/decisions.js';
+import { candidates, departmentOwners } from '../tasks/decision-people.js';
 
 /* The CEO names the owner. The people who run a department set its rules and switch autonomous release, also through
    its head or the orchestrator. The department keeps its rules through a change of owner. */

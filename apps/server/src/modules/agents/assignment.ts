@@ -6,7 +6,7 @@ import { employeeChangedBy } from '../../auth/session.js';
 import { agentChanges, agents, departments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { headStandingPrincipal } from '../conversation/decision-context.js';
-import { onAgent } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { appendEvent } from '../events/store.js';
 import type { ToolJob } from '../tools/job.js';
 

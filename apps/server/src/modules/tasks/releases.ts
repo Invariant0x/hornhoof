@@ -6,7 +6,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note } from './events.js';
 import { refuse, type Task, type Tx } from './state.js';
-import { taskByRef } from './views.js';
+import { taskByRef } from './lookup.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { commitApprovalRequired, exactCommitApproval } from './commit-approval.js';
 import { recordTurnSummary } from './wait-goals.js';

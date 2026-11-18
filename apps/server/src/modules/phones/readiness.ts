@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { companyPhones, phoneSessions } from '../../db/schema.js';
 import { nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { holding, phoneBinding } from './queue.js';
+import { holding, phoneBinding } from './binding.js';
 import { phoneBaselineCapable, phoneCapable, phoneRequest } from './rpc.js';
 import type { CompanyPhone } from './store.js';
 

@@ -23,7 +23,7 @@ import { liveNode, planNodes } from '../nodes/nodes.js';
 import { internalAddress, modelsFrom, modelsRequest, type ModelsAnswer } from './api-models.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
 import { periodsOf, together, tokensByModel, tokensBySubscription, TokensQuery } from './tokens.js';
-import { failOpenJobs } from '../nodes/messages.js';
+import { failOpenJobs } from '../nodes/job-failures.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { onlineIn, subView, subViews } from './views.js';

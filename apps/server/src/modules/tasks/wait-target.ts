@@ -2,7 +2,7 @@ import type { RecordedWaitOn } from '@hornhoof/protocol/waits';
 import { and, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
-import { liveSubscription } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { refuse } from './state.js';
 
 export async function checkedWaitTarget(ctx: Ctx, companyId: string, waiter: string, on: RecordedWaitOn | undefined): Promise<RecordedWaitOn | undefined> {

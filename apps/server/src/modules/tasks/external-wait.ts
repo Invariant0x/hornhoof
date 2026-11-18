@@ -7,11 +7,13 @@ import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type External
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
-import { move } from './engine.js';
+import { move } from './transitions.js';
 import { note } from './events.js';
 import { refusePaused } from './pause.js';
 import { wakeAll } from './wake.js';
-import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, reconnecting, type TurnMessage } from '../conversation/queue.js';
+import { agentState, enqueueTurn, insertOrDeliverTurn, pump, reconnecting, type TurnMessage } from '../conversation/queue.js';
+import { conversationOf } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered, NOT_DELIVERED, refusedMessage, taskNamed, undeliveredLine } from '../conversation/undelivered.js';
 import { dropMail, inboxChanged } from '../conversation/inbox.js';
@@ -20,9 +22,9 @@ import { checkWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
 import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
 import { checkedWaitTarget } from './wait-target.js';
-import { taskByRef } from './views.js';
+import { taskByRef } from './lookup.js';
 import type { Actor } from './state.js';
-import { routeOf, routeSnapshot } from './echelons-store.js';
+import { routeOf, routeSnapshot } from './route-records.js';
 import { onTask, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 
 const EXTERNAL_WAIT_MS = 2 * 3_600_000;

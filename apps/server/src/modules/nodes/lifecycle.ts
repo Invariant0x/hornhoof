@@ -8,7 +8,7 @@ import { isOperatorReply, type NodeIdentity, type NodeTransport } from './hub.js
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
-import { nodeDrainHello } from '../updates/node-drain.js';
+import { nodeDrainHello } from '../updates/drain-state.js';
 import { acceptOperatorEvidence } from '../program-operator/evidence.js';
 import { receiveOperatorReply } from '../program-operator/rpc.js';
 import { restoreOperatorNode } from '../program-operator/health.js';

@@ -2,7 +2,7 @@ import type { Ctx } from '../../app.js';
 import { canViewAgent } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import type { AgentRow } from '../agents/find.js';
-import { programPlan } from '../conversation/queue.js';
+import { programPlan } from '../conversation/placement.js';
 
 /* A terminal shows a program, and a person gets it by the plan that program really lives on. The agent's card may say another:
    a new owner of the plan on the card gets nothing of a program that still runs on someone else's. */

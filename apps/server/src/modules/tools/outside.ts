@@ -6,7 +6,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
-import { agentOnNode } from '../conversation/queue.js';
+import { agentOnNode } from '../conversation/placement.js';
 import { TURN_TIMEOUT_MS } from '../conversation/constants.js';
 import { appendEvent } from '../events/store.js';
 import { holdsMachine } from '../network/follow.js';

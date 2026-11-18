@@ -4,7 +4,8 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
+import { enqueueTurn } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { operationsStaff } from '../program-operator/access.js';
 import { headOf } from './failures.js';
 import { sameProgram } from './program-history.js';

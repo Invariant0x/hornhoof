@@ -7,7 +7,8 @@ import { agentHidden, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { improvements, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { enqueueTurn, liveSubscription, NoSubscription, orchestratorOf } from '../conversation/queue.js';
+import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 import { seesTask } from '../tasks/sight.js';
 import { listImprovements, moveImprovement, requireOwnWork } from './store.js';
 

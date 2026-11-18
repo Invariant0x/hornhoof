@@ -23,7 +23,7 @@ import { agentCasePicture, personCasePicture, sendCasePicture } from '../program
 import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './state.js';
 import { seesTask } from './sight.js';
-import { taskByRef } from './views.js';
+import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 const PER_TURN = 30;
 const NAME_LENGTH = 200;

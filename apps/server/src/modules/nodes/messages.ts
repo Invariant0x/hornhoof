@@ -1,19 +1,21 @@
+import { failOpenJobs, completionValue } from './job-failures.js';
 import { jobsOf } from './jobs.js';
 import { lastBytes, ToolPrivacy, type Limits, type NodeMessage } from '@hornhoof/protocol';
 import { hideCredentials } from '@hornhoof/protocol/redaction';
-import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, planCredentials, subscriptions, turnTokens, type NodeStatus } from '../../db/schema.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
-import { ON_NODE } from '../jobs/dispatch.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
-import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
+import { clearNodeWords, holdForWords, limitUntil, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
+import { nodeOfAgent } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
 import { workStarts } from '../org/map-state.js';
-import { startWork } from '../tasks/engine.js';
+import { startWork } from '../tasks/progress.js';
 import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { turnsHeld } from '../tasks/orphan-turns.js';
@@ -28,7 +30,7 @@ import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
-import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
+import { type Hello } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
@@ -60,8 +62,6 @@ async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<voi
   if (id.kind !== 'node' || seenLately(ctx, id.nodeId, now.getTime())) return;
   await ctx.db.update(nodes).set({ lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode));
 }
-
-const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
 /* The turns that run on the node now, as Hornhoof has them. */
 async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
@@ -113,26 +113,6 @@ async function keepTokens(ctx: Ctx, msg: Extract<NodeMessage, { type: 'job.done'
   const [job] = finished;
   if (!job) return;
   await ctx.db.insert(turnTokens).values({ jobId: msg.jobId, companyId: job.companyId, agentId: job.agentId, subscriptionId: job.subscriptionId, ...tokenRow(msg.tokens), at: now }).onConflictDoNothing();
-}
-
-/* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */
-const cutOf = (cut?: RestartCut) =>
-  cut ? { interruption: sql`(${interruptionValue(cut)}) || jsonb_build_object('task', (select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId}))` } : {};
-
-/* Jobs of these nodes or subscriptions that a node had become failed with the reason, except the ones the node still runs.
-   A failed turn goes into its conversation and the agent's next turn goes out. Turns a node restart cut off keep why,
-   with the number of the task each was on. */
-export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = [], cut?: RestartCut): Promise<string[]> {
-  const conditions = [scope, ON_NODE];
-  if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
-  const failed = await ctx.db
-    .update(jobs)
-    .set({ status: 'failed', error: completionValue(error, 'cancelled'), result: completionValue(jobs.result, 'Stopped.'), finishedAt: new Date(), ...cutOf(cut) })
-    .where(and(...conditions))
-    .returning({ id: jobs.id, companyId: jobs.companyId });
-  for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
-  for (const { id } of failed) await afterJob(ctx, id);
-  return failed.map(j => j.id);
 }
 
 /* An event of a running turn's work, kept in its conversation; a sign that the turn goes on, whatever its program reports. */
@@ -540,3 +520,4 @@ async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Pr
   }
 }
 export { jobsOf } from './jobs.js';
+export { failOpenJobs, completionValue, cutOf } from './job-failures.js';

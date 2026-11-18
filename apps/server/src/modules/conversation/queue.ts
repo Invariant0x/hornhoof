@@ -1,34 +1,35 @@
+import { placement, CONVERSATION_NODE, isLeader, outdated, holdsWork, agentOnNode, liveSubscription, nodeOfAgent, programNode, conversationOf, lookRoom, type AgentTarget, type Placement } from './placement.js';
+import { onAgent } from './line.js';
 import { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, TURN_TIMEOUT_MS, INBOX_PROMPT, NOTHING_UNREAD, GONE_ALONG } from './constants.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, modelsFor, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { currentLimits, effortsOf, isProgramOwnPrompt, modelsFor, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agentEvents, agents, jobs, nodes, subscriptions, tasks, type AgentKind } from '../../db/schema.js';
+import { agentEvents, agents, jobs, tasks } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import type { TurnRefusal } from '../terminals/relay.js';
-import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
-import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
-import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from '../network/follow.js';
-import { pickBuiltin } from '../nodes/builtin.js';
 import { shownAway } from '../nodes/machine-away.js';
-import { roomFor, turnSent } from '../nodes/program-room.js';
+import { turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/jobs.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, type Tx } from '../tasks/state.js';
-import { startWork } from '../tasks/engine.js';
+import { startWork } from '../tasks/progress.js';
 import { openTaskNumbers } from '../tasks/open-numbers.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
@@ -39,7 +40,6 @@ import { openTurnOf } from '../tasks/turn-department.js';
 import { addressed, preface } from './prompt.js';
 import { originalPromptOf } from './requested-prompt.js';
 import { effortOfTurn } from './turn-effort.js';
-import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { repositoryScope } from '../testruns/describe.js';
 import { queuedInput, queuedUsed } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn, type TurnWords } from './turn-words.js';
@@ -47,7 +47,6 @@ import { cancelUnsentDelivery, DeliveryTargetMismatch, reserveDelivery } from '.
 import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
-import { nodesOnHold } from '../program-operator/not-started.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 import { fallbackMove } from '../subscriptions/fallback.js';
 import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
@@ -202,108 +201,8 @@ export async function wordsSettled(ctx: Ctx, node: NodeIdentity, agentId: string
 type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; byTurn?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; offer?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
 
 export type TurnMessage = NonNullable<Turn['message']>;
-
-/* One thing at a time per agent, so two pumps never send two turns. */
-const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
-
-export function onAgent<T>(ctx: Ctx, agentId: string, fn: () => Promise<T>): Promise<T> {
-  const mine = chains.get(ctx) ?? new Map<string, Promise<unknown>>();
-  chains.set(ctx, mine);
-  return inLane(mine, agentId, fn);
-}
-
-export const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'));
 /* Only a node's empty start opens the program while the plan's real turns wait. */
 const programStart = and(eq(jobs.prompt, ''), isNull(jobs.taskId), isNull(jobs.createdBy));
-
-export async function liveSubscription(ctx: { db: Pick<Ctx['db'], 'select'> }, agentId: string) {
-  const [row] = await ctx.db.select({ sub: subscriptions }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-  return row && !row.sub.removedAt ? row.sub : null;
-}
-
-/* A node and the owner of the subscription it runs: the person who may type into the agent's terminal there. */
-export type ProgramNode = { node: NodeIdentity; ownerPersonId: string; planId: string };
-
-const JOB_PLAN = { id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine };
-
-/* A program stays up after its last turn, on the plan that turn ran on, until a turn of another plan takes its place. Company
-   keys share the built-in node, so a window there shows that plan's program, even when the agent is on another key by now. A
-   personal plan has nodes of its own, with no other plan's program on them. */
-async function stayedProgram(ctx: Ctx, agentId: string, planId: string) {
-  const [last] = await ctx.db
-    .select(JOB_PLAN)
-    .from(jobs)
-    .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
-    .where(and(conversationOf(agentId), isNotNull(jobs.startedAt), eq(subscriptions.kind, 'api_key')))
-    .orderBy(desc(jobs.startedAt))
-    .limit(1);
-  return last && last.id !== planId ? last : null;
-}
-
-/* The plan that holds the agent's program now, with the node it is on: the one its running turn went out to, since that
-   turn goes on there when the agent moves, or else its own and its live node there, unless another plan's program stayed
-   up there. */
-export async function programPlan(ctx: Ctx, agentId: string) {
-  const [running] = await ctx.db
-    .select(JOB_PLAN)
-    .from(jobs)
-    .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
-    .where(and(conversationOf(agentId), eq(jobs.status, 'running')))
-    .limit(1);
-  if (running) return running;
-  const [own] = await ctx.db
-    .select({ id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id, builtinMachine: agents.builtinMachine })
-    .from(agents)
-    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
-    .where(eq(agents.id, agentId));
-  return (own?.kind === 'api_key' && (await stayedProgram(ctx, agentId, own.id))) || own;
-}
-
-/* The node that holds the agent's program now. A company key's agents are on the built-in node. */
-export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
-  const own = await programPlan(ctx, agentId);
-  const node = own && identityOf(own, own.nodeId, own.builtinMachine, ownBuiltin(ctx.config));
-  return node ? { node, ownerPersonId: own.ownerPersonId, planId: own.id } : null;
-}
-
-export const nodeOfAgent = async (ctx: Ctx, agentId: string) => (await programNode(ctx, agentId))?.node ?? null;
-
-/* The node someone who opens the agent's window watches. One that runs no turn starts its program where its next turn
-   would go, and keeps that node; while no machine of its plan can take it, the window waits for the first to come back. */
-export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
-  return (await onAgent(ctx, agentId, () => placedProgram(ctx, agentId))) ?? programNode(ctx, agentId);
-}
-
-/* Where an agent on a personal plan that runs no turn opens now. Anyone else's stays where it is. */
-async function placedProgram(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
-  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-  const sub = running ? null : await liveSubscription(ctx, agentId);
-  if (sub?.kind !== 'personal') return null;
-  const at = (node: NodeIdentity) => ({ node, ownerPersonId: sub.ownerPersonId, planId: sub.id });
-  const place = await nextTurnNode(ctx, agentId, sub);
-  if (place) return at(place);
-  const [first] = await planNodes(ctx.db, [sub.id]);
-  return (await programNode(ctx, agentId)) ?? (first ? at(nodeIdentity(first.id)) : null);
-}
-
-/* The machine of its plan the agent's next turn would go to, which it keeps from now on. */
-async function nextTurnNode(ctx: Ctx, agentId: string, sub: Parameters<typeof placement>[2]): Promise<NodeIdentity | null> {
-  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub) : null;
-  if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId, builtinMachine: place.builtinMachine }).where(eq(agents.id, agentId));
-  return place?.node ?? null;
-}
-
-/* Whether the agent's next turn would go to another node than this one now, as the queue itself would place it: an
-     agent that has work in progress on its own node waits for that one, and so goes nowhere else. Nothing is moved. */
-export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentity): Promise<boolean> {
-  const sub = await liveSubscription(ctx, agentId);
-  if (!sub) return false;
-  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
-  return place !== null && !sameNode(place.node, from);
-}
 
 /* The turn that goes on from this one's words, whichever way it came: a retry after a restart or a continuation. */
 export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string; error: string | null } | null> {
@@ -482,14 +381,6 @@ const queuedWords = async (ctx: Ctx, agentId: string, jobId: string, text: strin
 
 type QueuedTurn = NonNullable<Awaited<ReturnType<typeof queuedWords>>>;
 type OpenedQueued = QueuedTurn & { repeated: RepeatedTurn };
-type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>> };
-
-export async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<AgentTarget | null> {
-  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-  const sub = agent ? await liveSubscription(ctx, agent.id) : null;
-  const at = sub ? await nodeOfAgent(ctx, agentId) : null;
-  return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
-}
 
 /* Whose turn it is: of the person who typed, of the person whose words the program took after the turn they answered, or,
    for the words of anyone else, of the one the turn they came into was. */
@@ -778,101 +669,7 @@ async function unheardSession(ctx: Ctx, agentId: string, jobId: string, on: On, 
   const [original] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, from.data), eq(jobs.agentId, agentId)));
   return matchingSession(original, on, instructionsHash);
 }
-
-/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live.
-   Turns with a repository need 0.5.0, which clones it. The built-in node always matches the server. */
-const CONVERSATION_NODE = [0, 3, 0];
 const REPOSITORY_NODE = [0, 5, 0];
-function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
-  const have = (version ?? '0').split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < need.length; i++) if ((have[i] ?? 0) !== need[i]) return (have[i] ?? 0) < need[i]!;
-  return false;
-}
-
-export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_NODE): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
-
-/* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
-/* builtinMachine: the machine of the built-in node, for an API key's turn. moves: the agent's program is not there yet. */
-type Placement = { node: NodeIdentity; nodeId: string | null; builtinMachine: string | null; moves: boolean };
-
-type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtinMachine: string | null; roleKey: string | null };
-
-/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. An
-   assistant's own agent works for its owner alone, so it waits as a worker does. */
-const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
-
-/* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
-const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent), true);
-
-/* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
-   else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
-   the one picked waits for an update or has no room. A plan's to the node its program is on while
-   that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
-   freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. A turn that would start a new program goes only to a machine with free memory for it, and an
-   employee's turn goes to none that works past what it carries; roomy: whether a node has room, which the agent's state
-   also asks as if every node had. */
-async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent))): Promise<Placement | null> {
-  if (sub.kind === 'api_key') {
-    const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
-    if (!machine) return null;
-    const node = builtinOf(machine);
-    return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
-  }
-  const all = await planNodes(ctx.db, [sub.id]);
-  /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
-  const onHold = await nodesOnHold(ctx, all.map(n => n.id));
-  const open = all.filter(n => !onHold.has(n.id));
-  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, need, roomy)));
-  return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
-}
-
-/* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom
-   an update kept off it past their limit, who go to another machine of the plan when one can take them. */
-async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Promise<boolean> {
-  if (!all.some(n => n.id === agent.nodeId)) return false;
-  if (isLeader(agent) && nodeHeldLong(ctx, nodeIdentity(agent.nodeId!))) return false;
-  return holdsWork(ctx, agent.id);
-}
-
-/* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
-   is one of those. */
-async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
-  if (!isLeader(agent)) return null;
-  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
-}
-
-/* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
-   waits for its own machine, and a laptop that sleeps a while does not scatter the team. */
-async function holdsWork(ctx: Ctx, agentId: string): Promise<boolean> {
-  const [held] = await ctx.db.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['working', 'blocked']))).limit(1);
-  return Boolean(held);
-}
-
-/* The node on the machine its nodes say is freest, and of machines about as free the one that holds the fewest agents,
-   the older of two alike. */
-async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
-  if (able.length <= 1) return able[0] ?? null;
-  const held = await ctx.db
-    .select({ machineId: nodes.machineId, n: count() })
-    .from(agents)
-    .innerJoin(nodes, eq(nodes.id, agents.nodeId))
-    .where(and(isNull(agents.removedAt), inArray(nodes.machineId, able.map(n => n.machineId))))
-    .groupBy(nodes.machineId);
-  const on = (n: NodeRow) => Number(held.find(h => h.machineId === n.machineId)?.n ?? 0);
-  const free = (n: NodeRow) => {
-    const load = ctx.hub.loadOf(nodeIdentity(n.id));
-    return load ? freedom(load) : null;
-  };
-  const better = (a: NodeRow, b: NodeRow) => {
-    const [x, y] = [free(a), free(b)];
-    if (x !== null && y !== null && Math.abs(x - y) >= ABOUT_AS_FREE) return x > y;
-    return on(a) < on(b);
-  };
-  return able.reduce((best, n) => (better(n, best) ? n : best));
-}
 
 const ALONG = 'Several things waited for you in line and go out together in this turn. Go through each of them:';
 
@@ -1342,3 +1139,6 @@ function forgetStartupValues(ctx: Ctx, started: readonly { id: string }[]): void
   for (const job of started) forgetPrivateTurn(ctx.db, job.id);
 }
 export { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, TURN_TIMEOUT_MS, STOPPED_ON_PURPOSE, INBOX_PROMPT, NOTHING_UNREAD, GONE_ALONG } from './constants.js';
+export { chains, onAgent } from './line.js';
+export { placement, CONVERSATION_NODE, isLeader, takesTurns, outdated, waitsForOwnNode, holdsWork, freest, heldNodeFor, agentOnNode, liveSubscription, nodeOfAgent, programNode, programPlan, JOB_PLAN, conversationOf, stayedProgram, goesElsewhere, lookRoom, windowNode, placedProgram, nextTurnNode } from './placement.js';
+export type { ProgramNode, AgentTarget, Placement, PlacedAgent } from './placement.js';

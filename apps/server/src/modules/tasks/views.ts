@@ -1,9 +1,9 @@
 import type { TaskPriority } from '@hornhoof/protocol';
 import { findingReport } from './review-findings.js';
 import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
-import { routeSnapshots } from './echelons-store.js';
+import { routeSnapshots } from './route-records.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
@@ -19,7 +19,6 @@ import { openWaitsOf, shownWaits } from './wait-views.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 import { trackerLookups, type GoalRef, type TrackerLookups } from '../tracker/task-view.js';
 import { reviewerOf, type TimeFacts } from './time-facts.js';
-
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
   return agent.kind === 'orchestrator' || (agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id;
@@ -318,14 +317,4 @@ async function holderOffline(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'hub'>>, a
   const [holder] = await ctx.db.select(only(agents, 'subscriptionId')).from(agents).where(eq(agents.id, agentId));
   return offlineMachine({ db: ctx.db, hub: ctx.hub }, holder?.subscriptionId ?? null);
 }
-
-/* The task a reference names in the company: its number (12 or "#12") or its id. */
-export async function taskByRef(ctx: Pick<Ctx, 'db'>, companyId: string, ref: number | string): Promise<Task | null> {
-  const number = typeof ref === 'number' ? ref : /^#?\d+$/.test(ref) ? Number(ref.replace('#', '')) : null;
-  if (number === null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(ref))) return null;
-  const [task] = await ctx.db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.companyId, companyId), number !== null ? eq(tasks.number, number) : eq(tasks.id, String(ref))));
-  return task ?? null;
-}
+export { taskByRef } from './lookup.js';

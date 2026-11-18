@@ -4,14 +4,15 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } f
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { agentState, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf } from '../conversation/queue.js';
+import { agentState, enqueueTurn, insertTurn, limitUntil, orchestratorOf } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { turnAgain } from './again.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
-import { keptBeforeStart } from '../program-operator/not-started.js';
+import { keptBeforeStart } from '../program-operator/start-holds.js';
 import { keepUnheardWords, operatorHandledFailure, sayAgain, tellAgainWentAlong, unheardWords } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';

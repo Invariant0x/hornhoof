@@ -3,7 +3,7 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, waitPolicies } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { departmentOwners } from './decisions.js';
+import { departmentOwners } from './decision-people.js';
 import type { Task, Tx } from './state.js';
 
 /* The review after the one due, on the sequence its anchor and interval declare: a late sweep neither moves the sequence

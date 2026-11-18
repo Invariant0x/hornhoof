@@ -11,7 +11,9 @@ import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, 
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { unreadCount } from '../conversation/inbox.js';
-import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
+import { liveSubscription, programNode } from '../conversation/placement.js';
+import { planHeld, planHoldView, pump, pumpWaiting } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';

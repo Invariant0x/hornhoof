@@ -8,7 +8,7 @@ import type { Tx } from './state.js';
 import { taskEvents } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task } from './state.js';
-import type { Route } from './echelons-store.js';
+import type { Route } from './route-records.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { exactComparison, type Review } from './review-context.js';
 

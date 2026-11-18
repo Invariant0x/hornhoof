@@ -6,7 +6,7 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
 import { publishWorking } from '../events/store.js';
 import { identityOf, keyOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
-import { failOpenJobs } from '../nodes/messages.js';
+import { failOpenJobs } from '../nodes/job-failures.js';
 import { jobsOf } from '../nodes/jobs.js';
 import { livePrograms } from '../nodes/program-room.js';
 import { requestProgramView } from '../program-operator/rpc.js';

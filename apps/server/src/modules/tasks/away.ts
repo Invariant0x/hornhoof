@@ -4,7 +4,7 @@ import { agents, jobs, machines, nodes, taskEvents, tasks } from '../../db/schem
 import { only } from '../../db/selections.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { ownMachine, type NodeIdentity } from '../nodes/hub.js';
-import { failOpenJobs } from '../nodes/messages.js';
+import { failOpenJobs } from '../nodes/job-failures.js';
 import { published } from './events.js';
 import { when } from './silent.js';
 
