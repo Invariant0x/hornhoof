@@ -385,14 +385,14 @@ export async function stopCalls(ctx: Ctx, job: ToolJob, batch: string): Promise<
   return open.length ? `Stopping ${open.length} ${open.length === 1 ? 'call' : 'calls'} of batch ${batch}.` : `Every call of batch ${batch} has ended already.`;
 }
 
-/* The calls that wait or run now in each department, for the map. */
-export async function runningCalls(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<{ departmentId: string | null; id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null }[]> {
+/* The calls that wait or run now in each department and pipeline. */
+export async function runningCalls(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<{ departmentId: string | null; id: string; number: number; judge: boolean; task: number; by: string; pipelineId: string | null; stage: string | null; startedAt: string | null }[]> {
   const rows = await ctx.db
-    .select({ call: oneShotCalls, startedAt: jobs.startedAt, task: tasks.number })
+    .select({ call: oneShotCalls, startedAt: jobs.startedAt, task: tasks.number, pipelineId: tasks.pipelineId })
     .from(oneShotCalls)
     .innerJoin(jobs, eq(jobs.id, oneShotCalls.jobId))
     .innerJoin(tasks, eq(tasks.id, oneShotCalls.taskId))
     .where(and(eq(oneShotCalls.companyId, companyId), inArray(jobs.status, ['queued', 'running'])))
     .orderBy(asc(oneShotCalls.createdAt), asc(oneShotCalls.number));
-  return rows.map(r => ({ departmentId: r.call.departmentId, id: r.call.id, number: r.call.number, judge: r.call.judge, task: r.task, by: r.call.callerAgentId, stage: r.call.stage, startedAt: r.startedAt?.toISOString() ?? null }));
+  return rows.map(r => ({ departmentId: r.call.departmentId, id: r.call.id, number: r.call.number, judge: r.call.judge, task: r.task, by: r.call.callerAgentId, pipelineId: r.pipelineId, stage: r.call.stage, startedAt: r.startedAt?.toISOString() ?? null }));
 }

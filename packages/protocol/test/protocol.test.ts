@@ -387,14 +387,12 @@ describe('company templates', () => {
     }
   });
 
-  it('staff Operations in full in all nine, one of each required role, and keep their other roles', () => {
-    const required = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
-    const others: Record<string, string[]> = { project: [], startup: [], studio: ['OPS-INTEG'], corporation: ['OPS-FIX', 'OPS-INTEG'], security: ['OPS-INTEG'], opensource: [], agency: ['OPS-FIX', 'OPS-INTEG'], lab: [], home: [] };
-    expect(Object.keys(others).sort()).toEqual([...COMPANY_TEMPLATE_KEYS].sort());
+  it('staff Operations with its required roles and its pipeline owners once each in all nine', () => {
+    const roles = ['OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
     for (const template of COMPANY_TEMPLATES) {
       const { staff } = template.departments.find(d => d.template === 'operations')!;
       /* The product manager every department of a template hires is in Operations too, though Hornhoof does not require it. */
-      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, 'OPS-PM', ...others[template.key]!].sort());
+      expect(staff.map(line => line.role).sort(), template.key).toEqual(roles);
       expect(staff.every(line => line.count === 1), template.key).toBe(true);
     }
   });

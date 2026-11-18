@@ -28,5 +28,5 @@ pipelines:
       - { name: "Prepare the release", ownerRole: "DEV-OPS", echelon: "development" }
       - { name: "Review the release notes", ownerRole: "DEV-REV", echelon: "review" }
       - { name: "Check release evidence", ownerRole: "DEV-TEST", echelon: "tests" }
-      - { name: "Roll out and watch", ownerRole: "DEV-OPS" }
+      - { name: "Roll out and watch", ownerRole: "DEV-OPS", handoffTo: [operations, support] }
 ---

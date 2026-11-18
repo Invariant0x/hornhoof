@@ -17,7 +17,7 @@ pipelines:
       - { name: "Check the signal", ownerRole: "OPS-WATCH", brief: "Compare the screen and events from the current run. Check recent updates and reconnects before treating a quiet machine as stalled." }
       - { name: "Restore service", ownerRole: "OPS-PROGRAM", echelon: "development", brief: "Handle routine prompts and finish interrupted delivery. Restart only when the screen and recent activity show that the run has stopped." }
       - { name: "Confirm recovery", ownerRole: "OPS-FIX", echelon: "review", oneShot: {"fanOut": 3, "judge": "Compare recovery evidence and keep gaps that could leave work stuck."} }
-      - { name: "Record the cause", ownerRole: "OPS-BUGS" }
+      - { name: "Record the cause", ownerRole: "OPS-BUGS", handoffTo: [development, support, home_devices] }
   - key: operations-integrations
     name: "Connect a tool"
     why: "For connecting a shared tool, mailbox or outside service."

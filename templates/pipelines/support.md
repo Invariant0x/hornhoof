@@ -17,7 +17,7 @@ pipelines:
       - { name: "Read incoming tickets", ownerRole: "SUP-T1" }
       - { name: "Group and assess urgency", ownerRole: "SUP-T2", echelon: "development" }
       - { name: "Check disputed cases", ownerRole: "SUP-QA", echelon: "review" }
-      - { name: "Assign and tell the customer", ownerRole: "SUP-HEAD" }
+      - { name: "Assign and tell the customer", ownerRole: "SUP-HEAD", handoffTo: [development, operations] }
   - key: support-knowledge
     name: "Help articles"
     why: "For turning a recurring question into an answer others can reuse."

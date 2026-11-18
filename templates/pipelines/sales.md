@@ -9,7 +9,7 @@ pipelines:
       - { name: "Qualify the request", ownerRole: "SAL-SDR" }
       - { name: "Discuss the need", ownerRole: "SAL-AE", echelon: "development" }
       - { name: "Check the offer", ownerRole: "SAL-REV", echelon: "review" }
-      - { name: "Follow up and record the result", ownerRole: "SAL-OPS" }
+      - { name: "Follow up and record the result", ownerRole: "SAL-OPS", handoffTo: [finance, support] }
   - key: sales-outreach
     name: "Email outreach"
     why: "For finding suitable contacts and starting conversations by email."

@@ -64,10 +64,9 @@ describe('POST /api/setup with a company template', () => {
     expect(top.map(d => d.templateKey).sort()).toEqual(['development', 'operations']);
     const dev = top.find(d => d.templateKey === 'development')!;
     expect(depts.filter(d => d.parentId === dev.id).map(d => d.name).sort()).toEqual(['Product 1', 'Product 2', 'Product 3']);
-    /* The studio's people: six in Operations and eight in development, a product manager in each, and the turnkey team of
-       each, all in the department itself. */
+    /* The studio's staff includes all pipeline owners and both turnkey teams, in the departments themselves. */
     const staff = await db.select().from(agents).where(eq(agents.companyId, company!.id));
-    expect(staff.map(a => a.roleKey ?? a.kind).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-PM', 'DEV-REV', 'DEV-REV', 'DEV-SEC', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH', 'orchestrator']);
+    expect(staff.map(a => a.roleKey ?? a.kind).sort()).toEqual(['DEV-ARCH', 'DEV-DOCS', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-OPS', 'DEV-PM', 'DEV-REV', 'DEV-REV', 'DEV-SEC', 'DEV-TEST', 'OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH', 'orchestrator']);
     expect(staff.filter(a => a.kind !== 'orchestrator').every(a => a.departmentId !== null && a.productId === null)).toBe(true);
   });
 

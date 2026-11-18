@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Added
+
+- Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
+
 ### Changed
 
 - The company map shows only employee squares again, in their original status colors and with their usual blinking.
