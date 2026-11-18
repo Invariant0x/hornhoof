@@ -17,9 +17,9 @@ export type Rows = { selected: string | null; onOpenTask: (id: string) => void; 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
    parts of a date and the dot of a name stay in place. */
-function Cell({ name, children }: { name: string; children: ReactNode }) {
+function Cell({ name, person, children }: { name: string; person?: boolean; children: ReactNode }) {
   return (
-    <span className="tr-cell" dir="auto">
+    <span className={person ? 'tr-cell tr-cell-person' : 'tr-cell'} dir="auto">
       <span className="tr-k">{name}</span>
       <span className="tr-v" dir="auto">{children}</span>
     </span>
@@ -87,11 +87,11 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
             return <small className="tr-relation" key={other.id}><DepartmentMark id={department.id} name={name} template={rows.departmentTemplate?.(department.id)} /><span>{words.neededFor(other.number, name)}</span></small>;
           })}
         </div>
-        <Cell name={words.executor}>
+        <Cell name={words.executor} person>
           {executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} turnkey={rows.turnkeyOf?.(executor.id)} /> : t.tracker.nobody}
           {ghostStage && <WorkerMark kind="ghost" className="tr-stage-ghost" />}
         </Cell>
-        <Cell name={words.responsible}>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>
+        <Cell name={words.responsible} person>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>
         <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>
           {goal ? (

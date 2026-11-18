@@ -1532,7 +1532,7 @@ export const ru: Messages = {
     removeAsk: 'Убрать репозиторий? Клоны у агентов останутся, токен будет удален.',
     yesRemove: 'Да, убрать',
     schema: 'Схема отдела',
-    status: { working: 'в работе', queued: 'в очереди', handed: 'сдал дальше', waiting: 'ждет решения', idle: 'свободен', off: 'нет подписки' },
+    status: { working: 'в работе', queued: 'в очереди', handed: 'сдал дальше', waiting: 'ждет решения', idle: 'свободен', off: 'Подписки пока нет' },
     statusSummary: counts => summary(counts, { working: 'в работе', queued: 'в очереди', handed: 'сдали дальше', waiting: 'ждут решения', idle: 'свободны', off: 'без подписки' }),
     waitsForTask: 'Ждет новую задачу',
     onTimer: (every: string) => `По таймеру, ${every.toLowerCase()}`,

@@ -7,8 +7,20 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
+- The README animations show the current map, department routes, tracker, task cards and agent windows.
+- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
+- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
+- On phones, task details stack under the title and long text wraps within the list.
+- Removed computer access details from agent windows, including the orchestrator's window.
+- The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
+- Telegram sends only the finished answer and its files, in the language you write to the bot.
+
 ### Added
 
+- The Media workflow captures the current map, Startup department, tracker list, task card and agent window at desktop and phone widths in light and dark.
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
 - A Video production department template and a Video studio kit: a character and style keeper holds every character's look from shot to shot, and the video model works through an API key with a spend limit.
@@ -21,17 +33,6 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.
 - One-shot stages use diamonds in the tracker and task routes.
 - Generalists use squares and keep their label.
-### Fixed
-
-- The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
-- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
-- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
-- On phones, task details stack under the title and long text wraps within the list.
-### Fixed
-
-- Removed computer access details from agent windows, including the orchestrator's window.
-### Changed
-
 - Task cards show the title, key facts and links to related tasks together at the top.
 - The long task description opens with More when it is too long to show at once.
 - The task log shows the latest four steps, including waits, and lets you open earlier steps.

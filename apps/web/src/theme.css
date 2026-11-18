@@ -1804,6 +1804,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
 .tr-side-caption { display: flex; align-items: center; gap: 8px; }
 .tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
+.tr-pipelines .tr-item-name > .ic { align-self: start; margin-block-start: max(0px, calc((1lh - 14px) / 2)); }
 .tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; }
 .tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-inline-size: 0; border-inline-start: 3px solid transparent; }
 .tr-dept-head > .tr-item { grid-template-columns: minmax(0, 1fr); align-self: stretch; padding-inline-end: 0; border: 0; background: none; color: inherit; font-weight: inherit; }
@@ -1995,7 +1996,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-v { display: block; min-inline-size: 0; color: var(--muted); }
 .tr-id-name { display: none; }
 @container tr-list (width > 640px) {
-  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, fit-content(12%)) fit-content(20%) fit-content(12%); column-gap: 12px; }
+  .tr-list-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, fit-content(var(--tracker-target-fine))) fit-content(12%) fit-content(20%) fit-content(12%); column-gap: 12px; }
+  .tr-cell.tr-cell-person { min-inline-size: min-content; }
+  .tr-cell-person .tr-mark { white-space: nowrap; }
   .tr-group, .tr-group > div, .tr-rows, .tr-row, .tr-cells { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
   .tr-group-head, .tr-add-task { grid-column: 1 / -1; }
   .tr-add-task { justify-self: start; }
@@ -2088,6 +2091,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .tp-materials h5 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
 .tp-head { justify-items: stretch; }
 .tp-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.tp-heading { overflow-wrap: anywhere; }
 .tp-menu-button { display: grid; place-items: center; inline-size: 44px; block-size: 44px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 18px; cursor: pointer; }
 .tp-menu-button:hover, .tp-menu-button[aria-expanded='true'] { background: var(--surface2); color: var(--cyan-ink); }
 .tp-head .tp-facts { margin: 0; font-size: 12px; overflow-wrap: anywhere; }

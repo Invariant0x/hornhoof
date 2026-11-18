@@ -46,20 +46,17 @@ function DepartmentLink({ target, open }: { target: Pick<Department, 'id' | 'nam
 function PipelineRoute({ pipeline, department, onOpen, onOpenDepartment }: Props & { pipeline: DepartmentPipeline }) {
   const t = useT(), { language } = useLanguage(), id = useId();
   const route = localPipeline(t, pipeline);
-  const stages = new Map(route.stages.map(stage => [stage.id, stage]));
   const calls = department.calls?.filter(call => call.pipelineId === route.id || (call.pipelineId === null && route.isDefault));
   return <section className="dv-route" aria-labelledby={`${id}-route`}>
     <h4 id={`${id}-route`} dir="auto">{route.name}</h4>
     {route.department.id !== department.id && <p className="muted" dir="auto">{route.department.name}</p>}
     <ol className="dv-stages" role="list">
       {route.stages.map(stage => {
-        const parent = stage.parentId ? stages.get(stage.parentId) : undefined;
         const holders = holdersOf(department.employees, stage);
         const position = stage.ownerTitle?.[language] ?? holders[0]?.title?.[language] ?? stage.ownerRole ?? stage.owner?.name ?? t.workers.permanent;
         return <li key={stage.id}>
-          {parent && <div className="dv-stage-link"><a href={`#${id}-${parent.id}`}><bdi>{parent.name}</bdi></a></div>}
           <div className="dv-stage">
-            <h5 id={`${id}-${stage.id}`} tabIndex={-1} dir="auto">{stage.name}</h5>
+            <h5 dir="auto">{stage.name}</h5>
             {holders.length ? holders.map(employee => <AgentPlace key={employee.id} employee={employee} position={position} onOpen={onOpen} />)
               : <AgentPlace position={position} onOpen={onOpen} />}
             {stage.oneShot && <OneShotMarks stage={{ ...stage.oneShot, stage: stage.echelon }} calls={calls} position={position} />}

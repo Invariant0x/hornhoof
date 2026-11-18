@@ -85,6 +85,9 @@ export const getUpdates = (base: string, token: string, offset: number, signal: 
 export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
   callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
 
+export const sendTyping = (base: string, token: string, chatId: number, signal: AbortSignal) =>
+  callTelegram<unknown>(base, token, 'sendChatAction', { chat_id: chatId, action: 'typing' }, signal);
+
 const TELEGRAM_SEND_FILE_BYTES = 50 * 1024 * 1024;
 export const TELEGRAM_CAPTION_MAX = 1024;
 

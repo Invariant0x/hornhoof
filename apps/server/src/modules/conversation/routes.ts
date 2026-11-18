@@ -24,6 +24,7 @@ import { refusedMessage } from './undelivered.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
+import type { BotLang } from '../telegram/words.js';
 import { firstContactRoutes, greetingOffers } from './first-contact.js';
 
 /* after: what came since seq, a page at a time; last: only the newest so many, before seq when given. */
@@ -34,7 +35,7 @@ const MessageBody = z
 
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
-type TelegramOrigin = { bot: string; chat: number; update: number };
+type TelegramOrigin = { bot: string; chat: number; update: number; lang: BotLang };
 /* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
    agent, which thinks for it. fresh: what that agent reads instead when its turn starts a new session. */
 type AssistantOrigin = { message: string; own?: boolean; fresh?: string };
@@ -59,9 +60,10 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   };
   if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, pictures, assistant, standing);
   if (telegram && standing) {
+    const { lang, ...origin } = telegram;
     return {
       actor: { personId: me.id },
-      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram, ...(pictures.length ? { pictures } : {}) } },
+      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerInTelegram(me, standing, lang)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin, ...(pictures.length ? { pictures } : {}) } },
     };
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */

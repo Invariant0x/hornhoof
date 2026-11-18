@@ -8,6 +8,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { DepartmentView } from '../src/screens/Department';
+import { DepartmentStructure } from '../src/screens/DepartmentStructure';
 import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import { useDepartmentTree } from '../src/tasks';
@@ -32,7 +33,7 @@ const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.perso
 const messages: Record<Language, Messages> = { en, ru };
 const structureLocales = LANGUAGES.map(({ id }) => {
   const t = messages[id], route = t.pipelineCatalog['development-changes'];
-  const words = [t.dept.structure, t.tracker.side.pipelines, t.dept.noModelYet, t.workers.permanent, t.workers.ghost,
+  const words = [t.dept.structure, t.tracker.side.pipelines, t.dept.noModelYet, t.dept.status.off, t.workers.permanent, t.workers.ghost,
     t.workers.slot(1), t.workers.judge, t.workers.idle, route.name, route.stages['Plan the change']];
   return { id, length: words.join('').length };
 }).sort((a, b) => a.length - b.length);
@@ -114,10 +115,8 @@ describe('Department view', () => {
     expect(within(stage).getByText('No model yet')).toBeVisible();
     const square = within(stage).getByRole('img', { name: 'Permanent agent' });
     expect(square).toHaveClass('cell', 'o');
-    const predecessor = within(changes).getByRole('heading', { name: 'Build the change' });
-    const stageLinks = within(changes).getAllByRole('link', { name: 'Build the change' });
-    expect(stageLinks).toHaveLength(2);
-    for (const link of stageLinks) expect(link).toHaveAttribute('href', `#${predecessor.id}`);
+    expect(within(changes).getByRole('heading', { name: 'Build the change' })).toBeVisible();
+    expect.soft(within(changes).queryAllByRole('link', { name: 'Build the change' })).toHaveLength(0);
     const marks = (inStage: HTMLElement) => within(inStage).getAllByRole('img', { name: /^One-shot call: starts from zero each time, no memory/ });
     const diamonds = marks(stage);
     expect(diamonds).toHaveLength(3);
@@ -145,6 +144,20 @@ describe('Department view', () => {
     expect(diamonds.every(mark => mark.classList.contains('idle'))).toBe(true);
     await user.click(within(stage).getByRole('link', { name: 'Design' }));
     expect(await screen.findByRole('heading', { level: 2, name: 'Design' })).toBeVisible();
+  });
+
+  it.each(checkedLocales)('shows matching model and subscription status lines in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const [dev] = DEV_ORG.departments;
+    const employee: Employee = { ...dev!.employees[0]!, model: '', modelName: null, status: 'off' };
+    render(<LanguageProvider><DepartmentStructure department={{ ...dev!, employees: [employee] }} onOpen={() => {}} /></LanguageProvider>);
+    const statuses = {
+      en: ['No model yet', 'No subscription yet'],
+      ru: ['Модели пока нет', 'Подписки пока нет'],
+    };
+    const place = within(screen.getByRole('img', { name: messages[language].workers.permanent }).closest('.dv-agent-place')! as HTMLElement);
+    expect(place.getAllByText((_, element) => element?.tagName === 'SMALL' && element.textContent !== employee.title?.[language])
+      .map(line => line.textContent)).toEqual(statuses[language]);
   });
 
   it.each(checkedLocales)('localizes the route, its vacant position and both marks in %s', language => {

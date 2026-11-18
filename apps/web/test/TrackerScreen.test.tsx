@@ -6,6 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
+import { decl } from './css';
 import { taskRoute } from './task-route';
 
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
@@ -104,6 +105,19 @@ it('marks the whole department row and keeps its pipeline disclosure independent
   await user.click(department);
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(side.getByRole('button', { name: pipeline })).toBeInTheDocument();
+});
+
+it('keeps a pipeline chevron beside the first line of its full name', async () => {
+  const name = 'Beta build way';
+  shell('/tasks?department=d2', { 'GET /api/pipelines': [200, { pipelines: [{ ...PIPELINE, name, isDefault: true }] }] });
+  const label = `${name} (default)`;
+  const pipeline = await screen.findByRole('button', { name: label });
+  const text = within(pipeline).getByText(label);
+  expect(text.previousElementSibling).toHaveClass('ic');
+  expect(text.parentElement).toHaveClass('tr-item-name');
+  expect(text.closest('.tr-pipelines')).toBeInTheDocument();
+  expect.soft(decl('.tr-pipelines .tr-item-name > .ic', 'align-self')).toBe('start');
+  expect(decl('.tr-pipelines .tr-item-name > .ic', 'margin-block-start') ?? '').toContain('1lh');
 });
 
 describe('My tasks and View as', () => {
