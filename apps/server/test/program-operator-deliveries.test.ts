@@ -38,6 +38,15 @@ it('does not reuse a delivery identity for different words or another target', a
   await expect(reserveDelivery(db, { ...input, companyId: randomUUID() })).rejects.toThrow(/target/i);
 });
 
+it.each(['missing agent', 'removed agent', 'wrong node'] as const)('identifies a permanent target mismatch: %s', async reason => {
+  const { db, input } = await fixture();
+  if (reason === 'missing agent') input.agentId = randomUUID();
+  if (reason === 'removed agent') await db.update(agents).set({ removedAt: new Date('2026-11-17T00:38:00Z') }).where(eq(agents.id, input.agentId));
+  if (reason === 'wrong node') input.nodeId = randomUUID();
+  await expect(reserveDelivery(db, input)).rejects.toMatchObject({ name: 'DeliveryTargetMismatch' });
+  expect(await db.select().from(programDeliveries)).toEqual([]);
+});
+
 
 it('releases an unsent reference but preserves attempted or instance-bound delivery identities', async () => {
   const { db, input } = await fixture();

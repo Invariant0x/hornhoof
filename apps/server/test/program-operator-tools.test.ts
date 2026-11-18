@@ -338,14 +338,14 @@ it('says the picture could not be drawn when its drawing failed, and the next lo
   expect((await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id })).text).toContain('Choose a theme.');
 });
 
-/* A case the program operator was given, for its report. */
-async function withCase(question: boolean) {
+/* A case the program operator was given, for its report, on a question of the kind the node classed it. */
+async function withCase(question: boolean, kind: OperatorQuestion['kind'] = 'permission') {
   const c = await fixture();
   const now = new Date(); let ordinal = 0;
   const identity = { agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance };
   const record = (frame: Parameters<typeof acceptOperatorEvidence>[2]) => acceptOperatorEvidence(c.ctx, c.identity, { ...frame, ordinal: ordinal++, evidenceId: randomUUID() }, now);
   await record(c.fact);
-  const request = { id: randomUUID(), kind: 'permission' as const, tool: 'Bash', text: 'Remove ./tmp/mine?', callId: 'q' };
+  const request: OperatorQuestion = { id: randomUUID(), kind, tool: 'Bash', text: 'Remove ./tmp/mine?', callId: 'q' };
   if (question) await record({ type: 'program.question', ...identity, evidenceId: randomUUID(), ordinal: 0, phase: 'asked', question: request, questionOrdinal: 1, elapsedMs: 0 });
   await record({ type: 'program.operator_needed', ...identity, evidenceId: randomUUID(), ordinal: 0, reason: question ? 'question_waiting' : 'assignment_unrecorded', questionId: question ? request.id : undefined, deliveryId: question ? null : c.delivery.id, evidenceKey: question ? request.id : c.delivery.id, elapsedMs: question ? 30000 : 60000, sinceLaunchMs: 60000, exit: null });
   const [incident] = await c.db.select().from(programOperatorCases);
@@ -358,6 +358,9 @@ async function withCase(question: boolean) {
   };
   return { ...c, caller, incident: incident!, record, request, identity, deny };
 }
+
+/* A denied report on a case where the operator's turn made no denial: said plainly, not as a refusal of access. */
+const NO_DENIAL = { status: 409, code: 'conflict', message: expect.stringContaining('No denial is recorded for this question.') };
 
 it('records a permission denial and sends one report with a picture to the target head after the program continues', async () => {
   const c = await withCase(true);
@@ -377,7 +380,7 @@ it('journals an allowed permission and its exact request without sending a denia
   await readProgramView(c.ctx, c.caller, { employee: c.agent.id });
   expect(await sendProgramInput(c.ctx, c.caller, { ...c.input, keys: ['Enter'], reason: 'Only my temporary folder.', decision: 'allowed' })).toMatchObject({ result: 'applied' });
   expect((await c.journal()).map(e => e.operatorAction)).toContainEqual(expect.objectContaining({ decision: 'allowed', question: c.request, result: 'applied', reason: 'Only my temporary folder.' }));
-  await expect(reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'No denial was made.' })).rejects.toMatchObject({ status: 403 });
+  await expect(reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'No denial was made.' })).rejects.toMatchObject(NO_DENIAL);
 });
 
 it('reports once with the last picture when the node has become unavailable', async () => {
@@ -408,6 +411,42 @@ async function toldOf(c: WithCase): Promise<string[]> {
 }
 const revoked = (c: WithCase, closedBecause: string) => expect(c.sent.mock.calls).toContainEqual([expect.anything(), expect.objectContaining({ type: 'program.operator_case', case: c.incident.id, disposition: 'revoke', closedBecause })]);
 const atWork = (c: WithCase) => { c.screen.state = 'working'; c.screen.question = null; };
+/* Claude Code's own check before a removal, as a program showed it (RM_PERMISSION): "❯ 1. Yes", then "2. No". */
+const onRmCheck = (c: WithCase) => Object.assign(c.screen, { cells: RM_PERMISSION, cols: 162, rows: 47, tool: 'Bash' });
+
+/* The node classes the same check permission or protected by what the request names; Switch's program asked it as protected on
+   17 Nov at 23:40. Down moves to "2. No", Enter answers it, and the operator says it denied. */
+it.each(['permission', 'protected'] as const)("records No on Claude Code's removal check asked as a %s question as a denial, and takes the denied report", async kind => {
+  const c = await withCase(true, kind);
+  onRmCheck(c);
+  expect((await readProgramView(c.ctx, c.caller, { employee: c.agent.id })).text).toContain('Do you want to proceed?');
+  expect(await sendProgramInput(c.ctx, c.caller, { ...c.input, keys: ['Down', 'Enter'], decision: 'denied', reason: 'Only a person may approve this removal.' })).toMatchObject({ result: 'applied' });
+  const [entry] = await c.journal();
+  expect(entry!.operatorAction).toMatchObject({ case: c.incident.id, keys: ['Down', 'Enter'], key: 'Enter', question: c.request, requestedDecision: 'denied', decision: 'denied', permissionDecision: true, result: 'applied' });
+  expect(entry!.text).toContain(`Decision: denied. Request: ${c.request.text}.`);
+  expect(await reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'Only a person may approve this removal.' })).toMatchObject({ outcome: 'denied', case: c.incident.id });
+  expect(await c.turnsOf(c.head.id)).toHaveLength(1);
+});
+
+it('refuses a denied report on a protected question plainly while no denial is recorded, before an answer and after Yes', async () => {
+  const c = await withCase(true, 'protected');
+  onRmCheck(c);
+  await expect(reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'Not answered yet.' })).rejects.toMatchObject(NO_DENIAL);
+  await readProgramView(c.ctx, c.caller, { employee: c.agent.id });
+  expect(await sendProgramInput(c.ctx, c.caller, { ...c.input, keys: ['Enter'], decision: 'allowed', reason: 'Only my temporary folder.' })).toMatchObject({ result: 'applied' });
+  expect((await c.journal()).map(e => e.operatorAction)).toContainEqual(expect.objectContaining({ keys: ['Enter'], question: c.request, decision: 'allowed', permissionDecision: true, result: 'applied' }));
+  await expect(reportOperatorCase(c.ctx, c.caller, { case: c.incident.id, outcome: 'denied', text: 'No denial was made.' })).rejects.toMatchObject(NO_DENIAL);
+  expect((await caseRow(c)).status).toBe('open');
+  expect(await toldOf(c)).toEqual([]);
+});
+
+it("still refuses a denied report from another turn of the operator as access to the case, with the denial recorded", async () => {
+  const c = await withCase(true, 'protected');
+  onRmCheck(c);
+  await c.deny();
+  await expect(reportOperatorCase(c.ctx, c.callers.operator, { case: c.incident.id, outcome: 'denied', text: 'Outside the working folder.' })).rejects.toMatchObject({ status: 403, message: 'This operator turn cannot access that program case.' });
+  expect((await caseRow(c)).status).toBe('open');
+});
 
 it("closes a question case by itself once a fresh screen shows the program at work asking nothing, before its operator looked, and tells no one", async () => {
   const c = await withCase(true);

@@ -181,9 +181,13 @@ function actionOf({ me, caller, input, typed, reply, outcome }: Entry, secrets: 
   };
 }
 
+/* A program asks permission before it acts, and a protected question is such a request on sign-in, consent, payment or secrets:
+   both are answered allowed or denied. A work question is answered in words. */
+export const takesDecision = (kind: OperatorQuestion['kind']) => kind === 'permission' || kind === 'protected';
+
 /* An answer to a question of permission, given and taken. */
 function decided(input: KeysInput, question: OperatorQuestion | null, outcome: Outcome) {
-  return input.decision && question?.kind === 'permission' && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
+  return input.decision && question && takesDecision(question.kind) && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
 }
 
 function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { phase: 'requested' | 'finished' }): string {
