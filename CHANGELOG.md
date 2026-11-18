@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
 - The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
 - Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
 - The orchestrator can use an open machine grant whoever started the turn or last wrote.

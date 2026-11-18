@@ -1733,7 +1733,9 @@ export const testRuns = pgTable(
     createdAt: createdAt(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId), index('test_runs_environment_request').on(sql`(${t.environmentRequest}->>'requestId')`).where(sql`${t.environmentRequest} is not null and ${t.environmentSnapshot} is null and ${t.status} = 'running'`)],
+  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId),
+    index('test_runs_release').on(t.companyId, t.departmentId, sql`(${t.fileCache}->>'release')`),
+    index('test_runs_environment_request').on(sql`(${t.environmentRequest}->>'requestId')`).where(sql`${t.environmentRequest} is not null and ${t.environmentSnapshot} is null and ${t.status} = 'running'`)],
 );
 
 export const HARNESS_BUILD_STATUSES = ['building', 'ready', 'failed'] as const;
