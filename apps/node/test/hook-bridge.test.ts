@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { request } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
-import { fromAgent, socketOf, type Peer } from '../src/terminal/peer.js';
+import { fromAgent, OwnerUnknown, socketOf, type Peer } from '../src/terminal/peer.js';
 import { procFixture } from './terminal-proc-fixture.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
@@ -122,6 +122,28 @@ describe('hook delivery through the bridge', () => {
     now += 60_000;
     expect((await post(b.url)).status).toBe(403);
     expect(b.rejected).toHaveLength(2);
+  });
+
+  it('answers a lookup that gave no answer with a retryable 502, keeps nothing of it and says why', async () => {
+    const answers: (() => boolean)[] = [() => { throw new OwnerUnknown('lsof timed out'); }, () => true];
+    const heard: string[] = [];
+    const b = await opened((_key, event) => void heard.push(event), async () => answers.shift()!());
+    expect((await post(b.url, 'slow-call')).status).toBe(502);
+    expect(heard).toEqual([]);
+    expect((await post(b.url, 'slow-call')).status).toBe(200);
+    expect(heard).toEqual(['stop']);
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'owner check unavailable: lsof timed out' }]);
+  });
+
+  it("reports a refused check command and tools call with the check's reason, as it does a hook", async () => {
+    const b = await opened(() => { throw Error('must not run'); }, async (_key, _peer, why) => { why?.("the caller is not under the agent's pane");return false; });
+    const check = b.url.replace('/hook/', '/check/');
+    expect((await fetch(check, { method: 'POST', headers: { 'x-hh-pid': String(process.pid) }, body: '{}' })).status).toBe(403);
+    expect((await fetch(b.bridge.agent('agent-1').mcpUrl, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await post(b.url)).status).toBe(403);
+    const reason = "owner check failed: the caller is not under the agent's pane";
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'check', reason }, { key: 'agent-1', event: 'mcp', reason }, { key: 'agent-1', event: 'stop', reason }]);
+    expect(JSON.stringify(b.rejected)).not.toContain(b.url.split('/').at(-1)!);
   });
 
   it('does not trust a borrowed pid or a cached successful stop before checking the caller', async () => {

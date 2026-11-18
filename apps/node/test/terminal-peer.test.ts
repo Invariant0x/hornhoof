@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fromAgent } from '../src/terminal/peer.js';
+import { fromAgent, OwnerUnknown } from '../src/terminal/peer.js';
 
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
 const folders: string[] = [];
@@ -78,5 +78,27 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', socket)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, port: 41235 })).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 1))('agent-1', socket)).toBe(false);
+  });
+
+  it('says why it refuses a connection, and a pane lookup that fails gives no answer instead of a refusal', async () => {
+    const reasons: string[] = [];
+    const why = (reason: string) => void reasons.push(reason);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 0 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, port: 41235 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', socket, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-3', socket, why)).toBe(false);
+    expect(reasons).toEqual([
+      'malformed pid hint',
+      'the hinted process does not hold the connection',
+      "the caller is not under the agent's pane",
+      'the connection is not in the socket table',
+      "no process under the agent's pane holds the connection",
+      'the agent has no pane',
+    ]);
+    const lost = fromAgent(async () => { throw new Error('no server running on /tmp/tmux-0/hh'); }, fakeProc(socket, 12));
+    await expect(lost('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
+    await expect(lost('agent-1', socket)).rejects.toThrow('tmux pane lookup failed');
   });
 });
