@@ -9,6 +9,7 @@ import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { idOnly } from '../../db/selections.js';
+import { phoneReadiness } from './readiness.js';
 
 export type CompanyPhone = typeof companyPhones.$inferSelect;
 export type PhoneSession = typeof phoneSessions.$inferSelect;
@@ -59,6 +60,7 @@ export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person) {
   return {
     id: phone.id, name: phone.name, owner: owner!, machineId: phone.machineId, lending: phone.lending, stopping: active?.state === 'revoking',
     online: phoneCapable(ctx, nodeIdentity(phone.nodeId)), state: !phone.lending ? 'owner' : active ? 'busy' : 'available', queued: sessions.filter(s => s.state === 'queued').length,
+    readiness: phoneReadiness(ctx, phone),
     ...(me?.id === phone.personId ? { endpoint: phone.serial } : {}),
   };
 }

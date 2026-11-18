@@ -1,4 +1,5 @@
 import { idOnly } from '../../db/selections.js';
+import { seedDefaultPipeline } from '../tracker/pipelines.js';
 import { ensureOpenTurn } from '../tasks/turn-department.js';
 import { and, asc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -25,17 +26,18 @@ const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).
 const operationsOf = async (tx: Tx, companyId: string) =>
   (await tx.select().from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations'), isNull(departments.parentId))).orderBy(asc(departments.position)))[0];
 
-async function createOperations(tx: Tx, companyId: string) {
+async function createOperations(ctx: Ctx, tx: Tx, companyId: string) {
   const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, companyId));
   const [dept] = await tx.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS', position: (last?.n ?? -1) + 1 }).returning();
   await ensureOpenTurn(tx, companyId, dept!.id);
+  await seedDefaultPipeline(ctx, tx, dept!, null);
   return dept!;
 }
 
 /* Under the company's lock, so two servers or two checks at once hire no one twice. */
 async function hireMissing(ctx: Ctx, tx: Tx, companyId: string): Promise<{ departmentId: string; hired: Hired[] }> {
   await lockCompany(tx, companyId);
-  const dept = (await operationsOf(tx, companyId)) ?? (await createOperations(tx, companyId));
+  const dept = (await operationsOf(tx, companyId)) ?? (await createOperations(ctx, tx, companyId));
   const missing = missingRoles(await staffOf(tx, dept.id));
   const hired: Hired[] = [];
   if (!missing.length) return { departmentId: dept.id, hired };

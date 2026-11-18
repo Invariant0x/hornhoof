@@ -93,7 +93,7 @@ describe('the orchestrator takes any tool of Hornhoof when it needs it', () => {
     expect(JSON.parse((await call('api', { path: '/api/people' })).text).people).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Maria' })]));
   });
 
-  it("answers a decision itself as the owner's answer, and people see that the orchestrator gave it", async () => {
+  it("answers a decision itself as the owner's answer, and people see that the orchestrator gave it for the owner", async () => {
     const c = await company();
     const { me, call } = await orchestrator(c);
     const owner = (await c.app.inject({ url: '/api/me', ...as(c.ceo) })).json().person.id as string;
@@ -103,7 +103,9 @@ describe('the orchestrator takes any tool of Hornhoof when it needs it', () => {
     expect((await c.db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'answered', answeredBy: owner, answeredByAgentId: me.id });
     const { task } = (await c.app.inject({ url: `/api/tasks/${c.task.id}`, ...as(c.ceo) })).json() as { task: { requests: unknown[]; log: { kind: string; by: unknown }[] } };
     expect(task.requests).toMatchObject([{ id: request.id, answer: 'Yes, with tax.', byOrchestrator: true }]);
-    expect(task.log.find(line => line.kind === 'answered')!.by).toMatchObject({ kind: 'person', id: owner, byOrchestrator: true });
+    /* Every tool call of the orchestrator keeps its job as a standing decision for the owner, so the log names the
+       orchestrator and the owner it answered for. */
+    expect(task.log.find(line => line.kind === 'answered')!.by).toMatchObject({ kind: 'agent', id: me.id, for: { id: owner } });
   });
 
   it("is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key", async () => {

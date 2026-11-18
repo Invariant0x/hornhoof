@@ -6,6 +6,14 @@ The list at the end names every template, what it learned from and its licence. 
 
 The development templates carry Hornhoof's own T1-T11 testing policy and coding cycle with four task kinds. Product environment discovery and ownership are also project-owned procedures, shared by Development and Operations. These project-owned rules govern affected tests, the final whole-suite run, release-scoped mutation testing, deterministic evidence and the Bug, Known behaviour, Unknown path and Legacy code cycles for any company and language.
 
+The one-shot stage declarations, judge briefs and stage-owner guidance are Hornhoof's own text. They use the procedure in `skills/hh-one-shot-calls.md`.
+
+The first-contact offer and setup procedures in `skills/orch-interview.md` and `skills/orch-company.md` are Hornhoof's own text. Telegram's bot guide explains the BotFather and Start steps.
+
+The ready pipelines in `pipelines/` and the setup skill `skills/orch-pipelines.md` are Hornhoof's own procedure. The Marketing, Sales and Operations catalogs draw on the work of two live companies: their task handoffs, department notes and the roles that do the work. The catalog text generalizes the practice for any company.
+
+Each catalog has one department, a default pipeline key and an ordered list of pipelines. Each pipeline names when it fits and gives ordered tracker stages with role owners. A stage can add a brief and map to an echelon for one-shot calls. Stock defaults inherit their department route's one-shot calls. Alternatives declare the calls that suit their work while preserving the department's checks.
+
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
@@ -224,6 +232,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/ops-intake.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-mcp-config-review.md` | Written for Hornhoof | affaan-m/ECC skills/mcp-dependency-review/SKILL.md | Hornhoof |
 | `skills/ops-node-health.md` | Written for Hornhoof | affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
+| `skills/ops-phone-readiness.md` | Written for Hornhoof | Hornhoof's own procedure for checking and restoring connected phone settings | Hornhoof |
 | `skills/ops-postmortem.md` | Written for Hornhoof | wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md | Hornhoof |
 | `skills/ops-program-operator.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-runbook.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md | Hornhoof |
@@ -233,6 +242,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/ops-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/orch-company.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/orch-interview.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md | Hornhoof |
+| `skills/orch-pipelines.md` | Written for Hornhoof | Hornhoof's own pipeline setup procedure | Hornhoof |
 | `skills/orch-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/orch-people.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
 | `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
@@ -303,3 +313,13 @@ Development authors write a failing test before the change, run only affected te
 | `echelons/finance.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/home_devices.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/household.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `pipelines/business_development.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/design.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/development.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/finance.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/home_devices.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/household.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/marketing.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
+| `pipelines/operations.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
+| `pipelines/sales.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
+| `pipelines/support.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |

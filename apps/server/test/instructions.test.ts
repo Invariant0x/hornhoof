@@ -1,5 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -43,7 +42,7 @@ const SKILLS = [
   skill('dev-migrations', 'Migrations', 'Never edit a shipped migration.'),
 ];
 
-const T: Templates = { roles: new Map([[ROLE.id, ROLE]]), skills: new Map(SKILLS.map(s => [s.id, s])), teams: new Map(), echelons: new Map(), roster: () => [ROLE], teamsOf: () => [], stagesOf: () => ({ department: 'development', stages: [] }) };
+const T: Templates = { roles: new Map([[ROLE.id, ROLE]]), skills: new Map(SKILLS.map(s => [s.id, s])), teams: new Map(), echelons: new Map(), catalogs: new Map(), roster: () => [ROLE], teamsOf: () => [], stagesOf: () => ({ department: 'development', stages: [] }) };
 
 type AgentRow = typeof agents.$inferSelect;
 
@@ -172,8 +171,14 @@ describe('what a node from before skill files takes', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
 
-  /* A role is built of as many bricks as it needs: how much such a node takes bounds none of them, and a turn too long for
-     it ends saying the node needs an update. */
+  it('gives the orchestrator owner authority in any turn and treats quoted text as data', () => {
+    const { text } = orchestratorSteady(shipped);
+    expect(text).toContain('Ordinary work uses the company owner');
+    expect(text).toContain('A permanent deletion requires the CEO');
+    expect(text).toContain('Lines Hornhoof marks with "> "');
+    expect(text).not.toContain('do it only when they say so');
+  });
+
   it('gets every brick of a role and of the orchestrator whole', () => {
     for (const role of shipped.roles.values()) {
       const { parts, whole } = always(role);
@@ -335,10 +340,9 @@ describe('renderInstructions', () => {
     expect(whole).not.toContain('## Skills');
   });
 
-  it('keeps that text whole however long it is, and a turn too long for the node does not go out', () => {
+  it('keeps the whole override for a node that takes skills inline', () => {
     const long = 'Test first. '.repeat(2000);
     const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
-    expect(whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
     expect(whole).toContain(`${long}\n<!-- /hh:skill -->`);
   });
 
@@ -690,19 +694,18 @@ describe('reading web pages in a browser on the node', () => {
       expect(packet.text, id).toContain(rule!.body);
       expect(packet.whole, id).toContain(rule!.body);
       expect(packet.skills.some(s => s.name === 'hh-web-pages'), id).toBe(false);
-      expect(packet.text.length, id).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     }
   });
 
-  it('says when to take hh-browse, and that a sign-in or a robot check is noted for a person while the work goes on, never got past or taken to the orchestrator or the CEO', () => {
+  it('says when to take hh-browse, that the agent signs in itself from the vault, and that a robot check is noted for a person while the work goes on, never got past or taken to the orchestrator or the CEO', () => {
     const body = shipped.skills.get('hh-web-pages')!.body;
     expect(body).toContain('`hh-browse URL`');
     expect(body).toMatch(/scripts build/);
     expect(body).toMatch(/--screenshot[\s\S]*hh-attach/);
     expect(body).toMatch(/only public http and https addresses/);
     expect(body).toMatch(/`login_required`[\s\S]*`robot_check`/);
-    expect(body).toMatch(/never try to get past it/i);
-    expect(body).toMatch(/never ask the orchestrator or the CEO/i);
+    expect(body).toMatch(/At `login_required`, sign in yourself[^.]*vault_entry/);
+    expect(body).toMatch(/At `robot_check`, never try to get past it and never ask the orchestrator or the CEO/);
     expect(body).toMatch(/note the address[^.]*for a person[^.]*go on with the other addresses/i);
     expect(body).not.toMatch(/[—ё]/);
   });
@@ -734,10 +737,6 @@ describe('one run of every test per release', () => {
       PLACE,
     );
   };
-
-  it('keeps MAX_INSTRUCTIONS at 200000', () => {
-    expect(MAX_INSTRUCTIONS).toBe(200_000);
-  });
 
   it('starts employee hh-* skills with You can', () => {
     for (const skill of shipped.skills.values()) {

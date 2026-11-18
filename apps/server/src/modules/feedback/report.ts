@@ -36,6 +36,7 @@ export const Kind = z.enum(FEEDBACK_KINDS);
 export const Report = z.strictObject({
   v: z.literal(1),
   installation: z.string().regex(/^[0-9a-f]{32}$/),
+  submission: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   kind: Kind,
   title: Title,
   text: Text,
@@ -44,7 +45,7 @@ export const Report = z.strictObject({
   repeats: z.int().min(1).max(REPEATS_MAX).optional(),
 });
 export type Report = z.infer<typeof Report>;
-export type Shown = Omit<Report, 'v' | 'installation' | 'repeats'>;
+export type Shown = Omit<Report, 'v' | 'installation' | 'submission' | 'repeats'>;
 
 /* What a person writes in the feedback window, and the finding it was opened from, if any. */
 export const Written = z.strictObject({ kind: Kind, title: Title, text: Text, improvement: z.uuid().optional() });

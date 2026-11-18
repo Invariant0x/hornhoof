@@ -19,6 +19,12 @@ it('masks known credentials in every question field before clipping and keeps a 
   expect(operatorQuestion(data, [secret], question)).toEqual(question);
 });
 
+it('masks a short known credential in a question and keeps the tool as a work decision', () => {
+  const secret = 'Ask';
+  const question = operatorQuestion({ tool_name: 'AskUserQuestion', tool_use_id: 'call-Ask', tool_input: 'Use Ask' }, [secret]);
+  expect(question).toMatchObject({ kind: 'work', tool: '[hidden]UserQuestion', callId: 'call-[hidden]', text: '{"tool":"[hidden]UserQuestion","request":"Use [hidden]"}' });
+});
+
 it('uses provider call-id and request fallbacks without exposing unbounded identifiers', () => {
   expect(operatorQuestion({ tool_call_id: 42, input: 'Continue?' }, [])).toMatchObject({ tool: 'Permission', callId: '42', kind: 'permission', text: '{"tool":"Permission","request":"Continue?"}' });
   expect(operatorQuestion({ tool_use_id: {}, message: 'Ready?' }, [])).toMatchObject({ callId: null, text: '{"tool":"Permission","request":"Ready?"}' });

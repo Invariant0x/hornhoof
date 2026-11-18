@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
-import { ACCESS_DURATIONS, DURATION_S, type AccessDuration, type ComputerAccessView } from '../types';
+import { ACCESS_DURATIONS, type AccessDuration, type ComputerAccessView } from '../types';
 import { cannotOpen, decidesAccess, givesLines, isOpen, machineName, useAccess, type AccessAnswer, type AccessChoice } from './access';
 import { DecidedByNote } from './DecidedBy';
 import { clock } from './subscription';
@@ -8,12 +8,12 @@ import { clock } from './subscription';
 /* Computer access in a machine's card (#1115, Design #1102), a part of its block of system and programs, named for
    whoever hears the screen: closed, open to the orchestrator until a time, open in full
    to every agent of the company until a time, asked for by the orchestrator, or out of reach. Its owner opens it after
-   choosing how long and for whom, every agent only after saying yes once more; whoever the server lets close it closes
+   choosing how long and for whom; whoever the server lets close it closes
    it with one press. What the server answers shows at once, and a change that failed stays beside its machine with a
    way to try again. */
 
 type State = 'closed' | 'open' | 'full' | 'asks' | 'offline';
-type Step = { kind: 'shown' } | { kind: 'choose'; duration: AccessDuration } | { kind: 'confirm'; duration: AccessDuration };
+type Step = { kind: 'shown' } | { kind: 'choose'; duration: AccessDuration };
 type Attempt = { action: AccessAnswer; choice?: AccessChoice };
 
 function stateOf(view: ComputerAccessView): State {
@@ -99,35 +99,13 @@ function Choose({ t, machine, gives, duration, onDuration, onPick, onCancel }: {
       <StepHeading>{c.who}</StepHeading>
       <Line>{c.whoText(machine)}</Line>
       {gives.map(line => <Line key={line} className="muted">{line}</Line>)}
+      <Line className="muted">{c.teamAccess(machine)}</Line>
       <Durations t={t} duration={duration} onPick={onDuration} />
       <div className="acc-pick">
         <button className="act" type="button" onClick={() => onPick('orchestrator')}>{c.orchestrator}</button>
         <button className="act" type="button" onClick={() => onPick('all_agents')}>{c.team}</button>
       </div>
       <div className="entry-actions">
-        <button className="act" type="button" onClick={onCancel}>{c.cancel}</button>
-      </div>
-    </div>
-  );
-}
-
-/* Once more, before every agent of the company may change anything on the machine. */
-function Confirm({ t, language, machine, duration, onOpen, onCancel }: { t: Messages; language: Language; machine: string; duration: AccessDuration; onOpen(): void; onCancel(): void }) {
-  const c = t.machines.computer;
-  const until = clock(language, new Date(Date.now() + DURATION_S[duration] * 1000).toISOString()) ?? '';
-  return (
-    <div className="acc-step" role="group" aria-label={c.confirm} onKeyDown={leaveOnEscape(onCancel)}>
-      <StepHeading>{c.confirm}</StepHeading>
-      <Line>{c.confirmText(machine)}</Line>
-      <div className="acc-facts">
-        <Line>{c.confirmMachine(machine)}</Line>
-        <Line>{c.confirmWho}</Line>
-        <Line>{c.confirmDuration(c.durations[duration])}</Line>
-        <Line>{c.until(until)}</Line>
-      </div>
-      <Line className="muted">{c.confirmFoot}</Line>
-      <div className="entry-actions">
-        <button className="btn" type="button" onClick={onOpen}>{c.fullButton}</button>
         <button className="act" type="button" onClick={onCancel}>{c.cancel}</button>
       </div>
     </div>
@@ -267,8 +245,8 @@ function AnswerAsk({ t, view, flow }: ActionProps) {
   );
 }
 
-/* A closed machine of theirs: its button, then for whom and for how long, then once more for every agent. */
-function OpenSteps({ t, language, view, flow }: ActionProps) {
+/* A closed machine of theirs: choose how long, then whom to open it for. */
+function OpenSteps({ t, view, flow }: ActionProps) {
   const machine = machineName(t, view.machine);
   const { step } = flow;
   if (step.kind === 'choose') {
@@ -279,13 +257,10 @@ function OpenSteps({ t, language, view, flow }: ActionProps) {
         gives={givesLines(t, view)}
         duration={step.duration}
         onDuration={duration => flow.setStep({ kind: 'choose', duration })}
-        onPick={scope => (scope === 'all_agents' ? flow.setStep({ kind: 'confirm', duration: step.duration }) : flow.act('open', { scope, duration: step.duration }))}
+        onPick={scope => flow.act('open', { scope, duration: step.duration })}
         onCancel={flow.cancel}
       />
     );
-  }
-  if (step.kind === 'confirm') {
-    return <Confirm t={t} language={language} machine={machine} duration={step.duration} onOpen={() => flow.act('open', { scope: 'all_agents', duration: step.duration, confirm: true })} onCancel={flow.cancel} />;
   }
   return (
     <div className="entry-actions">

@@ -50,19 +50,19 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, builtin_machine: null, inbox_wake: false } }));
   /* The same for a part of a test run: none ran on a machine's built-in node before there were any. */
   if (table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
-  /* Migration 0098 gives every person an empty Telegram, 0100 makes every one a person and no assistant, and the deletion
-     of people deletes nobody. */
-  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null, removed_at: null } }));
+  /* Migration 0098 gives every person an empty Telegram, 0100 makes every one a person and no assistant, the deletion
+     of people deletes nobody, and 0145 records no CEO's yes and no finished deletion for anyone. */
+  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null, removed_at: null, deletion_approved_at: null, deletion_approved_by: null, deletion_completed_at: null } }));
   /* Migration 0100: nobody's assistant answered a request before. */
   if (table === 'requests') return rows.map(row => ({ row: { ...row.row, answered_by_assistant_id: null } }));
   if (table !== 'tasks') return rows;
   /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty, and
-     the tracker's migration the goal, the responsible person, the why, the due date and the pipeline, all empty, and the
-     tracker's first revision of the task. */
+     the tracker's migration the goal, the responsible person, the why, the due date and the pipeline, all empty, the
+     tracker's first revision of the task, and 0148 no priority. */
   const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
   return rows.map(({ row }) => ({ row: {
     ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), paused: null,
-    goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null, tracker_revision: 0,
+    goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null, tracker_revision: 0, priority: null,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

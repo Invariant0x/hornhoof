@@ -404,7 +404,7 @@ export function pumpTests(ctx: Ctx): Promise<void> {
   return next;
 }
 
-type RunEnd = { wakes: Wake[]; moved: Task | null };
+type RunEnd = { wakes: Wake[]; changed: Task | null };
 
 const goesOnLine = (wait: ExternalWait | null) => wait ? `\n\nYour wait for "${wait.reason}" goes on until ${wait.until}. If this run was what it waited for, end it with end_wait.` : '';
 
@@ -413,17 +413,17 @@ const goesOnLine = (wait: ExternalWait | null) => wait ? `\n\nYour wait for "${w
    end. Nobody hears of a run on a closed task. */
 async function tellEnd(tx: Tx, run: Run, task: Task, text: string, always: boolean): Promise<RunEnd> {
   await endRunWaits(tx, { taskId: task.id, runId: run.id, outcome: run.status === 'stopped' ? 'cancelled' : 'resolved', proofRef: `run:${run.id}:${run.status}`, actor: { agentId: run.agentId } });
-  if (CLOSED.includes(task.status)) return { wakes: [], moved: null };
+  if (CLOSED.includes(task.status)) return { wakes: [], changed: null };
   const { waited, goesOn } = await endWaitForRun(tx, task.id, run.agentId, { id: run.id, label: named(run) });
-  if (!always && !waited) return { wakes: [], moved: null };
+  if (!always && !waited) return { wakes: [], changed: task };
   const wakes: Wake[] = [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text: text + goesOnLine(goesOn) }];
   await keepWakes(tx, run.companyId, wakes);
-  return { wakes, moved: waited ? task : null };
+  return { wakes, changed: task };
 }
 
 /* What the write that ended a run kept, once it is kept. */
 async function told(ctx: Ctx, end: RunEnd): Promise<void> {
-  if (end.moved) published(ctx, end.moved);
+  if (end.changed) published(ctx, end.changed);
   await wakeAll(ctx, end.wakes);
 }
 
@@ -774,6 +774,7 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const setup = await prepareRun(ctx, job, task, input, kind, mode, found);
   const unchecked = await checkNamedFiles(ctx, found, mode, setup.pin);
   const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts);
+  published(ctx, task);
   await pumpTests(ctx);
   if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;
   return (await startedRunSummary(ctx, run, task, found, setup.department)) + unchecked;

@@ -47,10 +47,11 @@ export type MakerView = {
 export type HolderView = { keeps: boolean; hold: Pick<Manifest, 'id' | 'size' | 'sha256'>[]; want: string[] };
 
 /* Who may get in now, taken from the database a restore replaces at the moment it closes, and applied to the restored
-   one: a restore never brings back a person who was disabled, a machine that was disconnected or a key that was
+   one: a restore never brings back a person who was disabled or removed, a machine that was disconnected or a key that was
    replaced since the bundle. */
 export type Carry = {
-  people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; scopeKind: string; isOwner: boolean; isCeoDelegate: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
+  /* A carry from an older updater can omit the removal fields. */
+  people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; removedAt?: string | null; removedName?: string | null; scopeKind: string; isOwner: boolean; isCeoDelegate: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
   /* The hashes of the invites open now. */
   invites: string[];
   /* role, dataLeftAt, uploadState: whether the machine holds the company's data now, and what one that stopped still

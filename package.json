@@ -31,7 +31,7 @@
     "deps": "node scripts/deps.mjs",
     "test:related": "vitest related --run",
     "typecheck:tests": "npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
-    "test": "node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present --",
+    "test": "node scripts/check-release.mjs --local && npm run typecheck:tests && npm run -s build -w @hornhoof/node && npm run test:release && vitest run",
     "test:real": "npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server",
     "test:lab": "npm run build -w @hornhoof/protocol && npm run test:lab -w @hornhoof/server",
     "build": "npm run build --workspaces --if-present",

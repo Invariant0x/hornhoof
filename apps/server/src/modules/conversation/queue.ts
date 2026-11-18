@@ -3,7 +3,7 @@ import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, modelsFor, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -211,7 +211,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; byTurn?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; byTurn?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; offer?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -946,41 +946,6 @@ async function waitsForTasks(ctx: Ctx, job: { id: string; agentId: string | null
   return true;
 }
 
-/* Why a turn ended unsent: its instructions are longer than any node takes, or than its node from before skill files
-   takes. */
-export const TOO_LONG = 'instructions_too_long';
-export const NODE_TOO_OLD = 'node_too_old';
-export const UNSENT: readonly string[] = [TOO_LONG, NODE_TOO_OLD];
-
-/* Instructions longer than its node takes: the node would drop the turn unseen. */
-function unsendable(name: string, length: number, files: boolean): { error: string; result: string } | null {
-  if (files) {
-    return length > MAX_INSTRUCTIONS
-      ? { error: TOO_LONG, result: `${name}'s instructions are ${length} characters, more than the ${MAX_INSTRUCTIONS} a turn carries, so this turn did not go out. Shorten its role or a skill on its card.` }
-      : null;
-  }
-  return length > OLD_NODE_INSTRUCTIONS
-    ? { error: NODE_TOO_OLD, result: `This machine's node is too old for these instructions; update it. ${name}'s instructions are ${length} characters, more than the ${OLD_NODE_INSTRUCTIONS} it takes.` }
-    : null;
-}
-
-/* A turn its node would drop ends at once instead, saying why on the agent's card and its task. It ends after this send
-   is over, as its end sends the agent's next turn. */
-async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { error: string; result: string }): Promise<void> {
-  const at = new Date();
-  const [ended] = await ctx.db
-    .update(jobs)
-    .set({ status: 'failed', ...why, startedAt: at, finishedAt: at })
-    .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
-    .returning({ id: jobs.id });
-  if (!ended) return;
-  await publishWorking(ctx, job.companyId);
-  /* tasks/wake imports this module, so its afterJob comes in here. */
-  void import('../tasks/wake.js')
-    .then(({ afterJob }) => afterJob(ctx, job.id))
-    .catch(err => ctx.log.error({ error: loggable(err) }, 'A turn that did not go out could not end.'));
-}
-
 /* A turn that waited for the agent and goes out inside its turn. */
 type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf' | 'inboxWake'>;
 type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId' | 'prompt'>;
@@ -1186,8 +1151,6 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A node from before skill files gets every skill in the instructions. */
   const files = ctx.hub.takesSkillFiles(place.node);
   const instructions = await instructionsOf(ctx, agent, files);
-  const refused = unsendable(agent.name, instructions.text.length, files);
-  if (refused) return unsent(ctx, job, refused);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;

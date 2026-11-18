@@ -62,8 +62,13 @@ export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; d
    at a stage must carry. */
 /* oneShot: its owner runs the stage as one-shot calls, so many at once and a judge. */
 export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null; oneShot?: EchelonOneShot }[] };
+export type CatalogStage = { name: string; ownerRole: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot };
+export type CatalogPipeline = { key: string; name: string; why: string; stages: CatalogStage[] };
+export type PipelineCatalog = { department: TemplateKey; default: string; pipelines: CatalogPipeline[] };
+
 export type Templates = {
   roles: Map<string, Role>; skills: Map<string, Skill>; teams: Map<string, TeamTemplate>; echelons: Map<TemplateKey, StageRoute>;
+  catalogs: Map<TemplateKey, PipelineCatalog>;
   roster(key: TemplateKey): Role[]; teamsOf(key: TemplateKey): TeamTemplate[];
   /* A department made from no template works as Development does. */
   stagesOf(key: TemplateKey | null): StageRoute;
@@ -251,6 +256,8 @@ function loadTeams(dir: string, roles: ReadonlyMap<string, Role>, skills: Readon
   return teams;
 }
 
+const OneShot = z.object({ fanOut: z.number().int().min(1), judge: z.string().trim().min(1).optional() }).strict()
+  .transform(({ fanOut, judge }) => ({ fanOut, judge: judge ?? null }));
 const RouteHead = z
   .object({
     department: z.enum(TEMPLATE_KEYS),
@@ -260,7 +267,7 @@ const RouteHead = z
           .object({
             stage: z.enum(ECHELON_STAGES),
             ability: z.string().optional(),
-            oneShot: z.object({ fanOut: z.number().int().min(1), judge: z.string().trim().min(1).optional() }).strict().optional(),
+            oneShot: OneShot.optional(),
           })
           .strict(),
       )
@@ -283,7 +290,7 @@ function parseRouteFile(file: string, key: TemplateKey, skills: ReadonlyMap<stri
   }
   return {
     department: key,
-    stages: route.stages.map(step => ({ stage: step.stage, ability: step.ability ?? null, ...(step.oneShot ? { oneShot: { fanOut: step.oneShot.fanOut, judge: step.oneShot.judge ?? null } } : {}) })),
+    stages: route.stages.map(step => ({ stage: step.stage, ability: step.ability ?? null, ...(step.oneShot ? { oneShot: step.oneShot } : {}) })),
   };
 }
 
@@ -298,6 +305,68 @@ function loadRoutes(dir: string, skills: ReadonlyMap<string, Skill>): Map<Templa
   return routes;
 }
 
+const CatalogKey = z.string().regex(/^[a-z][a-z0-9-]*$/);
+const CatalogHead = z.strictObject({
+  department: z.enum(TEMPLATE_KEYS),
+  default: CatalogKey,
+  pipelines: z.array(z.strictObject({
+    key: CatalogKey,
+    name: z.string().trim().min(1),
+    why: z.string().trim().min(1),
+    stages: z.array(z.strictObject({
+      name: z.string().trim().min(1),
+      ownerRole: z.string(),
+      brief: z.string().trim().min(1).optional(),
+      echelon: z.enum(ECHELON_STAGES).optional(),
+      oneShot: OneShot.optional(),
+    })).min(1),
+  })).min(1),
+});
+
+function parseCatalogFile(file: string, roles: ReadonlyMap<string, Role>): PipelineCatalog {
+  const catalog = parsed(CatalogHead, file, readParts(file).head);
+  const keys = new Set(catalog.pipelines.map(p => p.key));
+  if (keys.size !== catalog.pipelines.length || !keys.has(catalog.default)) throw new Error(`${file}: pipeline keys must be unique and include the default.`);
+  for (const pipeline of catalog.pipelines) {
+    const names = new Set(pipeline.stages.map(stage => stage.name));
+    if (names.size !== pipeline.stages.length) throw new Error(`${file}: ${pipeline.key} repeats a stage name.`);
+    const mapped = new Set<EchelonStage>();
+    for (const step of pipeline.stages) {
+      if (roles.get(step.ownerRole)?.department !== catalog.department) throw new Error(`${file}: ${step.ownerRole} is not a role of ${catalog.department}.`);
+      if (step.oneShot && !step.echelon) throw new Error(`${file}: ${step.name} needs an echelon for its one-shot calls.`);
+      if (!step.echelon) continue;
+      if (mapped.has(step.echelon)) throw new Error(`${file}: ${pipeline.key} maps ${step.echelon} twice.`);
+      mapped.add(step.echelon);
+    }
+  }
+  return catalog;
+}
+
+function loadCatalogs(dir: string, roles: ReadonlyMap<string, Role>): Map<TemplateKey, PipelineCatalog> {
+  const catalogs = new Map<TemplateKey, PipelineCatalog>();
+  for (const f of markdown(join(dir, 'pipelines'))) {
+    const file = join(dir, 'pipelines', f);
+    const catalog = parseCatalogFile(file, roles);
+    if (f !== `${catalog.department}.md`) throw new Error(`${file} must be named ${catalog.department}.md.`);
+    catalogs.set(catalog.department, catalog);
+  }
+  return catalogs;
+}
+
+/* Keep the department's executable checks. A ready pipeline can set up one-shot work at the echelons it maps. */
+export function catalogRoute(templates: Templates, key: TemplateKey | null, catalogKey: string | null): StageRoute {
+  const route = templates.stagesOf(key);
+  const catalog = key ? templates.catalogs.get(key) : undefined;
+  if (!catalog) return route;
+  const pipeline = catalog.pipelines.find(p => p.key === catalogKey);
+  if (!pipeline) return route;
+  const mapped = new Map(pipeline.stages.map(stage => [stage.echelon, stage.oneShot]));
+  return { ...route, stages: route.stages.map(({ oneShot: inherited, ...step }) => {
+    const oneShot = mapped.get(step.stage) ?? (catalogKey === catalog.default ? inherited : undefined);
+    return { ...step, ...(oneShot ? { oneShot } : {}) };
+  }) };
+}
+
 /* The head first, then default members, then optional ones, each by its order. */
 const roleRank = (r: Role): number => (r.kind === 'head' ? 0 : r.inDefault ? 1 : 2);
 
@@ -310,9 +379,9 @@ function sortDepartmentRoster(roles: Iterable<Role>, order: ReadonlyMap<string, 
 /* The order of the roles of each roster as their files give it, kept for copies of the templates. */
 const orders = new WeakMap<Templates, ReadonlyMap<string, number>>();
 
-function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams: Map<string, TeamTemplate>, echelons: Map<TemplateKey, StageRoute>, order: ReadonlyMap<string, number>): Templates {
+function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams: Map<string, TeamTemplate>, echelons: Map<TemplateKey, StageRoute>, catalogs: Map<TemplateKey, PipelineCatalog>, order: ReadonlyMap<string, number>): Templates {
   const templates: Templates = {
-    roles, skills, teams, echelons,
+    roles, skills, teams, echelons, catalogs,
     roster: key => sortDepartmentRoster(roles.values(), order, key),
     teamsOf: key => [...teams.values()].filter(team => team.department === key),
     stagesOf: key => (key && echelons.get(key)) || echelons.get('development')!,
@@ -324,11 +393,11 @@ function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams
 export function loadTemplates(dir: string): Templates {
   const skills = loadSkills(dir);
   const { roles, order } = loadRoles(dir, skills);
-  return templatesOf(roles, skills, loadTeams(dir, roles, skills), loadRoutes(dir, skills), order);
+  return templatesOf(roles, skills, loadTeams(dir, roles, skills), loadRoutes(dir, skills), loadCatalogs(dir, roles), order);
 }
 
 /* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the
    templates it came from do not see. A test file reads the templates once for all the servers it builds. */
 export function copyTemplates(templates: Templates): Templates {
-  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), structuredClone(templates.teams), structuredClone(templates.echelons), orders.get(templates)!);
+  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), structuredClone(templates.teams), structuredClone(templates.echelons), structuredClone(templates.catalogs), orders.get(templates)!);
 }

@@ -11,6 +11,8 @@ Read a change against its brief and find what will break. The check is the same 
 
 **What to read.** The brief first, then what the candidate changed, `git diff --name-only --diff-filter=d <base>..<commit>` with both taken from task.review (`source.baseCommit` and `commit`), and the code around it; on your own change before you submit it, the base is the commit your branch started from. A narrower scope your task sets, such as a slice or a range of commits, replaces it.
 
+At a one-shot Review stage, follow the ability "One-shot calls". In the brief, give every call the same candidate and base, the acceptance criteria and a distinct part of the diff or review angle. Ask each for file and line evidence. Use the route's judge to combine findings and verify them against the candidate before giving your verdict.
+
 **Your program's own review on a first look only**, from inside the clone on the candidate or slice you review and against that same base: in Claude Code its code-review skill, in Codex `codex review --base` naming a local branch you make at the base commit, in Antigravity its review-agent subagent. Kimi Code has none. Keep the turn's assigned effort without raising it. Its findings are leads: check each against the code, then go through the list below, which it does not replace. When you only recheck fixes, skip your program's own review and never reread the whole patch, whole branch or full diff.
 
 1. **Does it do what the brief asked?** Every requirement met, nothing extra added. Missing work is a finding.

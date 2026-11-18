@@ -210,7 +210,8 @@ describe('a part of a test run on a node', () => {
     expect(existsSync(join(dir, 'runs', 'part-1'))).toBe(false);
   });
 
-  it("gives Vitest the cores and memory the machine has free, at least half of its cores, unless already set", async () => {
+  /* As the product run's config does by itself: a machine of 16 cores and 7 GB free went to swap with half its cores in workers. */
+  it("gives Vitest the cores the load leaves free and as many workers as the free memory holds, unless a count is named", async () => {
     const { url } = origin();
     const command = 'echo "workers=$VITEST_MAX_WORKERS"', gib = 2 ** 30;
     const idle = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 64 * gib, env: {} });
@@ -218,15 +219,18 @@ describe('a part of a test run on a node', () => {
     const some = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 4.5, memFree: 64 * gib, env: {} });
     expect(some.log).toContain('workers=11\n');
     const busy = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 12, memFree: 64 * gib, env: {} });
-    expect(busy.log).toContain('workers=8\n');
+    expect(busy.log).toContain('workers=4\n');
     const memory = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 11.5 * gib, env: {} });
-    expect(memory.log).toContain('workers=10\n');
+    expect(memory.log).toContain('workers=4\n');
     const short = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 2 * gib, env: {} });
-    expect(short.log).toContain('workers=8\n');
+    expect(short.log).toContain('workers=1\n');
     const one = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 1, load: 0, memFree: 64 * gib, env: {} });
     expect(one.log).toContain('workers=1\n');
     const presetEnv = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: { VITEST_MAX_WORKERS: '3' } });
     expect(presetEnv.log).toContain('workers=3\n');
+    /* Vitest also takes a share of the cores, which the machine keeps as it named it. */
+    const presetShare = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: { VITEST_MAX_WORKERS: '50%' } });
+    expect(presetShare.log).toContain('workers=50%\n');
     const presetCmd = await runTests(run(url, { command: 'VITEST_MAX_WORKERS=2 sh -c \'echo "workers=$VITEST_MAX_WORKERS"\'' }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: {} });
     expect(presetCmd.log).toContain('workers=2\n');
   });

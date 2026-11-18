@@ -11,6 +11,8 @@ Check that a change keeps the company's data, access and secrets protected. The 
 
 Read the candidate's change from its base to its commit, both taken from task.review (`source.baseCommit` and `commit`); on your own change before you submit it, the base is the commit your branch started from.
 
+At a one-shot Security stage, follow the ability "One-shot calls". In the brief, give each call a separate protection to check in the same candidate, such as access checks, handling of private data or redaction of secrets. Ask for code references and fixes. Use the route's judge to combine the findings, then verify them against the code before giving your verdict.
+
 **Your program's own review on a first look only**, from inside the clone on the candidate or slice under review and against that same base: in Claude Code its security-review skill, in Codex `codex review --base` naming a local branch you make at the base commit, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
 
 Follow every input in the change from where it enters to where it is used, and check what the change touches of this list:

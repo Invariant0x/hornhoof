@@ -58,6 +58,28 @@ async function remote(c: Awaited<ReturnType<typeof company>>, owner = c.owner.id
 }
 
 describe('machine access scope', () => {
+  it('opens to all agents with a single choice of scope and the owner signature', async () => {
+    const c = await company();
+    const r = await remote(c);
+    const res = await c.open({ scope: 'all_agents', grant: r.grant(3600) }, c.ceo, r.machine);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().scope).toBe('all_agents');
+  });
+
+  it('runs on an open machine for the orchestrator after another person writes or while their input is pending', async () => {
+    const c = await company();
+    expect((await c.open()).statusCode).toBe(200);
+    const token = await invitePerson(c.app, c.ceo, { name: 'Other', email: 'other@example.test', access: { whole: true } });
+    const { id: personId } = (await c.app.inject({ url: '/api/me', ...as(token) })).json().person;
+    const job = await c.run(c.orchestrator);
+    await c.db.update(jobs).set({ createdBy: personId, decisionInputPending: true }).where(eq(jobs.id, job.id));
+    await listen(c.app);
+    const client = await mcp(c.app, job.token);
+    const result = await client.callTool({ name: 'computer', arguments: { command: 'recorded sample' } });
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+    expect(await c.db.select().from(computerRuns)).toMatchObject([{ jobId: job.id, machineId: c.machine }]);
+  });
+
   it.each(DURATIONS)('opens for %s and names its opener', async (duration, seconds) => {
     const c = await company();
     const opened = await c.open({ duration, scope: 'all_agents', confirm: true });
@@ -66,12 +88,8 @@ describe('machine access scope', () => {
     expect((await c.app.inject({ url: '/api/machines/access', ...as(c.ceo) })).json()).not.toHaveProperty('durations');
   });
 
-  it('requires confirmation, validates durations and defaults to one hour for the orchestrator', async () => {
+  it('validates durations and defaults to one hour for the orchestrator', async () => {
     const c = await company();
-    for (const body of [{ scope: 'all_agents' }, { scope: 'all_agents', confirm: false }]) {
-      const refused = await c.open(body);
-      expect([refused.statusCode, refused.json().error?.reason]).toEqual([400, 'confirm_needed']);
-    }
     for (const duration of ['2h', 8, null]) expect((await c.open({ duration })).statusCode).toBe(400);
     expect((await c.open()).json()).toMatchObject({ scope: 'orchestrator', until: new Date(AT.getTime() + 3600_000).toISOString() });
   });

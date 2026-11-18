@@ -1,84 +1,18 @@
-import type { AddressInfo } from 'node:net';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { lineState, RETURN_MS, type WorkLine } from '@hornhoof/protocol';
+import { lineState, RETURN_MS } from '@hornhoof/protocol';
 import { and, eq, sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { only } from '../src/db/selections.js';
-import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
+import { agentEvents, agents, departments, jobs, mapReturns, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
-import { agentState } from '../src/modules/conversation/queue.js';
-import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownDatabases, echelonsTurn } from './helpers.js';
+import { invitePerson, until } from './helpers.js';
 import { rowsRead } from './rows-read.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
-
-ownDatabases();
-
-type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[]; reworkAt: string | null }[] };
-
-/* Development with Hana at its head, Bruno and Felix who build, and Rita who reviews; the orchestrator gives Hana the
-   department's work. Everyone is on the company key. */
-async function company(env: NodeJS.ProcessEnv = {}) {
-  const { app, db, config } = await testApp(env);
-  const ceo = await setUpCompany(app);
-  const [acme] = await db.select().from(companies);
-  const [sub] = await db.select().from(subscriptions);
-  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
-  const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId = dev!.id, extra: Partial<typeof agents.$inferInsert> = {}) =>
-    (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [], ...extra }).returning())[0]!;
-  const hana = await hire('Hana', 'head', 'DEV-HEAD');
-  const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const felix = await hire('Felix', 'worker', 'DEV-FE');
-  const rita = await hire('Rita', 'worker', 'DEV-REV');
-  const ctx = app.ctx;
-  await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev!.id));
-  let commit = HEAD;
-  const atCommit = (sha: string) => { commit = sha; };
-  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: commit });
-  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
-  await echelonsTurn(db, acme!.id);
-  const top = (await createTask(ctx, { agentId: orchestrator!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: hana.id })).task;
-  const member = async (title: string, agentId: string, reviewerAgentId = rita.id) =>
-    (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
-  /* A turn of the agent on the task goes out, as the queue takes it: running, with the new cycle of its lines in the same
-     write, and then its task at work. */
-  const run = async (agentId: string, taskId: string | null, at = new Date()) => {
-    const job = await db.transaction(async tx => {
-      const [row] = await tx
-        .insert(jobs)
-        .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, taskId, kind: 'conversation', prompt: 'go', status: 'running', startedAt: at, timeoutMs: 900000 })
-        .returning();
-      await workStarts(tx, { id: row!.id, companyId: acme!.id, agentId, taskIds: [taskId] });
-      return row!;
-    });
-    await startWork(ctx, job.id);
-    return job;
-  };
-  const end = (jobId: string, status: 'done' | 'failed' = 'done') => db.update(jobs).set({ status, finishedAt: new Date() }).where(eq(jobs.id, jobId));
-  const org = async (token = ceo, on: FastifyInstance = app): Promise<Org> => (await on.inject({ url: '/api/org', ...as(token) })).json();
-  return { app, db, config, ctx, ceo, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, sales: sales!, hire, hana, bruno, felix, rita, top, member, run, end, org, atCommit };
-}
-
-const allLines = (org: Org) => [...org.workLines, ...org.departments.flatMap(d => d.workLines)];
-const lineOf = (org: Org, up: string, down: string) => allLines(org).find(l => l.upstreamAgentId === up && l.downstreamAgentId === down);
-
-/* What the browser draws for the line at the time the server gave. */
-function stateOf(org: Org, up: { id: string }, down: { id: string }): string {
-  const line = lineOf(org, up.id, down.id);
-  if (!line) return 'none';
-  return lineState({ working: line.working, workEpoch: line.workEpoch, returnedEpoch: line.returnedEpoch, returnedAt: line.returnedAt ? Date.parse(line.returnedAt) : null }, Date.parse(org.serverNow));
-}
+import { company, lineOf, online, stateOf } from './map-state-fixture.js';
 
 describe('lines between a head and its employees', () => {
   it('reports no rework when work has not been returned, including after a hand-in', async () => {
@@ -418,35 +352,6 @@ describe('who sees the lines', () => {
   });
 });
 
-const NODE_KEY = 'k'.repeat(40);
-
-/* The company with the built-in node online, so its agents can run, and a tool client for one agent's running turn. */
-async function online() {
-  const c = await company({ NODE_KEY });
-  const url = await listen(c.app);
-  const builtin = await connectNode(url, NODE_KEY);
-  onTestFinished(() => builtin.close());
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
-  await until(async () => (await agentState(c.app.ctx, c.hana.id)).ready);
-  const tools = async (agentId: string, taskId: string | null = null) => {
-    const token = `tool-token-${agentId}`;
-    const job = await c.db.transaction(async tx => {
-      const [row] = await tx
-        .insert(jobs)
-        .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId, taskId, kind: 'conversation', prompt: 'go', status: 'running', startedAt: new Date(), timeoutMs: 900000, toolTokenHash: hashToken(token) })
-        .returning();
-      await workStarts(tx, { id: row!.id, companyId: c.acme.id, agentId, taskIds: [taskId] });
-      return row!;
-    });
-    const client = new Client({ name: 'test', version: '0.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(c.app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-    onTestFinished(() => client.close());
-    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
-    return { job, call };
-  };
-  return { ...c, tools, builtin };
-}
-
 describe('results given back in a message', () => {
   it("turn the department line yellow when its head writes to the orchestrator", async () => {
     const { orchestrator, hana, tools, org } = await online();
@@ -555,107 +460,6 @@ describe('a turn the node tells of', () => {
     builtin.send({ type: 'job.event', jobId: job!.id, seq: 0, event: { kind: 'text', text: 'On it.' } });
     await until(async () => (await db.select().from(agentEvents).where(eq(agentEvents.jobId, job!.id))).length > 0);
     expect(lineOf(await org(), hana.id, bruno.id)!.workEpoch).toBe(1);
-  });
-});
-
-/* From here on the database refuses every change to the table's rows that the condition names, as a server that stops
-   right there writes nothing more. What it gives back takes the refusal away again. */
-async function stopAt(db: Db, table: 'tasks' | 'map_returns', when = 'true'): Promise<() => Promise<unknown>> {
-  await db.execute(sql.raw(`create or replace function hh_stop() returns trigger language plpgsql as $$ begin raise exception 'The server stopped here.'; end $$`));
-  await db.execute(sql.raw(`create trigger hh_stop before update on ${table} for each row when (${when}) execute function hh_stop()`));
-  return () => db.execute(sql.raw(`drop trigger hh_stop on ${table}`));
-}
-
-/* The next turn the node was sent. */
-async function sentTo(node: FakeNode): Promise<{ jobId: string; prompt: string }> {
-  const m = await node.next();
-  if (m.type !== 'job.run') throw new Error(`Expected job.run, got ${m.type}`);
-  return m;
-}
-
-/* A task that is open and goes to work once its turn does. */
-const AT_WORK = `old.status = 'open' and new.status = 'working'`;
-
-describe('a turn the queue takes', () => {
-  /* The first work on the line came back, Bruno's handed in or Hana's reported done, and the next work waits for the queue. */
-  async function returned(level: 'member' | 'department') {
-    const c = await online();
-    const { ctx, orchestrator, hana, bruno, top, member, run, end } = c;
-    if (level === 'member') {
-      const api = await member('Checkout API', bruno.id);
-      const first = await run(bruno.id, api.id);
-      await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
-      await end(first.id);
-      return { ...c, up: hana, down: bruno, next: await member('Checkout page', bruno.id) };
-    }
-    const first = await run(hana.id, top.id);
-    await report(ctx, hana.id, top.id, { done: true, summary: 'Payments are live.' });
-    await end(first.id);
-    const next = (await createTask(ctx, { agentId: orchestrator.id }, { title: 'Refunds', brief: '', body: '', departmentId: top.departmentId, assigneeAgentId: hana.id })).task;
-    return { ...c, up: orchestrator, down: hana, next };
-  }
-
-  it.each(['member', 'department'] as const)('begins the new cycle of a %s line with the turn it takes, so a server that stops once the turn went out leaves the old return out', async level => {
-    const { ctx, db, config, up, down, next, org, end, builtin } = await returned(level);
-    expect(stateOf(await org(), up, down)).toBe('yellow');
-    await stopAt(db, 'tasks', AT_WORK);
-    await wakeAll(ctx, [{ agentId: down.id, taskId: next.id, why: 'assigned' }]);
-    const turn = await sentTo(builtin);
-    expect(stateOf(await org(), up, down)).toBe('blue');
-    await end(turn.jobId, 'failed');
-    expect(stateOf(await org(), up, down)).toBe('quiet');
-    const again = await buildApp({ db, config });
-    try {
-      expect(stateOf(await org(undefined, again), up, down)).toBe('quiet');
-    } finally {
-      await again.close();
-    }
-  });
-
-  it.each(['member', 'department'] as const)('takes no turn when the new cycle of its %s line cannot be kept, and sends it with its cycle on the next try', async level => {
-    const { ctx, db, up, down, next, org, builtin } = await returned(level);
-    const before = builtin.queued();
-    const goOn = await stopAt(db, 'map_returns');
-    await wakeAll(ctx, [{ agentId: down.id, taskId: next.id, why: 'assigned' }]);
-    /* Nothing went out: the turn still waits, and the line still shows the result that came back. */
-    expect(await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.taskId, next.id))).toEqual([{ status: 'queued' }]);
-    expect(builtin.queued()).toBe(before);
-    expect(stateOf(await org(), up, down)).toBe('yellow');
-    await goOn();
-    await pump(ctx, down.id);
-    await sentTo(builtin);
-    const now = await org();
-    expect(stateOf(now, up, down)).toBe('blue');
-    expect(lineOf(now, up.id, down.id)!.workEpoch).toBe(2);
-  });
-
-  it("begins the cycle of a task that goes out inside a head's turn with that turn, also when its own task keeps no line on", async () => {
-    const { ctx, db, config, acme, sub, orchestrator, hana, top, run, end, org, builtin } = await online();
-    const first = await run(hana.id, top.id);
-    await report(ctx, hana.id, top.id, { done: false, summary: 'Waiting for the provider.' });
-    await end(first.id);
-    expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
-    const refunds = (await createTask(ctx, { agentId: orchestrator.id }, { title: 'Refunds', brief: '', body: '', departmentId: top.departmentId, assigneeAgentId: hana.id })).task;
-    /* Hana is busy, so the turn on the blocked department task and the one on the new task wait, and go out as one. */
-    const [busy] = await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
-    await wakeAll(ctx, [
-      { agentId: hana.id, taskId: top.id, why: 'assigned' },
-      { agentId: hana.id, taskId: refunds.id, why: 'assigned' },
-    ]);
-    await stopAt(db, 'tasks', AT_WORK);
-    await end(busy!.id);
-    /* The next turn goes out, and the server stops before the task that went with it is at work. */
-    await expect(afterJob(ctx, busy!.id)).rejects.toMatchObject({ cause: { message: 'The server stopped here.' } });
-    const turn = await sentTo(builtin);
-    expect(turn.prompt).toContain('Refunds');
-    expect(stateOf(await org(), orchestrator, hana)).toBe('blue');
-    await end(turn.jobId, 'failed');
-    const again = await buildApp({ db, config });
-    try {
-      expect(stateOf(await org(undefined, again), orchestrator, hana)).toBe('quiet');
-    } finally {
-      await again.close();
-    }
   });
 });
 

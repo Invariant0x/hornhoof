@@ -5,11 +5,7 @@ import { agents, companies, notebookNotes, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 
-/* A note is one fact, so it stays short. A notebook takes any number of notes: its agent's instructions carry as much of it
-   as a program reads and say where they cut it (notebookPart). */
-export const NOTE_MAX = 300;
-
-export const NoteBody = z.object({ text: z.string().trim().min(1).max(NOTE_MAX) });
+export const NoteBody = z.object({ text: z.string().trim().min(1) });
 
 /* The company's notebook, which the orchestrator carries, or a department's, which its head carries. */
 export type Book = { companyId: string; departmentId: string | null; parentId?: string | null };

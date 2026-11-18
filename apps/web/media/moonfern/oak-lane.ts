@@ -509,7 +509,6 @@ export function oakAgentCard(agentId: string): AgentCardView | null {
     skills: [],
     parts: [],
     raw: '',
-    instructions: { length: 4200, max: 200_000 },
     runsOn: [],
     changes: [],
     interrupted: [],
