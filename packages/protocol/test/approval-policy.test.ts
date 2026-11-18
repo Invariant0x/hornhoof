@@ -56,12 +56,9 @@ describe('ruleOf', () => {
     }
   });
 
-  it('asks for each commit, and only for a new kind of spend or anything else, with no rule yet', () => {
-    expect(defaultRule('commit')).toEqual({ mode: 'every' });
-    expect(ruleOf(undefined, 'commit')).toEqual({ mode: 'every' });
-    for (const channel of ['spend', 'other'] as const) {
-      expect(defaultRule(channel)).toEqual({ mode: 'new_kinds' });
-      expect(ruleOf(undefined, channel)).toEqual({ mode: 'new_kinds' });
+  it('allows commits, spending and other new work with no rule yet', () => {
+    for (const channel of ['commit', 'spend', 'other'] as const) {
+      expect(approvalNeeded(ruleOf(undefined, channel), work())).toBe(false);
     }
   });
 

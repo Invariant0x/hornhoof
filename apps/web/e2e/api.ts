@@ -1,6 +1,6 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
-import type { Locator, Page } from '@playwright/test';
+import type { Locator, Page, Request } from '@playwright/test';
 import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TokenPeriods, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -112,7 +112,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
-    program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 },
+    program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '',
     runsOn: [], changes: [], interrupted: [], canEdit: true, canRemove: true, timer: null,
   } satisfies AgentCardView,
   '/api/agents/orchestrator/events?last=300': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
@@ -137,6 +137,15 @@ export async function serveApi(page: Page) {
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
   });
 }
+
+/* The stream above stays open until the page ends it. A navigation replaces the page, and on Vite's dev server React's
+   development mode mounts every effect twice, so the app closes the first stream it opened and opens another (#1337).
+   Each engine names that end in its own words: Chromium net::ERR_ABORTED, Firefox NS_BINDING_ABORTED for a navigation
+   and NS_ERROR_ABORT for a close, WebKit "Load request cancelled" on Linux and "cancelled" on macOS. A check that counts
+   failed requests leaves out this end alone: any other failure of the stream, a refused connection say, still counts. */
+const STREAM_ENDED_BY_PAGE = /^(?:net::ERR_ABORTED|NS_BINDING_ABORTED|NS_ERROR_ABORT|Load request cancelled|cancelled)$/;
+export const streamEndedByPage = (request: Request): boolean =>
+  new URL(request.url()).pathname === '/api/stream' && STREAM_ENDED_BY_PAGE.test(request.failure()?.errorText ?? '');
 
 export async function box(locator: Locator) {
   const b = await locator.boundingBox();

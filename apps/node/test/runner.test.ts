@@ -370,6 +370,28 @@ describe('a one-shot call', () => {
     });
   }
 
+  it('keeps an untimed call running until explicitly cancelled', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const started = deferred();
+    const stop = new AbortController();
+    const adapter = {
+      ...fakeAdapter(async () => ok()),
+      oneCall: async ({ signal }: RunInput) => new Promise<RunResult>(done => {
+        signal!.addEventListener('abort', () => done(ok()), { once: true });
+        started.resolve();
+      }),
+    };
+    fakeClock();
+    let ended = false;
+    const running = runJob(adapter, job({ call: true, timeoutMs: 0 }), dir, { signal: stop.signal }).finally(() => { ended = true; });
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+    expect(ended).toBe(false);
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(existsSync(join(dir, 'work', 'calls', 'job-1'))).toBe(false);
+  });
+
   it("runs the program's one-call mode in a fresh folder of its own, with no session, and removes the folder after", async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = callAdapter();

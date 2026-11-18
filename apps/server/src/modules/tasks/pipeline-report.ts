@@ -6,7 +6,7 @@ import { agents, departments, jobs, requests, taskEvents, tasks, testPartTimings
 import { loggable } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { keepTimings } from '../testruns/timings.js';
-import { refuse, type Tx } from './engine.js';
+import { refuse, type Tx } from './state.js';
 import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsJob, type FactsTask, type LaterBug } from './pipeline-facts.js';
 import { NUDGES, workTree, type AgentTime } from './tree.js';
 import { treeFactsOf } from './tree-facts.js';

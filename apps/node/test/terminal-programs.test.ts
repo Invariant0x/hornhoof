@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi, writeClaudeTools } from '../src/terminal/programs.js';
+import { agyProgram, prepareAgy } from '../src/providers/antigravity-terminal.js';
+import { acceptClaudeDialogs, claudePlanLimits, claudeProgram, claudeTranscript, writeClaudeTools } from '../src/providers/claude-terminal.js';
+import { codexProgram, findRollout } from '../src/providers/codex-terminal.js';
+import { findKimiWire, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/providers/kimi-terminal.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 const AGENT_SECRET = '5ec7e7f00dc0ffee';
@@ -239,8 +242,8 @@ describe('Codex in a terminal', () => {
 
   it('reads all of AGENTS.md, which Codex cuts at 32 KiB unless told otherwise', () => {
     for (const sessionId of [null, 'th-9']) {
-      const { command } = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
-      expect(command[command.indexOf('project_doc_max_bytes=1048576') - 1]).toBe('-c');
+      const { command } = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, instructionsBytes: 1_200_000, urls: URLS });
+      expect(command[command.indexOf('project_doc_max_bytes=1200000') - 1]).toBe('-c');
     }
   });
 

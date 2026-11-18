@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "test_runs_release" ON "test_runs" USING btree ("company_id","department_id",("file_cache"->>'release'));

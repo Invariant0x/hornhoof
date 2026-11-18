@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statfsSync } from 'node:fs';
 import { availableParallelism, cpus as processors, freemem, loadavg, totalmem } from 'node:os';
+import { vitestWorkers, WORKER_BYTES } from './vitest-workers.js';
 
 export type MachineLoad = {
   cpus: number;
@@ -15,6 +16,8 @@ export type MachineLoad = {
   hostLoad?: number;
   hostMemFree?: number;
   hostMemory?: number;
+  /* How many processes the machine's kernel killed for want of memory since it started, where it says. */
+  oomKills?: number;
 };
 
 type Disk = { free: number; total: number };
@@ -67,6 +70,12 @@ const containerMemory = (read: (path: string) => string | null, rawFree: number,
   return { memFree: Math.min(rawFree, Math.max(0, limit - current)), memTotal: limit };
 };
 
+/* The kernel counts every process it kills for want of memory, the machine's own and a container's over its limit alike. */
+const oomKills = (vmstat: string | null) => {
+  const count = vmstat ? /^oom_kill (\d+)$/m.exec(vmstat)?.[1] : undefined;
+  return count === undefined ? {} : { oomKills: Number(count) };
+};
+
 /* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
 const processorModel = (cpuModel: string, hostCpu: string | undefined) => {
   const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
@@ -108,7 +117,7 @@ const diskOf = (path: string) => (): Disk | null => {
 
 /* The machine as a test run meets it: its processors, the load average over the last minute, and the memory a new program
    can get. On Linux that is MemAvailable, which counts the cache the system drops when asked, and a container with a
-   memory limit gets at most what is left under it. */
+   memory limit gets at most what is left under it. Linux also counts the processes its kernel killed for want of memory. */
 export function machineLoad({
   read = readText,
   cpus = availableParallelism(),
@@ -134,19 +143,17 @@ export function machineLoad({
     ...(model ? { cpuModel: model } : {}),
     ...(space ? { diskFree: Math.min(space.free, space.total), diskTotal: space.total } : {}),
     ...hostFacts(read, env, cores, busy, rawFree, rawTotal),
+    ...oomKills(read('/proc/vmstat')),
   };
 }
 
-/* A Vitest worker of the product's tests takes up to about a gigabyte, and Vitest itself about as much again. So does an
-   agent program with the tools it runs, its helpers inside it. */
-export const WORKER_BYTES = 2 ** 30;
+/* An agent program with the tools it runs, its helpers inside it, takes up to about a gigabyte. */
 export const PROGRAM_BYTES = 2 ** 30;
 
-/* The Vitest workers for the tests of one of the agent programs that run on a machine: the program's share of the
-   processors, and no more than its share of the memory holds once the program and Vitest itself have theirs. At least one,
-   for tests must run. Its helpers inherit the number, and each of their runs takes as many. */
+/* The Vitest workers for the tests of one of the agent programs that run on a machine: what the program's share of the
+   processors and of the memory takes, once the program has its own, in workers of a check. Its helpers inherit the number,
+   and each of their runs takes as many. */
 export function programWorkers({ cpus, memTotal }: Pick<MachineLoad, 'cpus' | 'memTotal'>, programs: number): number {
   const sharing = Math.max(1, programs);
-  const memory = Math.floor((memTotal / sharing - PROGRAM_BYTES - WORKER_BYTES) / WORKER_BYTES);
-  return Math.max(1, Math.min(Math.floor(cpus / sharing), memory));
+  return vitestWorkers({ cpus: cpus / sharing, freeBytes: memTotal / sharing - PROGRAM_BYTES, workerBytes: WORKER_BYTES.check });
 }

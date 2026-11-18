@@ -1,5 +1,7 @@
 # Task 1253: read machine check admission
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1253-check-slots.md). These are historical results, not checks of the current release.
+
 Known behaviour, risk class none, small turnkey task. Initial base: cf8b05fed0a2c80cb8cd6794d579bc4abcc8397c. The head's later instruction requires rebasing only our task commits onto the released main / turn-32, without merging old turn-31 history. Integration uses fast-forward turn-32, never turn-31.
 
 The read tools test_run and work_run add checkSlot and a one-line waiting explanation to an assigned part whose execution has not started. The existing queuePosition stays available. Example contract for a queued part:

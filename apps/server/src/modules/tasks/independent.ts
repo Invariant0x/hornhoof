@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { taskEvents, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import type { Tx } from './engine.js';
+import type { Tx } from './state.js';
 
 const IndependentPartSchema = z.strictObject({ title: z.string().trim().min(1), brief: z.string(), body: z.string().trim().min(1), executor: z.uuid() });
 export type IndependentPartInput = z.infer<typeof IndependentPartSchema>;

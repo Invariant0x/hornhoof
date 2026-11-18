@@ -1,19 +1,19 @@
+import { candidates } from './decision-people.js';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
-import { canReach, WHOLE, withOwned } from '../../auth/access.js';
+import { canReach } from '../../auth/access.js';
 import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, machineAccess, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { agents, departments, machineAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
-import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
-import { seesTask, type TaskPlace } from './sight.js';
-
+import { requestSubject, taskSpot, type Request, type Task } from './state.js';
+import { seesTask, type TaskPlace } from './visibility.js';
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
    this person may take it (auth/decisions.ts). */
 
@@ -41,36 +41,6 @@ export type Decisions = {
   machines: MachineAway[];
   counts: Counts;
 };
-
-/* The company's active and invited people with what each reaches and owns, for owners. */
-export async function candidates(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Candidate[]> {
-  const rows = await ctx.db.select({ id: people.id, status: people.status, isOwner: people.isOwner, scopeKind: people.scopeKind }).from(people).where(eq(people.companyId, companyId));
-  const listed = rows.filter(p => p.scopeKind !== 'company').map(p => p.id);
-  const access = listed.length ? await ctx.db.select().from(personAccess).where(inArray(personAccess.personId, listed)) : [];
-  const owned = await ctx.db.select({ id: departments.id, ownerPersonId: departments.ownerPersonId }).from(departments).where(eq(departments.companyId, companyId));
-  const namedFor = (id: string) => owned.filter(d => d.ownerPersonId === id).map(d => d.id);
-  return rows.map(p => {
-    if (p.scopeKind === 'company') return { id: p.id, status: p.status, isOwner: p.isOwner, access: withOwned(WHOLE, namedFor(p.id)) };
-    const mine = access.filter(a => a.personId === p.id);
-    return {
-      id: p.id,
-      status: p.status,
-      isOwner: p.isOwner,
-      access: withOwned({ whole: false, departments: new Set(mine.flatMap(a => (a.departmentId ? [a.departmentId] : []))), teams: new Set(mine.flatMap(a => (a.teamId ? [a.teamId] : []))) }, namedFor(p.id)),
-    };
-  });
-}
-
-/* Each department's owner who counts now: named by the CEO, active and with access still. */
-export async function departmentOwners(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Map<string, string>> {
-  const everyone = await candidates(ctx, companyId);
-  return new Map(everyone.filter(p => p.status === 'active').flatMap(p => [...(p.access.owns ?? [])].map((department): [string, string] => [department, p.id])));
-}
-
-/* The addressee of a question uses the same ownership policy as its decision card. */
-export async function decisionPerson(ctx: Pick<Ctx, 'db'>, companyId: string, subject: DecisionSubject): Promise<string> {
-  return decisionOwner(subject, await candidates(ctx, companyId));
-}
 
 /* Whether a decision is held by a department's named owner other than this viewer. */
 function heldElsewhere(subject: DecisionSubject, everyone: readonly Candidate[], viewer: string): boolean {
@@ -104,11 +74,11 @@ const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAns
 
 /* What the orchestrator asks of people: his pending cards, for people who see the whole company and see him, and his
    requests for machines. A request for a machine shows to its owner, whose it is to answer, whether they see him or
-   not, and to the people who see the whole company and see him. Only a screen of a person takes it. */
+   not, and to the people who see the whole company and see him. The orchestrator reads the same cards with the owner's rights. */
 async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ cards: ProposalRow[]; computers: Decisions['computers'] }> {
   const { db } = ctx;
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
-  if (!orchestrator || me.via) return { cards: [], computers: [] };
+  if (!orchestrator || me.viaHead) return { cards: [], computers: [] };
   const seesHim = seesAgentId(viewer, orchestrator.id);
   const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
   /* Most of the time no machine is asked for, and nothing of the machines is read. */
@@ -128,7 +98,7 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
   const found = (await db.execute(sql`SELECT m.id, m.label, m.source, count(*)::int AS open,
       (SELECT r.dumped_at FROM net.restores r WHERE m.source = 'kept:' || r.kept ORDER BY r.at DESC LIMIT 1) AS after
     FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge
-    WHERE c.picked IS NULL AND c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)})
+    WHERE c.picked IS NULL AND (c.op = 'delete' OR c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)}))
     GROUP BY m.id ORDER BY m.created_at, m.source`)) as unknown as { rows: { id: string; label: string; open: number; after: string | Date | null }[] };
   if (found.rows.length === 0) return [];
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
@@ -139,18 +109,9 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
 /* The server's own machine while it needs no key is the CEO's and the delegate's to open; any other only its owner's. */
 const machineDecidedBy = (view: AccessView): DecidedBy => ({ kind: view.key === 'not_needed' ? 'ceo_and_delegate' : 'machine_owner', departmentId: null });
 
-/* A machine still away waits for each of its people, on each one's card as this person sees them. */
-function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
-  const byPerson = { ...counts.byPerson };
-  for (const card of away) {
-    for (const id of new Set([me.id, card.owner?.id ?? me.id])) byPerson[id] = (byPerson[id] ?? 0) + 1;
-  }
-  return { ...counts, byPerson, total: counts.total + away.length };
-}
+export const openPersonRequests = () => and(eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human')));
 
-/* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
-   by an agent they see, or that are theirs to answer, the orchestrator's pending cards for people who see the whole
-   company and see him, and its requests for machines for their owners and for those people. */
+/* Everything waiting for people that this person may see, each with whether they may take it. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
@@ -160,7 +121,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     .select({ request: requests, task: tasks })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
+    .where(and(eq(requests.companyId, me.companyId), openPersonRequests()))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
@@ -179,7 +140,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     ...computers.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.agentId })),
   ]);
   const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
-  return { requests: seen, proposals: shownCards, computers, merges, machines, counts: withMachines(counts, machines.filter(card => !card.back), me) };
+  return { requests: seen, proposals: shownCards, computers, merges, machines, counts };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the
@@ -195,3 +156,4 @@ export async function departmentNames(ctx: Pick<Ctx, 'db'>, ids: string[]): Prom
   if (!ids.length) return new Map();
   return new Map((await ctx.db.select().from(departments).where(inArray(departments.id, ids))).map(d => [d.id, d]));
 }
+export { candidates, decisionPerson, departmentOwners } from './decision-people.js';

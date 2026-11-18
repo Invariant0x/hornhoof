@@ -6,7 +6,7 @@ import { ProgramAccess, type ProgramFacts } from '../src/terminal/program-access
 const SECRET = 'private-token-123';
 
 /* One agent's program on this node, as the host tells of it, with what was pasted and pressed into it. */
-function fixture() {
+function fixture(secret = SECRET) {
   const agentKey = randomUUID();
   let now = 1000;
   const state = {
@@ -19,11 +19,11 @@ function fixture() {
     paste: async (_key, text) => { state.typed.push(`paste:${text}`); },
     press: async (_key, keys) => { state.typed.push(`keys:${keys.join(' ')}`); if (state.fail) throw new Error('tmux went away'); },
     lane: (_key, run) => run(),
-    secrets: () => [SECRET],
+    secrets: () => [secret],
     now: () => now,
   });
   const look = () => access.view({ type: 'program.view_get', agentKey, request: randomUUID() });
-  const type = (snapshot: string, keys: string[], text: string | null = null, action = randomUUID()) => access.input({ type: 'program.input_send', agentKey, action, snapshot, keys, text, auditReason: `Use ${SECRET}.` });
+  const type = (snapshot: string, keys: string[], text: string | null = null, action = randomUUID()) => access.input({ type: 'program.input_send', agentKey, action, snapshot, keys, text, auditReason: `Use ${secret}.` });
   return { agentKey, state, access, look, type, later: (ms: number) => { now += ms; } };
 }
 
@@ -45,6 +45,18 @@ it('masks node secrets in tool and question metadata before either reply leaves 
   expect(view).toMatchObject({ tool: '[hidden]', question: masked });
   expect(await c.type(view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', question: masked, auditReason: 'Use [hidden].' });
   expect(c.state.facts.question!.text).toBe(`Use ${SECRET}`);
+});
+
+it('masks an exact short credential in the pane, metadata and input reply without masking its encoded form', async () => {
+  const secret = 'hidden';
+  const encoded = Buffer.from(secret).toString('base64');
+  const c = fixture(secret);
+  c.state.cells = `Code: ${secret} (${encoded})\nhid\nden`;
+  c.state.facts = { ...c.state.facts!, tool: secret, question: { id: randomUUID(), kind: 'protected', tool: secret, text: `Use ${secret} or [hidden]`, callId: secret } };
+  const view = await c.look();
+  const question = { tool: '[hidden]', text: 'Use [hidden] or [hidden]', callId: '[hidden]' };
+  expect(view).toMatchObject({ cells: `Code: [hidden] (${encoded})\nhid\nden`, tool: '[hidden]', question });
+  expect(await c.type(view.snapshot!, ['Enter'], secret)).toMatchObject({ text: '[hidden]', auditReason: 'Use [hidden].', question });
 });
 
 it('pastes text first, then presses any keys, Ctrl+U and Escape too, into the program the look showed', async () => {

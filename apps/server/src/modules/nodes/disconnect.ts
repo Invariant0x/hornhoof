@@ -11,7 +11,7 @@ import { revokeMachineRows, visitorKeyOf } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
 import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
-import { failOpenJobs } from './messages.js';
+import { failOpenJobs } from './job-failures.js';
 import { liveNode, settlePlans } from './nodes.js';
 
 /* The machine that leads does not leave the company: the server moves to another machine first. Asked where a person
@@ -54,9 +54,19 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
      asked for now and not waited for; a relay that does not answer is asked again with the next view a keeper reads. */
   if (copies.length > 0) void afterLeave(ctx);
   else if (cored) void visitorKeyOf(ctx, { force: true });
+  await finishDisconnect(ctx, machineIds, ids);
+  for (const id of moved) await pump(ctx, id);
+}
+
+async function finishDisconnect(ctx: Ctx, machineIds: string[], ids: string[]): Promise<void> {
   /* The nodes lose their keys first, so the turns that end here send no next turn to the leaving ones. */
   for (const id of ids) { clearNodeWords(ctx, nodeIdentity(id)); ctx.hub.close(id, 4001); }
   if (ids.length) await failOpenJobs(ctx, inArray(jobs.nodeId, ids), 'machine_disconnected');
   await loseParts(ctx, inArray(testParts.machineId, machineIds), 'machine_disconnected');
-  for (const id of moved) await pump(ctx, id);
+}
+
+/* Finish work left after the machine and its nodes had already lost access. */
+export async function finishDisconnectedMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
+  const known = await ctx.db.select(only(nodes, 'id')).from(nodes).where(inArray(nodes.machineId, machineIds));
+  await finishDisconnect(ctx, machineIds, known.map(node => node.id));
 }

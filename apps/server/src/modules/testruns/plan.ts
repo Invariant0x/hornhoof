@@ -13,7 +13,7 @@ export type TestPartPlanInput = {
   machines?: MachinePace[];
   /* How long a preparation takes, at the middle pace, that the first machine runs before its part. */
   preparationMs?: number;
-  /* A full run's parts: no fewer than min and no more than max, and enough of them that each ends within ceilingMs. */
+  /* A run's parts: no fewer than min and no more than max, and enough of them that each ends within ceilingMs. */
   spread?: PartSpread;
 };
 export type PartSpread = { min: number; max: number; ceilingMs: number };
@@ -123,7 +123,7 @@ function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPl
   nonnegative(costAdjustedMs, 'estimated total cost');
   return { parts, partMs, estimate: { parts: count, estimatedWallMs, costAdjustedMs } };
 }
-/* Each count a full run may take. A count beyond the free machines waits for machines as they free, at one pace, so its
+/* Each count a run may take. A count beyond the free machines waits for machines as they free, at one pace, so its
    parts are laid out evenly and counted at the pace of the slowest machine. */
 function spreadOptions(groups: Group[], machines: MachinePace[], input: TestPartPlanInput, paced: boolean, spread: PartSpread): { options: Alternative[]; least: number; most: number } {
   const most = Math.min(spread.max, MAX_TEST_PARTS, groups.length), least = Math.min(spread.min, most);
@@ -141,10 +141,10 @@ function withinCeiling(options: Alternative[], ceilingMs: number): Alternative {
 }
 function spreadReason(spread: PartSpread, least: number, most: number, best: Alternative): string {
   const fits = best.partMs <= spread.ceilingMs ? '' : `; no count fits that, so its longest part is estimated at ${best.partMs} ms`;
-  return ` A full run takes ${least} to ${most} parts of at most ${spread.ceilingMs} ms each${fits}.`;
+  return ` This run takes ${least} to ${most} parts of at most ${spread.ceilingMs} ms each${fits}.`;
 }
 type Choice = { single: Alternative; options: Alternative[]; best: Alternative; note: string };
-/* The layouts a run may take and the one it takes: the cheapest, or for a full run the cheapest that fits its ceiling. */
+/* The layouts a run may take and the one it takes: the cheapest that fits its ceiling, or the cheapest of all for a run without one. */
 function choose(groups: Group[], machines: MachinePace[], input: TestPartPlanInput, paced: boolean): Choice {
   const preparationMs = input.preparationMs ?? 0, single = alternative(groups, machines.slice(0, 1), input.costs, paced, preparationMs);
   if (!input.spread) {

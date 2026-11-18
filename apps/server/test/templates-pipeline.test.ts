@@ -65,20 +65,20 @@ const POINTS: Record<string, RegExp[]> = {
     /states[\s\S]*widths[\s\S]*themes[\s\S]*languages/i,
     /independent checker is not the author[\s\S]*does not edit/i,
     /contrast[\s\S]*token use[\s\S]*overflow/i,
-    /breaking system change needs the CEO's decision[\s\S]*cost/i,
+    /breaking system change needs the decision of the department's own responsible people[\s\S]*cost/i,
   ],
   'ops-work-pipeline': [
     /blast radius[\s\S]*rollback/i,
-    /spending[\s\S]*cross-department access[\s\S]*irreversible/i,
+    /spending[\s\S]*irreversible[\s\S]*access to another department the orchestrator or Operations grants/i,
     /independent Security[\s\S]*exact candidate before shared merge[\s\S]*urgent[\s\S]*small[\s\S]*named[\s\S]*review fixes/i,
     /failed check[\s\S]*rollback before investigation/i,
     /valid and rejected cases/i,
   ],
   'home-work-pipeline': [
-    /Every physical action[\s\S]*exact action, target[\s\S]*amount and time/i,
-    /camera or microphone content[\s\S]*Streams and recordings are not ordinary device metadata/i,
-    /person still approves each action/i,
-    /people make payments in their own accounts/i,
+    /Check changes to devices and scenes on each affected device[\s\S]*restore the previous setting/i,
+    /Irreversible deletion needs the CEO's yes[\s\S]*a person makes payments and signs in the company's name/i,
+    /Streams and recordings need a separate assignment and existing access/i,
+    /Group routine checks and changes the notebook allows/i,
     /private to the home[\s\S]*never ask for or store card, bank or account secrets/i,
   ],
   'sal-work-pipeline': [
@@ -111,7 +111,7 @@ const POINTS: Record<string, RegExp[]> = {
     /Self-review does not replace this gate/i,
     /one pinned commit[\s\S]*full candidate validation is assigned/i,
     /collected graph[\s\S]*not execution evidence/i,
-    /neither creates a tester handoff nor waives a human release approval/i,
+    /neither creates a tester handoff nor changes the department's release approval policy/i,
   ],
 };
 
@@ -189,8 +189,6 @@ describe('standalone verification planning abilities', () => {
       const asFile = await instructionsOf(app.ctx, head!);
       expect(asFile.skills.find(f => f.name === id)?.body, key).toContain(bodyOf(id));
       expect(asFile.text, key).toContain(`\n- ${id}: `);
-      const whole = await instructionsOf(app.ctx, head!, false);
-      expect(whole.text, key).toContain(bodyOf(id));
       seen.add(key);
     }
     expect([...seen].sort()).toEqual([...TEMPLATE_KEYS].sort());

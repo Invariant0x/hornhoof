@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
+import { agents, approvalPolicies, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 import { as, listen, mcp, SETUP, testApp } from './helpers.js';
@@ -14,15 +14,15 @@ const START = '9'.repeat(40);
 
 const reportOf = async (f: Awaited<ReturnType<typeof readyInTurn>>, id = f.task.id) => (await f.detail(id)).log.findLast(event => event.kind === 'report')?.data;
 
-describe('a department always has one open turn, the release it gets ready', () => {
-  it('opens one for every top-level department: the one setup makes and one built later', async () => {
+describe('a department that releases its work has one open turn, the release it gets ready', () => {
+  it('opens none for a top-level department that keeps no repository: the one setup makes and one built later', async () => {
     const { app, db } = await testApp();
     const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
     const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(ceo) });
     expect(built.statusCode).toBeLessThan(300);
     const tops = await db.select().from(departments).where(isNull(departments.parentId));
     expect(tops.map(top => top.templateKey).sort()).toEqual(['operations', 'support']);
-    for (const top of tops) expect(await db.select().from(turns).where(and(eq(turns.departmentId, top.id), eq(turns.status, 'open')))).toHaveLength(1);
+    for (const top of tops) expect(await db.select().from(turns).where(and(eq(turns.departmentId, top.id), eq(turns.status, 'open')))).toHaveLength(0);
   });
 
   it('offers no tools to plan, merge or switch the mode of turns', async () => {
@@ -110,15 +110,30 @@ describe('a result joins the open turn of its department as its head accepts it'
     expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
   });
 
-  it('sends the result of a product with a repository of its own to main, with a person approving it, and into no turn', async () => {
+  /* A product has no rules of its own: the department that holds it decides whether its main needs a person's yes. */
+  const productOnMain = async () => {
     const f = await readyInTurn();
     const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, parentId: f.task.departmentId!, roleCode: 'DEV', repoUrl: 'https://github.com/acme/app.git' }).returning();
     await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
     f.repo.heads.main = f.finalCommit;
+    return f;
+  };
+
+  it('sends the result of a product with a repository of its own to main and into no turn with no approval while its department sets no commit rule', async () => {
+    const f = await productOnMain();
+    expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: null });
+    expect(await reportOf(f)).toMatchObject({ acceptedCandidate: { integration: { branch: 'main', commit: f.finalCommit, approval: null } } });
+  });
+
+  it('sends the result of a product with a repository of its own to main, with a person approving it under its department\'s every rule, and into no turn', async () => {
+    const f = await productOnMain();
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
     await expect(f.accept()).rejects.toMatchObject({ status: 403 });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
     const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve this exact main integration.', commit: f.finalCommit });
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: null });
+    expect(await reportOf(f)).toMatchObject({ acceptedCandidate: { integration: { branch: 'main', commit: f.finalCommit, approval: asked.request.id } } });
   });
 });
 

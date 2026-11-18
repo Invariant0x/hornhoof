@@ -1,9 +1,0 @@
-
- RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1112/packages/protocol
-
- ✓ test/approval-policy.test.ts (12 tests) 5ms
-
- Test Files  1 passed (1)
-      Tests  12 passed (12)
-   Start at  14:34:26
-   Duration  116ms (import 60%, transform 26%, tests 11%, worker 3%)

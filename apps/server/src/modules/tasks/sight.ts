@@ -1,33 +1,13 @@
+import { seesTask } from './visibility.js';
 import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { canReach } from '../../auth/access.js';
 import { knowsAgentId, ownsPlace, seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { tasks } from '../../db/schema.js';
-import { taskSpot, type Task } from './engine.js';
+import { type Task } from './state.js';
 import type { TreeFacts } from './tree.js';
 import { maskWaits } from './wait-views.js';
 import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, type TaskLine } from './views.js';
-
-/* What a person reads of tasks (auth/agent-view.ts): every task of the company, with every employee named in it and its
-   stages, as the tasks are the company's work. What an agent said in them is its own, for the people who open that agent;
-   what the repository says stays with the CEO's view and the owner of the task's department. Changing a task goes by who
-   acts on its work. Agents' own tools do not come this way. */
-
-export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId'>;
-
-/* Every task of the company, but the work of another person's assistant's own agent. */
-export function seesTask(viewer: Pick<AgentViewer, 'apart'>, task: TaskPlace): boolean {
-  return [task.assigneeAgentId, task.executorAgentId].every(id => !id || knowsAgentId(viewer, id));
-}
-
-/* Whether the person changes the task: the work of the agents they open in a place they reach, and what they gave themselves. */
-export function actsOnTask(viewer: AgentViewer, task: TaskPlace): boolean {
-  if (!canReach(viewer.access, taskSpot(task))) return false;
-  if (viewer.full || task.createdByPersonId === viewer.personId) return true;
-  return [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId].some(id => seesAgentId(viewer, id));
-}
-
 const shownRef = (viewer: AgentViewer, agent: AgentRef | null) => (agent && knowsAgentId(viewer, agent.id) ? agent : null);
 
 /* A wait says what its holder wrote, so it goes with whoever opens the holder, and whom it is on goes when that is someone
@@ -75,10 +55,16 @@ function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: st
 /* Whom a task waits for, as whom its waits answer to shows: no employee the reader does not know of, and no other person. */
 const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number]['who']) =>
   !who || (who.kind === 'agent' ? knowsAgentId(viewer, who.id) : who.id === viewer.personId) ? who : null;
-const shownTime = (viewer: AgentViewer, time: TaskLine['time']): TaskLine['time'] => ({ ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who) })) });
+const shownTime = (viewer: AgentViewer, time: TaskLine['time'], externalWait: TaskLine['externalWait']): TaskLine['time'] => ({
+  ...time, waitsOn: time.waitsOn.map(w => {
+    const hidden = !externalWait && (w.kind === 'external' || w.event === 'ceo' || w.until !== undefined);
+    return { ...w, who: shownWho(viewer, w.who), ...(hidden ? { reason: w.kind === 'run' || w.kind === 'work' ? w.reason : null, until: undefined } : {}) };
+  }),
+});
 
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time) };
+  const externalWait = shownWait(viewer, line);
+  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait, independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time, externalWait) };
 }
 
 /* Task lines as this person reads them. */
@@ -154,3 +140,5 @@ export function factsFor(viewer: AgentViewer, facts: TreeFacts, departmentId: st
     turns: facts.turns?.filter(t => knows(t.agentId)),
   };
 }
+export { seesTask, actsOnTask } from './visibility.js';
+export type { TaskPlace } from './visibility.js';

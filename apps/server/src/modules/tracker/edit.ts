@@ -1,12 +1,13 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { nextRevision } from './revision.js';
+import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { pipelineStages, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { note, published, refuse, taskSpot, type Actor, type Task, type Tx } from '../tasks/engine.js';
+import { note, published } from '../tasks/events.js';
+import { refuse, taskSpot, type Actor, type Task, type Tx } from '../tasks/state.js';
 import { holdPipelines, placeOnPipeline, stageGone } from './pipelines.js';
 import { requireAnswersFor } from './responsible.js';
 import { goalFor } from './task-fields.js';
-
 /* What may change of a task beside its work: its texts for people and what the tracker keeps. Who does it, its status, its
    place and its route change elsewhere. null takes a goal, a date or a pipeline off. */
 export type TaskEdit = {
@@ -16,12 +17,13 @@ export type TaskEdit = {
   goalId?: string | null;
   responsiblePersonId?: string;
   dueAt?: Date | null;
+  priority?: Task['priority'];
   pipelineId?: string | null;
   pipelineStageId?: string | null;
 };
 
 /* The names the history and the screens use for what changed, in the order the card shows them. */
-const FIELDS = [['title', 'title'], ['brief', 'brief'], ['why', 'why'], ['goalId', 'goal'], ['responsiblePersonId', 'responsible'], ['dueAt', 'due'], ['pipelineId', 'pipeline'], ['pipelineStageId', 'stage']] as const;
+const FIELDS = [['title', 'title'], ['brief', 'brief'], ['why', 'why'], ['goalId', 'goal'], ['responsiblePersonId', 'responsible'], ['dueAt', 'due'], ['priority', 'priority'], ['pipelineId', 'pipeline'], ['pipelineStageId', 'stage']] as const;
 
 const same = (a: unknown, b: unknown) => (a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b);
 
@@ -34,6 +36,7 @@ export async function trackerSet(ctx: Pick<Ctx, 'db'>, task: Task, edit: TaskEdi
   if (edit.title !== undefined) set.title = edit.title.trim();
   if (edit.brief !== undefined) set.brief = edit.brief.trim();
   if (edit.why !== undefined) set.why = edit.why.trim();
+  if (edit.priority !== undefined) set.priority = edit.priority;
   if (edit.dueAt !== undefined) set.dueAt = edit.dueAt;
   if (edit.goalId !== undefined && edit.goalId !== task.goalId) {
     if (edit.goalId && task.parentId) throw refuse(400, 'goal_invalid', 'Work under a task serves the goal of the task above it, so it names none of its own.');
@@ -63,8 +66,6 @@ async function stageOf(ctx: Pick<Ctx, 'db'>, task: Task, stageId: string | null)
 export type Seen = { version: number; revision: number };
 export const seenOf = (task: Pick<Task, 'version' | 'trackerRevision'>): Seen => ({ version: task.version, revision: task.trackerRevision });
 const sameAs = (task: Pick<Task, 'version' | 'trackerRevision'>, seen: Seen) => task.version === seen.version && task.trackerRevision === seen.revision;
-/* The next revision of what the tracker keeps, for every change of it. */
-export const nextRevision = () => sql`${tasks.trackerRevision} + 1`;
 
 /* An edit of what the tracker keeps, made only on the task as its writer saw it: a move of its work or another edit of it
    since then refuses it, so neither is written over. It gives no work and is no move of it: it wakes nobody, leaves what
@@ -100,3 +101,4 @@ export async function writeEdit(tx: Tx, actor: Actor, task: Task, edit: TaskEdit
   await note(tx, row!, { kind: 'edited', actor, data: { fields } });
   return row!;
 }
+export { nextRevision } from './revision.js';

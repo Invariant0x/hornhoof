@@ -1,10 +1,8 @@
-import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
 import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
-import { PRIVATE_TOOL_NOTE, ToolPrivacy, toolPrivacy, privateToolEvent, type PrivateValues, type ToolPrivacyPolicy } from '@hornhoof/protocol';
+import type { ToolPrivacy, ToolPrivacyPolicy } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { toldPlace } from '../program-folder.js';
@@ -22,11 +20,15 @@ import { redact } from '../redact.js';
 import { Bridge, type AgentUrls, type OpensCheck, type Outside } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
 import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
-import { sendTerminalOutput, ViewHistory } from './view-stream.js';
+import { ViewSessions } from './views.js';
+import { SessionPrivacy } from './privacy.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
-import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
-import { acceptClaudeDialogs, agyTranscript, claudeToolsFile, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, writeClaudeTools, type LaunchSpec, type TermProgram } from './programs.js';
+import type { LaunchSpec, TermProgram } from './programs.js';
+import { agyTranscript, prepareAgy } from '../providers/antigravity-terminal.js';
+import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTools } from '../providers/claude-terminal.js';
+import { findRollout, rolloutFiles } from '../providers/codex-terminal.js';
+import { findKimiWire, prepareKimi } from '../providers/kimi-terminal.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
@@ -75,8 +77,6 @@ function exitError(output: string | null, signedOut: RegExp | null, fallback: Jo
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
   privacy?: ToolPrivacy;
-  lostPrivacy?: boolean;
-  privateOutput?: boolean;
   jobId: string | null;
   onEvent(e: AgentEvent): void;
   typed: boolean;
@@ -102,8 +102,6 @@ type LiveWords = { turn: Turn; program: TermProgram; text: string; deadline: num
 type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
 type Agent = {
-  privateOutput?: boolean;
-  privateJobId?: string | null;
   key: string;
   name: string;
   program: TermProgram | null;
@@ -231,29 +229,6 @@ type Agent = {
   tryingToSleep: boolean;
 };
 
-type Size = { cols: number; rows: number };
-/* shown: the size its tmux client is to have; applied: the size it was last given; tty: that client's terminal, once
-   found. */
-type View = {
-  child: ChildProcess;
-  key: string;
-  write: boolean;
-  mask: StreamMask;
-  decoder: StringDecoder;
-  quiet: NodeJS.Timeout | null;
-  shown: Size;
-  applied: Size;
-  tty: string | null;
-  history: ViewHistory | null;
-  out(text: string): void;
-};
-
-const sameSize = (a: Size, b: Size) => a.cols === b.cols && a.rows === b.rows;
-/* Erases a window's screen below a session of so many rows, and puts the cursor back where it was. */
-const eraseBelow = (rows: number) => `\u001b7\u001b[${rows + 1};1H\u001b[J\u001b8`;
-/* Sets a terminal's size: stty names the terminal with -f on macOS and -F elsewhere. */
-const stty = (tty: string, size: Size) =>
-  new Promise<void>(resolve => execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)], () => resolve()));
 
 type Options = {
   tmux: Tmux;
@@ -309,7 +284,6 @@ const TURN_BEGAN = 'it began a turn of its own';
 const ENTER_TRIES = 3;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
-const MAX_EARLY_KEYS = 256;
 /* A stop hook can precede the program's last log lines; the turn waits this long for them. */
 const SETTLE_MS = 3000;
 /* How long the plan's limits may take to come after a turn of a program that does not log them. */
@@ -406,7 +380,8 @@ export class TerminalHost {
   private readonly operator: OperatorRuntime | null;
   private readonly operatorTimer: NodeJS.Timeout | null;
   private readonly agents = new Map<string, Agent>();
-  private readonly views = new Map<string, View>();
+  private readonly viewSessions: ViewSessions;
+  private readonly privacy: SessionPrivacy;
   private readonly bridge: Bridge;
   private readonly fs: AgentFs;
   private readonly readyMs: number;
@@ -420,18 +395,10 @@ export class TerminalHost {
   private readonly lookMs: number;
   private readonly reportMs: number;
   private readonly remembered = new Set<string>();
-  /* Views being opened, and those Hornhoof closed meanwhile. */
-  private readonly viewsOpening = new Set<string>();
-  /* What the owner types while their view opens: Hornhoof told them the terminal is there. */
-  private readonly earlyKeys = new Map<string, Msg<'term.input'>[]>();
-  private readonly viewsClosed = new Set<string>();
   /* Windows opening one agent wait for the same session to be created. */
   private readonly sessionsOpening = new Map<string, Promise<void>>();
   /* The last launch into each agent's session, which the next one waits for. */
   private readonly launches = new Map<string, Promise<unknown>>();
-  /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
-     counts too, since Hornhoof says the view is ready as it asks for it. */
-  private readonly wanted = new Map<string, { key: string; size: Size }>();
   private readonly limitsStops = new Set<AbortController>();
   private readonly cols: number;
   private readonly rows: number;
@@ -449,6 +416,13 @@ export class TerminalHost {
     this.readyMs = set.readyMs;
     this.pollMs = set.pollMs;
     this.openMs = set.openMs;
+    this.privacy = new SessionPrivacy(opts.tmux, message => this.log(message));
+    this.viewSessions = new ViewSessions(opts, {
+      openMs: this.openMs,
+      agent: key => this.agent(key),
+      ensureSession: (key, starts) => this.ensureSession(this.agent(key), starts),
+      typed: (key, input, write) => this.ownerTyped(key, input, write),
+    });
     this.toolsMs = set.toolsMs;
     this.enterWaitMs = set.enterWaitMs;
     this.typingQuietMs = set.typingQuietMs;
@@ -462,35 +436,10 @@ export class TerminalHost {
     this.operatorTimer = this.operatorTicks();
   }
 
-  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): Promise<void> {
+  private async sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy): Promise<void> {
     const agent = this.agents.get(key);
     if (!agent) return;
-    const turn = activeTurn(agent);
-    const privacy = turn ? (turn.privacy ??= new ToolPrivacy()) : null;
-    privacy?.input(name, input, policy);
-    await this.keepOutputPrivate(agent);
-    if (privacy) this.rememberSensitiveReply(privacy, answer, policy);
-  }
-
-  private rememberSensitiveReply(privacy: ToolPrivacy, answer: unknown, policy: ToolPrivacyPolicy | undefined): void {
-    if (!answer || typeof answer !== 'object') return;
-    const content = (answer as { result?: { content?: { text?: string }[] } }).result?.content ?? [];
-    for (const block of content) {
-      if (typeof block.text !== 'string') continue;
-      let value: unknown = block.text;
-      try { value = JSON.parse(block.text); } catch { /* Plain sensitive replies are values too. */ }
-      privacy.result(value, policy);
-    }
-  }
-
-  private keepOutputPrivate(agent: Agent): Promise<void> {
-    agent.privateOutput = true;
-    agent.privateJobId = activeTurn(agent)?.jobId ?? agent.privateJobId ?? null;
-    return this.opts.tmux.protectOutput(agent.name, agent.privateJobId);
-  }
-
-  private hideOutput(agent: Agent): void {
-    void this.keepOutputPrivate(agent).catch(() => this.log('Sensitive terminal output could not be cleared.'));
+    await this.privacy.tool(agent.name, activeTurn(agent), name, input, answer, policy);
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
@@ -579,11 +528,7 @@ export class TerminalHost {
     const [size, cells] = await Promise.all([this.opts.tmux.run(['display-message', '-p', '-t', a.name, '#{pane_width} #{pane_height}']), this.opts.tmux.screen(a.name, 0, true)]);
     const [cols, rows] = size.trim().split(/\s+/).map(Number);
     if (!cols || !rows) throw new Error('The existing pane size is unknown.');
-    return { cols, rows, cells: this.terminalText(a, cells) };
-  }
-
-  private terminalText(agent: Agent, text: string): string {
-    return agent.privateOutput ? PRIVATE_TOOL_NOTE : text;
+    return { cols, rows, cells: this.opts.tmux.maskedScreen(a.name, cells) };
   }
 
   private operatorInputLine(key: string, cells: string): OperatorInputLine {
@@ -660,15 +605,14 @@ export class TerminalHost {
 
   async screen(key: string): Promise<string> {
     const agent = this.agent(key);
-    return this.terminalText(agent, await this.opts.tmux.screen(agent.name));
+    return this.opts.tmux.maskedScreen(agent.name, await this.opts.tmux.screen(agent.name));
   }
 
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { privateOutput: this.opts.tmux.outputPrivate(`a-${key}`), privateJobId: this.opts.tmux.privateJob(`a-${key}`), key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
-      if (a.privateOutput) this.hideOutput(a);
     }
     return a;
   }
@@ -734,8 +678,8 @@ export class TerminalHost {
     const { input, program } = job;
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
-    const instructionsFile = await this.writeInstructions(job);
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
+    const instructions = await this.writeInstructions(job);
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, ...instructions, urls });
     return { spec, urls, hash: await this.versionedHash(a, job, spec) };
   }
 
@@ -750,7 +694,7 @@ export class TerminalHost {
       if (failed) return failed;
       const done = await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
       if (!goesOn && !tools && done.ok) await this.toolsConnected(a, job);
-      return this.privateResult(a, turn, done);
+      return { ...done, privateValues: turn.privacy?.values };
     } finally {
       this.closesTurn(a, job, turn, starting);
     }
@@ -768,25 +712,6 @@ export class TerminalHost {
     }
   }
 
-  private privateResult(agent: Agent, turn: Turn, result: RunResult): RunResult {
-    if (turn.lostPrivacy) return this.privateLostResult(result);
-    return { ...result, sensitive: agent.privateOutput || turn.privacy?.sensitive, privateValues: this.turnValues(turn) };
-  }
-
-  private privateLostResult(result: RunResult): RunResult {
-    return { ...result, sensitive: true, result: PRIVATE_TOOL_NOTE, output: PRIVATE_TOOL_NOTE, privateValues: undefined,
-      ...(result.failure ? { failure: { ...result.failure, text: PRIVATE_TOOL_NOTE } } : {}),
-      ...(result.programOutput ? { programOutput: { ...result.programOutput, text: PRIVATE_TOOL_NOTE } } : {}) };
-  }
-
-  private turnValues(turn: Turn): PrivateValues | undefined {
-    return turn.lostPrivacy ? undefined : turn.privacy?.values;
-  }
-
-  private lostPrivacy(agent: Agent, jobId: string | null): boolean {
-    return agent.privateOutput === true && jobId !== null && agent.privateJobId === jobId;
-  }
-
   private opensTurn(a: Agent, job: TermJob, goesOn: boolean, tools: Promise<unknown> | null): { turn: Turn; starting: Promise<unknown> | null } {
     const { input } = job;
     /* What is left in the log from before belongs to no turn. */
@@ -798,9 +723,7 @@ export class TerminalHost {
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn = requestedTurn(job, this.requestedWords(a, job), starting !== null);
-    turn.privateOutput = a.privateOutput;
-    turn.privacy = new ToolPrivacy();
-    turn.lostPrivacy = this.lostPrivacy(a, turn.jobId);
+    turn.privacy = this.privacy.fresh(a.name);
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -967,20 +890,21 @@ export class TerminalHost {
 
   /* Claude Code reads what it is told from the file it starts with, which this returns. Codex, Kimi Code and Antigravity
      read a file of their folder for it, each its own in a task's folder, agy only its start. */
-  private async writeInstructions(job: TermJob): Promise<string | null> {
+  private async writeInstructions(job: TermJob): Promise<{ instructionsFile: string | null; instructionsBytes?: number }> {
     const told = await this.toldOf(job);
     const whole = join(job.input.workDir, '.hh-instructions.md');
-    if (!told) return null;
+    if (!told) return { instructionsFile: null };
     if (job.program.kind === 'claude') {
       await this.fs.write(whole, told + '\n');
-      return whole;
+      return { instructionsFile: whole };
     }
     const place = toldPlace(job.program.kind, job.input);
     const { rules, whole: all } = job.program.kind === 'antigravity' ? agyRules(told, whole, Buffer.byteLength(place.head)) : { rules: told, whole: null };
     if (all) await this.fs.write(whole, all + '\n');
     await this.fs.mkdir(dirname(place.file));
-    await this.fs.write(place.file, place.head + rules + '\n');
-    return null;
+    const instructions = place.head + rules + '\n';
+    await this.fs.write(place.file, instructions);
+    return { instructionsFile: null, instructionsBytes: Buffer.byteLength(instructions) };
   }
 
   /* The program runs as this turn would start it, in the session it asks for. A new session asked for goes on in a program
@@ -1075,7 +999,7 @@ export class TerminalHost {
     if (job.input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     const screen = await this.screen(job.key);
     /* Its screen says why, which the loader would hide. */
-    this.showViews(a);
+    this.viewSessions.program(a.key);
     const shown = await this.shownNow(a);
     await this.whyNotReady(a, job, shown);
     return await this.failedTurn(a, job, !this.operator?.failure(a.key) && job.signedOut.test(shown) ? 'not_logged_in' : 'agent_failed', screen);
@@ -1327,7 +1251,8 @@ export class TerminalHost {
     const input = await this.readInput(a);
     if (!input || !this.leftByOthers(a, input)) return;
     const jobId = job.input.jobId ?? null;
-    const text = cut(redact(await this.wholeInput(a, input), this.secretsOf(job)), 100_000);
+    const whole = await this.wholeInput(a, input);
+    const text = cut(redact(this.opts.tmux.outputValues(a.name).text(whole), this.secretsOf(job)), 100_000);
     await this.leftInputs.keep({ agentKey: a.key, jobId, text, typed: (a.typedAt ?? -Infinity) > (a.pastedAt ?? -Infinity), ref: leftRef(jobId, input) });
   }
 
@@ -1525,7 +1450,8 @@ export class TerminalHost {
 
   /* Both entry paths report the same program state. */
   private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
-    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, this.sessionToTell(a))), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+    const values = this.opts.tmux.outputValues(a.name);
+    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, this.sessionToTell(a))), this.reportMs, this.opts.secrets, values), look: { at: Date.now(), call: null } };
   }
 
   /* After a restart Hornhoof asks the node to go on in the session it heard of, and a node goes on only in one it remembers:
@@ -1561,8 +1487,7 @@ export class TerminalHost {
     await this.settle(a, message);
     await this.planLimits(a);
     if (job.input.tools && this.bridge.toolsRefusedSince(a.key, a.startedAt)) return await this.withoutTools(a, job);
-    /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
-    const output = message.trim() ? '' : await this.screen(job.key);
+    const output = await this.screen(job.key);
     return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits, tokens: a.tally.tokens() };
   }
 
@@ -1640,7 +1565,7 @@ export class TerminalHost {
   /* Hornhoof hears that the turn's program is gone, how it ended and what it showed last, without the secrets. */
   private async toldGone(a: Agent, watch: ProgramWatch, screen: string): Promise<void> {
     const ended = (await this.opts.tmux.exitSnapshot(a.name))?.programOutput;
-    this.reportGone(watch, ended, screen, a.signAt);
+    this.reportGone(watch, ended, this.opts.tmux.maskedScreen(a.name, screen), a.signAt);
   }
 
   private reportGone(watch: ProgramWatch, ended: ProgramOutput | undefined, screen: string, signAt: number): void {
@@ -1725,7 +1650,7 @@ export class TerminalHost {
   private async typedExit(a: Agent, turn: Turn) {
     const ended = await this.opts.tmux.exitSnapshot(a.name);
     const screen = ended?.output ?? await this.screen(a.key);
-    if (a.turn === turn) this.reportGone(turn.observed!.watch, ended?.programOutput, screen, a.signAt);
+    if (a.turn === turn) this.reportGone(turn.observed!.watch, ended?.programOutput, this.opts.tmux.maskedScreen(a.name, screen), a.signAt);
     return ended;
   }
 
@@ -1881,8 +1806,9 @@ export class TerminalHost {
     const settling = this.settle(a, end.message);
     a.settling = settling;
     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
-    void settling.then(() => {
-      this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
+    void settling.then(async () => {
+      const screen = await this.screen(a.key);
+      this.finishTyped(a, end.message, error, end.failure ? `${screen}\n\n${end.failure.text}` : screen, undefined, turn);
     });
   }
 
@@ -2357,17 +2283,10 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    event = this.privateEvent(a, turn, event);
+    event = this.privacy.event(a.name, turn, event, name => this.bridge.toolPolicy(a.key, name));
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
-  }
-
-  private privateEvent(agent: Agent, turn: Turn, event: AgentEvent): AgentEvent {
-    const privacy = (turn.privacy ??= new ToolPrivacy());
-    event = privacy.event(event, undefined, name => this.bridge.toolPolicy(agent.key, name));
-    if (privacy.sensitive && !agent.privateOutput) this.hideOutput(agent);
-    return privateToolEvent(event, turn.lostPrivacy === true, turn.lostPrivacy === true);
   }
 
   private typedEvent(turn: Turn, event: AgentEvent): void {
@@ -2388,7 +2307,7 @@ export class TerminalHost {
   }
 
   private askedOperator(a: Agent, data: Record<string, unknown>): void {
-    const question = operatorQuestion(data, this.opts.secrets(), a.operatorQuestion);
+    const question = operatorQuestion(data, [...this.opts.secrets(), ...this.opts.tmux.outputValues(a.name).forms()], a.operatorQuestion);
     if (question.id !== a.operatorQuestion?.id) this.ownActivity(a);
     a.operatorQuestion = question;
     a.question = { name: String(data.tool_name ?? 'Permission'), at: Date.now(), asking: true };
@@ -2607,7 +2526,7 @@ export class TerminalHost {
     this.beginTurn(a);
     a.ends.started(id);
     a.programTurnId = id;
-    const turn: Turn = { privacy: new ToolPrivacy(), privateOutput: a.privateOutput, jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
+    const turn: Turn = { privacy: this.privacy.fresh(a.name), jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
     turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
@@ -2626,7 +2545,7 @@ export class TerminalHost {
       });
       await start;
     }
-    this.opts.send(typedOpen(a.key, text, turn.ref, queuedFrom));
+    this.opts.send(typedOpen(a.key, turn.privacy!.values.text(text), turn.ref, queuedFrom));
     await answered();
   }
 
@@ -2690,7 +2609,6 @@ export class TerminalHost {
   private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
-      this.bindPrivacy(a, turn);
       a.sinceRun.add(m.jobId);
       this.bindOperatorTurn(a, turn, m.jobId);
       turn.words.bind(m.jobId);
@@ -2699,11 +2617,6 @@ export class TerminalHost {
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
-  }
-
-  private bindPrivacy(agent: Agent, turn: Turn): void {
-    turn.lostPrivacy = this.lostPrivacy(agent, turn.jobId);
-    if (turn.privacy?.sensitive) this.hideOutput(agent);
   }
 
   private bindOperatorTurn(a: Agent, turn: Turn, jobId: string): void {
@@ -2732,7 +2645,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure, tokens: TurnTokens | null = null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, sensitive: turn.privateOutput || turn.privacy?.sensitive, privateValues: this.turnValues(turn), ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, privateValues: turn.privacy?.values, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */
@@ -3059,7 +2972,7 @@ export class TerminalHost {
 
   /* Someone has the agent's terminal open, or is opening it. */
   private viewed(key: string): boolean {
-    return [...this.wanted.values()].some(view => view.key === key);
+    return this.viewSessions.watched(key);
   }
 
   /* Checks first, so that a program at work answers at once and not after its turn. Then in the line of Hornhoof's turns: one sent
@@ -3135,7 +3048,7 @@ export class TerminalHost {
     if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
-    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, fresh: false, started: null, privateOutput: false });
+    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, fresh: false, started: null });
     return RETIRED;
   }
 
@@ -3178,13 +3091,13 @@ export class TerminalHost {
     if (a.up === up && !a.asleep) return;
     a.up = up;
     a.asleep = false;
-    this.showViews(a, up);
+    this.viewSessions.program(a.key, up);
   }
 
   private programAsleep(a: Agent): void {
     a.up = false;
     a.asleep = true;
-    this.showViews(a, false, true);
+    this.viewSessions.program(a.key, false, true);
   }
 
   /* A program that ended keeps its last screen on show, which says why; the loader is for a program that starts. */
@@ -3192,35 +3105,7 @@ export class TerminalHost {
     if (a.restarting) return;
     this.reportUnheard(a, true);
     a.up = false;
-    this.showViews(a);
-  }
-
-  private showViews(a: Agent, running = true, asleep = false): void {
-    for (const [termId, view] of this.views) if (view.key === a.key) this.opts.send({ type: 'term.program', termId, running, ...(asleep ? { asleep } : {}) });
-  }
-
-  /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
-  closeViews(): void {
-    for (const view of this.views.values()) view.child.kill();
-  }
-
-  async open(m: Msg<'term.open'>): Promise<void> {
-    this.expectKeys(m);
-    try {
-      await this.openView(m);
-      this.earlyKeysGo(m.termId);
-    } catch (err) {
-      /* A view that did not open keeps no size, and takes no keys. */
-      this.earlyKeys.delete(m.termId);
-      await this.forget(m.termId, m.agentKey);
-      throw err;
-    }
-  }
-
-  /* The others may have got smaller for a view that is gone. */
-  private forget(termId: string, key: string): Promise<void> {
-    this.wanted.delete(termId);
-    return this.fit(key);
+    this.viewSessions.program(a.key);
   }
 
   private ensureSession(a: Agent, starts: boolean): Promise<void> {
@@ -3240,222 +3125,46 @@ export class TerminalHost {
     if (await this.opts.tmux.has(a.name)) return;
     /* The window shows a loader over the empty session while the program starts. */
     const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
-    await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), ...this.fitted(a.key) });
+    await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), ...this.viewSessions.fitted(a.key) });
     /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
        starting its own. */
     if (!a.turn) Object.assign(a, { hash: null, instance: null, binding: null });
   }
 
-  private async openView(m: Msg<'term.open'>): Promise<void> {
-    const a = this.agent(m.agentKey);
-    this.viewsOpening.add(m.termId);
-    this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
-    /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
-    const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
-    try {
-      await this.ensureSession(a, starts);
-      /* The others get smaller first, if this window is: a client bigger than the session gets rows of dots. */
-      await this.fit(m.agentKey);
-    } finally {
-      this.viewsOpening.delete(m.termId);
-    }
-    if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
-    const shown = this.fitted(m.agentKey);
-    const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, history: null, out: () => {} };
-    this.views.set(m.termId, view);
-    /* A program that sleeps shows what it printed, and says it sleeps, until a turn starts it; one who may type starts it.
-       A watcher of an agent with no program sees the waiting screen; anyone else, a loader until the program is up. */
-    if (a.asleep && !a.turn) this.opts.send({ type: 'term.program', termId: m.termId, running: false, asleep: true });
-    else if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
-    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), this.terminalText(a, text));
-    child.on('exit', () => {
-      view.history?.stop();
-      if (view.quiet) clearTimeout(view.quiet);
-      view.out(view.mask.flush());
-      this.views.delete(m.termId);
-      this.wanted.delete(m.termId);
-      this.opts.send({ type: 'term.exit', termId: m.termId });
-      void this.fit(m.agentKey);
-    });
-    await this.showHistory(m.termId, view, a.name);
-    if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
-    /* A resize that came while it opened, or a window smaller than the others', sizes every view of the session. */
-    await this.fit(m.agentKey);
-  }
-
-  /* What the attached client writes meanwhile waits in its pipe, and follows the history in its order. */
-  private async showHistory(termId: string, view: View, name: string): Promise<void> {
-    const show = (text: string) => {
-      view.out(view.mask.push(text));
-      if (view.quiet) clearTimeout(view.quiet);
-      view.quiet = setTimeout(() => view.out(view.mask.flush()), 60);
-    };
-    const open = () => this.views.get(termId) === view && !view.child.killed;
-    /* A session gets the size of its views when one attaches, and what that leaves off its screen is history too. */
-    const tty = await this.ttyOf(termId, view);
-    if (tty) await this.clientSized(tty, view.shown);
-    const history = new ViewHistory(this.opts.tmux, name, text => { if (open()) show(text); }, () => this.repaint(termId, view));
-    view.history = history;
-    await history.open();
-    if (!open()) return;
-    view.child.stdout?.on('data', (chunk: Buffer) => {
-      /* The client draws, so it is there: a size that could not reach it before goes now. */
-      if (!view.tty) void this.fit(view.key);
-      const text = view.decoder.write(chunk);
-      history.saw(text);
-      show(text);
-    });
-  }
-
-  private async repaint(termId: string, view: View): Promise<void> {
-    const tty = await this.ttyOf(termId, view);
-    if (tty) await this.opts.tmux.repaint(tty);
-  }
-
-  input(m: Msg<'term.input'>): void {
-    const view = this.typingView(m.termId);
-    if (view?.write) this.ownerTyped(view, m);
-    else this.keepEarly(m);
-  }
-
-  /* Keys wait while what came before them still waits, for the order of what the owner typed. */
-  private typingView(termId: string): View | undefined {
-    return this.earlyKeys.has(termId) ? undefined : this.views.get(termId);
-  }
-
-  private keepEarly(m: Msg<'term.input'>): void {
-    const early = this.earlyKeys.get(m.termId);
-    if (early && early.length < MAX_EARLY_KEYS) early.push(m);
-  }
-
-  private expectKeys({ termId, write }: Msg<'term.open'>): void {
-    if (write) this.earlyKeys.set(termId, []);
-  }
-
-  private earlyKeysGo(termId: string): void {
-    const view = this.views.get(termId);
-    const keys = this.earlyKeys.get(termId) ?? [];
-    this.earlyKeys.delete(termId);
-    if (view) for (const m of keys) this.ownerTyped(view, m);
-  }
-
   /* What a person's terminal answers by itself goes to tmux, which asked for it, and is nobody's key: a program waits on no
      person because someone opened its view or came back to the window. */
-  private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {
-    if (!isTerminalReport(data)) this.operator?.ownerInput(view.key);
-    const a = this.agents.get(view.key);
-    if (a) this.ownerKeys(a, view, data, pressedIn);
+  private ownerTyped(key: string, { data, pressedIn }: Msg<'term.input'>, write: (data: string) => void): void {
+    if (!isTerminalReport(data)) this.operator?.ownerInput(key);
+    const a = this.agents.get(key);
+    if (a) this.ownerKeys(a, write, data, pressedIn);
   }
 
-  private ownerKeys(a: Agent, view: View, data: string, pressedIn?: string): void {
+  private ownerKeys(a: Agent, write: (data: string) => void, data: string, pressedIn?: string): void {
     if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
     if (typesWords(data)) a.typedAt = Date.now();
     a.ownerTyped ||= !isTerminalReport(data);
-    void this.inputLane(a, async () => { view.child.stdin?.write(data); });
+    void this.inputLane(a, async () => { write(data); });
   }
 
-  async resize(m: Msg<'term.resize'>): Promise<void> {
-    const wanted = this.wanted.get(m.termId);
-    if (!wanted) return;
-    const height = m.rows !== wanted.size.rows;
-    wanted.size = { cols: m.cols, rows: m.rows };
-    await this.fit(wanted.key);
-    if (height) this.heightChanged(m.termId);
+  /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
+  closeViews(): void {
+    this.viewSessions.closeAll();
   }
 
-  /* A terminal moved its own rows when its window changed height, also with the session's height as it was. */
-  private heightChanged(termId: string): void {
-    const view = this.views.get(termId);
-    if (!view) return;
-    this.eraseBelowSession(termId, view, view.shown);
-    view.history?.resized();
+  open(m: Msg<'term.open'>): Promise<void> {
+    return this.viewSessions.open(m);
   }
 
-  /* One session runs one program at one size. People watching it in windows of different sizes are tmux clients of
-     different sizes, and tmux fills what a bigger client has beyond the window with rows of dots. So every view of a
-     session gets the size of the smallest window among them: all of it shows in each, and a bigger window keeps empty
-     room below and to the right. */
-  private fitted(key: string): Size {
-    const size = { cols: Infinity, rows: Infinity };
-    for (const w of this.wanted.values()) {
-      if (w.key !== key) continue;
-      size.cols = Math.min(size.cols, w.size.cols);
-      size.rows = Math.min(size.rows, w.size.rows);
-    }
-    return size;
+  input(m: Msg<'term.input'>): void {
+    this.viewSessions.input(m);
   }
 
-  private async fit(key: string): Promise<void> {
-    const size = this.fitted(key);
-    const changed = [...this.views].filter(([termId, view]) => view.key === key && this.wanted.has(termId) && !sameSize(view.shown, size));
-    await Promise.all(changed.map(([termId, view]) => this.sizeView(termId, view, size)));
-  }
-
-  private async sizeView(termId: string, view: View, size: Size): Promise<void> {
-    view.shown = size;
-    const tty = await this.ttyOf(termId, view);
-    /* Its client is not there yet, as on a machine short of memory: the size has not reached it, and goes once it draws. */
-    if (!tty) {
-      if (view.shown === size) view.shown = view.applied;
-      return;
-    }
-    await this.applyNewest(tty, view);
-    const last = view.shown;
-    await this.clientSized(tty, last);
-    if (view.shown === last) this.eraseBelowSession(termId, view, last);
-  }
-
-  /* Sizes on their way do not wait for each other. One that lands after a newer one would leave the terminal at the older
-     size, so whichever ends last gives it the newest size again. */
-  private async applyNewest(tty: string, view: View): Promise<void> {
-    while (!sameSize(view.applied, view.shown)) {
-      const size = view.shown;
-      await stty(tty, size);
-      view.applied = size;
-    }
-  }
-
-  /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */
-  private async clientSized(tty: string, size: Size): Promise<void> {
-    for (const end = Date.now() + this.openMs; Date.now() < end; await new Promise(r => setTimeout(r, 20))) {
-      const client = (await this.opts.tmux.clients()).find(c => c.tty === tty);
-      if (!client || sameSize(client, size)) return;
-    }
-  }
-
-  /* tmux redraws a client that got smaller only within its new size; what the window showed below stays unless erased. */
-  private eraseBelowSession(termId: string, view: View, size: Size): void {
-    const own = this.wanted.get(termId)?.size;
-    if (own && size.rows < own.rows) view.out(eraseBelow(size.rows));
-  }
-
-  /* The terminal of a view's tmux client. A client attaches a moment after its view opens, so a size that comes before
-     waits for it. */
-  private async ttyOf(termId: string, view: View): Promise<string | null> {
-    for (const end = Date.now() + this.openMs; !view.tty && this.views.get(termId) === view && Date.now() < end; await new Promise(r => setTimeout(r, 50))) {
-      for (const client of await this.opts.tmux.clients()) if ((await parentOf(client.pid)) === view.child.pid) view.tty = client.tty;
-    }
-    return view.tty;
+  resize(m: Msg<'term.resize'>): Promise<void> {
+    return this.viewSessions.resize(m);
   }
 
   close(m: Msg<'term.close'>): void {
-    const view = this.views.get(m.termId);
-    if (view) {
-      view.child.kill();
-      /* Its viewer process takes a while to end; the others get their size back at once. */
-      void this.forget(m.termId, view.key);
-    } else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
-  }
-}
-
-/* The process that started a given one: from /proc on Linux, from ps elsewhere. */
-export async function parentOf(pid: number): Promise<number | null> {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-  } catch {
-    return new Promise(resolve => execFile('ps', ['-o', 'ppid=', '-p', String(pid)], (err, out) => resolve(err ? null : Number(out.trim()))));
+    this.viewSessions.close(m);
   }
 }
 

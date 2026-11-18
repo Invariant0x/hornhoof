@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks, testParts, testRuns } from '../../db/schema.js';
-import { onTask } from '../tasks/attachments.js';
+import { onTask } from '../tasks/file-policy.js';
 import type { ToolJob } from '../tools/job.js';
 import { builtinOf, keyOf, nodeIdentity, ownBuiltin, type NodeIdentity } from './hub.js';
 import { checkQueueSnapshot } from './check-slots.js';

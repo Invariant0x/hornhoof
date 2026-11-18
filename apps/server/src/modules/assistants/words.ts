@@ -1,6 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ApiError, errorAnswer, type ErrorReason } from '../../errors.js';
-import { FILE_BYTES } from '../tasks/attachments.js';
+import { FILE_BYTES } from '../tasks/file-policy.js';
 import { langOf, type BotLang } from '../telegram/words.js';
 import { LINK_DAYS } from './files.js';
 

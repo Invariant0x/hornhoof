@@ -1,8 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, assistants, companies, invites, machines, people, personKeys, sessions, subscriptions, tasks } from '../src/db/schema.js';
-import { as, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
+import { agents, assistants, companies, invites, jobs, machines, people, personKeys, sessions, subscriptions, tasks } from '../src/db/schema.js';
+import { as, invitePerson, listen, mcp, ownDatabases, ownPlan, setUpCompany, testApp } from './helpers.js';
+
+ownDatabases();
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
 const bearer = (key: string) => ({ headers: { authorization: `Bearer ${key}` } });
@@ -131,7 +134,7 @@ describe('DELETE /api/people/:id', () => {
     expect(await listed(c)).toEqual(['Ivan', 'Olga']);
   });
 
-  it("is the CEO's alone, by himself or through the orchestrator: never the CEO's own row, nor someone else's company", async () => {
+  it("is the CEO's alone and never applies to the CEO or another company", async () => {
     const c = await company();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     await c.app.inject({ method: 'PUT', url: `/api/people/${c.mariaId}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(c.ceo) });
@@ -151,9 +154,73 @@ describe('DELETE /api/people/:id', () => {
     expect((await remove(c, '00000000-0000-4000-8000-000000000000', c.ceo)).statusCode).toBe(404);
     expect((await row(c, stranger!.id)).removedAt).toBeNull();
 
-    expect((await c.app.inject({ method: 'DELETE', url: `/api/people/${c.olgaId}`, headers: orchestratorHeaders(c.owner.id, orchestrator!.id) })).statusCode).toBe(204);
-    expect((await row(c, c.olgaId)).removedAt).not.toBeNull();
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/people/${c.olgaId}`, headers: orchestratorHeaders(c.owner.id, orchestrator!.id) })).statusCode).toBe(403);
+    expect((await row(c, c.olgaId)).removedAt).toBeNull();
     expect((await row(c, c.mariaId)).removedAt).toBeNull();
+  });
+
+  it("requires a real CEO yes for the exact target and cannot record it through owner headers", async () => {
+    const c = await company();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const headers = orchestratorHeaders(c.owner.id, orchestrator!.id);
+    const approval = (id: string, auth: ReturnType<typeof as> | { headers: Record<string, string> }, approve: boolean) =>
+      c.app.inject({ method: 'POST', url: `/api/people/${id}/delete-approval`, payload: { approve }, ...auth });
+    const deleteAsAgent = (id: string) => c.app.inject({ method: 'DELETE', url: `/api/people/${id}`, headers });
+    expect((await deleteAsAgent(c.olgaId)).statusCode).toBe(403);
+    expect((await approval(c.olgaId, { headers }, true)).statusCode).toBe(403);
+    expect((await approval(c.olgaId, as(c.maria), true)).statusCode).toBe(403);
+    expect((await approval(c.olgaId, as(c.ceo), false)).statusCode).toBe(400);
+    expect((await approval(c.mariaId, as(c.ceo), true)).statusCode).toBe(204);
+    expect((await deleteAsAgent(c.olgaId)).statusCode).toBe(403);
+    const token = 'delete-person-tool-token-0123456789';
+    const [plan] = await c.db.select().from(subscriptions).where(eq(subscriptions.companyId, c.companyId));
+    await c.db.insert(jobs).values({ companyId: c.companyId, agentId: orchestrator!.id, subscriptionId: plan!.id, kind: 'conversation', prompt: '', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
+    await listen(c.app);
+    const client = await mcp(c.app, token);
+    const forged = await client.callTool({ name: 'api', arguments: { method: 'POST', path: `/api/people/${c.olgaId}/delete-approval`, body: { approve: true } } });
+    expect(forged.isError).toBe(true);
+    const removed = await client.callTool({ name: 'delete_person', arguments: { person: c.mariaId } });
+    expect(removed.isError, JSON.stringify(removed.content)).toBeFalsy();
+    expect(await row(c, c.mariaId)).toMatchObject({ deletionApprovedBy: c.owner.id, deletionApprovedAt: expect.any(Date), deletionCompletedAt: expect.any(Date) });
+    expect((await row(c, c.olgaId)).removedAt).toBeNull();
+  });
+
+  it("lets the orchestrator read another person's assistant's conversation, and leaves orders to its person", async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.maria, c.mariaId);
+    const plan = await ownPlan(c.db, 'maria@acme.com');
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { plan }, ...as(c.maria) })).statusCode).toBe(200);
+    const [assistant] = await c.db.select().from(assistants).where(eq(assistants.personId, ava.id));
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const headers = orchestratorHeaders(c.owner.id, orchestrator!.id);
+    const path = `/api/agents/${assistant!.agentId}`;
+    expect((await c.app.inject({ url: `${path}/events`, headers })).statusCode).toBe(200);
+    expect((await c.app.inject({ url: `${path}/events`, ...as(c.ceo) })).statusCode).toBe(403);
+    expect((await c.app.inject({ method: 'POST', url: `${path}/messages`, headers, payload: { text: 'Do this.' } })).statusCode).toBe(403);
+  });
+
+  it('resumes cleanup after a failure after the account and its assistant were marked removed', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.maria, c.mariaId);
+    const plan = await ownPlan(c.db, 'maria@acme.com');
+    const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.mariaId, machineKey: 'maria-box', hostname: 'maria-box' }).returning();
+    await c.db.execute("CREATE FUNCTION fail_removal() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''Test cleanup failure''; END'");
+    await c.db.execute("CREATE TRIGGER fail_removal BEFORE UPDATE ON subscriptions FOR EACH ROW EXECUTE FUNCTION fail_removal()");
+    try {
+      expect((await remove(c, c.mariaId, c.ceo)).statusCode).toBe(500);
+      expect((await row(c, c.mariaId)).removedAt).not.toBeNull();
+      expect((await row(c, ava.id)).removedAt).not.toBeNull();
+      expect((await c.app.inject({ url: '/api/me', ...as(c.maria) })).statusCode).toBe(401);
+    } finally {
+      await c.db.execute('DROP TRIGGER fail_removal ON subscriptions');
+      await c.db.execute('DROP FUNCTION fail_removal()');
+    }
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const retry = await c.app.inject({ method: 'DELETE', url: `/api/people/${c.mariaId}`, headers: orchestratorHeaders(c.owner.id, orchestrator!.id) });
+    expect(retry.statusCode).toBe(204);
+    expect((await c.db.select().from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.removedAt).not.toBeNull();
+    expect((await c.db.select().from(machines).where(eq(machines.id, box!.id)))[0]!.revokedAt).not.toBeNull();
+    expect((await remove(c, c.mariaId, c.ceo)).statusCode).toBe(404);
   });
 
   it('never deletes a person whose machine runs the company server', async () => {

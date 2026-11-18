@@ -5,17 +5,16 @@ import { ru } from '../../src/i18n/ru';
 import { BUILTIN_SKINS } from '../../src/skins/registry';
 import { NODE } from '../../src/tracker';
 import { captureWith } from '../capture';
-import { DEV, GOALS, QUESTION, serveShortNames, serveTasksBoard, SHORT, TASKS } from './api';
+import { DEV, GOAL_NOTE, GOALS, QUESTION, serveGoalHistory, serveOutsideWork, serveShortNames, serveTasksBoard, SHORT, TASKS } from './api';
 
-/* The tracker as a person meets it: the left panel of lists, where the person is, three views of the same work with their
-   filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, a light and
-   a dark skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
+/* The tracker as a person meets it: the left panel of lists, where the person is, views of the same work with their
+   filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, every built-in skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
 
 const MESSAGES: Record<Language, Messages> = { en, ru };
 const capture = captureWith('tasks-board', process.env.HH_SCREENSHOT_DIR);
 /* One built-in skin of each scheme. */
 const SKINS = (['light', 'dark'] as const).map(scheme => BUILTIN_SKINS.find(skin => skin.scheme === scheme)!.id);
-const LOOKS = LANGUAGES.flatMap(({ id }) => SKINS.map(skin => ({ lang: id, skin })));
+const LOOKS = LANGUAGES.flatMap(({ id }) => BUILTIN_SKINS.map(skin => ({ lang: id, skin: skin.id })));
 
 async function open(page: Page, lang: Language, width: number, path: string, skin: string = SKINS[1]!) {
   await page.setViewportSize({ width, height: 900 });
@@ -24,7 +23,7 @@ async function open(page: Page, lang: Language, width: number, path: string, ski
     localStorage.setItem('hh-theme', skin);
   }, { language: lang, skin });
   await page.goto(path);
-  await expect(page.locator('.tr-where h1')).toBeVisible();
+  await expect(page.locator('h1.tr-where')).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -48,16 +47,19 @@ async function inside(page: Page, what: string) {
   expect(await sideways(page), what).toBeLessThanOrEqual(0);
 }
 
-/* What a finger presses is at least 44 px high, and a link that stands alone at least 44 px wide too, even with two letters. */
+/* What a finger presses is at least 44 px high, and a link that stands alone at least 44 px wide too, even with two letters,
+   on a phone and on any touch screen. A mouse on a wide screen takes the layout's sizes, never under 24 px (WCAG 2.5.8). */
 const LINKS = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
 async function touchable(page: Page, what: string) {
-  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-menu:visible, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
-    els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
-    expect(height, what).toBeGreaterThanOrEqual(43.5);
+  const finger = page.viewportSize()!.width <= 760 || await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+  const least = finger ? 43.5 : 23.5;
+  for (const [name, height] of await page.locator(`.tr-item, .tr-views label, .tr-add-view, .tr-chip, .tr-menu:visible, .tr-row-caret, .tr-goal-link, .tr-canvas .zbtn, ${LINKS}`).evaluateAll(els =>
+    els.filter(e => e.getClientRects().length).map(e => [`${e.className} ${e.textContent}`, e.getBoundingClientRect().height] as const))) {
+    expect(height, `${what}: ${name}`).toBeGreaterThanOrEqual(least);
   }
   for (const [text, width] of await page.locator(LINKS).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().width] as const))) {
-    expect(width, `${what}: ${text}`).toBeGreaterThanOrEqual(43.5);
+    expect(width, `${what}: ${text}`).toBeGreaterThanOrEqual(least);
   }
 }
 
@@ -71,18 +73,17 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     const t = MESSAGES[lang];
     await serveTasksBoard(page);
     await open(page, lang, width, `/tasks?department=${DEV.id}`, skin);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(DEV.name);
+    await expect(page.getByRole('heading', { level: 1, name: `${DEV.name} / ${t.tracker.views.list}` })).toBeVisible();
 
-    /* The list: groups by state in words, the task that waits for the person first; each row names who does it, who answers
-       for it, its goal and its due day. */
+    /* The list starts with work in progress and names the people, goal, due day and subtasks. */
     const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
-    await expect(list.getByRole('heading', { level: 2 }).first()).toHaveText(`${t.tracker.groups.waitingYou}: 1`);
+    await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
     const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
-    await expect(payments).toContainText('Hana');
+    await expect(payments.getByRole('img', { name: 'Hana' })).toBeVisible();
     await expect(payments).toContainText(GOALS[1]!.title);
-    await expect(payments).toContainText(t.tracker.list.subtasks(1, 3));
+    await expect(payments.getByRole('button', { name: t.tracker.list.subtasks(1, 3) })).toBeVisible();
     await inside(page, `list ${lang} ${skin} ${width}`);
-    await touchable(page, `list ${lang} ${skin} ${width}`);
+    if (width <= 760) await touchable(page, `list ${lang} ${skin} ${width}`);
     await capture(page, info, `list-${lang}-${skin}-${width}`);
 
     /* The board: the pipeline's stages when one is chosen, columns by status otherwise, as many side by side as fit. */
@@ -189,9 +190,7 @@ const roleColor = (page: Page, role: string) => page.evaluate(r => {
   return color;
 }, role);
 
-/* Design's rules for the tracker (#1150), in the light skin: a chip in focus has the app's ring, its choice is as wide and as
-   high in every engine with the arrow at the end side, the left panel keeps no room for a bar, a chosen chip and the chosen
-   view read clearly, and a card's facts keep their words in order right to left. */
+/* The wrapped chip keeps its focus ring, the sidebar reserves scrollbar space, and the card's facts keep their direction. */
 for (const dir of ['ltr', 'rtl'] as const) {
   test(`keeps the chips, the left panel and the card's facts alike in every engine: ${dir}`, async ({ page }, info) => {
     const t = MESSAGES.en;
@@ -202,22 +201,19 @@ for (const dir of ['ltr', 'rtl'] as const) {
     const chips = page.getByRole('group', { name: t.tracker.filters.label });
     const status = chips.getByLabel(t.tracker.filters.status);
     await status.focus();
-    const ring = await status.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineOffset, s.outlineColor]; });
-    expect(ring).toEqual(['solid', '2px', '2px', await roleColor(page, '--cyan-ink')]);
+    const chip = chips.locator('label').filter({ has: page.getByLabel(t.tracker.filters.status, { exact: true }) });
+    const ring = await chip.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineColor]; });
+    expect(ring).toEqual(['solid', '2px', await roleColor(page, '--cyan-ink')]);
     await shot('chip-focus');
     const box = (await status.boundingBox())!;
-    expect(Math.abs(box.width - 160)).toBeLessThanOrEqual(1);
-    expect(Math.abs(box.height - 40)).toBeLessThanOrEqual(1);
-    const arrow = await status.evaluate(el => { const s = getComputedStyle(el); return [s.paddingInlineEnd, s.backgroundPositionX]; });
-    expect(arrow[0]).toBe('28px');
-    if (dir === 'rtl') expect(arrow[1]).toBe('10px, 15px');
-    else expect(arrow[1]).not.toBe('10px, 15px');
-    const side = await page.locator('.tr-side').evaluate((el: HTMLElement) => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
-    expect(side[0]).toBe(side[1]);
+    const chipBox = (await chip.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(chipBox.width - 2);
+    expect(box.height).toBeGreaterThanOrEqual(chipBox.height - 2);
+    expect(await page.locator('.tr-side').evaluate(el => getComputedStyle(el).scrollbarGutter)).toBe('stable');
     await status.selectOption({ label: t.tracker.statuses.working });
     await status.evaluate(el => (el as HTMLSelectElement).blur());
-    await expect(page.locator('.tr-chip.on')).toHaveCount(1);
-    expect(await page.locator('.tr-chip.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
+    await expect(chip).toContainText(t.tracker.filters.group(t.tracker.statuses.working));
+    expect(await chip.evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
     expect(await page.locator('.tr-views label.on').evaluate(el => getComputedStyle(el).color)).toBe(await roleColor(page, '--ink'));
     await shot('light-chips');
     await view(page, t, t.tracker.views.board);
@@ -284,10 +280,13 @@ async function cardWords(page: Page, what: string) {
    a chosen card, a chosen node and a node under the pointer draw their border at 3:1 at least on both sides; a due day reads
    day then month right to left too, in the list, on the board and in the cards of a task and a goal; a card gives its words
    as much width in every engine; and a link of two letters is still 44 px wide. */
-for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
-  test(`draws the chosen work clearly, keeps dates in order, cards as wide and links wide enough: ${dir} ${width}`, async ({ page }, info) => {
+/* As Design splits the touch rule: on a phone, on a wide touch screen and on a wide screen with a mouse. */
+for (const dir of ['ltr', 'rtl'] as const) for (const { width, touch } of [{ width: 1440, touch: false }, { width: 1440, touch: true }, { width: 375, touch: false }]) {
+  test.describe(`${dir} ${width}${touch ? ' touch' : ''}`, () => {
+  test.use({ hasTouch: touch });
+  test(`draws the chosen work clearly, keeps dates in order, cards as wide and links wide enough: ${dir} ${width}${touch ? ' touch' : ''}`, async ({ page }, info) => {
     const t = MESSAGES.en;
-    const look = `${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const look = `${dir}-${width}${touch ? '-touch' : ''}-${info.project.name.replace('tasks-', '')}`;
     const shot = (name: string) => capture(page, info, `last-${name}-${look}`);
     /* A close look at one box and 24 px around it, where a line of 1 px is hard to see on the whole screen. */
     const closeUp = async (target: Locator, name: string) => {
@@ -386,11 +385,239 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
     await shot('goals');
     await visit(`/tasks?department=${DEV.id}`);
     if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    /* A department's employees are folded under its name in the left panel. */
+    await page.locator('.tr-dept-body summary').filter({ hasText: t.tracker.side.employees }).click();
     const people = page.locator('.tr-people .linkish').first();
     await expect(people).toBeVisible();
     await people.scrollIntoViewIfNeeded();
     await touchable(page, `people ${look}`);
     await shot('people');
+  });
+  });
+}
+
+/* Where the parts of an element's words stand on the screen: the box of the first letter of each part, looked for in order
+   in one of its texts; null where they are not there in that order. */
+const partsAt = (locator: Locator, parts: string[]) => locator.evaluate((el, parts) => {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent!;
+    const at: number[] = [];
+    for (const part of parts) {
+      const i = text.indexOf(part, at.length ? at[at.length - 1]! + parts[at.length - 1]!.length : 0);
+      if (i < 0) break;
+      at.push(i);
+    }
+    if (at.length < parts.length) continue;
+    return at.map(i => { const range = document.createRange(); range.setStart(node!, i); range.setEnd(node!, i + 1); const r = range.getBoundingClientRect(); return { x: r.x, y: r.y, height: r.height }; });
+  }
+  return null;
+}, parts);
+
+/* A phrase reads in its own order in both directions: each part of it stands right of the part before on the same line, or
+   on a line below it where the phrase wraps. */
+async function readsInOrder(locator: Locator, parts: string[], what: string) {
+  const at = await partsAt(locator, parts);
+  expect(at, `${what}: ${parts.join(' ')}`).not.toBeNull();
+  for (let i = 1; i < at!.length; i++) {
+    const [before, part] = [at![i - 1]!, at![i]!];
+    const why = `${what}: "${parts[i]}" after "${parts[i - 1]}"`;
+    if (Math.abs(part.y - before.y) < before.height / 2) expect(part.x, why).toBeGreaterThan(before.x);
+    else expect(part.y, why).toBeGreaterThan(before.y);
+  }
+}
+
+/* An element's words stand at the start edge of its box, as the page's words do: at the right right to left. */
+async function atStart(locator: Locator, dir: 'ltr' | 'rtl', what: string) {
+  const [box, words] = await locator.evaluate(el => {
+    const s = getComputedStyle(el), r = el.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const w = range.getBoundingClientRect();
+    return [[r.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft), r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight)], [w.left, w.right]];
+  });
+  if (dir === 'rtl') expect(Math.abs(words[1]! - box[1]!), `${what}: right edge`).toBeLessThanOrEqual(1);
+  else expect(Math.abs(words[0]! - box[0]!), `${what}: left edge`).toBeLessThanOrEqual(1);
+}
+
+/* What Design found reading the tracker right to left after #1300 (#1303), and that it reads the same left to right: a goal
+   and its progress in words, a person's task in the left panel, and on a phone each value of a row with its name,
+   "Executor: Hana", at the start side. The line under where the person is went with the tracker's new header. */
+for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`reads goals, people's tasks and a row's names and values in order: ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    const look = `${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const shot = (name: string) => capture(page, info, `order-${name}-${look}`);
+    const visit = async (path: string) => {
+      await open(page, 'en', width, path, SKINS[0]);
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    };
+    await page.clock.setFixedTime(new Date('2026-11-16T12:00:00Z'));
+    await serveTasksBoard(page);
+    await serveShortNames(page);
+
+    /* The person's own tasks: a goal reads with its number and its progress in words. */
+    await visit('/tasks');
+    const goals = page.getByRole('region', { name: t.tracker.yourGoals, exact: true });
+    const big = goals.getByRole('listitem').filter({ hasText: GOALS[0]!.title });
+    await readsInOrder(big.locator('.linkish'), ['500', 'shops', 'card'], `goal ${look}`);
+    await readsInOrder(big.locator('.goal-progress small'), ['212', 'of', '500', 'shops'], `goal's progress ${look}`);
+    await atStart(big.locator('.goal-progress small'), dir, `goal's progress ${look}`);
+    await shot('goals');
+
+    /* A person's task in the left panel: its number, then its name. */
+    await visit(`/tasks?department=${DEV.id}`);
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    const task = page.locator('.tr-people .linkish').first();
+    await task.scrollIntoViewIfNeeded();
+    await readsInOrder(task, ['#', SHORT], `person's task ${look}`);
+    await shot('people');
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.close, exact: true }).click();
+
+    /* A row of the list: where it is narrow each value with its name before it, "Executor: Hana", at the start side; where
+       it is wide the names stand above the list and each value at the start side of its column. */
+    const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
+    await row.scrollIntoViewIfNeeded();
+    /* Executor, responsible, priority, goal and due. */
+    const cells = row.locator('.tr-cells > .tr-cell');
+    await expect(cells).toHaveCount(5);
+    for (const cell of await cells.all()) {
+      const value = (await cell.locator('.tr-v').textContent())!;
+      const parts = await cell.evaluate(el => [...el.children].map(c => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, shown: getComputedStyle(c).position !== 'absolute' }; }));
+      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.right]; });
+      const [name, words] = parts as [typeof parts[0], typeof parts[0]];
+      if (name.shown) {
+        expect(name.right, `${value}: its name before it ${look}`).toBeLessThanOrEqual(words.left);
+        if (dir === 'rtl') expect(Math.abs(words.right - box[1]!), `${value}: at the right ${look}`).toBeLessThanOrEqual(1);
+        else expect(Math.abs(name.left - box[0]!), `${value}: at the left ${look}`).toBeLessThanOrEqual(1);
+      } else if (dir === 'rtl') expect(Math.abs(words.right - box[1]!), `${value}: at the right of its column ${look}`).toBeLessThanOrEqual(1);
+      else expect(Math.abs(words.left - box[0]!), `${value}: at the left of its column ${look}`).toBeLessThanOrEqual(1);
+    }
+    await shot('list');
+  });
+}
+
+/* Every phrase in a place that reads out of its order: a phrase is the words up to the nearest box of their own (a block, a
+   flex item) or element in its own direction, in the order they are written. Each word, and the stop at the end of one,
+   stands right of the word before on its line, or on a line below where the phrase wraps. A phrase in English or Russian
+   reads so in both directions; right to left, a phrase that is not kept in its own direction puts a stop at its start and
+   a number after the words it comes before. */
+const outOfOrder = (locator: Locator) => locator.evaluate(root => {
+  const SKIP = 'select, option, textarea, input, script, style, svg, .sr, .tr-k, [hidden]';
+  const own = (e: Element) => { const s = getComputedStyle(e); return s.display !== 'inline' || e.hasAttribute('dir') || /isolate|plaintext/.test(s.unicodeBidi); };
+  const phraseOf = (e: Element) => { let at = e; while (at !== root && !own(at)) at = at.parentElement!; return at; };
+  const phrases = new Map<Element, Text[]>();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    const parent = node.parentElement;
+    if (!parent || !node.textContent!.trim() || parent.closest(SKIP) || getComputedStyle(parent).visibility === 'hidden') continue;
+    const phrase = phraseOf(parent);
+    phrases.set(phrase, [...(phrases.get(phrase) ?? []), node]);
+  }
+  const bad: string[] = [];
+  for (const nodes of phrases.values()) {
+    const marks: { mark: string; x: number; y: number; h: number }[] = [];
+    for (const node of nodes) {
+      const text = node.textContent!;
+      for (const m of text.matchAll(/\S+/g)) {
+        const at = (i: number) => { const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1); return range.getBoundingClientRect(); };
+        const first = at(m.index!);
+        marks.push({ mark: m[0], x: first.x, y: first.y, h: first.height });
+        if (m[0].length > 1 && /[.,:;!?…]$/.test(m[0])) { const stop = at(m.index! + m[0].length - 1); marks.push({ mark: m[0].slice(-1), x: stop.x, y: stop.y, h: stop.height }); }
+      }
+    }
+    if (marks.some(m => !m.h)) continue;
+    for (let i = 1; i < marks.length; i++) {
+      const [a, b] = [marks[i - 1]!, marks[i]!];
+      const ok = Math.abs(b.y - a.y) < a.h / 2 ? b.x > a.x : b.y > a.y;
+      if (!ok) { bad.push(`${nodes.map(n => n.textContent).join('').replace(/\s+/g, ' ').trim()}  ["${b.mark}" after "${a.mark}"]`); break; }
+    }
+  }
+  return bad;
+});
+
+/* Design's finding on the pictures of #1304 (#1328): on a goal's card, Turns and releases and the goal board every phrase
+   reads in its own order right to left, its stop at its end and its numbers in place; left to right nothing changes. */
+for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`reads every phrase of a goal's card, Turns and releases and the goal board in order: ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    const look = `${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const shot = (name: string) => capture(page, info, `phrases-${name}-${look}`);
+    const visit = async (path: string) => {
+      await open(page, 'en', width, path, SKINS[0]);
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    };
+    await page.clock.setFixedTime(new Date('2026-11-16T12:00:00Z'));
+    await serveTasksBoard(page);
+    const gift = await serveOutsideWork(page);
+    await serveGoalHistory(page);
+
+    /* The cards of a company goal with its smaller goals and no tasks yet, and of a goal past its date with a task and a
+       history. */
+    for (const goal of [GOALS[0]!, GOALS[1]!]) {
+      await visit('/tasks');
+      await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
+      const card = page.getByRole('complementary', { name: goal.title, exact: true });
+      await expect(card.getByRole('heading', { level: 3 })).toHaveText(goal.title);
+      await expect(card.getByRole('region', { name: t.tracker.card.tasks })).toBeVisible();
+      if (goal.id === GOALS[1]!.id) await expect(card.getByText(GOAL_NOTE)).toBeVisible();
+      expect.soft(await outOfOrder(card), `goal ${goal.id} ${look}`).toEqual([]);
+      await shot(`goal-${goal.id}`);
+    }
+
+    /* Turns and releases: the next release with its goals, and a release out already, unfolded. */
+    await visit('/tasks?show=turns');
+    const main = page.locator('.tr-main');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.turns);
+    const released = page.getByRole('button', { name: new RegExp(t.tasks.board.released(2, 'v1.2.0')) });
+    await released.click();
+    await expect(released).toHaveAttribute('aria-expanded', 'true');
+    expect.soft(await outOfOrder(main), `turns ${look}`).toEqual([]);
+    await shot('turns');
+
+    /* The list for later turns of a department of the person's own, one item of it unfolded. */
+    await page.getByLabel(t.tasks.department, { exact: true }).selectOption(DEV.id);
+    const later = page.getByRole('region', { name: t.backlog.heading });
+    await later.getByRole('button', { name: t.tables.openCard('Gift cards for shops') }).click();
+    await expect(later.locator('.bl-text')).toBeVisible();
+    expect.soft(await outOfOrder(main), `later turns ${look}`).toEqual([]);
+    await later.scrollIntoViewIfNeeded();
+    await shot('later');
+    await page.getByLabel(t.tasks.department, { exact: true }).selectOption({ index: 0 });
+
+    /* The goal board: the work outside every release, Gift cards with its progress and its related tasks unfolded. */
+    await page.getByText(t.tasks.board.showOutside, { exact: true }).click();
+    const card = page.getByRole('article', { name: `#${gift.number} Gift cards`, exact: true });
+    await card.getByRole('button', { name: t.tasks.board.related(1, 3) }).click();
+    await expect(card.locator('.goal-subs')).toBeVisible();
+    expect.soft(await outOfOrder(main), `goal board ${look}`).toEqual([]);
+    await card.scrollIntoViewIfNeeded();
+    await shot('goal-board');
+  });
+}
+
+/* Design's finding on the pictures of #1329: a goal's history says what changed in words of the person's language, here
+   its due date, never the name the code keeps it under; a name it has no words for reads as the goal changed. */
+const DUE_CHANGED: Record<Language, string> = { en: 'Ivan changed the due date', ru: 'Ivan изменил срок' };
+const GOAL_CHANGED: Record<Language, string> = { en: 'Ivan changed the goal', ru: 'Ivan изменил цель' };
+const UNNAMED = 'reviewCadence';
+for (const lang of LANGUAGES.map(l => l.id)) {
+  test(`says in words what changed in a goal's history: ${lang}`, async ({ page }) => {
+    const t = MESSAGES[lang];
+    const goal = GOALS[1]!;
+    await serveTasksBoard(page);
+    await serveGoalHistory(page, [{ kind: 'edited', text: '', data: { fields: [UNNAMED] }, by: { kind: 'person', id: 'p1', name: 'Ivan' }, at: '2026-11-15T10:00:00.000Z' }]);
+    await open(page, lang, 1440, '/tasks');
+    await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
+    const history = page.getByRole('complementary', { name: goal.title, exact: true }).getByRole('list', { name: t.tracker.card.history });
+    /* Its four lines, set, the date moved, the note and an edit of a name without words, are there; each edit is read
+       once, so a wrong word fails at once. */
+    await expect(history.getByRole('listitem')).toHaveCount(4);
+    const [due, unnamed] = [await history.getByRole('listitem').nth(1).innerText(), await history.getByRole('listitem').nth(3).innerText()];
+    expect(due).toContain(DUE_CHANGED[lang]);
+    expect(due).not.toContain('dueAt');
+    expect(unnamed).toContain(GOAL_CHANGED[lang]);
+    expect(unnamed).not.toContain(UNNAMED);
   });
 }
 
@@ -404,7 +631,8 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
     await expect(side).toBeVisible();
     const box = (await side.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(16);
+    /* It stands against the start edge, and 16 px of the page show beside it at the end. */
+    expect(box.x).toBe(0);
     expect(box.x + box.width).toBeLessThanOrEqual(375 - 16);
     /* It runs to the bottom of the screen, so nothing of the page shows under it. */
     expect(box.y + box.height).toBe(page.viewportSize()!.height);

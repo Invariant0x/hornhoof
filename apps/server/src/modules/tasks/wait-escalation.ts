@@ -5,7 +5,8 @@ import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.j
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { notificationMessage } from '../events/notifications.js';
-import { ownNote, type Task, type Tx } from './engine.js';
+import { ownNote } from './events.js';
+import { type Task, type Tx } from './state.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { departmentHead, waitRoute, type WaitRoute } from './wait-policy.js';
 import { claimFinalReview, waitOwner, type TaskWait } from './wait-state.js';

@@ -9,7 +9,7 @@ import { repoAt } from '../departments/repository.js';
 import type { CompareResult } from '../testruns/compare.js';
 import type { CommitWanted, RepoAddress } from '../testruns/refs.js';
 import { modelProvider } from './echelons-policy.js';
-import { refuse, type Task, type Tx } from './engine.js';
+import { refuse, type Task, type Tx } from './state.js';
 import { ReviewSha } from './review-schema.js';
 
 export { ReviewSha } from './review-schema.js';

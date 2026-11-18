@@ -152,10 +152,10 @@ describe('giving work to agents that are on', () => {
     const staff = team.departments[0]!.employees;
     expect(staff.find(e => e.id === bruno.id)!.on).toBe(false);
     expect(staff.find(e => e.id === bea.id)!.on).toBe(true);
-    const refused = await call(head, 'create_task', { paths: ['apps/**'], title: 'Checkout API', brief: 'b', body: 'b', executor: bruno.id });
+    const refused = await call(head, 'create_task', { paths: ['checkout/**'], title: 'Checkout API', brief: 'b', body: 'b', executor: bruno.id });
     expect(refused.isError).toBe(true);
     expect(text(refused)).toContain('Bruno is switched off');
-    expect((await call(head, 'create_task', { paths: ['apps/**'], title: 'Checkout API', brief: 'b', body: 'b', executor: bea.id })).isError).toBeFalsy();
+    expect((await call(head, 'create_task', { paths: ['checkout/**'], title: 'Checkout API', brief: 'b', body: 'b', executor: bea.id })).isError).toBeFalsy();
   });
 
   it('refuses to hand a task over to an employee that is off', async () => {

@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, people } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import type { Endpoint } from '../events/bus.js';
-import type { Actor, Task } from './engine.js';
+import type { Actor, Task } from './state.js';
 
 type Live = Pick<Ctx, 'db' | 'bus'>;
 

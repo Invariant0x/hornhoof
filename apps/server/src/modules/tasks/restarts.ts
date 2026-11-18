@@ -2,12 +2,15 @@ import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent, turnGoingOn } from '../conversation/queue.js';
+import { enqueueTurn, insertTurn } from '../conversation/queue.js';
+import { NoSubscription, turnGoingOn } from '../conversation/turn-records.js';
+import { liveSubscription } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
 import { when } from './silent.js';
 import { logTurnFact } from './turn-log.js';
-import { published } from './engine.js';
+import { published } from './events.js';
 import { repeatedTurn, type TaskWake } from './wake-state.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */

@@ -12,7 +12,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { afterPlanMove } from '../agents/routes.js';
-import { onAgent } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
 import { stopJobs } from '../tasks/wake.js';
@@ -54,7 +54,8 @@ const unknownPerson = () => new ApiError(404, 'not_found', 'This person does not
 
 /* The person an assistant is for: active, of the company, and a person, never another assistant. */
 async function ownerFor(db: Db, me: Person, id: string): Promise<Person> {
-  const [owner] = await db.select({ ...personColumns, isAgent: people.isAgent }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+  const [owner] = await db.select({ ...personColumns, isAgent: people.isAgent }).from(people)
+    .where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt))).for('share');
   if (!owner) throw unknownPerson();
   if (owner.isAgent || owner.status !== 'active') throw new ApiError(409, 'conflict', 'An assistant belongs to an active person of the company, who is not an assistant.', 'assistant_owner_invalid');
   return owner;
@@ -149,9 +150,9 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/people/assistants', async (req, reply) => {
     const me = await requirePerson(req, db);
     const body = NewAssistant.parse(req.body);
-    const owner = await ownerFor(db, me, body.owner);
-    guardManager(me, owner);
     const person = await db.transaction(async tx => {
+      const owner = await ownerFor(tx, me, body.owner);
+      guardManager(me, owner);
       const [row] = await tx
         .insert(people)
         .values({ companyId: me.companyId, name: body.name, title: body.title, email: null, status: 'active', scopeKind: 'listed', isAgent: true, assistantOf: owner.id })

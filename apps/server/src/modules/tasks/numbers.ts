@@ -1,6 +1,6 @@
 import { eq, max } from 'drizzle-orm';
 import { companies, tasks, turns } from '../../db/schema.js';
-import type { Tx } from './engine.js';
+import type { Tx } from './state.js';
 
 /* The last task number a company gave: the highest of its tasks, or of the numbers it gave before their rows were
    removed. The next task goes on after it. */

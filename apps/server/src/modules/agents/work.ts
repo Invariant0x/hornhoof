@@ -4,7 +4,7 @@ import { viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, jobs, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask } from '../tasks/visibility.js';
 import { notStep } from '../tools/steps.js';
 
 type Task = typeof tasks.$inferSelect;

@@ -163,3 +163,25 @@ describe("the lower part of a machine's card", () => {
     expect(block(card, 'Settings and actions')).toBeInTheDocument();
   });
 });
+
+describe("a machine whose system killed a program for want of memory", () => {
+  const SHORT = {
+    en: 'The machine reported a shortage of memory. New agent programs wait, and what already runs there goes on.',
+    ru: 'Машина сообщила о нехватке памяти. Новые программы агентов ждут, а то, что там уже работает, продолжается.',
+  };
+
+  it.each(['en', 'ru'] as const)('says so under its resources in one plain line with no figures, in %s', async language => {
+    show(language, { ...LAPTOP, load: { ...LAPTOP.load!, memoryShort: true } } as MachineView);
+    const card = await open();
+    const line = await within(card).findByText(SHORT[language]);
+    expect(line).toHaveClass('machine-note');
+    expect(line.textContent).not.toMatch(/\d/);
+  });
+
+  it('says nothing of it once a report finds no new kill', async () => {
+    show('en', { ...LAPTOP, load: { ...LAPTOP.load!, memoryShort: false } } as MachineView);
+    const card = await open();
+    await within(card).findByText('Stable');
+    expect(within(card).queryByText(SHORT.en)).toBeNull();
+  });
+});

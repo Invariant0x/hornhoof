@@ -6,25 +6,30 @@ import type { Ctx } from '../../app.js';
 import { WHOLE } from '../../auth/access.js';
 import { knowsAgentId, seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
+import { agents, companies, departments, people, personAccess, pipelines, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
-import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
+import { limitUntil } from '../conversation/limits.js';
+import { planHeld, planHoldView } from '../conversation/state.js';
+import { programNode } from '../conversation/placement.js';
 import { repoView } from '../departments/repository.js';
 import { hostsOf } from '../departments/repo-hosts.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Channel, type Endpoint } from '../events/bus.js';
 import { workingSeen } from '../events/stream-view.js';
 import { machineOf } from '../nodes/nodes.js';
-import { departmentOwners, pendingFor, visibleDecisions } from '../tasks/decisions.js';
-import { seesTask, shownEchelons } from '../tasks/sight.js';
-import { routeSnapshots } from '../tasks/echelons-store.js';
-import { agentFailureStates } from '../tasks/failures.js';
-import { agentProgramState } from '../tasks/silent.js';
+import { departmentOwners } from '../tasks/decision-people.js';
+import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { seesTask } from '../tasks/visibility.js';
+import { shownEchelons } from '../tasks/sight.js';
+import { routeSnapshots } from '../tasks/route-records.js';
+import { agentFailureStates } from '../tasks/failure-records.js';
+import { agentProgramState } from '../tasks/program-state.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
 import { keyEndFor, onlineIn, subView } from '../subscriptions/views.js';
+import { catalogRoute } from '../templates/load.js';
 import { runningCalls } from '../calls/calls.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
@@ -80,10 +85,12 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const allAgents = companyAgents.filter(a => knowsAgentId(viewer, a.id));
     /* The company's employees: a person's own assistant is no one's but theirs. */
     const employees = allAgents.filter(a => a.kind !== 'assistant');
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, apiProtocol: subscriptions.apiProtocol, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
+    const defaults = new Map((await db.select({ department: pipelines.departmentId, key: pipelines.catalogKey }).from(pipelines)
+      .where(and(eq(pipelines.companyId, me.companyId), eq(pipelines.isDefault, true)))).map(p => [p.department, p.key]));
     /* What each department works on now: its newest open task without an executor (the head's), else its newest open one. */
     const reach = viewer.access;
     const { openTasks, running, busy, doing } = await agentWork(db, me.companyId);
@@ -104,6 +111,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The earliest open turn by its short name, for readers older than the departments' own turns. */
     const turn = open[0] && { id: open[0].id, number: open[0].number, goal: open[0].title || open[0].goal };
     const allTeams = await db.select().from(teams).where(eq(teams.companyId, me.companyId)).orderBy(asc(teams.stage), asc(teams.createdAt));
+    const turnkeyTeams = new Set(allTeams.filter(t => t.turnkey).map(t => t.id));
     const topDepts = depts.filter(d => !d.parentId);
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
     const topOf = (deptId: string | undefined) => {
@@ -151,11 +159,13 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             name: a.name,
             roleId: a.roleKey,
             ...teamField(a.teamId),
+            turnkey: a.teamId !== null && turnkeyTeams.has(a.teamId),
             title: role?.title ?? null,
             kind: a.kind,
             model: a.model,
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
+            ...(sub?.apiProtocol ? { apiProtocol: sub.apiProtocol } : {}),
             effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             ...agentProgramState(ctx, run),
@@ -262,6 +272,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
+          oneShotStages: catalogRoute(templates, d.templateKey, defaults.get(d.id) ?? null).stages.flatMap(({ stage, oneShot }) =>
+            oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
+          ),
           calls: callsOf(d.id),
         }))),
     };

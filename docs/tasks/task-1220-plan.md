@@ -1,5 +1,7 @@
 # Employee history attribution, task 1220
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/tasks/task-1220-plan.md). These are historical results, not checks of the current release.
+
 Implementation base: `task-1112` at `76c4b7d571aba37c5eefd12cac4eeee4945c01e5`.
 This belongs to turn 32 and must never enter turn 31. The head explicitly authorized implementation from this checked base. Take later changes of task 1112 into this branch if it moves. Review, independent Security and Tests precede integration by the head.
 

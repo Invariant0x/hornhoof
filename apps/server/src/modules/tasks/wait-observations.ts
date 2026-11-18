@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { CLOSED, openAfter, type Task } from './engine.js';
+import { CLOSED, openAfter, type Task } from './state.js';
 import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
 

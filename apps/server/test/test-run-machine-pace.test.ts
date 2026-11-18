@@ -9,7 +9,7 @@ import { AWAY_MS, checkTestTimes, pumpTests } from '../src/modules/testruns/runs
 import { until } from './helpers.js';
 import { company, done, idle, nextOf } from './test-runs-company.js';
 
-const FILES = Array.from({ length: 30 }, (_, index) => `test/${String(index).padStart(2, '0')}.ts`);
+const FILES = Array.from({ length: 30 }, (_, index) => `checks/${String(index).padStart(2, '0')}.ts`);
 /* What each file takes on the faster machine; the slower one took 2.3 times as long for the same files. */
 const msOf = (file: string): number => 4000 + (Number(/\d+/.exec(file)![0]) % 7) * 3000;
 const RUNTIMES = [
@@ -21,7 +21,7 @@ async function described(request: Extract<ServerMessage, { type: 'tests.describe
   const manifest = {
     version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'none' as const, inputs: [], install: [], paths: [], cache: 'none' as const }, services: [], prepare: [], reset: null,
-    suites: [{ id: 'unit', root: '.', files: ['test/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'] }],
+    suites: [{ id: 'unit', root: '.', files: ['checks/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'] }],
     impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported' as const, reason: 'Not applicable.' } }, mutation: { status: 'unsupported' as const, language: 'typescript', reason: 'Not configured.' },
     execution: { version: 2 as const },
   };
@@ -77,10 +77,10 @@ it('lays a run out by what each machine took for the same files before, and give
   await checkTestTimes(c.app.ctx, new Date(Date.now() + AWAY_MS + 60_000));
   expect((await c.db.select().from(testParts).where(eq(testParts.id, onSlow.id)))).toEqual([]);
   /* What its runner said each file took is kept as the part ends, for the next plan. */
-  fast.node.send(done(fastPart, { ok: false, error: 'failed', exitCode: 1, commit: run!.commitSha, files: [{ suiteId: 'unit', file: 'test/00.ts', status: 'failed', ms: 4100 }] }));
+  fast.node.send(done(fastPart, { ok: false, error: 'failed', exitCode: 1, commit: run!.commitSha, files: [{ suiteId: 'unit', file: 'checks/00.ts', status: 'failed', ms: 4100 }] }));
   const moved = await nextOf(fast.node, 'tests.run');
   expect(moved.environment!.selection).toEqual(onSlow.environmentSelection!.selection);
-  expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, fastPart.partId)))[0]?.files).toMatchObject([{ package: '.', file: 'test/00.ts', totalMs: 4100 }]);
+  expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, fastPart.partId)))[0]?.files).toMatchObject([{ package: '.', file: 'checks/00.ts', totalMs: 4100 }]);
   await call('stop_tests', { run: run!.number });
 });
 

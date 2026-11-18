@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { taskRoute } from '../../test/task-route';
-import type { BacklogItem, Decisions, Employee, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TurnView } from '../../src/types';
+import type { BacklogItem, Decisions, Employee, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TaskLogLine, TurnView } from '../../src/types';
 import { detail, ME, serveApi } from '../api';
 
 /* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six pieces of
@@ -78,7 +78,7 @@ function company(): TaskLine[] {
     });
   }
   all.push(task('Fix the sign-in page', DEV, {
-    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] },
+    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...IVAN }, reason: null, since: '2026-11-13T08:00:00.000Z' }] },
   }));
   all.push(task('Rename the shop', DEV, { turn: null, status: 'done' }));
   all.push(task('Old checkout', DEV, { turn: 2, status: 'done' }));
@@ -157,5 +157,40 @@ export async function serveShortNames(page: Page) {
     const shown = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (shown) return route.fulfill({ json: { task: { ...detail(shortTask(shown)), neededFor: [], mayEdit: true, version: 1 } } });
     return route.fallback();
+  });
+}
+
+/* The same company where Gift cards, with its three subtasks and their parts, is the orchestrator's own work: a card of the
+   goal board outside every release, with its progress and its related tasks. Added after serveTasksBoard, so it answers
+   first. */
+export async function serveOutsideWork(page: Page) {
+  const gift = TASKS.find(x => x.title === 'Gift cards')!;
+  const tree = new Set([gift.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const x of TASKS) if (x.parentId && tree.has(x.parentId) && !tree.has(x.id)) { tree.add(x.id); grew = true; }
+  }
+  const tasks = TASKS.map(x => (tree.has(x.id) ? { ...x, department: null, turn: null } : x));
+  await page.route('**/api/**', route => {
+    if (new URL(route.request().url()).pathname !== '/api/tasks') return route.fallback();
+    return route.fulfill({ json: { tasks } });
+  });
+  return gift;
+}
+
+/* The history of the goal Card payments: Ivan set it, moved its date, and Hana wrote a note on it, a sentence of its own. An
+   edit names what changed as the server writes it (goals.ts FIELD_NAMES): "due" for the due date. more: lines after these. */
+export const GOAL_NOTE = 'The bank asks for two more weeks, 3 of 5 checks are done.';
+export async function serveGoalHistory(page: Page, more: TaskLogLine[] = []) {
+  const by = { kind: 'person' as const, id: IVAN.id, name: IVAN.name };
+  const log: TaskLogLine[] = [
+    { kind: 'created', text: '', data: {}, by, at: '2026-11-10T09:00:00.000Z' },
+    { kind: 'edited', text: '', data: { fields: ['due'] }, by, at: '2026-11-12T09:30:00.000Z' },
+    { kind: 'comment', text: GOAL_NOTE, data: {}, by: { kind: 'agent', id: HANA.id, name: HANA.name }, at: '2026-11-14T16:45:00.000Z' },
+    ...more,
+  ];
+  await page.route('**/api/**', route => {
+    if (new URL(route.request().url()).pathname !== `/api/goals/${GOALS[1]!.id}`) return route.fallback();
+    return route.fulfill({ json: { goal: GOALS[1], log } });
   });
 }

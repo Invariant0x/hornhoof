@@ -18,6 +18,7 @@ import type { Bound } from '../link/relay.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
+import { seedDefaultPipeline } from '../tracker/pipelines.js';
 import { ensureOperations } from '../operations/ensure.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
 import { isSetupCode, setupNeeded } from './code.js';
@@ -113,6 +114,7 @@ async function templateDepartments(ctx: Ctx, tx: Tx, companyId: string, personId
       .values({ companyId, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
       .returning();
     await ensureOpenTurn(tx, companyId, row!.id);
+    await seedDefaultPipeline(ctx, tx, row!, { personId });
     for (const product of dept.products ?? []) {
       await tx.insert(departments).values({ companyId, name: product, parentId: row!.id, roleCode, position: position++ });
     }

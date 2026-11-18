@@ -53,6 +53,14 @@ class Passes {
     await this.chain;
   }
 
+  /* Once the passes asked for so far have ended, the ones asked for while they ran among them. */
+  async idle(): Promise<void> {
+    for (let seen = this.chain; ; seen = this.chain) {
+      await seen;
+      if (seen === this.chain) return;
+    }
+  }
+
   private async pass(): Promise<void> {
     const work = this.want;
     this.want = NOTHING;
@@ -134,6 +142,13 @@ export class Assistants {
     for (const ears of this.ears.values()) for (const hear of ears) hear();
     await Promise.all(passes.map(p => p.stop()));
     await this.wakes.stop();
+  }
+
+  /* Once nothing asked of it runs any more: the passes asked for and the wakes they sent. What did not go by then does not go
+     for what was asked, so a test that says nothing went waits for this first. */
+  async settled(): Promise<void> {
+    await Promise.all([...this.companies.values()].map(passes => passes.idle()));
+    await this.wakes.idle();
   }
 
   /* Something an assistant of this company waits for may have happened. */

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { OPERATOR_SNAPSHOT_MS, ProgramKey, type OperatorError, type OperatorQuestion, type OperatorServerMessage, type ProgramInputLine, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { boundedPane, operatorCells, type Pane } from './operator-control.js';
-import { redact } from '../redact.js';
+import { redactOperator } from '../redact.js';
 
 type ViewCommand = Extract<OperatorServerMessage, { type: 'program.view_get' }>;
 type InputCommand = Extract<OperatorServerMessage, { type: 'program.input_send' }>;
@@ -40,7 +40,7 @@ export class ProgramAccess {
       const snapshot = { token: randomUUID(), instance: facts.instance, at: this.source.now() };
       this.keep(command.agentKey, snapshot);
       const secrets = this.source.secrets();
-      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', ...(facts.completion ? { completion: facts.completion } : {}), tool: facts.tool === null ? null : redact(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
+      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', ...(facts.completion ? { completion: facts.completion } : {}), tool: facts.tool === null ? null : redactOperator(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
     });
   }
 
@@ -94,5 +94,5 @@ export class ProgramAccess {
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
-  return question ? { ...question, tool: question.tool && redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
+  return question ? { ...question, tool: question.tool && redactOperator(question.tool, secrets), text: redactOperator(question.text, secrets), callId: question.callId && redactOperator(question.callId, secrets) } : null;
 }

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createSceneRecorder } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
-import { reportUnmocked } from '../moonfern/tracker-scene';
+import { reportUnmocked, trackerFrames } from '../moonfern/tracker-scene';
 
 /* Development's board by state, then by the stages of its pipeline "Beta build way": each task stands in the stage of
    whoever holds it, from Build through Review and Security to the TestFlight smoke test. */
@@ -35,4 +35,8 @@ test('board.gif: a department board by state, then by the stages of its pipeline
 
   reportUnmocked(watcher.errors);
   await recorder.finishGif('board');
+});
+
+test('tracker screenshots: board at desktop and phone widths', async ({ browser }, info) => {
+  await trackerFrames(browser, info, 'board');
 });

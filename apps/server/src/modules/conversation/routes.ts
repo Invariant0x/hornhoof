@@ -17,11 +17,14 @@ import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
-import { agentState, insertTurn, onAgent, pump, reconnecting } from './queue.js';
+import { agentState } from './state.js';
+import { insertTurn, pump, reconnecting } from './queue.js';
+import { onAgent } from './line.js';
 import { refusedMessage } from './undelivered.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
+import { firstContactRoutes, greetingOffers } from './first-contact.js';
 
 /* after: what came since seq, a page at a time; last: only the newest so many, before seq when given. */
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), last: z.coerce.number().int().min(1).max(500).optional(), before: z.coerce.number().int().min(1).optional() });
@@ -95,6 +98,7 @@ async function requireTakes(ctx: Ctx, me: Person, agent: AgentRow, task: Written
 /* A person's words to an agent, from its window, through its Telegram bot or by the person's assistant, under that person's
    own rights: whoever calls this has checked that they may write to the agent. Returns the turn the words went into. */
 export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input: Written): Promise<string> {
+  if (agent.kind === 'assistant' && me.via) throw new ApiError(403, 'forbidden', 'Only its own person can write to this assistant.', 'assistant_not_allowed');
   if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
   const pictures = await ownPictures(ctx, me, agent.id, input.pictures);
   await requireTakes(ctx, me, agent, input.task);
@@ -120,6 +124,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   pictureRoutes(app, ctx);
+  firstContactRoutes(app, ctx);
 
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
@@ -163,7 +168,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
          Operations every company starts with is no building. */
       if (depts.some(d => !isOperations(d)) && !company?.template) return false;
       const greeting = company?.template ? await templateGreeting(depts.filter(d => !d.parentId).map(d => d.id)) : FIRST_TURN;
-      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: greeting, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
+      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: `${greeting}\n\n${greetingOffers(company?.template ?? null)}`, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });
     /* Outside the agent's line, which the pump waits on. */

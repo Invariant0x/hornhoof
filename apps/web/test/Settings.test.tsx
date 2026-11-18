@@ -190,7 +190,8 @@ describe('your own name under Profile', () => {
   });
 
   it('keeps its heading and Done fixed and scrolls only its body, with the same 18 px of room for a scrollbar in every browser', async () => {
-    expect(decl('.dialog.settings-window', 'height')).toBe('calc(100vh - 32px)');
+    expect(decl('.dialog-back', 'grid-template')).toBe('minmax(0, 1fr) / minmax(0, 1fr)');
+    expect(decl('.dialog.settings-window', 'height')).toBe('100%');
     expect(decl('.dialog.settings-window', 'padding')).toBe('0');
     expect(decl('.dialog.settings-window', 'overflow')).toBe('hidden');
     /* The window itself keeps no room for a scrollbar: only its body scrolls. */

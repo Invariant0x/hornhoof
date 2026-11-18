@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import { liveSubscription } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
 
 export async function waitOrchestrator(ctx: Ctx, companyId: string): Promise<string | null> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));

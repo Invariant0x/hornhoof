@@ -1,8 +1,6 @@
-import { COMPANY_TEMPLATES as SERVER_COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import { COMPANY_TEMPLATES, TEMPLATES } from '../src/templates';
 import type { StructureItem } from '../src/types';
 import { StructureCard } from '../src/ui/StructureCard';
 import { mockApi } from './api-mock';
@@ -205,15 +203,5 @@ describe('StructureCard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
     expect(container.querySelectorAll('.mat')).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Create departments (5)' })).toBeEnabled();
-  });
-});
-
-describe('TEMPLATES', () => {
-  it('match the templates the server knows', () => {
-    expect(TEMPLATES).toEqual(DEPARTMENT_TEMPLATES);
-  });
-
-  it('keep the company templates the same as the server', () => {
-    expect(COMPANY_TEMPLATES).toEqual(SERVER_COMPANY_TEMPLATES);
   });
 });

@@ -4,7 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, people, requests, taskEvents, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
+import { agents, approvalPolicies, departments, jobs, people, requests, taskEvents, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { acceptDescription, noteTestCapabilities } from '../src/modules/testruns/describe.js';
@@ -31,6 +31,7 @@ async function releaseFixture(options: { product?: boolean } = {}) {
   const [ceo] = await db.select().from(people);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const departmentId = head.departmentId!;
+  await db.insert(approvalPolicies).values({ companyId: head.companyId, departmentId, channel: 'commit', mode: 'every' });
   /* Without the product, the work is of the department itself, which releases turns: its main approval comes at the release. */
   const [product] = options.product === false ? [] : await db.insert(departments).values({ companyId: head.companyId, name: 'Shop app', parentId: departmentId, roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();
   const productId = product?.id ?? null;
@@ -627,12 +628,12 @@ describe('autonomous release for exact commits to main', () => {
     expect((await toggle(c.danaToken, c.dev.id, false)).json()).toMatchObject({ autonomousRelease: false });
   });
 
-  it('forbids heads, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release, and lets the orchestrator for the CEO', async () => {
+  it("lets a department's head and the orchestrator change its release policy under the same authority as its commit rule", async () => {
     const c = await company();
     await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, c.ids.wes));
 
-    /* The CEO delegate Wes runs no department of his own, and Sam runs Sales only: neither switches Development. */
-    for (const token of [c.wholeToken, c.samToken]) {
+    /* Sam runs Sales only. */
+    for (const token of [c.samToken]) {
       const res = await c.app.inject({
         method: 'PUT',
         url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
@@ -643,17 +644,26 @@ describe('autonomous release for exact commits to main', () => {
       expect(res.json().error.reason).toBe('autonomous_release_not_allowed');
       expect((await c.policy(c.ceoToken, c.dev.id)).json()).toMatchObject({ autonomousRelease: false });
     }
-    expect((await c.policy(c.wholeToken, c.dev.id)).json()).toMatchObject({ canSetAutonomousRelease: false });
+    expect((await c.policy(c.wholeToken, c.dev.id)).json()).toMatchObject({ canSetAutonomousRelease: true });
 
-    /* Development's head, acting for Dana who runs it, is an agent and MUST be refused too. */
+    /* Development's head switches the policy for Dana, who runs it. */
     const headDirect = await c.app.inject({
       method: 'PUT',
       url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
       headers: orchestratorHeaders(c.ids.dana, c.head.id),
       payload: { enabled: true },
     });
-    expect(headDirect.statusCode).toBe(403);
-    expect(headDirect.json().error.reason).toBe('autonomous_release_not_allowed');
+    expect(headDirect.statusCode).toBe(200);
+    expect(headDirect.json()).toMatchObject({ autonomousRelease: true, canSetAutonomousRelease: true });
+
+    const headTools = await c.tools(c.head, c.ids.dana);
+    const setRelease = (department: string, enabled: boolean) => headTools.callTool({
+      name: 'set_autonomous_release', arguments: { department, enabled },
+    }) as Promise<ToolRes>;
+    expect((await setRelease(c.sales.id, false)).isError).toBe(true);
+    expect((await setRelease(c.dev.id, false)).isError).toBeFalsy();
+    expect((await c.policy(c.ceoToken, c.dev.id)).json().autonomousRelease).toBe(false);
+    expect((await setRelease(c.dev.id, true)).isError).toBeFalsy();
 
     /* Someone without department access cannot inspect that department's autonomous release journal. */
     const hiddenDeptJournal = await c.app.inject({
@@ -670,15 +680,15 @@ describe('autonomous release for exact commits to main', () => {
     expect(filteredJournal.statusCode).toBe(200);
     expect(filteredJournal.json().entries).toEqual([]);
 
-    /* Orchestrator cannot relax the commit channel via set_approval_policy either. */
+    /* Commit rules are set by the same people as the other rules. */
     const orchTools = await c.tools(c.orchestrator, c.ids.ceo);
     const relaxCommit = (await orchTools.callTool({
       name: 'set_approval_policy',
       arguments: { department: c.dev.id, channel: 'commit', mode: 'new_kinds' },
     })) as ToolRes;
-    expect(relaxCommit.isError).toBe(true);
+    expect(relaxCommit.isError).toBeFalsy();
     const relaxRoute = await c.setRule(c.ceoToken, c.dev.id, 'commit', { mode: 'within_limits', limit: 10 });
-    expect(relaxRoute.statusCode).toBe(400);
+    expect(relaxRoute.statusCode).toBe(200);
 
     /* A personal assistant of the CEO (an outside agent) is also refused. */
     const added = await c.app.inject({
@@ -699,7 +709,7 @@ describe('autonomous release for exact commits to main', () => {
     });
     expect(botAttempt.statusCode).toBeGreaterThanOrEqual(400);
 
-    expect((await c.policy(c.ceoToken, c.dev.id)).json().autonomousRelease).toBe(false);
+    expect((await c.policy(c.ceoToken, c.dev.id)).json().autonomousRelease).toBe(true);
 
     /* The orchestrator acts as the CEO, who runs every department. */
     const orchDirect = await c.app.inject({

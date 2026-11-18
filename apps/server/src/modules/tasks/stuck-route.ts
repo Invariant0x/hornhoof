@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments } from '../../db/schema.js';
-import type { Tx } from './engine.js';
+import type { Tx } from './state.js';
 
 type Agent = typeof agents.$inferSelect;
 type Place = Pick<Agent, 'companyId' | 'departmentId'>;

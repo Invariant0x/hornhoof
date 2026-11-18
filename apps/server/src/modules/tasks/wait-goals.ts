@@ -4,7 +4,8 @@ import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { people, requests, taskEvents, tasks, turns } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { CLOSED, note, refuse, type Actor, type Request, type Task, type Tx } from './engine.js';
+import { CLOSED, refuse, type Actor, type Request, type Task, type Tx } from './state.js';
+import { note } from './events.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { lastOfSource, requestSourceKey, type TaskWait } from './wait-state.js';
 
