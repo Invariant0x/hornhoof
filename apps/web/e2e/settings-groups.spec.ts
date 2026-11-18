@@ -79,7 +79,8 @@ async function shot(page: Page, info: TestInfo, name: string) {
   await page.evaluate(async () => { await document.fonts.ready; });
   const viewport = page.viewportSize()!;
   const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
-  if (content + 64 > viewport.height) await page.setViewportSize({ width: viewport.width, height: content + 64 });
+  /* A window can end between pixels, and a page is a whole number of them. */
+  if (content + 64 > viewport.height) await page.setViewportSize({ width: viewport.width, height: Math.ceil(content + 64) });
   const file = `${name}-${info.project.name}.png`;
   await page.screenshot({ path: SHOTS ? `${SHOTS}/${file}` : info.outputPath(file), animations: 'disabled' });
   await page.setViewportSize(viewport);
@@ -294,7 +295,7 @@ for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) 
     await page.goto('/');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
     const menu = page.locator('.account-menu');
-    await expect(menu.getByRole('button')).toHaveText([t.settings.menu, new RegExp(`^${t.shell.tabs.improvements}`), t.updates.menu, t.about.menu, t.shell.logOut]);
+    await expect(menu.getByRole('button')).toHaveText([t.firstContact.title, t.settings.menu, new RegExp(`^${t.shell.tabs.improvements}`), t.updates.menu, t.about.menu, t.shell.logOut]);
     await expect(menu.getByRole('group')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await shot(page, info, `menu-${look}`);
@@ -361,7 +362,7 @@ for (const skin of SKINS) for (const width of RTL_WIDTHS) {
     const problems = await prepare(page, 'ru', skin, width, 'listed');
     await page.goto('/');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
-    await expect(page.locator('.account-menu').getByRole('button')).toHaveText([t.settings.menu, t.about.menu, t.shell.logOut]);
+    await expect(page.locator('.account-menu').getByRole('button')).toHaveText([t.firstContact.title, t.settings.menu, t.about.menu, t.shell.logOut]);
     await shot(page, info, `menu-person-${look}`);
     const shown: GroupId[] = ['profile', 'appearance', 'passwords'];
     for (const id of shown) {

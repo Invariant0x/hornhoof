@@ -4,6 +4,7 @@ import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import type { MachineView } from '../src/types';
 import { ME, openTaskCard, serveApi } from './api';
 import type { PhoneView } from '../src/ui/Phones';
+import { inOneRowAtEnd } from './button-row';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const machine: MachineView = { id: 'm1', hostname: 'Company computer', os: 'linux', arch: 'arm64', owner: { id: ME.person.id, name: ME.person.name }, online: true, lastSeenAt: null, plans: [], load: null, lendsTests: false, running: { agents: [], parts: [] } };
@@ -121,6 +122,23 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
     await fits(card);
     expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     if (info.project.name === 'phones-chromium' && skin.id === 'light' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`stopped-${width}.png`), fullPage: true });
+  });
+}
+
+/* Find phone and Cancel stand side by side at the end edge of the form, as Save and Cancel of a key do (Design, #1321).
+   Neither shipped language is right to left, so right to left is the same form in a synthetic direction. */
+for (const width of [1440, 375]) for (const language of LANGUAGES) for (const dir of ['ltr', 'rtl'] as const) {
+  test(`Find phone and Cancel stand in one row at the end edge, ${dir}, at ${width}px, ${language.name}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const t = await setup(page, language.id, 'light');
+    await page.evaluate(dir => { document.documentElement.dir = dir; }, dir);
+    const section = page.getByRole('region', { name: t.phones.heading });
+    await section.getByRole('button', { name: t.phones.add, exact: true }).click();
+    const form = section.getByRole('form', { name: t.phones.add });
+    await expect(form).toBeVisible();
+    await inOneRowAtEnd(form, [t.phones.find, t.phones.cancel]);
+    await fits(form);
+    if (info.project.name === 'phones-chromium') await form.screenshot({ path: info.outputPath(`add-phone-buttons-${language.id}-${dir}-${width}.png`) });
   });
 }
 

@@ -141,6 +141,9 @@ select:disabled { opacity: .55; }
 .field-group > legend { float: inline-start; inline-size: 100%; margin: 0; padding: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: break-word; }
 .field-group-body { clear: both; display: grid; gap: 8px; min-inline-size: 0; padding-block-start: 4px; }
 .field-group-body > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+/* A key, token or password for somewhere else: a text field, so no browser fills Hornhoof's sign-in into it, masked as a
+   password field is (#1320). */
+.secret-masked { -webkit-text-security: disc; }
 /* A typed key and its Show button in one frame of 44 px, so both are targets of 44 px. */
 .keybox { display: flex; min-inline-size: 0; border: 1px solid var(--line2); background: var(--surface2); }
 .keybox:focus-within { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
@@ -1459,9 +1462,8 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-acts .btn { min-height: 44px; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
-/* Nor does the version lie over a form's buttons, or over anything on a phone, where every corner holds something to
-   press; About names the version there. */
-body:has(.form-foot) .version-mark { display: none; }
+/* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
+   every window and panel fixed there (#1384). A phone shows no version at all; About names it there. */
 @media (max-width: 760px) { .version-mark { display: none; } }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }

@@ -61,6 +61,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
 - The public link's settings the updater kept beside the newest copy that has them stay after that copy goes, since a link taken on a build that went back may be in no other place.
 - An employee on its program's Default model can hand in work and be chosen to check it: it counts as the model its program last ran on, which Codex turns now record too; a model with no known strength is still refused.
+- A browser or password manager no longer fills the Hornhoof email and password into Add phone or any other form with a key, token or site password: the pairing code is a field for six digits, keys and tokens are masked text, and only Log in, an invite, Setup and the password question offer the saved Hornhoof sign-in.
 
 ### Added
 
@@ -78,6 +79,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
 - Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
 - Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.

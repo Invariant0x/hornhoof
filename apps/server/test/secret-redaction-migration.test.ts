@@ -29,25 +29,3 @@ it('upgrades an existing database without discarding prose, and a suppression ro
   await client.query("update tasks set body = 'Old text again'");
   expect((await client.query('select body from tasks')).rows).toEqual([{ body: 'Old text again' }]);
 });
-
-it('lets frozen evidence lose a hidden value only in the named columns, from the server session itself', async () => {
-  const client = await freshPglite();
-  onTestFinished(() => client.close());
-  await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
-  await client.exec(`CREATE TABLE frozen (id int PRIMARY KEY, note text, kind text);
-    CREATE TRIGGER frozen_guard BEFORE UPDATE OR DELETE ON frozen FOR EACH ROW EXECUTE FUNCTION outbound_refuse_change();
-    INSERT INTO frozen VALUES (1, 'a Secret1077!', 'kept');
-    CREATE ROLE frozen_agent NOLOGIN; GRANT SELECT, UPDATE ON frozen TO frozen_agent;`);
-  const attempt = (allowed: string[], change: string, role = '') => client.transaction(async tx => {
-    await tx.query("SELECT set_config('hornhoof.hiding_secret', $1, true)", [JSON.stringify(allowed)]);
-    if (role) await tx.exec(`SET LOCAL ROLE ${role}`);
-    await tx.exec(`UPDATE frozen SET ${change} WHERE id = 1`);
-  });
-  await expect(attempt([], "note = 'a [hidden]'")).rejects.toThrow(/is refused/);
-  await expect(attempt(['note'], "kind = 'changed'")).rejects.toThrow(/is refused/);
-  await expect(attempt(['note'], "note = 'a [hidden]'", 'frozen_agent')).rejects.toThrow(/is refused/);
-  await expect(client.exec('DELETE FROM frozen')).rejects.toThrow(/is refused/);
-  await attempt(['note'], "note = 'a [hidden]'");
-  expect((await client.query('SELECT note, kind FROM frozen')).rows).toEqual([{ note: 'a [hidden]', kind: 'kept' }]);
-  await expect(client.exec("UPDATE frozen SET note = 'again' WHERE id = 1")).rejects.toThrow(/is refused/);
-});

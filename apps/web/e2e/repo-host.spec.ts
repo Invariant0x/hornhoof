@@ -135,7 +135,8 @@ for (const lang of ['en', 'ru'] as const) {
         await capture(part, 'department-company', info);
 
         await part.getByRole('button', { name: t.repoHost.own, exact: true }).click();
-        await expect(part.getByLabel(t.repoHost.key, { exact: true })).toHaveAttribute('type', 'password');
+        await expect(part.getByLabel(t.repoHost.key, { exact: true })).toHaveAttribute('type', 'text');
+        await expect(part.getByLabel(t.repoHost.key, { exact: true })).toHaveCSS('-webkit-text-security', 'disc');
         await part.getByLabel(t.repoHost.owner, { exact: true }).fill(OWNER);
         await part.getByLabel(t.repoHost.key, { exact: true }).fill('github_pat_2222');
         await fits(page, '.dv-drawer-b', width);

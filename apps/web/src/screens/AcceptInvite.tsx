@@ -87,6 +87,8 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: (joined
       </div>
       <p className="muted">{t.invite.hi(invite.name, invite.email)}</p>
       <form onSubmit={e => void submit(e)} noValidate>
+        {/* The email the new password is for, so a browser saves the two together as this person's Hornhoof sign-in. */}
+        <input type="email" name="username" autoComplete="username" value={invite.email} readOnly hidden />
         <Field label={t.invite.choosePassword} problem={problem} hint={t.common.atLeast10}>
           {p => <input {...p} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" autoFocus />}
         </Field>

@@ -8,6 +8,14 @@ it('reserves a footer row for the version outside the screen and its fixed panel
   expect(rulesFor('.version-mark').filter(rule => ['fixed', 'absolute', 'sticky'].includes(rule.decls.position ?? ''))).toEqual([]);
 });
 
+/* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
+   there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). */
+it('hides the version footer only for a whole screen, the map or a phone', () => {
+  const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
+    rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
+  expect(hiding).toEqual(['any width: body:has(.dview) .version-mark', '(max-width: 760px): .version-mark']);
+});
+
 function paddingRightPx(selector: string): number | undefined {
   const right = decl(selector, 'padding-right');
   if (right) return px(right);

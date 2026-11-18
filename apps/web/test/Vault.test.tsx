@@ -66,8 +66,10 @@ describe('the Passwords group of the settings', () => {
     const user = userEvent.setup();
     open();
     await user.click(await screen.findByRole('button', { name: 'Add a sign-in' }));
-    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
-    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'new-password');
+    /* A site's password, masked, in a field no browser fills with or saves as the Hornhoof sign-in (#1320). */
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.getByLabelText('Password')).toHaveClass('secret-masked');
     await user.type(screen.getByLabelText('Name'), 'Partner site');
     await user.type(screen.getByLabelText('Site'), 'https://partner.example/login');
     await user.type(screen.getByLabelText('Login'), 'team@acme.test');

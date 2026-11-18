@@ -149,7 +149,8 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await nav.getByRole('button', { name: words.subscriptions, exact: true }).click();
       await expect(page.getByRole('heading', { name: words.subscriptions, exact: true })).toBeVisible();
       await strip.click();
-      expect(await box(window)).toEqual(full);
+      /* Whole again, over the whole of this screen: the map has no version footer, Subscriptions keeps it below the screen. */
+      expect(await box(window)).toEqual(await box(page.locator('.app-screen')));
       await expect(strip).toBeHidden();
       await expect(window).toBeFocused();
       await checkLeftControls(window, [words.close, words.minimize, words.size]);

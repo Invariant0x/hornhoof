@@ -3,6 +3,7 @@ import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { RecoveryView } from '../types';
 import { Field } from '../ui/Field';
+import { NOT_A_LOGIN } from '../ui/SecretInput';
 import { RestoreProgress, sizeOf, textOf, when } from './Backups';
 
 /* How often the server is asked what came in, and whether the company is back. */
@@ -111,7 +112,7 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
           {forgotten && <p className="update-note">{t.setup.restore.again}</p>}
           {!linkCode && (
             <Field label={t.setup.code} hint={t.setup.codeHint}>
-              {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+              {p => <input {...p} {...NOT_A_LOGIN} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
             </Field>
           )}
           <Field label={t.backups.recoveryFile}>

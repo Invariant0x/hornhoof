@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
 import { Field } from './Field';
+import { SecretInput } from './SecretInput';
 import './hide-secret.css';
 
 export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: () => void }) {
@@ -40,7 +41,7 @@ export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: (
   return <form className="secret-action" onSubmit={event => void submit(event)} aria-label={words.action}>
     <p className="muted"><bdi>{words.hint}</bdi></p>
     <Field label={words.value}>
-      {props => <input {...props} type="password" autoComplete="off" value={value} disabled={busy} onChange={event => setValue(event.target.value)} />}
+      {props => <SecretInput {...props} value={value} disabled={busy} onChange={event => setValue(event.target.value)} />}
     </Field>
     {failed && <p className="bad" role="alert">{words.failed}</p>}
     <div className="entry-actions" role="group" aria-label={words.action}>

@@ -21,19 +21,12 @@ export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => P
 
 /* Tables Operations does not read at all. Signing in, joining and installing a node stay out of its reach, and so does
    the public link, whose address goes into machine commands. Plans' sealed sign-ins too: a row put there would reach a
-   node as its plan's sign-in. The tables the outbound gateway and its checks made by a model left behind too: nothing
-   uses them, and they hold a mailbox's sign-in, contacts and private words until a later release drops them. Waits'
-   owners, dates and policies too: a row written by hand could move a promise or quiet an alarm, and they name private
-   work. The link's certificate too: it holds the sealed keys, and its mode decides how the link runs. And the count of
-   failed sign-ins, as a row taken out of it would give a guesser more tries. The keys of git hosts Hornhoof creates
-   repositories with too: a row put there would send a new repository and its key to another account. */
-const OUTBOUND = [
-  'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
-  'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
-  'outbound_setup_events',
-  'support_tickets', 'support_classifications',
-];
-export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
+   node as its plan's sign-in. Waits' owners, dates and policies too: a row written by hand could move a promise or quiet
+   an alarm, and they name private work. The link's certificate too: it holds the sealed keys, and its mode decides how
+   the link runs. And the count of failed sign-ins, as a row taken out of it would give a guesser more tries. The keys of
+   git hosts Hornhoof creates repositories with too: a row put there would send a new repository and its key to another
+   account. */
+export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames'];
 /* Columns that hold a password, a token or a key, or private words: Operations reads none of them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
