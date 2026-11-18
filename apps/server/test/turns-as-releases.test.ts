@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
+import { agents, approvalPolicies, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 import { as, listen, mcp, SETUP, testApp } from './helpers.js';
@@ -110,15 +110,30 @@ describe('a result joins the open turn of its department as its head accepts it'
     expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
   });
 
-  it('sends the result of a product with a repository of its own to main, with a person approving it, and into no turn', async () => {
+  /* A product has no rules of its own: the department that holds it decides whether its main needs a person's yes. */
+  const productOnMain = async () => {
     const f = await readyInTurn();
     const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, parentId: f.task.departmentId!, roleCode: 'DEV', repoUrl: 'https://github.com/acme/app.git' }).returning();
     await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
     f.repo.heads.main = f.finalCommit;
+    return f;
+  };
+
+  it('sends the result of a product with a repository of its own to main and into no turn with no approval while its department sets no commit rule', async () => {
+    const f = await productOnMain();
+    expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: null });
+    expect(await reportOf(f)).toMatchObject({ acceptedCandidate: { integration: { branch: 'main', commit: f.finalCommit, approval: null } } });
+  });
+
+  it('sends the result of a product with a repository of its own to main, with a person approving it under its department\'s every rule, and into no turn', async () => {
+    const f = await productOnMain();
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
     await expect(f.accept()).rejects.toMatchObject({ status: 403 });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
     const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve this exact main integration.', commit: f.finalCommit });
     await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
     expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: null });
+    expect(await reportOf(f)).toMatchObject({ acceptedCandidate: { integration: { branch: 'main', commit: f.finalCommit, approval: asked.request.id } } });
   });
 });
 
