@@ -71,7 +71,7 @@ it('lends the phone to the next job when the oldest queued job is already cancel
 });
 
 it('checks idle phones after minutes and leaves a session alone until it ends', async () => {
-  const c = await phoneCompany(() => []);
+  const c = await phoneCompany({ readiness: () => [] });
   const phone = (await c.addPhone()).json();
   const checks = () => c.calls.filter(m => m.type === 'phone.baseline');
   expect(checks()).toHaveLength(1);
