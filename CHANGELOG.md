@@ -60,6 +60,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
 - An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
 - The public link's settings the updater kept beside the newest copy that has them stay after that copy goes, since a link taken on a build that went back may be in no other place.
+- An employee on its program's Default model can hand in work and be chosen to check it: it counts as the model its program last ran on, which Codex turns now record too; a model with no known strength is still refused.
 
 ### Added
 

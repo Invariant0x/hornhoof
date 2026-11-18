@@ -68,6 +68,18 @@ describe("the tokens of a turn in a live terminal", () => {
     expect(tally.tokens()).toEqual({ input: 4500, output: 160, cacheRead: 33000, cacheWrite: null, total: 37660 });
   });
 
+  /* Codex runs on its Default when Hornhoof names no model: the model its turn context names is the one the turn ran on. */
+  it('takes the model a Codex turn ran on from its turn context', () => {
+    const tally = new TurnTally();
+    tally.begin();
+    tally.codexLine({ type: 'turn_context', payload: { cwd: '/work', model: 'gpt-6.1-sol' } });
+    for (const line of fixture('codex-rollout-usage.jsonl')) tally.codexLine(line);
+    expect(tally.tokens()).toMatchObject({ total: 37660, model: 'gpt-6.1-sol' });
+    tally.begin();
+    tally.codexLine({ type: 'turn_context', payload: { cwd: '/work', model: '' } });
+    expect(tally.tokens()).toBeNull();
+  });
+
   it('gives no data for a turn whose program told no tokens', () => {
     const tally = new TurnTally();
     tally.begin();
