@@ -44,7 +44,7 @@ describe('the carry of a restore', () => {
     /* An invite that ran out is as closed as one that was used. */
     await db.insert(invites).values({ tokenHash: hashToken('ran out'), companyId: acme!.id, personId: finn.id, createdBy: owner!.id, expiresAt: new Date(Date.now() - 1000) });
     const [live, gone] = await db.insert(machines).values([
-      { companyId: acme!.id, personId: owner!.id, machineKey: 'live', networkId: hashToken('live'), role: 'worker', lendsTests: false },
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'live', networkId: hashToken('live'), role: 'worker', lendsTests: false, computerClosed: true },
       { companyId: acme!.id, personId: owner!.id, machineKey: 'gone', networkId: hashToken('gone'), role: 'worker', revokedAt: new Date(), keepsBackups: false },
     ]).returning();
     const later = new Date(Date.now() + 86_400_000);
@@ -71,8 +71,8 @@ describe('the carry of a restore', () => {
     const [openInvite] = await db.select().from(invites).where(sql`${invites.personId} = ${finn.id} AND ${invites.expiresAt} > now()`);
     expect(carry.invites).toEqual([openInvite!.tokenHash]);
     const machine = (id: string) => carry.machines.find(one => one.id === id);
-    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true, role: 'worker', dataLeftAt: null, uploadState: null });
-    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false, role: 'worker', dataLeftAt: null, uploadState: null });
+    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true, computerClosed: true, role: 'worker', dataLeftAt: null, uploadState: null });
+    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false, computerClosed: false, role: 'worker', dataLeftAt: null, uploadState: null });
     /* A company with no link and no secrets of its peer services says so. */
     expect(carry.link).toBeNull();
     expect(carry.peerSecrets).toEqual([]);
