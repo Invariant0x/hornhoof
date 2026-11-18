@@ -683,7 +683,6 @@
           "apps/server/test/development-echelons-template.test.ts",
           "apps/server/test/instructions.test.ts",
           "apps/server/test/long-text-storage.test.ts",
-          "apps/server/test/map-state.test.ts",
           "apps/server/test/notebook.test.ts",
           "apps/server/test/notification-actions.test.ts",
           "apps/server/test/operations-card.test.ts",
