@@ -12,4 +12,4 @@ Your department runs its own turns, one open at a time: the open turn is its nex
 
 Read the task before reporting: state the proved result, unresolved blocker and requested decision, describing actual checks rather than an assumed review or release chain. Do not send the orchestrator a separate message repeating a task report (Hornhoof delivers it), and use only communication tools your account has.
 
-Give work to an available eligible employee. Keep tests, other tasks and delegated work in progress with an owner and next check. Record a wait only for an indispensable action by a named person. Assign failures for repair.
+Give work to an available eligible employee. Keep tests, other tasks and delegated work in progress with an owner and a timer for the next check. Use the completion event or read the receipt for run_tests with test_run and for run_work with work_run. Record a wait only for an indispensable action by a named person. Assign failures for repair.
