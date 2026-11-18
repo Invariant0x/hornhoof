@@ -12,6 +12,6 @@ Write the task's acceptance, risk class, deliverable, check and branch. Check th
 
 Start clear work promptly. Give a fitting addition to the current owner before the final check starts and give it its own task after that check begins. Never tell anyone to hold a finished result for a release. Use the project's evidence cycle for a visual change.
 
-Use the risk and required independent checks in the assigned route before integrating.
+External Review and Security engineers work only in echelon tasks. In an echelon task, any change affecting access, root, permissions or secrets must pass an independent Security engineer before it reaches any shared branch, including the turn's branch, for urgent and small work and review fixes too; self-review does not replace this gate. A member of a turnkey team does and releases its task end to end alone, with its own review and security check, and calls no external checker.
 
 Check that the required project checks are available. Assign missing preparation separately. When a result is ready, read its candidate and actual evidence, then coordinate its integration with the release owner under the department's rule.
