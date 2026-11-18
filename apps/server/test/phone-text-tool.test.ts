@@ -2,17 +2,31 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { PhoneReply, toolPrivacy, type PhoneGrant, type PhoneServerMessage, type PhoneTypingIssue } from '@hornhoof/protocol';
+import { PhoneReply, toolPrivacy, type PhoneFrame, type PhoneGrant, type PhoneServerMessage, type PhoneTypingIssue } from '@hornhoof/protocol';
 import { expect, it, vi } from 'vitest';
 import type { Ctx } from '../src/app.js';
 import { phoneAction } from '../src/modules/phones/queue.js';
 import { registerPhoneTools } from '../src/modules/phones/tools.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { phoneNodeMessage, phoneRequest } from '../src/modules/phones/rpc.js';
-import { PhoneAdb } from '../../node/src/phones/adb.js';
-import { PhoneExecutor } from '../../node/src/phones/executor.js';
 
 vi.mock('../src/modules/phones/queue.js', () => ({ phoneAction: vi.fn() }));
+
+/* The node's own phone code, loaded when the test runs: the server's type check covers server files only. */
+type AdbCall = { args: string[]; input?: string; signal: AbortSignal; timeoutMs?: number };
+type NodeAdb = { tree(...args: unknown[]): Promise<string>; type(...args: unknown[]): Promise<unknown> };
+type NodeExecutor = { handle(message: PhoneServerMessage): Promise<void>; close(): void };
+type NodePhones = {
+  PhoneAdb: new (run: (call: AdbCall) => Promise<Buffer>) => NodeAdb;
+  PhoneExecutor: new (deps: { adb: Record<string, unknown>; send(message: PhoneReply | PhoneFrame): void }) => NodeExecutor;
+};
+async function nodePhones(): Promise<NodePhones> {
+  const [adb, executor] = await Promise.all([
+    import(new URL('../../node/src/phones/adb.ts', import.meta.url).href) as Promise<Pick<NodePhones, 'PhoneAdb'>>,
+    import(new URL('../../node/src/phones/executor.ts', import.meta.url).href) as Promise<Pick<NodePhones, 'PhoneExecutor'>>,
+  ]);
+  return { PhoneAdb: adb.PhoneAdb, PhoneExecutor: executor.PhoneExecutor };
+}
 
 const id = '22222222-2222-4222-8222-222222222222';
 const capture = { width: 0, height: 0, elements: [] };
@@ -64,6 +78,7 @@ it('keeps typing metadata in the phone privacy policy and rejects free text in t
 });
 
 it('returns a partial typing position through the server before its request timer', async () => {
+  const { PhoneAdb, PhoneExecutor } = await nodePhones();
   vi.useFakeTimers({ now: 0 });
   const node = nodeIdentity(id);
   const serial = 'R58MIDENTITY';

@@ -13,6 +13,8 @@ const TEXT_REPLY_MS = 18_000;
 const TEXT_READBACK_MS = 6_000;
 const TEXT_START_ROOM_MS = 4_000;
 const TEXT_IDENTITY_MS = 2_000;
+/* The capture after a text ends this long before the deadline: the node still makes its picture. */
+const TEXT_PICTURE_MS = 1_500;
 type TextOperation = Extract<PhoneOperation, { kind: 'text' }>;
 type ActionResult = Pick<PhoneReply, 'capture' | 'typing'>;
 class PhoneDeviceChanged extends Error {}
@@ -186,12 +188,12 @@ export class PhoneExecutor {
     const readTree = (until: number) => this.deps.adb.tree(serial, signal, until).catch(() => '');
     await this.assertDevice(state, Math.min(Date.now() + TEXT_IDENTITY_MS, beforeDeadline));
     const before = await readTree(beforeDeadline);
-    const typed = await this.deps.adb.type(serial, operation.text, signal, deadline - TEXT_READBACK_MS);
+    const typed = await this.deps.adb.type(serial, operation.text, signal, deadline - TEXT_READBACK_MS, deadline);
     const after = await readTree(deadline);
     if (typed.failure && await this.deviceGone(state, deadline)) throw new PhoneDeviceChanged('phone_device_gone');
     const sent = [...operation.text];
     const check = checkPhoneText(before, after, sent.slice(0, typed.next).join(''));
-    const capture = await this.capture(state, after, deadline).catch((error: unknown) => {
+    const capture = await this.capture(state, after, deadline - TEXT_PICTURE_MS).catch((error: unknown) => {
       if (error instanceof PhoneDeviceChanged) throw error;
       return undefined;
     });

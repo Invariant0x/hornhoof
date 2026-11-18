@@ -71,9 +71,10 @@ const KEYBOARD_APP = 'com.android.adbkeyboard';
 const KEYBOARD_IME = `${KEYBOARD_APP}/.AdbIME`;
 /* Every step starts an Android process. A few per call keep each call far from the adb deadline. */
 const STEPS_PER_CALL = 4;
-const BATCH_TIMEOUT_MS = 6_000;
+/* A call that is cut off may already have typed part of its steps, so every step starts with this much time for it. */
+const STEP_MS = 1_500;
+const BATCH_TIMEOUT_MS = STEPS_PER_CALL * STEP_MS;
 const RESTORE_KEYBOARD_MS = 1_500;
-const FIRST_BATCH_MIN_MS = 500;
 
 function stepCommand(step: TextStep, keyboard: boolean): string {
   if (step.kind === 'enter') return `input keyevent${' KEYCODE_ENTER'.repeat(step.count)}`;
@@ -142,8 +143,10 @@ export class PhoneAdb {
     await this.call(serial, ['shell'], signal, await this.script(serial, op, signal));
   }
 
-  /* A partial reply ends after a completed step. A timed-out batch is a failure with the last confirmed position. */
-  async type(serial: string, text: string, signal: AbortSignal, deadline = Infinity): Promise<PhoneTyped> {
+  /* A partial reply ends after a completed step. A timed-out batch is a failure with the last confirmed position.
+     The first call takes the steps that fit before deadline, a later one starts only with its full limit.
+     The phone gets its own keyboard back by restoreBy. */
+  async type(serial: string, text: string, signal: AbortSignal, deadline = Infinity, restoreBy = deadline): Promise<PhoneTyped> {
     PhoneSerial.parse(serial);
     PhoneOperation.parse({ kind: 'text', text });
     const steps = phoneTextSteps(text);
@@ -153,23 +156,29 @@ export class PhoneAdb {
     let next = 0;
     try {
       if (keyboard) {
-        const setupDeadline = batchDeadline - FIRST_BATCH_MIN_MS;
+        const setupDeadline = batchDeadline - STEP_MS;
         own = await this.ownKeyboard(serial, signal, setupDeadline);
         await this.call(serial, ['shell'], signal, `set -e\nime enable ${KEYBOARD_IME} >/dev/null\nime set ${KEYBOARD_IME} >/dev/null\nsleep 1\n`, setupDeadline);
       }
-      for (let at = 0; at < steps.length; at += STEPS_PER_CALL) {
+      for (let at = 0; at < steps.length;) {
         const now = Date.now();
-        if (at > 0 && batchDeadline - now < BATCH_TIMEOUT_MS) break;
-        const group = steps.slice(at, at + STEPS_PER_CALL);
+        const room = batchDeadline - now;
+        const count = at === 0 ? Math.min(STEPS_PER_CALL, Math.floor(room / STEP_MS)) : room < BATCH_TIMEOUT_MS ? 0 : STEPS_PER_CALL;
+        if (count < 1) {
+          if (at === 0) throw new Error('phone_adb_failed');
+          break;
+        }
+        const group = steps.slice(at, at + count);
         const script = ['set -e', ...group.flatMap(step => [stepCommand(step, keyboard), 'sleep 0.06']), ''].join('\n');
         await this.call(serial, ['shell'], signal, script, Math.min(now + BATCH_TIMEOUT_MS, batchDeadline));
         next = group.at(-1)!.end;
+        at += group.length;
       }
       return { next };
     } catch (error) {
       return { next, failure: error instanceof Error && error.message === 'phone_keyboard_unavailable' ? 'phone_keyboard_unavailable' : 'phone_adb_failed' };
     } finally {
-      if (own !== undefined) await this.keyboardOff(serial, own, deadline);
+      if (own !== undefined) await this.keyboardOff(serial, own, restoreBy);
     }
   }
 
@@ -226,7 +235,7 @@ export class PhoneAdb {
     if (remaining <= 0) return undefined;
     const pending = this.keyboard().catch(() => undefined);
     let timer!: ReturnType<typeof setTimeout>;
-    const expired = new Promise<undefined>(resolve => { timer = setTimeout(resolve, remaining); });
+    const expired = new Promise<undefined>(resolve => { timer = setTimeout(() => { resolve(undefined); }, remaining); });
     try { return await Promise.race([pending, expired]); }
     finally { clearTimeout(timer); }
   }

@@ -137,12 +137,48 @@ describe('the phone adb boundary', () => {
     ]);
     expect([...text].slice(10).join('')).toBe('e');
     batchMs = 1000;
-    expect(await adb.type('R58M123', text, new AbortController().signal, Date.now() + 2500)).toEqual({ next: 5 });
+    // 2.5 seconds hold one step of 1.5 seconds: the first call types only 'a'.
+    expect(await adb.type('R58M123', text, new AbortController().signal, Date.now() + 2500)).toEqual({ next: 1 });
     expect(calls.at(-1)?.timeoutMs).toBe(2500);
-    expect([...text].slice(5).join('')).toBe('c\r\nd\ne');
+    expect(calls.at(-1)?.input).toBe("set -e\ninput text 'a'\nsleep 0.06\n");
+    expect([...text].slice(1).join('')).toBe('\nb\n\nc\r\nd\ne');
     calls.length = 0;
     expect(await adb.type('R58M123', 'a\nb\n', new AbortController().signal)).toEqual({ next: 4 });
     expect(calls).toHaveLength(1);
+  });
+
+  it('gives every step of the first call 1.5 seconds and types nothing when not one step fits', async () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
+    expect(await adb.type('R58M123', 'a\nb\n\nc', new AbortController().signal, 3_100)).toEqual({ next: 2 });
+    expect(calls.map(call => [call.input, call.timeoutMs])).toEqual([["set -e\ninput text 'a'\nsleep 0.06\ninput keyevent KEYCODE_ENTER\nsleep 0.06\n", 3100]]);
+    calls.length = 0;
+    expect(await adb.type('R58M123', 'a\nb', new AbortController().signal, 1_400)).toEqual({ next: 0, failure: 'phone_adb_failed' });
+    expect(calls).toEqual([]);
+  });
+
+  it('leaves a whole step after the keyboard setup and gives the phone its keyboard back by the reply deadline', async () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => {
+      calls.push(call);
+      if (call.args.includes('pm')) return Buffer.from('package:/data/app/adbkeyboard/base.apk\n');
+      if (call.args.includes('settings')) return Buffer.from('com.example.keys/.Ime\n');
+      return Buffer.alloc(0);
+    });
+    // Typing ends by 5 s: the keyboard keeps 1.5 s of it, and the setup leaves one 1.5 s step before that.
+    expect(await adb.type('R58M123', 'Привет', new AbortController().signal, 5_000, 9_000)).toEqual({ next: 6 });
+    expect(calls.map(call => [call.args.slice(2).join(' '), call.timeoutMs])).toEqual([
+      ['shell pm path com.android.adbkeyboard', 2000],
+      ['shell settings get secure default_input_method', 2000],
+      ['shell', 2000],
+      ['shell', 3500],
+      ['shell', 9000],
+    ]);
+    expect(calls.at(-1)?.input).toBe("ime set 'com.example.keys/.Ime' >/dev/null 2>&1 || ime reset >/dev/null\n");
   });
 
   it('says the keyboard app is unavailable when the phone lacks it and the node has none to install', async () => {

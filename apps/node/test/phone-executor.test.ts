@@ -21,14 +21,21 @@ const PHOTO = screencap(true);
 const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
 const editableField = (value: string) => tree('12:00').replace('••••••••', value).replace('password="true"', 'password="false"');
+/* A promise to settle from outside, since Promise.withResolvers is newer than the language level the tests compile to. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(settle => { resolve = settle; });
+  return { promise, resolve };
+}
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?: () => Promise<void>; fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
+function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?: () => Promise<void>; readMs?: number[]; fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
   let ticks = 0;
   let readStarted = false;
+  let reads = 0;
   let unplugged = false;
   const adb = new PhoneAdb(async call => {
     calls.push(call);
@@ -40,6 +47,8 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
     if (a.endsWith('uiautomator dump /dev/tty')) {
       if (!readStarted) { readStarted = true; await input.firstRead?.(); }
+      // Each field read takes the phone this long on the test's own clock.
+      vi.setSystemTime(Date.now() + (input.readMs?.[reads++] ?? 0));
       return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
     }
     if (input.failure && call.input?.includes('input text')) throw new Error('ADB echoed a private value');
@@ -204,9 +213,21 @@ describe('phone messages on the execution node', () => {
     p.phones.close();
   });
 
-  it('returns a continuation position before the deadline if an earlier action still holds the queue', async () => {
-    const entered = Promise.withResolvers<void>();
-    const blocker = Promise.withResolvers<void>();
+  it('ends the capture after a text early enough to make its picture before the reply deadline', async () => {
+    const p = phone(SCREEN, SERIAL, '', { fields: [field(''), field('hi')], readMs: [0, 10_000] });
+    await p.open();
+    await p.act(6, { kind: 'text', text: 'hi' });
+    expect(p.reply(6)?.status).toBe('ok');
+    expect(p.reply(6)?.capture).toBeTruthy();
+    // The read back ends 10 s after receipt; the screenshot must end by 18 - 1.5 s, leaving the picture its time.
+    const screenshot = p.calls.findLast(c => c.args.join(' ').endsWith('screencap -p'));
+    expect(screenshot?.timeoutMs).toBe(6_500);
+    p.phones.close();
+  });
+
+  it('answers that typing failed at position 0 before the deadline when an earlier action holds the queue, and never types later', async () => {
+    const entered = deferred();
+    const blocker = deferred();
     const p = phone(Buffer.alloc(0), SERIAL, '', { firstRead: () => { entered.resolve(); return blocker.promise; } });
     await p.open();
     const capture = p.act(6, { kind: 'capture' });
