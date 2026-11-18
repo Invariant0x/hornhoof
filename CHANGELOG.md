@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Changed
+
+- Before you update: migration 0145 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

@@ -18,6 +18,9 @@ ownDatabases();
 const TAGS = (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
 const GATEWAY = TAGS.find(tag => tag.endsWith('_outbound'))!;
 const BEFORE_GATEWAY = TAGS[TAGS.indexOf(GATEWAY) - 1]!;
+/* The migration that drops the gateway's tables again, and the one just before it; without it, the latest install. */
+const DROP = TAGS.find(tag => tag.endsWith('_drop_outbound'));
+const BEFORE_DROP = DROP ? TAGS[TAGS.indexOf(DROP) - 1]! : TAGS.at(-1)!;
 
 /* Every older install a test here starts from, made once as the file is collected. */
 await prepareInstalls([
@@ -31,6 +34,7 @@ await prepareInstalls([
   '0085_work_fast_cards',
   '0097_route_abilities',
   '0129_builtin_node_connections',
+  BEFORE_DROP,
 ]);
 
 describe('department owner and approval policy migration', () => {
@@ -146,6 +150,63 @@ describe('outbound gateway migration', () => {
     expect(n).toBeGreaterThan(0);
     await migrate(db, { migrationsFolder: target });
     expect((await db.execute(guards)).rows).toEqual([{ n }]);
+  });
+});
+
+describe('the migration that drops the outbound gateway', () => {
+  /* Every table External messaging, its checks made by a model and its support desk left behind, and nothing else. */
+  const GATEWAY_TABLES = [
+    'model_check_certificates', 'model_check_datasets', 'model_check_evaluations', 'model_check_revisions', 'model_checks',
+    'outbound_accounts', 'outbound_approvals', 'outbound_attempts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_channels',
+    'outbound_contact_events', 'outbound_contacts', 'outbound_daily_usage', 'outbound_events', 'outbound_message_revisions', 'outbound_messages',
+    'outbound_permissions', 'outbound_policies', 'outbound_review_receipts', 'outbound_sampling_counters', 'outbound_setup_events',
+    'support_classifications', 'support_tickets',
+  ];
+  const names = <T extends Record<string, unknown>>(rows: T[], key: keyof T) => rows.map(row => String(row[key])).sort();
+
+  /* Each table's rows, and what defines it: its constraints, indexes and triggers. */
+  async function state(db: PgliteDatabase) {
+    const tables = names((await db.execute<{ tablename: string }>(sql`select tablename from pg_tables where schemaname = 'public'`)).rows, 'tablename');
+    const rows = Object.fromEntries(await Promise.all(tables.map(async table =>
+      [table, names((await db.execute<{ row: string }>(sql.raw(`select to_jsonb(t)::text as row from public."${table}" t`))).rows, 'row')] as const)));
+    const shape = (await db.execute<{ owner: string; what: string }>(sql`
+      select conrelid::regclass::text as owner, 'constraint ' || conname || ' ' || pg_get_constraintdef(oid) as what from pg_constraint where connamespace = 'public'::regnamespace
+      union all select tablename, 'index ' || indexdef from pg_indexes where schemaname = 'public'
+      union all select tgrelid::regclass::text, 'trigger ' || tgname || ' ' || tgfoid::regproc::text from pg_trigger where not tgisinternal`)).rows;
+    const functions = names((await db.execute<{ proname: string }>(sql`select proname from pg_proc where pronamespace = 'public'::regnamespace`)).rows, 'proname');
+    return { tables, rows, shape, functions };
+  }
+  const without = <T>(record: Record<string, T>, gone: string[]) => Object.fromEntries(Object.entries(record).filter(([table]) => !gone.includes(table)));
+  const shapeOf = (shape: { owner: string; what: string }[], gone: string[]) => shape.filter(item => !gone.includes(item.owner.replace(/^(public\.)?"?|"$/g, ''))).map(item => `${item.owner} ${item.what}`).sort();
+
+  it('drops its tables with their rows, a mailbox sign-in among them, and the function that guarded them, leaving every other table as it was', async () => {
+    const client = await olderInstall(BEFORE_DROP);
+    const db = drizzle(client);
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values ('Acme', true) returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code, owner_person_id) values (${company}, 'sales', 'SAL', ${person}) returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, updated_by) values (${company}, ${department}, 'message', 'every', ${person})`);
+    /* Where a department writes letters from now: the mailbox's sign-in in the vault, which the mail ability takes with vault_entry. */
+    await db.execute(sql`insert into vault_entries (company_id, name, site, login, password_enc, created_by) values (${company}, 'Sales mailbox', 'mail.acme.example', 'sales@acme.example', 'sealed password', ${person})`);
+    const channel = (await db.execute<{ id: string }>(sql`insert into outbound_channels (company_id, department_id, name, adapter, purpose, audience, created_by) values (${company}, ${department}, 'mail', 'smtp', 'sales', 'direct', ${person}) returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into outbound_accounts (company_id, department_id, channel_id, sender_domain, label, config_enc, created_by) values (${company}, ${department}, ${channel}, 'acme.example', 'sales', 'sealed sign-in', ${person})`);
+    await db.execute(sql`insert into model_checks (company_id, department_id, kind) values (${company}, ${department}, 'reply')`);
+    const before = await state(db);
+    expect(before.tables).toEqual(expect.arrayContaining(GATEWAY_TABLES));
+    expect(before.rows.outbound_accounts).toHaveLength(1);
+
+    const target = await migrationsUpTo(DROP ?? TAGS.at(-1)!);
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+    const after = await state(db);
+
+    expect(before.tables.filter(table => !after.tables.includes(table))).toEqual(GATEWAY_TABLES);
+    expect(after.tables).toEqual(before.tables.filter(table => !GATEWAY_TABLES.includes(table)));
+    expect(after.rows).toEqual(without(before.rows, GATEWAY_TABLES));
+    expect(after.rows.vault_entries).toEqual([expect.stringContaining('"login": "sales@acme.example"')]);
+    expect(shapeOf(after.shape, GATEWAY_TABLES)).toEqual(shapeOf(before.shape, GATEWAY_TABLES));
+    expect(before.functions.filter(name => !after.functions.includes(name))).toEqual(['outbound_refuse_change']);
+    expect(after.functions).toEqual(before.functions.filter(name => name !== 'outbound_refuse_change'));
   });
 });
 

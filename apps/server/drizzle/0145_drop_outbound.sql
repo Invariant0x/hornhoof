@@ -1,0 +1,26 @@
+DROP TABLE "model_check_certificates" CASCADE;--> statement-breakpoint
+DROP TABLE "model_check_datasets" CASCADE;--> statement-breakpoint
+DROP TABLE "model_check_evaluations" CASCADE;--> statement-breakpoint
+DROP TABLE "model_check_revisions" CASCADE;--> statement-breakpoint
+DROP TABLE "model_checks" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_accounts" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_approvals" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_attempts" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_bindings" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_catalog_revisions" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_channels" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_contact_events" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_contacts" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_daily_usage" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_events" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_message_revisions" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_messages" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_permissions" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_policies" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_review_receipts" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_sampling_counters" CASCADE;--> statement-breakpoint
+DROP TABLE "outbound_setup_events" CASCADE;--> statement-breakpoint
+DROP TABLE "support_classifications" CASCADE;--> statement-breakpoint
+DROP TABLE "support_tickets" CASCADE;--> statement-breakpoint
+-- The guard their triggers shared goes with them; hiding a secret no longer has to pass it.
+DROP FUNCTION IF EXISTS public.outbound_refuse_change();
