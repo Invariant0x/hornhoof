@@ -1488,6 +1488,8 @@ body:has(.form-foot) .version-mark { display: none; }
 .repo-url { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .repo-command { overflow-wrap: anywhere; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
+/* A form's own buttons stand at its end edge, as in every other form (Design, #1321). */
+.repo-form > .repo-actions { justify-content: flex-end; }
 .dv-side li .repo { margin-top: 6px; }
 .briefing, .briefing-form { display: grid; gap: 8px; justify-items: start; }
 .briefing-form { justify-items: stretch; }

@@ -105,11 +105,15 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
       <Field label={t.phones.address} problem={problems.endpoint} hint={t.phones.networkHint}>{props => <input {...props} {...NOT_A_LOGIN} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
       <Field label={t.phones.pairingAddress} hint={t.phones.pairingAddressHint}>{props => <input {...props} {...NOT_A_LOGIN} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
       <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} {...NOT_A_LOGIN} name="code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
-      <div className="entry-actions"><button type="button" className="btn" onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button></div>
       {devices && <div role="status">{devices.length === 0 ? <p>{t.phones.noDevices}</p> : devices.map(d => <p key={d.serial} className="phone-device">{t.phones.device(d.model, d.serial)}<small>{t.phones.devices[d.status]}</small></p>)}</div>}
     </fieldset>
     {failure !== null && <p role="alert" className="bad">{errorText(t, failure)}</p>}
-    <div className="form-foot"><button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>{devices && <button type="submit" className="btn" disabled={!ready || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}</div>
+    {/* Find phone, then Add phone once a phone is found, and Cancel, side by side at the end edge as in every form. */}
+    <div className="form-foot">
+      <button type="button" className="btn" disabled={busy !== null} onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button>
+      {devices && <button type="submit" className="btn" disabled={!ready || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}
+      <button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>
+    </div>
   </form>;
 }
 
