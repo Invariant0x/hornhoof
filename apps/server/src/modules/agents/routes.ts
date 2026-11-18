@@ -1,5 +1,5 @@
 import { effortsOf, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { alias } from 'drizzle-orm/pg-core';
@@ -553,13 +553,13 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
       await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
       /* Its bot goes with it, and with the bot what it still owed to chats. */
       await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id));
-      const failed = await tx
+      const ended = await tx
         .update(jobs)
-        .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
+        .set({ status: sql`case when ${jobs.status} = 'queued' then 'obsolete' else 'failed' end`, error: 'removed', finishedAt: new Date() })
         .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))))
         .returning({ id: jobs.id, kind: jobs.kind, subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine });
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'removed', before: null, after: null });
-      return failed;
+      return ended;
     });
     await stopSteps(ctx, ended.filter(job => job.kind === 'tools'));
     const left = await leaveWork(ctx, actorOf(me), agent);
