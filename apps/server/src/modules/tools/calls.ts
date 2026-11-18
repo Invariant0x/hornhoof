@@ -30,6 +30,7 @@ export async function invocationOf(req: FastifyRequest, config: Config): Promise
 export const STARTS_FIRST: ReadonlySet<string> = new Set([
   'run_tests',
   'run_work',
+  'check_author',
   'stop_tests',
   'stop_work',
   'computer',

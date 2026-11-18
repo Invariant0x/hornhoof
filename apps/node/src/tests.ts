@@ -120,7 +120,7 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
 /* What a part's commands get of the machine: its programs, its browsers and the grammars its quality tools parse with, which
    the image keeps in place so that they fetch nothing. Nothing else of the node's own environment. */
 const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
-function partBase(root: string, dir: string, checkLease?: string): Record<string, string> {
+export function partBase(root: string, dir: string, checkLease?: string): Record<string, string> {
   const tools = Object.fromEntries(MACHINE_TOOLS.flatMap(key => (process.env[key] ? [[key, process.env[key]]] : [])));
   const path = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
   const check: Record<string, string> = checkLease ? { PATH: [join(dir, 'tools', 'bin'), path].join(delimiter), HH_CHECK_SLOT: checkLease } : { PATH: path };
@@ -730,7 +730,7 @@ async function productPhase<T>(state: ProductState, phase: keyof TestEnvironment
   state.options.activity?.();
   return result;
 }
-async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
+export async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
   killUser(user.uid, proc);
   while (productUserAlive(user.uid, proc)) {
     killUser(user.uid, proc);

@@ -1,3 +1,4 @@
+import { recordAuthorCheck } from '../tasks/author-check.js';
 import { failOpenJobs, completionValue } from './job-failures.js';
 import { jobsOf } from './jobs.js';
 import { lastBytes, ToolPrivacy, type Limits, type NodeMessage } from '@hornhoof/protocol';
@@ -330,6 +331,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
+  if (msg.type === 'author_check.done') return recordAuthorCheck(ctx, id, msg);
   if (await testNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.

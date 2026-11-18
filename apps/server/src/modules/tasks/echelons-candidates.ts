@@ -1,6 +1,6 @@
 import { pathInScope } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
-import { DocumentCandidate, EchelonCandidate, type HandedCandidate } from '@hornhoof/protocol/echelons';
+import { DocumentCandidate, EchelonCandidate, type HandedCandidate, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import type { Ctx } from '../../app.js';
@@ -28,6 +28,13 @@ async function handedOf<T extends HandedCandidate>(db: Db | Tx, task: Task, id: 
   const parsed = shape.safeParse(event?.data.candidate);
   if (!parsed.success || event?.agentId !== parsed.data.producedBy.agentId) throw refuse(409, 'task_invalid', 'The current candidate has no immutable producer submission.');
   return parsed.data;
+}
+
+/* When a formerly skipped Review intervened after a checker repaired a candidate, that checker still
+   verifies the same work it originally received. Review checks the repair independently. */
+export function candidateReceivedAt(db: Db | Tx, task: Task, route: Route, candidate: HandedCandidate, stage: EchelonStage): Promise<HandedCandidate> {
+  if (candidate.producedBy.stage !== stage || !candidate.parentId || route.state.resultKind !== 'code') return Promise.resolve(candidate);
+  return handedOf(db, task, candidate.parentId, EchelonCandidate);
 }
 
 export const currentCandidate = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> => handedOf(db, task, route.state.candidateId, EchelonCandidate);
