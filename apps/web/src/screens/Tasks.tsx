@@ -5,8 +5,8 @@ import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
-import type { ComputerAccessDecision, Decisions, GoalView, MachineAwayCard, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
+import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
+import type { ComputerAccessDecision, Decisions, GoalView, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
@@ -73,7 +73,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   recipient: string;
 };
 
-type Shown = Pick<Decisions, 'requests' | 'proposals'> & { machineAccess: ComputerAccessDecision[]; merges: MergeDecision[]; machinesAway: MachineAwayCard[] };
+type Shown = Pick<Decisions, 'requests' | 'proposals'> & { machineAccess: ComputerAccessDecision[]; merges: MergeDecision[] };
 
 function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: string | null): T[] {
   return personId ? items.filter(i => i.ownerPersonId === personId) : items;
@@ -81,12 +81,12 @@ function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: s
 
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
-  if (!decisions) return { requests: [], proposals: [], machineAccess: [], merges: [], machinesAway: [] };
+  if (!decisions) return { requests: [], proposals: [], machineAccess: [], merges: [] };
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), machineAccess: theirs(decisions.machineAccess ?? []), merges: theirs(decisions.merges ?? []), machinesAway: decisions.machinesAway ?? [] };
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), machineAccess: theirs(decisions.machineAccess ?? []), merges: theirs(decisions.merges ?? []) };
 }
 
-const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.machineAccess.length && !s.merges.length && !s.machinesAway.some(m => !m.back);
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.machineAccess.length && !s.merges.length;
 
 /* The person whose decisions show, with a cross that shows everyone's again. */
 function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
@@ -125,10 +125,9 @@ type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' 
 /* Each decision with the buttons it already has elsewhere: requests, then the orchestrator's cards, then the computer. */
 function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
   const t = useT();
-  const { requests, proposals, machineAccess, merges, machinesAway } = shown;
+  const { requests, proposals, machineAccess, merges } = shown;
   return (
     <>
-      <MachineAway machines={machinesAway} />
       {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
@@ -196,12 +195,15 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
   );
 }
 
-/* What waits for a person, counted as the left panel shows it. */
-const countOf = (s: Shown, tasks: TaskLine[]) => s.requests.length + s.proposals.length + s.machineAccess.length + s.merges.length + s.machinesAway.filter(m => !m.back).length + tasks.length;
+/* A task with a question counts once, alongside decisions that have no task. */
+function countOf(s: Shown, tasks: TaskLine[]): number {
+  const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
+  return taskIds.size + s.proposals.length + s.machineAccess.length + s.merges.length;
+}
 
 /* Which part of the tracker a place is: what waits for a person, the turns, or work to look at as a list, a board or a graph. */
 type Section =
-  | { kind: 'waits' | 'turns' | 'mine' | 'working' | 'company' }
+  | { kind: 'waits' | 'failures' | 'turns' | 'mine' | 'working' | 'company' }
   | { kind: 'department' | 'responsible' | 'goal' | 'root'; id: string };
 
 function sectionOf(place: TrackerPlace): Section {
@@ -376,12 +378,13 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const whoName = people.find(p => p.id === who)?.name ?? t.tasks.someone;
   const other = who !== me.person.id;
   const pickerPeople = people.filter(p => p.id !== me.person.id && !p.assistant && (p.status === 'active' || p.id === viewed));
-  const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
-  const asksYou = (id: string) => asking.has(id);
+  const questions = new Map((decisions?.requests ?? []).filter(r => r.canAnswer && r.ownerPersonId === who).map(r => [r.task.id, r.at]));
+  const questionAt = (id: string) => questions.get(id);
+  const asksYou = (id: string) => questions.has(id);
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
   const employees = new Map(org?.departments.flatMap(d => d.employees.map(e => [e.id, e] as const)));
   const rows: Rows = {
-    selected, onOpenTask, onOpenGoal, asksYou, placeName: place_,
+    selected, onOpenTask, onOpenGoal, asksYou, questionAt, placeName: place_,
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
     turnkeyOf: id => employees.get(id)?.turnkey,
     programOf: id => {
@@ -395,6 +398,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const own = mine(all, goals, who);
   const working = workingNow(all, org);
   const waitsOnWho = waitingOn(all, recipient);
+  const failures = all.filter(task => boardStatus(task) === 'failure');
+  const machinesAway = decisions?.machinesAway ?? [];
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   const department = section.kind === 'department' ? places?.departments.find(d => d.id === section.id) : undefined;
   const departmentName = section.kind === 'department' ? (section.id === 'none' ? t.tracker.side.orchestrator : department ? deptLabel(t, department) : '') : '';
@@ -408,6 +413,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     : section.kind === 'goal' ? { tasks: all, filter: { goal: section.id } }
     : section.kind === 'root' ? { tasks: treeOf(section.id, all), filter: {} }
     : section.kind === 'company' ? { tasks: all, filter: {} }
+    : section.kind === 'failures' ? { tasks: failures, filter: {} }
     : { tasks: [], filter: {} };
   const work = filterTasks(base.tasks, { ...base.filter, ...chips }, goals, asksYou);
   const chipTasks = filterTasks(base.tasks, base.filter, goals, asksYou);
@@ -436,6 +442,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     switch (section.kind) {
       case 'mine': return { title: other ? t.tracker.where.theirs(whoName) : t.tracker.where.mine };
       case 'waits': return { title: recipient === me.person.id ? t.tracker.where.waits : t.tracker.where.waitsFor(people.find(p => p.id === recipient)?.name ?? t.tasks.someone) };
+      case 'failures': return { title: t.tracker.side.failures };
       case 'working': return { title: t.tracker.where.working };
       case 'turns': return { title: t.tracker.where.turns };
       case 'company': return { title: view === 'due' ? t.tracker.views.due : t.tracker.where.company };
@@ -480,7 +487,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
 
   return (
-    <div className="tracker">
+    <div className="tracker fit">
       <TrackerSide
         id={sideId}
         place={place}
@@ -490,7 +497,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         places={places}
         pipelines={pipelines}
         tasks={all}
-        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho), mine: own.tasks.length, working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, recipient), waitsOnWho), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
         onAddTask={addInGroup}
         open={drawer}
         onClose={() => setDrawer(false)}
@@ -532,7 +539,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
             {(section.kind === 'waits' || section.kind === 'mine') && waiting}
           </>
         ) : section.kind === 'waits' ? waiting
-          : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
+          : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, questionAt, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
           : (
             <>
               <div className="tr-bar">
@@ -540,6 +547,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
                 <FilterChips chips={{ ...chips, goal: chips.goal === undefined ? base.filter.goal : chips.goal }} onChange={setChips} tasks={chipTasks} goals={goals}
                   subtasks={view === 'list' ? showSubtasks : undefined} onSubtasks={() => setShowSubtasks(!showSubtasks)} />
               </div>
+              {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
               {making && makeHere}
               {section.kind === 'mine' && view !== 'goals' && <OwnGoals goals={own.goals} label={other ? t.tracker.goalsOf(whoName) : t.tracker.yourGoals} onOpenGoal={onOpenGoal} />}
               {!tasks && broken === null && <p className="muted" role="status">{t.common.loading}</p>}

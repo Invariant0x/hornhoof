@@ -29,6 +29,20 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 - Company phone checks wait until a phone is idle and run less often, so they do not interrupt an agent using the screen.
 - Company phones stay awake with the screen set to its lowest manual brightness to save battery.
+- Tracker screenshots can render at phone widths with the version footer hidden.
+- The version and build appear in their own footer below every screen.
+- Failed test and work runs keep the run number with its label and give the cause in plain language.
+- The selected department uses the full sidebar row, and department, pipeline, and board card text wraps at spaces when possible.
+- The board shows Failures and Stopped columns only when they have tasks and keeps each person's name together when it fits.
+- In Turns and releases, each question button sits directly under its task's wait time.
+- Wait lines name the person before the elapsed time and show only the time when the status already says the task waits for you.
+- Task lists, boards, cards, and turns show who needs to act, what work is running, when a timer fires, and why work failed.
+- The tracker counts failures separately and counts each task needing your answer once.
+- Tracker boards keep all columns in one row when they fit and stack every column in order when space runs short.
+- Pipeline board headings all start at the same edge, with the count after the name.
+- The task lists panel sits against the start edge below app navigation and fills the available height.
+- Tracker goal links get more room and underline on hover or keyboard focus.
+- Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
 
 ### Added
 
@@ -65,6 +79,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Expand a task from the arrow next to its title to see its subtasks in the same list columns.
 - On narrow screens, tracker rows stack their facts and show the full names behind the initials.
 - New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
+- Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
 ## [0.32.1] - 2026-11-17

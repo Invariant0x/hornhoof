@@ -169,6 +169,7 @@ export function SpeedIcon() {
 }
 
 const TRACKER_ICONS = {
+  failure: <><path d="M8 2 15 14H1L8 2Z" /><path d="M8 6v3m0 2v1" /></>,
   waits: <><rect x="2" y="4" width="12" height="8" /><path d="m2 4 6 5 6-5" /></>,
   mine: <><circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="3.5" /></>,
   dates: <><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8h3" /></>,

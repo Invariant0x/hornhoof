@@ -1,4 +1,5 @@
 import { PriorityWord } from './TrackerMarks';
+import { StateWord, WaitLine } from './TaskActivity';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -8,10 +9,11 @@ import { mapPeople, useOrg } from '../org';
 import { cutLine } from '../restarts';
 import { placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
+import { humanStatus, matchesExternalWait, taskWaits } from '../task-board';
 import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { TaskEdit } from './TrackerForms';
-import { dueText, localeOf, matchesExternalWait, momentText, sinceSeconds, spanText, taskWaits, trackerLine, waitLabel } from './tracker-words';
+import { dueText, localeOf, momentText, sinceSeconds, spanText, trackerLine, waitClass, waitLabel } from './tracker-words';
 import { OfflineMachine } from './OfflineMachine';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
@@ -134,7 +136,7 @@ function WorkLabels({ task }: { task: TaskDetail }) {
   return labels.length > 0 && <p className="muted tp-kind">{labels.join(', ')}</p>;
 }
 
-function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
+function TaskHeader({ task, org, asksYou }: { task: TaskDetail; org: Org | null; asksYou: boolean }) {
   const t = useT();
   const turnText = task.turn !== null ? t.tasks.turn(task.turn) : null;
   const meta = [placeName(t, org, task.department), task.product?.name, turnText].filter(Boolean).join(' / ');
@@ -145,7 +147,7 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
       <p className="muted">{meta}</p>
       <WorkLabels task={task} />
       <p className="tp-state">
-        <span className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</span>
+        <StateWord status={humanStatus(task, asksYou)} />
         {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
       </p>
       {task.assigneeOffline && <OfflineMachine offline={task.assigneeOffline} />}
@@ -158,9 +160,10 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
 function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void }) {
   const t = useT();
   if (waiting.requests.length === 0) return null;
+  const heading = waiting.requests.some(request => request.canAnswer) ? t.tasks.waitingHere : t.tasks.questions;
   return (
-    <section className="tp-wait" aria-label={t.tasks.waitingHere}>
-      <h4>{t.tasks.waitingHere}</h4>
+    <section className="tp-wait" aria-label={heading}>
+      <h4>{heading}</h4>
       <Requests
         requests={waiting.requests}
         onChanged={() => {
@@ -190,7 +193,8 @@ function TaskRelatedSection({ heading, items, onOpen }: { heading: string; items
             <button className="linkish" type="button" onClick={() => onOpen(item.id)}>
               #{item.number} {item.title}
             </button>
-            <small>{t.tasks.states[item.status]}</small>
+            <small>{item.status === 'done' ? t.tasks.states.done : t.tracker.groups[humanStatus(item)]}</small>
+            <WaitLine task={item} />
           </li>
         ))}
       </ul>
@@ -212,7 +216,7 @@ function IndependentPartSection({ part, onOpen }: { part: TaskDetail['independen
       <p className="muted">{part.executor.name}</p>
       <p>
         <button className="linkish" type="button" onClick={() => onOpen(part.task.id)}>#{part.task.number} {part.task.title}</button>{' '}
-        <small>{t.tasks.states[part.task.status]}</small>
+        <small>{t.tracker.groups[humanStatus(part.task)]}</small>
       </p>
     </section>
   );
@@ -301,7 +305,7 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
 }
 
 /* Who answers for it, who does it, its pipeline and stage, its date, and its time in words. */
-function TaskFacts({ task }: { task: TaskDetail }) {
+function TaskFacts({ task, asksYou }: { task: TaskDetail; asksYou: boolean }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
@@ -310,12 +314,12 @@ function TaskFacts({ task }: { task: TaskDetail }) {
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
   const due = dueText(t, language, task);
   const time = task.time;
-  const waits = taskWaits(task);
+  const now = Date.now();
+  const waits = taskWaits(task, now);
   const external = task.externalWait;
   const setter = task.assignee?.name;
   const until = external && new Date(external.until).toLocaleTimeString(localeOf(language), { hour: '2-digit', minute: '2-digit' });
   const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
-  const now = Date.now();
   return (
     <dl className="facts tp-facts" aria-label={words.facts}>
       <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
@@ -325,15 +329,15 @@ function TaskFacts({ task }: { task: TaskDetail }) {
       {due && <Fact name={words.due}><DueDay due={due} /></Fact>}
       {(time || waits.length > 0) && (
         <Fact name={words.time}>
-          {time && words.inStatus(t.tasks.states[task.status], spanText(t, sinceSeconds(time.inStatusSince, now)))}
+          {time && words.inStatus(t.tracker.groups[humanStatus(task, asksYou)], spanText(t, sinceSeconds(time.inStatusSince, now)))}
           {time && time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
           {waits.map((wait, i) => {
             const recorded = external && matchesExternalWait(wait, external) ? external : null;
             return (
               <Fragment key={i}>
-                <small dir="auto">{waitLabel(t, task, wait, now)}</small>
-                {recorded && wait.kind !== 'external' && <small dir="auto">{recorded.reason}</small>}
-                {recorded && deadline && <small dir="auto">{deadline}</small>}
+                <small className={`tr-wait ${waitClass(wait)}`} dir="auto">{waitLabel(t, task, wait, now, language, asksYou && wait.event !== 'ceo')}</small>
+                {recorded && (wait.kind === 'run' || wait.kind === 'work') && <small dir="auto">{recorded.reason}</small>}
+                {recorded && !wait.failure && wait.event !== 'time' && deadline && <small dir="auto">{deadline}</small>}
               </Fragment>
             );
           })}
@@ -390,12 +394,13 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
   const people = mapPeople(org);
   const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };
   const { version, revision } = task;
+  const asksYou = waiting.requests.some(request => request.canAnswer);
   const mayEdit = !!task.mayEdit && typeof version === 'number' && typeof revision === 'number';
 
   return (
     <>
       <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
-      <TaskHeader task={task} org={org} />
+      <TaskHeader task={task} org={org} asksYou={asksYou} />
       {task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} />}
       {masked && <p className="muted"><a href="/settings/passwords">{t.tasks.hideSecret.vault}</a></p>}
       <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
@@ -405,7 +410,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
           <p dir="auto">{task.why}</p>
         </section>
       )}
-      <TaskFacts task={task} />
+      <TaskFacts task={task} asksYou={asksYou} />
       {(leads.onGraph || (mayEdit && !editing)) && (
         <div className="entry-actions tp-leads">
           {leads.onGraph && <button className="btn ghost" type="button" onClick={() => leads.onGraph!({ task: task.id })}>{t.tracker.card.graphFromHere}</button>}

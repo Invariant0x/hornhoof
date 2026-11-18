@@ -2,7 +2,7 @@ import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
 import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
-import type { ExternalWait, WaitSourceKind } from '@hornhoof/protocol/waits';
+import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -466,7 +466,7 @@ export type TaskPlace = { id: string; name: string } | null;
 export type PersonRef = { id: string; name: string };
 /* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
    waits for since when. */
-export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: { who: { kind: 'person' | 'agent'; id: string; name: string } | null; since: string; kind: WaitSourceKind | 'work'; reason: string | null }[] };
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: TaskWaitFact[] };
 /* A task another one comes after, or that comes after it, and where it stands. */
 export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 

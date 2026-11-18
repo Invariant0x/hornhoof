@@ -1,28 +1,18 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
-import { humanStatus, type Asks, type HumanStatus } from '../task-board';
+import { humanStatus, taskWaits, type Asks } from '../task-board';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
-import { dueText, sinceSeconds, spanText, taskWaits, waitLabel, waitText } from './tracker-words';
+import { dueText } from './tracker-words';
 import { routePath } from '../routes';
 import { TrackerIcon, type Program } from './icons';
 import { DepartmentMark, ExecutorMark, PersonMark, PriorityWord } from './TrackerMarks';
 import { WorkerMark } from './WorkerMark';
+import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined };
-
-/* The look of a state on the strip of a node or a card: the task lists' own classes, the person's answer in the colour of
-   attention. The words always go with it. */
-export const STATE_CLASS: Record<HumanStatus, string> = {
-  notStarted: 'open', working: 'working', review: 'review', waiting: 'waiting', waitingYou: 'you', stopped: 'blocked', paused: 'blocked', done: 'done', cancelled: 'cancelled',
-};
-
-export function StateWord({ status }: { status: HumanStatus }) {
-  const t = useT();
-  return <span className={`tstate ${STATE_CLASS[status]}`}>{t.tracker.groups[status]}</span>;
-}
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
    value keeps its own direction, so the parts of a date and the dot of a name stay in place right to left. */
@@ -59,11 +49,11 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const { task } = tree;
   const words = t.tracker.list;
   const due = dueText(t, language, task);
-  const status = humanStatus(task, rows.asksYou?.(task.id) ?? false);
+  const asksYou = rows.asksYou?.(task.id) ?? false;
+  const status = humanStatus(task, asksYou);
   const waits = taskWaits(task);
   const prerequisites = new Set(waits.flatMap(wait => wait.kind === 'after' && wait.reason ? [wait.reason] : []));
   const needed = (relations.get(task.number) ?? []).filter(other => other.department && other.department.id !== task.department?.id);
-  const details = waits.filter(wait => wait.kind !== 'after' || !wait.reason);
   const goal = task.goal;
   const executor = doerOf(task);
   const route = task.echelons;
@@ -79,20 +69,17 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
                 <TrackerIcon name="chevron" />
               </button>
             )}
-            <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
-            <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+            <span className="tr-task-title">
+              <span className={`tr-status-dot ${STATE_CLASS[status]}`} role="img" aria-label={t.tracker.groups[status]} />
+              <button className="linkish tr-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+            </span>
             {tree.total > 0 && <span className="tr-no tr-branch-count" title={words.subtasks(tree.done, tree.total)}><TrackerIcon name="branch" />{tree.total}</span>}
             <span className="tr-no">#{task.number}</span>
             {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
-            {[...prerequisites].map(ref => <span className="tr-relation" key={ref}>{words.waitsFor(ref)}</span>)}
+            {[...prerequisites].map(ref => <span className="tr-relation" key={ref}>{t.tracker.wait.after(ref)}</span>)}
           </div>
-          {details.map((wait, i) => (
-            <small className="tr-wait" key={i} dir="auto">
-              {wait.kind === 'person' && wait.who?.kind === 'person'
-                ? words.waitsForPerson(wait.who.name, spanText(t, sinceSeconds(wait.since)))
-                : waitLabel(t, task, wait)}
-            </small>
-          ))}
+          {(asksYou || waits[0]?.kind !== 'after') && <WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} />}
+          {asksYou && status !== 'done' && status !== 'cancelled' && <div className="entry-actions tr-question"><QuestionButton onOpen={() => rows.onOpenTask(task.id)} /></div>}
           {needed.map(other => {
             const department = other.department!;
             const name = rows.placeName?.(department) ?? department.name;
@@ -107,7 +94,7 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
         <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>
           {goal ? (
-            <a className="linkish tr-goal-link" href={routePath({ kind: 'tasks', card: 'goal', id: goal.id })} onClick={e => {
+            <a className="linkish tr-goal-link" dir="auto" href={routePath({ kind: 'tasks', card: 'goal', id: goal.id })} onClick={e => {
               if (!rows.onOpenGoal || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
               e.preventDefault();
               rows.onOpenGoal(goal.id);
@@ -141,7 +128,7 @@ function Group({ group, rows, relations, onAddTask, showSubtasks }: { group: Lis
   const id = useId();
   const over = group.status === 'done' || group.status === 'cancelled';
   const [open, setOpen] = useState(group.status !== 'cancelled');
-  const label = group.status === 'waitingPerson' ? t.tracker.list.waitingPerson : t.tracker.groups[group.status];
+  const label = group.status === 'waitingPerson' ? t.tracker.statuses.waits : group.status === 'failure' ? t.tracker.statuses.failure : t.tracker.groups[group.status];
   const state = group.status === 'waitingPerson' ? 'waiting' : STATE_CLASS[group.status];
   const heading = t.tracker.list.group(label, group.trees.length);
   return (
@@ -194,22 +181,27 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
   const { task } = tree;
   const words = t.tracker.board;
   const due = dueText(t, language, task);
-  const waits = waitText(t, task);
-  const status = humanStatus(task, rows.asksYou?.(task.id) ?? false);
+  const asksYou = rows.asksYou?.(task.id) ?? false;
+  const status = humanStatus(task, asksYou);
   return (
     <article className={`tr-card ${STATE_CLASS[status]}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
-      <span className="tr-no">#{task.number}</span>
-      <h3 className="tr-card-title"><button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button></h3>
+      <h3 className="tr-card-title">
+        <button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>
+          <span className="tr-no" aria-hidden="true">#{task.number}</span>
+          <span>{task.title}</span>
+        </button>
+      </h3>
       {(stage || status === 'waitingYou' || status === 'paused' || status === 'stopped') && <StateWord status={status} />}
       <ul className="tr-card-facts">
         {/* Each fact is a whole phrase in its own direction, so its dot and the parts of its date stay in place in RTL. */}
-        <li dir="auto">{words.executor(doerOf(task)?.name ?? t.tracker.nobody)}</li>
-        <li dir="auto">{words.responsible(task.responsible?.name ?? t.tracker.nobody)}</li>
+        <li dir="auto">{words.executor} <bdi className="tr-card-person">{doerOf(task)?.name ?? t.tracker.nobody}</bdi></li>
+        <li dir="auto">{words.responsible} <bdi className="tr-card-person">{task.responsible?.name ?? t.tracker.nobody}</bdi></li>
         {due && <li className={due.late ? 'tp-late' : undefined} dir="auto">{words.due(due.text)}</li>}
         {tree.total > 0 && <li dir="auto">{words.subtasks(tree.done, tree.total)}</li>}
-        {waits && <li className="tr-wait" dir="auto">{waits}</li>}
+        <li className="tr-card-activity"><WaitLine task={task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(task.id)} hasStatus /></li>
         {task.urgent && <li><span className="badge urgent">{t.tracker.card.urgent}</span></li>}
       </ul>
+      {asksYou && status !== 'done' && status !== 'cancelled' && <div className="entry-actions"><QuestionButton onOpen={() => rows.onOpenTask(task.id)} /></div>}
     </article>
   );
 }
@@ -218,21 +210,35 @@ function Column({ column, rows }: { column: BoardColumn; rows: Rows }) {
   const t = useT();
   const name = column.stage ? column.stage.name : t.tracker.statuses[column.status!];
   return (
-    <section className={`tr-col${column.stage ? ' stage' : ''}`} aria-label={name}>
-      <h2 className="tr-col-head">{name} <span className="tr-count">{column.cards.length}</span></h2>
+    <section className="tr-col" aria-label={name}>
+      <h2 className="tr-col-head"><span>{name}</span> <span className="tr-count">{column.cards.length}</span></h2>
       {column.cards.length ? column.cards.map(card => <BoardCard key={card.task.id} tree={card} rows={rows} stage={!!column.stage} />) : <p className="muted">{t.tracker.board.empty}</p>}
     </section>
   );
 }
 
-/* The board: a column per state, or per stage of a chosen pipeline, as many side by side as the width holds, one under
-   another where it is narrow, each card's subtasks counted over all the work. The engine moves the cards; nobody drags them. */
+/* The board keeps its state or stage columns together, in one row when they fit and in order down the page otherwise. */
 export function TrackerBoard({ tasks, all, pipeline, cancelled, rows }: { tasks: TaskLine[]; all: TaskLine[]; pipeline: Pipeline | null; cancelled: boolean; rows: Rows }) {
   const t = useT();
   const columns = boardColumns(tasks, pipeline, { cancelled, all }, rows.asksYou);
+  const group = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const element = group.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    setWidth(element.clientWidth);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const layout = width >= columns.length * 160 + (columns.length - 1) * 8 ? 'row' : 'stack';
   return (
     <section className="tr-board" aria-label={t.tracker.views.board}>
-      <div className="tr-columns">{columns.map(column => <Column key={column.id} column={column} rows={rows} />)}</div>
+      <div className="tr-columns" ref={group} data-layout={layout} style={{ '--tr-column-count': columns.length } as CSSProperties}>
+        {columns.map(column => <Column key={column.id} column={column} rows={rows} />)}
+      </div>
     </section>
   );
 }
@@ -249,6 +255,7 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
       <button className={`tr-node ${STATE_CLASS[status]}${rows.selected === node.id ? ' on' : ''}`} type="button" style={style} data-node={node.id} onClick={() => rows.onOpenTask(node.id)}>
         <span className="tr-node-title"><b>#{node.task.number}</b> {node.task.title}</span>
         <small>{t.tracker.groups[status]}</small>
+        <WaitLine task={node.task} asksYou={status === 'waitingYou'} questionAt={rows.questionAt?.(node.id)} />
       </button>
     );
   }
@@ -262,7 +269,7 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
   }
   const name = node.kind === 'loose' ? t.tracker.graph.loose : node.kind === 'pipeline' ? node.pipeline.name : node.stage.name;
   return (
-    <div className={`tr-node plain${node.kind === 'loose' ? '' : ' stage'}`} style={style} data-node={node.id}>
+    <div className="tr-node plain" style={style} data-node={node.id}>
       <span className="tr-node-title">{name}</span>
       {node.kind !== 'loose' && <small>{t.tracker.graph.count(node.count)}</small>}
     </div>

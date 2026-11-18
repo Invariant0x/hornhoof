@@ -142,7 +142,7 @@ describe('a task', () => {
   it.each(['en', 'ru'])('shows an external wait with its reason and deadline in %s, then clears it after a comment', async language => {
     localStorage.setItem('hh-lang', language);
     const user = userEvent.setup();
-    const externalWait = { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2026-11-03T11:30:00.000Z' };
+    const externalWait = { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2099-11-03T11:30:00.000Z' };
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
     await openFromTracker(user, 12);

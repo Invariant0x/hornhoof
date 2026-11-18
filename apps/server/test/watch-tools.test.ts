@@ -231,7 +231,7 @@ describe('tools a skill grants', () => {
       const now = Date.now(), wait = { reason: 'Waiting for the agreed event', since: new Date(now).toISOString(), until: new Date(now + 60_000).toISOString() };
       await db.update(tasks).set({ after: [dependency!.id], externalWait: { ...wait, ...(on ? { on } : {}) } }).where(eq(tasks.id, task.id));
       const rows = await watched(await mcp(app, TOKEN)), held = rows.find(a => a.name === 'Bruno')!.tasks;
-      expect(held[0]).toMatchObject({ waitsFor: [10], waitingForPerson: false });
+      expect(held[0]).toMatchObject({ waitsFor: [10], waitingForPerson: on?.kind === 'external' && on.event === 'ceo' });
       expect(held[0]!.externalWait).toEqual(wait);
       expect(taskWaitCount(held)).toBe(0);
       expect(JSON.stringify(rows)).not.toContain('Hidden dependency employee');
