@@ -13,7 +13,7 @@ Use this ability to plan an assigned campaign. Inputs are the goal, audience, ap
 4. List the pieces to produce, their proposed owners, dependencies, due dates, channel and language. Reuse one core piece through native variants without changing facts.
 5. For a launch, cover preparation, announcement order and follow-up: pages, proof, stakeholder information, questions and measurement.
 6. Reserve time for server checks and the independent review required by channel policy.
-7. Show paid costs and the department's spend rule they go by. Spending needs CEO authorization and any applicable financial control before commitment.
+7. Show paid costs under the department's spend rule. Give the person who pays the exact price, terms and materials needed to make the payment.
 8. Name the measure for each channel, its source, baseline and evaluation date. Record assumptions and stop conditions.
 
 Return a plan, with any approval rule its department set. A new public approach is the department's own decision; a paid commitment goes by its spend rule. The plan does not assign employees, change task gates or authorize publication.

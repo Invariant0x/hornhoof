@@ -12,6 +12,6 @@ Use this ability to maintain a plan for an assigned qualified deal. Inputs are b
 - **Our proposed steps**: deliverables, dependencies and proposed owners. Requests beyond the current assignment remain requests rather than promises of another person's work.
 - **Objections**: what was heard, the supported answer and what remains unresolved.
 - **Timing**: work back from the buyer's stated need, not from the company's reporting period. Show slips and their source.
-- **Walk-away conditions**: terms or risks that would make the deal unacceptable. Exceptions require the CEO's decision.
+- **Walk-away conditions**. Name the terms or risks that would make the deal unacceptable. Refer an exception to the owner responsible for that limit.
 
-Return the plan, changes since its previous version and unresolved approvals. Prices, discounts, legal terms, service levels and future delivery commitments require the authorized human decision; a human signs the contract. External proposals and messages are marked in the department's git, and each waits for nobody's yes unless its department set an approval rule for it. Keeping a plan does not authorize a commitment, account change or send.
+Return the plan, changes and outstanding decisions. Verify proposed commitments with their delivery owners and give the contract to the person who signs it.

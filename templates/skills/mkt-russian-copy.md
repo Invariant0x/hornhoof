@@ -11,7 +11,7 @@ Use this ability to write or adapt an assigned text for a Russian-speaking audie
 - **Tone**: lead with the point and evidence. Superlatives such as "лучший" or "уникальный" are claims requiring proof.
 - **Natural wording**: write from the brief rather than translating English phrases word by word; read the text aloud.
 - **Terms**: follow the glossary for product and feature names, explaining unfamiliar terms where useful.
-- **Mechanics**: use the company's spelling rules and Russian formats, such as « » quotes, "1 250,50 ₽" and "30 октября".
+- **Mechanics**. Use the company's spelling rules and the audience's local formats for dates, currency and punctuation.
 - **Local evidence**: use verified local prices, payment options and examples only when the company actually offers them. Mark missing facts instead of assuming them.
 - **Paid advertising**: identify placements subject to registration, labeling or other local rules and obtain current authoritative requirements and the authorized human decision before commitment.
 

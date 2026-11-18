@@ -10,7 +10,7 @@ Use this ability to adapt an assigned core piece for several specified networks.
 1. Preserve the source's facts and permitted claims while writing a native version for each destination: hook, length, structure, media description and call to action.
 2. Show all variants together with their source revision, account, language and intended time. Keep differences visible so each item can be assessed on its own.
 3. Mark missing images, alt text, links or approval details rather than inventing them.
-4. If the assignment includes publication, publish from the company's own accounts and mark each post in the department's git. Every public variant is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
+4. If publication is assigned, use the company's account in the network's phone app. Take one action at a time, check its result and continue at a human pace. Apply the department's channel rule and record delivery.
 5. Read delivery state before any retry. An unknown result needs destination verification, not blind reposting.
 6. For an authorized published item, inspect the visitor view for text, media, links and previews, and record its URL, time and approval reference. Correct a public record yourself with a new revision; deleting one for good is irreversible and needs the CEO's yes.
 

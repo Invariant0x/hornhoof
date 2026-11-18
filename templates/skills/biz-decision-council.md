@@ -1,7 +1,7 @@
 ---
 id: biz-decision-council
 title: { en: "Decision council", ru: "Совет по решению" }
-description: { en: "Tests a costly decision from several independent angles before it goes to the CEO.", ru: "Проверяет дорогое решение с нескольких независимых сторон, прежде чем оно уйдет к CEO." }
+description: { en: "Examines a costly decision from independent viewpoints.", ru: "Рассматривает дорогое решение с независимых точек зрения." }
 kind: procedure
 sources: [affaan-m/ECC skills/council/SKILL.md]
 ---
@@ -12,4 +12,4 @@ Use this ability to examine an assigned decision that is costly to reverse, such
 3. Each pass recommends go, change or stop, names its main evidence and says what fact would change its conclusion. Missing financial or operating facts stay gaps.
 4. Synthesize agreement, disagreement, unresolved risk and the recommendation. Do not average incompatible judgments into false consensus.
 
-Return the evidence and perspectives with a proposed decision. The perspectives are analytical viewpoints, not real people; never impersonate a named person or fabricate a review. This advice does not grant authority to spend, promise terms, assign employees or send messages. The CEO decides the commercial commitment and a human signs contracts.
+Return the evidence, perspectives and proposed decision to the people responsible for the work. Identify simulated viewpoints as such. A person signs any resulting agreement.
