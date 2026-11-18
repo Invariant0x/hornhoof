@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- People listed one under another (in Russian on a wide screen, in every language on a phone) are as high in Chromium, Firefox and Safari: a name leaves no room under its line, and each label sits on the line of its value.
 - Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
 - Product test runs resend an unanswered environment description request after a minute or when its node reconnects, and a failed socket write stays retryable under the same request id.
 - Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.

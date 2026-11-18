@@ -803,7 +803,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ptable tr:last-child td { border-bottom: 0; }
 .ptable tr.disabled td { color: var(--muted); }
-.pname { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+/* A name starts with its icon, which has no baseline, and each browser makes up a different one for the name from it.
+   At the top of its line the name keeps its line as tall as itself in every browser. */
+.pname { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; vertical-align: top; }
 .pname .ic { color: var(--pink-ink); }
 /* Whom an assistant acts for, under its name. */
 .ptable .pwho { min-width: 0; }
@@ -837,7 +839,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] tr:last-child { padding-block-end: 0; border-block-end: 0; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td, .fit > :is(.ptable, .dt)[data-fit="entries"] tr:last-child td { grid-column: 1 / -1; padding: 0; border: 0; min-width: 0; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label] { display: grid; grid-template-columns: subgrid; column-gap: 12px; align-items: baseline; }
-.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+/* A label stands beside its value on their baseline, with no room under it from a narrow screen's labels above values:
+   room under the smaller label makes the row as high as each browser rounds that baseline. */
+.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before { content: attr(data-label); margin-block-end: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions { padding-block-start: 4px; white-space: normal; }
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions .act + .act { margin: 0; }
