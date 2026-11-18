@@ -19,6 +19,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.
 - One-shot stages use diamonds in the tracker and task routes.
 - Generalists use squares and keep their label.
+### Fixed
+
+- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
+- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
+- On phones, task details stack under the title and long text wraps within the list.
 
 ## [0.34.0] - 2026-11-18
 
