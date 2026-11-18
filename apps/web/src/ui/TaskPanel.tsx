@@ -9,6 +9,7 @@ import { graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
 import type { GoalView, Org, TaskDetail, WaitingRequest } from '../types';
 import { Field } from './Field';
+import { useLoadFailure } from './LoadFailure';
 import { TaskEdit } from './TrackerForms';
 import { dueText, sinceSeconds, spanText } from './tracker-words';
 import { FoldedMarkdown, Markdown } from './Markdown';
@@ -430,7 +431,8 @@ export function useEscapeCloses(onClose: () => void, active: boolean): void {
 /* kind: where the panel stands, beside the tracker at the end side. */
 export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, onGraph, active = true, ...waiting }: { taskId: string; kind?: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting & Leads) {
   const t = useT();
-  const { task, failure, load } = useTask(taskId);
+  const { task, failure: readFailure, load } = useTask(taskId);
+  const failure = useLoadFailure(readFailure);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   const shown = task && !unavailableFailure(failure);
   useEscapeCloses(onClose, active && !shown);

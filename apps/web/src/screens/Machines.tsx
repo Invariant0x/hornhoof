@@ -9,7 +9,7 @@ import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { useStream } from '../live';
+import { latestAnswers, useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
@@ -689,6 +689,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [askMachines] = useState(latestAnswers);
   const live = useRef(true);
   /* Each change the person makes to the shown commands counts here, so a look that began before it leaves them alone. */
   const commandChanges = useRef(0);
@@ -704,13 +705,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   }, []);
 
   const load = useCallback(async () => {
+    const fresh = askMachines();
     try {
       const [hosts, list] = await Promise.all([
         api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
         loadMachineCommands(live, commandChanges, setCommand, setAddCommands, setCoreCommands),
       ]);
-      if (!live.current) return;
+      if (!live.current || !fresh()) return;
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
       setCopies(hosts.copies ?? null);
@@ -719,9 +721,9 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setSubs(list.subscriptions);
       setLoadFailure(null);
     } catch (err) {
-      setLoadFailure(err);
+      if (live.current && fresh()) setLoadFailure(err);
     }
-  }, []);
+  }, [askMachines]);
 
   /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds, and at once
      after a break, an update among them. */

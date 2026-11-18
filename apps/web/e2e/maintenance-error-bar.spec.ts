@@ -20,7 +20,8 @@ const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 const BUSY_POLL_MS = 2_000;
 
 /* What this view says, the same way in every language: the tabs, the update panel and the bars it may show. */
-const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.updates.label, t.updates.running('0.34.0 (00e5ff3)'), t.updates.maintenance, t.updates.details, t.errors.maintenance, t.errors.codes.internal, t.people.heading];
+const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.updates.label, t.updates.running('0.34.0 (00e5ff3)'),
+  t.updates.maintenance, t.updates.details, t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
 const ranked = LANGUAGES.map(l => ({ id: l.id, length: viewWords(DICTS[l.id]).join('').length })).sort((a, b) => a.length - b.length);
 const SHORTEST = ranked[0]!.id;
 const LONGEST = ranked.at(-1)!.id;
@@ -138,7 +139,8 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
   test(`during an update the map draws no bar of a maintenance refusal and comes back after it, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
     const problems = watchProblems(page);
-    await page.clock.install({ time: new Date('2026-11-18T13:35:00.000Z') });
+    await page.clock.install({ time: new Date('2026-11-18T13:00:00.000Z') });
+    await page.clock.pauseAt(new Date('2026-11-18T13:35:00.000Z'));
     await look(page, lang, skin, width);
     const server = await heldServer(page);
     const orgRefused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 503);
@@ -164,8 +166,11 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await expect(page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(panel).toContainText(t.updates.steps.health);
     expect(await page.getByRole('alert').count()).toBe(0);
-    /* The panel stays in its row over the company's map, which now draws under it. */
+    /* The open map starts after the panel, so the panel cannot cover a map control. */
     expect(rowsHold(await places(page, t), width)).toEqual([]);
+    const mapBox = (await page.locator('.map-workspace').boundingBox())!;
+    const panelBox = (await panel.boundingBox())!;
+    expect(mapBox.y).toBeGreaterThanOrEqual(panelBox.y + panelBox.height - 0.5);
     expect(problems).toEqual([]);
   });
 
@@ -178,6 +183,8 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await page.route('**/api/updates', route => route.fulfill({ json: running.on ? updates('install') : { ...updates('install'), updater: { present: true, status: null, waiting: null, calledOff: null } } }));
     await page.route('**/api/org', route => route.fulfill(BROKEN));
     await page.route('**/api/people', route => route.fulfill(BROKEN));
+    await page.route('**/api/machines', route => route.fulfill(BROKEN));
+    await page.route('**/api/subscriptions', route => route.fulfill(BROKEN));
     const panel = page.getByRole('status', { name: t.updates.label, exact: true });
 
     /* The map: the panel, then the bar of the company's failed load under it. */
@@ -231,7 +238,8 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await page.setViewportSize({ width, height: 900 });
 
     /* The tracker, which stands right under the header: the panel in its own row, the tracker after it. */
-    await page.goto('/tasks');
+    const sections = page.getByRole('navigation', { name: t.shell.sections });
+    await sections.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
     const tracker = page.locator('.tracker');
     await expect(tracker).toBeVisible();
     await expect(panel).toBeVisible();
@@ -239,6 +247,18 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     const tasks = await places(page, t);
     expect(rowsHold(tasks, width)).toEqual([]);
     expect((await tracker.boundingBox())!.y, 'the tracker stands under the panel').toBeGreaterThanOrEqual(tasks.bars[0]!.y + tasks.bars[0]!.height - 0.5);
+
+    for (const [tab, title] of [['machines', t.machines.heading], ['subscriptions', t.subs.heading]] as const) {
+      await sections.getByRole('button', { name: t.shell.tabs[tab], exact: true }).click();
+      const heading = page.getByRole('heading', { name: title, exact: true });
+      await expect(heading).toBeVisible();
+      await expect(panel).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(1);
+      await turned(page, rtl);
+      const screen = await places(page, t);
+      expect(rowsHold(screen, width)).toEqual([]);
+      expect((await heading.boundingBox())!.y).toBeGreaterThanOrEqual(screen.bars[0]!.y + screen.bars[0]!.height - 0.5);
+    }
     expect(problems).toEqual([]);
   });
 }

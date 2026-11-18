@@ -580,13 +580,17 @@ select:disabled { opacity: .55; }
    around the glass blocks. On the map the canvas runs under the header, and the room lets every touch through to it. */
 .body::before { content: ''; position: sticky; top: 0; display: block; block-size: var(--header-room); pointer-events: none; }
 .body.page::before { z-index: 5; background: var(--bg); pointer-events: auto; }
-/* The bars of the shell, the banners first and then what failed to load: each takes its own row of the page under the
-   header's room, never under the header, and what the page shows comes after them. Over the map and a department they
-   stand above the canvas; on a page they scroll under its band. */
+/* Shell bars take their own rows under the header. On a page they scroll under its band. */
 .body > :is(.update-banner, .alert) { position: relative; z-index: 9; margin-block: 0 var(--bar-gap); margin-inline: var(--bar-edge); }
-.body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); }
+.body > .update-banner { margin-inline: auto; max-inline-size: calc(100% - 2 * var(--bar-edge)); overflow-wrap: anywhere; }
 .body > .guard-stop { position: relative; z-index: 9; }
 .body.page > :is(.update-banner, .alert, .guard-stop) { z-index: auto; }
+/* On the map, the canvas fills the room after any shell bars. Without a bar it still reaches behind the header. */
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) { display: flex; flex-direction: column; }
+.body:not(.page)::before, .body:not(.page) > :is(.update-banner, .alert, .guard-stop) { flex: none; }
+.body:not(.page):has(> :is(.update-banner, .alert, .guard-stop)) > :is(.map-workspace:not([inert]), .map, .dview) {
+  position: relative; inset: auto; flex: 1; min-block-size: var(--bar-size);
+}
 
 /* Map */
 .map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -1792,7 +1796,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
 /* The tracker's work narrows for a card and widens back, which WebKit's scroll anchoring answers by moving the page: the page
    stays where the person scrolled it. */
-.body.tracker-page { inset-block-start: 56px; container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
+.body.tracker-page { inset-block-start: calc(var(--bar-top) + var(--bar-size)); container-type: size; overflow-anchor: none; scrollbar-gutter: stable; }
 .body.tracker-page::before { content: none; }
 /* The tracker stands right under the header, which leaves a bar of the shell above it a gap of its own. */
 .body.tracker-page > :is(.update-banner, .alert, .guard-stop):first-child { margin-block-start: var(--bar-gap); }

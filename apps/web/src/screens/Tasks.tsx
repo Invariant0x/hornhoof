@@ -460,8 +460,9 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
 
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
   const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
-  if (unavailableFailure(placesFailure ?? failure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = shownLoadFailure(placesFailure ?? failure ?? tracked(goalsFailure) ?? tracked(pipelinesFailure), updateSaysIt);
+  const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
+  if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
+  const broken = mainFailure ?? shownLoadFailure(tracked(goalsFailure), updateSaysIt) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
   const clearPerson = () => onPlace({ ...place, personId: undefined });
   const waiting = (
     <WaitingForYou

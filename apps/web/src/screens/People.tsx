@@ -7,7 +7,7 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
-import { useStream } from '../live';
+import { latestAnswers, useStream } from '../live';
 import { Field } from '../ui/Field';
 import { NOT_A_LOGIN } from '../ui/SecretInput';
 import { BusyLabel } from '../ui/BusyLabel';
@@ -472,19 +472,22 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [askPeople] = useState(latestAnswers);
   const canManage = me.person.scopeKind === 'company';
   const tableHost = usePeopleTable(people);
 
   const load = useCallback(async () => {
+    const fresh = askPeople();
     try {
       const [list, structure] = await Promise.all([api.get<{ people: PersonView[] }>('/api/people'), api.get<Org>('/api/org')]);
+      if (!fresh()) return;
       setPeople(list.people);
       setOrg(structure);
       setLoadFailure(null);
     } catch (err) {
-      setLoadFailure(err);
+      if (fresh()) setLoadFailure(err);
     }
-  }, []);
+  }, [askPeople]);
 
   useEffect(() => {
     void load();

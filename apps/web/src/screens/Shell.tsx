@@ -10,7 +10,7 @@ import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
-import { showsUpdate, UpdateBanner } from '../ui/UpdateBanner';
+import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
@@ -325,6 +325,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
   const updates = useUpdates(company);
+  const [updateSaysIt, setUpdateSaysIt] = useState(false);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
@@ -366,7 +367,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
 
   return (
     <AgentWindowContext value={openAgent}>
-    <UpdateSaysIt value={company && showsUpdate(updates)}>
+    <UpdateSaysIt value={updateSaysIt}>
     <div className="shell">
       <header className="topbar">
         <div className="tb-brand glass">
@@ -380,7 +381,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           comes after them. */}
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
-          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} />}
+          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
         </SwitchBanner>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />

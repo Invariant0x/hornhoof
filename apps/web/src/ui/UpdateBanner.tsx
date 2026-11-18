@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
@@ -58,15 +58,23 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
 
 /* Whether the banner shows an update on its way: asked for, or running, with the server in maintenance or restarting
    meanwhile. */
-export function showsUpdate(updates: Updates): boolean {
+function showsUpdate(updates: Updates): boolean {
   return updates.view !== null && (updates.starting || updates.view.updater.status?.state === 'running');
 }
 
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
-export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetails: () => void }) {
+export function UpdateBanner({ updates, onDetails, onProgressShown }: {
+  updates: Updates; onDetails: () => void; onProgressShown?: (shown: boolean) => void;
+}) {
   const t = useT();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
+  const showingProgress = showsUpdate(updates);
+  useLayoutEffect(() => {
+    if (!showingProgress || !onProgressShown) return;
+    onProgressShown(true);
+    return () => onProgressShown(false);
+  }, [showingProgress, onProgressShown]);
   const { view } = updates;
   if (!view) return null;
   const { status } = view.updater;
@@ -87,7 +95,7 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   };
 
   let body: React.ReactNode = null;
-  if (showsUpdate(updates)) {
+  if (showingProgress) {
     body = (
       <>
         <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
