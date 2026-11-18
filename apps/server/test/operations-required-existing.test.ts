@@ -1,11 +1,21 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray, type SQL } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, people } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, pipelines, pipelineStages, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ensureOperations } from '../src/modules/operations/ensure.js';
 import { appOn, createTestDb, SETUP, statements } from './helpers.js';
 import { company, FOUR, opsDepartments, roles, staff, staffedLike } from './operations-required-fixture.js';
-import { removeDepartments } from './operations-required-existing-fixture.js';
+
+/* Every department has its open turn, which ends before the department goes, as when the structure removes one. */
+async function removeDepartments(db: Db, where: SQL): Promise<void> {
+  const places = db.select(idOnly(departments)).from(departments).where(where);
+  const inPlaces = inArray(pipelines.departmentId, places);
+  await db.delete(pipelineStages).where(inArray(pipelineStages.pipelineId, db.select(idOnly(pipelines)).from(pipelines).where(inPlaces)));
+  await db.delete(pipelines).where(inPlaces);
+  await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(inArray(turns.departmentId, places));
+  await db.delete(departments).where(where);
+}
 
 describe('a company that lives already', () => {
   it('gets who is missing when the server starts, with its one head kept', async () => {
