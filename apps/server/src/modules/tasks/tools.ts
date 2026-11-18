@@ -1,4 +1,4 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { idOnly } from '../../db/selections.js';
 import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
@@ -7,10 +7,10 @@ import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, people, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
@@ -35,7 +35,7 @@ import { resolveStuckComment } from './stuck.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decision-people.js';
-import { TaskReference as Ref, WaitInput, lastEventOf, waitFor } from './external-wait.js';
+import { TaskReference as Ref, trackWork } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { ReviewSha, ReviewSubmission } from './review-context.js';
@@ -51,10 +51,6 @@ import { hasTrackerFields, TrackerFields, trackerInputOf } from '../tracker/tool
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
 type Agent = typeof agents.$inferSelect;
 type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } };
-
-/* What one turn may do to others' work: tasks it creates and questions it puts to people. */
-export const TURN_TASKS = 10;
-export const TURN_QUESTIONS = 3;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 /* Agents read role names in English, the language of their instructions. */
@@ -93,10 +89,10 @@ const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 const Backlog = z
   .array(z.uuid())
-  .max(TURN_TASKS)
-  .describe("Items of departments' lists, by id from backlog, that become tasks of this turn in their own department and leave the list. They count with tasks.");
+  .describe("Items of departments' lists, by id from backlog, that become tasks in their own department and leave the list.");
 
-type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic };
+type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic; recipient?: string };
+const HumanRecipient = z.uuid().describe('The person who can supply the missing answer, by id. For a missing sign-in, ask them to add it to the vault and give only the entry name.');
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
    is asked, which the answer says again as it comes. */
@@ -107,8 +103,8 @@ async function questionWords(db: Ctx['db'], task: Task, question: string, commit
 }
 
 /* Keep the outgoing question with the person responsible for its decision card. */
-async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
-  const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
+async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic, recipient }: Question): Promise<void> {
+  const personId = recipient ?? await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
@@ -133,6 +129,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
 
 export function registerHolderTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   new TaskTools(server, ctx, job).registerHolderTools();
+}
+
+export function registerDepartmentTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  new TaskTools(server, ctx, job).registerCreateTask();
 }
 
 /* What a close did beyond the task: the open work cancelled under it, and the tasks its closer made that wait for that work,
@@ -226,14 +226,19 @@ class TaskTools {
 
   private async me(): Promise<Agent> { return (await this.db.select().from(agents).where(eq(agents.id, this.job.agentId)))[0]!; }
 
-  private async startedAt(): Promise<Date> { return (await this.db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, this.job.id)))[0]?.at ?? new Date(0); }
-
-  /* Find only a task the agent can see. */
-  private async find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
+  /* A company watchdog can inspect tasks across departments. Task moves keep the normal scope. */
+  private async find(ref: number | string, inspect = false): Promise<{ agent: Agent; task: Task }> {
     const agent = await this.me();
     const task = await taskByRef(this.ctx, this.job.companyId, ref);
-    if (!task || !sees(agent, task)) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
+    if (!task || (!sees(agent, task) && !(inspect && await this.canInspect(agent, task)))) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
     return { agent, task };
+  }
+
+  private async canInspect(agent: Agent, task: Task): Promise<boolean> {
+    if (!agent.skills.some(id => this.ctx.templates.skills.get(id)?.grants.includes('agents'))) return false;
+    const holders = [task.assigneeAgentId, task.executorAgentId].filter(id => id !== null);
+    const privateHolder = holders.length && (await this.db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, holders), eq(agents.kind, 'assistant')))).length;
+    return !privateHolder;
   }
 
   private async where(t: Task): Promise<string> {
@@ -268,17 +273,9 @@ class TaskTools {
     return open.length ? ` It starts once ${listed(open)} ${open.length === 1 ? 'is' : 'are'} done.` : '';
   }
 
-  private async underCap(agent: Agent, adding = 1): Promise<void> {
-    const [made] = await this.db
-      .select(countOnly())
-      .from(tasks)
-      .where(and(eq(tasks.createdByAgentId, agent.id), gte(tasks.createdAt, await this.startedAt())));
-    if (Number(made?.n ?? 0) + adding > TURN_TASKS) throw refuse(409, 'task_invalid', `One turn creates at most ${TURN_TASKS} tasks. Finish this turn and go on in the next.`);
-  }
-
   /* An employee of the head's department, or the head. */
   private async member(head: Agent, id: string): Promise<Agent> {
-    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
+    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.companyId, head.companyId), isNull(agents.removedAt)));
     if (!agent || agent.departmentId !== head.departmentId) throw refuse(403, 'task_not_yours', `${id} does not work in your department. Call company for its employees.`);
     return agent;
   }
@@ -314,14 +311,6 @@ class TaskTools {
 
   private async urgentFromCeo(items: { department: string; urgent?: boolean | undefined }[]): Promise<void> {
     for (const department of new Set(items.filter(item => item.urgent).map(item => item.department))) await this.urgentBy(department);
-  }
-
-  private async underQuestionCap(): Promise<void> {
-    const [asked] = await this.db
-      .select(countOnly())
-      .from(requests)
-      .where(and(eq(requests.agentId, this.job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, await this.startedAt())));
-    if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
   }
 
   private async checkProduct(agent: Agent, id: string | undefined): Promise<void> {
@@ -364,18 +353,18 @@ class TaskTools {
   private registerTasks(): void {
     this.server.registerTool(
       'tasks',
-      { description: 'Your open tasks first, then the other open tasks you can see: number, title, brief, state, who holds it.', inputSchema: {} },
-      async () => {
+      { description: 'Your open tasks first, then other open tasks you can see, 40 per page. Use offset to skip rows already read.', inputSchema: { offset: z.number().int().nonnegative().default(0) } },
+      async ({ offset }) => {
         const agent = await this.me();
+        const visible = this.boss ? undefined : or(agent.departmentId ? eq(tasks.departmentId, agent.departmentId) : undefined, eq(tasks.assigneeAgentId, agent.id), eq(tasks.executorAgentId, agent.id));
         const open = await this.db
           .select()
           .from(tasks)
-          .where(and(eq(tasks.companyId, this.job.companyId), notInArray(tasks.status, [...CLOSED])))
-          .orderBy(desc(tasks.number))
-          .limit(200);
-        const holds = (t: Task) => t.assigneeAgentId === agent.id;
-        const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
-        return json(await taskLines(this.ctx, mine.slice(0, 40), t => sees(agent, t)));
+          .where(and(eq(tasks.companyId, this.job.companyId), notInArray(tasks.status, [...CLOSED]), visible))
+          .orderBy(desc(sql`${tasks.assigneeAgentId} is not distinct from ${agent.id}`), desc(tasks.number))
+          .limit(40)
+          .offset(offset);
+        return json(await taskLines(this.ctx, open, t => sees(agent, t)));
       },
     );
   }
@@ -390,7 +379,7 @@ class TaskTools {
         inputSchema: { task: Ref },
       },
       async ({ task: ref }) =>
-        this.find(ref).then(
+        this.find(ref, true).then(
           async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
@@ -401,15 +390,29 @@ class TaskTools {
     this.server.registerTool(
       'wait_for',
       {
-        description: 'Waits on a task you hold for an employee or an external event. Name what you need in one line and give an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
-        inputSchema: { task: Ref, ...WaitInput.shape },
+        description: 'Asks a named person for the missing judgment or information on a task you hold. The task waits for their answer, then you are woken. Use track_work for an operation in progress. Diagnose and repair failed work. For a missing sign-in, ask for a vault entry by name.',
+        inputSchema: { task: Ref, person: HumanRecipient, reason: z.string().trim().min(1), plan: AskPlan },
       },
-      async ({ task: ref, ...input }) => this.run(async () => {
-        const heard = await lastEventOf(this.ctx, this.job.agentId);
+      async ({ task: ref, person, reason, plan }) => this.run(async () => {
         const { task } = await this.find(ref);
-        this.plain(task, input.reason);
-        const moved = await waitFor(this.ctx, this.job.agentId, task.id, input, undefined, heard);
-        return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
+        this.plain(task, reason);
+        const recipient = await this.questionRecipient(person);
+        const moved = await ask(this.ctx, this.job.agentId, task.id, { kind: 'question', text: reason, recipientPersonId: recipient, ...(plan ? { plan } : {}) });
+        await recordQuestion(this.ctx, this.job, task, { kind: 'question', text: reason, recipient });
+        return { text: `Asked. #${task.number} waits for the person's answer.`, moved };
+      }),
+    );
+    this.server.registerTool(
+      'track_work',
+      {
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. You will be woken to check its progress. Diagnose and repair a failed operation.',
+        inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }) },
+      },
+      async ({ task: ref, work, nextCheck }) => this.run(async () => {
+        const { task } = await this.find(ref);
+        this.plain(task, work);
+        const moved = await trackWork(this.ctx, this.job.agentId, task.id, work, nextCheck);
+        return { text: `Work is in progress on #${task.number}. Next check at ${moved.task.externalWait!.until}.`, moved };
       }),
     );
   }
@@ -453,6 +456,12 @@ class TaskTools {
     );
   }
 
+  private async questionRecipient(person: string): Promise<string> {
+    const [recipient] = await this.db.select({ id: people.id }).from(people).where(and(eq(people.id, person), eq(people.companyId, this.job.companyId), eq(people.status, 'active'), eq(people.isAgent, false)));
+    if (!recipient) throw refuse(400, 'task_invalid', 'Name an active person in this company.');
+    return recipient.id;
+  }
+
   private registerAskPerson(): void {
     this.server.registerTool(
       'ask_person',
@@ -463,8 +472,7 @@ class TaskTools {
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
-          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself. ` +
-          'Apart from an approval the department requires, ask a person for an irreversible deletion (the CEO says yes to it) or for what only they know: their own password or account, their taste in a text the first time, a real choice between directions. Never ask anyone to do, add or confirm what you or your department can do, and outbound work follows the rules its department explicitly sets.',
+          'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO’s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),
@@ -473,26 +481,31 @@ class TaskTools {
           options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
           link: z.url({ protocol: /^https$/ }).max(500).optional(),
           plan: AskPlan,
+          person: HumanRecipient.optional(),
           topic: z
             .enum(DECISION_TOPICS)
             .optional()
             .describe(
-              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; repositories or release for your department\'s repository and releases, which its owner answers, or the CEO when it has none; people, access, subscriptions, machines, public_link or updates for what only the CEO decides: people and their access, the company\'s plans, machines and links. Name it on every question; without it the CEO answers.',
+              'What the question is about. For people, access, subscriptions, machines, public_link or updates, name the person who can supply the answer. For department work, use task or employee. For its repository or release, use repositories or release.',
             ),
         },
       },
-      async ({ task: ref, question, commit, images, options, link, topic, plan }) =>
+      async ({ task: ref, question, commit, images, options, link, topic, plan, person }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
           const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
           if (reply) return reply;
-          await this.underQuestionCap();
+          if (commit && person) throw refuse(400, 'task_invalid', 'The department’s commit rule determines who approves it.');
+          const recipient = person ? await this.questionRecipient(person) : undefined;
+          if (!recipient && !commit && topic && !['task', 'employee', 'repositories', 'release'].includes(topic)) {
+            throw refuse(400, 'task_invalid', 'Resolve the request through the department or the orchestrator. If only a person can answer, name them.');
+          }
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
           const { text, told } = await questionWords(this.db, task, question, commit);
-          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
-          await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic });
+          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
+          await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
         }),
     );
@@ -577,7 +590,6 @@ class TaskTools {
       },
       async input =>
         this.run(async () => {
-          await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
           const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
@@ -636,7 +648,7 @@ class TaskTools {
     );
   }
 
-  private registerCreateTask(): void {
+  registerCreateTask(): void {
     this.server.registerTool(
       'create_task',
       {
@@ -645,8 +657,8 @@ class TaskTools {
       },
       async input =>
         this.run(async () => {
-          const agent = await this.me();
-          await this.underCap(agent);
+          const me = await this.me();
+          const agent = this.boss ? { ...me, departmentId: this.job.departmentId } : me;
           const executor = await this.member(agent, input.executor);
           const architect = await this.optionalMember(agent, input.architectAgentId);
           if (input.independentPart) await this.member(agent, input.independentPart.executor);

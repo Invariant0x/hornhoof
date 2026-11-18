@@ -130,6 +130,26 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitA
   return { task: row, wakes: [] };
 }
 
+/* A scheduled observation of active work uses the existing durable check timer. */
+export function trackWork(ctx: Ctx, agentId: string, taskId: string, reason: string, nextCheck: string): Promise<Moved> {
+  return onAgent(ctx, agentId, async () => {
+    const task = await loadTask(ctx.db, taskId);
+    requireHolder(task, agentId);
+    if (task.status === 'blocked' || task.status === 'waiting') throw refuse(409, 'task_invalid', 'Resolve the blocker or human question before recording work in progress.');
+    const now = ctx.clock();
+    const until = new Date(nextCheck);
+    if (until.getTime() <= now) throw refuse(400, 'task_invalid', 'Set the next check in the future.');
+    const externalWait: ExternalWait = { reason, since: new Date(now).toISOString(), until: until.toISOString(), work: true };
+    const actor = { agentId };
+    const row = await move(ctx, task, { status: task.status === 'open' ? 'working' : task.status, externalWait, silent: 0 }, {
+      kind: 'updated', actor, text: `Work in progress: ${reason}. Next check at ${externalWait.until}.`, data: { externalWait },
+    }, async tx => {
+      if (task.externalWait?.operation) await endSourceWait(tx, { taskId, kind: 'external', sourceKey: waitForSourceKey(task.externalWait.operation), sourceRevision: 0, outcome: 'superseded', proofRef: 'track_work', actor });
+    });
+    return { task: row, wakes: [] };
+  });
+}
+
 /* The holder says its wait is over, having read what it waited for. Nobody is told: it goes on in the turn it is in. */
 export function endOwnWait(ctx: Ctx, agentId: string, taskId: string): Promise<{ task: Task; reason: string }> {
   return onAgent(ctx, agentId, async () => {

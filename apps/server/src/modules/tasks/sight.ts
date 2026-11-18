@@ -58,7 +58,7 @@ const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number][
 const shownTime = (viewer: AgentViewer, time: TaskLine['time'], externalWait: TaskLine['externalWait']): TaskLine['time'] => ({
   ...time, waitsOn: time.waitsOn.map(w => {
     const hidden = !externalWait && (w.kind === 'external' || w.event === 'ceo' || w.until !== undefined);
-    return { ...w, who: shownWho(viewer, w.who), ...(hidden ? { reason: w.kind === 'run' || w.kind === 'work' ? w.reason : null, until: undefined } : {}) };
+    return { ...w, who: shownWho(viewer, w.who), ...(hidden ? { reason: !w.nextCheck && (w.kind === 'run' || w.kind === 'work') ? w.reason : null, until: undefined, nextCheck: undefined } : {}) };
   }),
 });
 

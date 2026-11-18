@@ -3,8 +3,9 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, taskRoutes, taskWaits, teams } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, requests, subscriptions, tasks, taskRoutes, taskWaits, teams } from '../src/db/schema.js';
 import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
 import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
@@ -12,7 +13,7 @@ import { minuteRound } from '../src/modules/agents/timers.js';
 import { keepWakes, wakesLeft } from '../src/modules/tasks/outbox.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { discardStaleTurn, taskWakeOf } from '../src/modules/tasks/wake-state.js';
-import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
+import { checkExternalWaits, lastEventOf, waitFor } from '../src/modules/tasks/external-wait.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, echelonsTurn, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
@@ -49,9 +50,16 @@ async function fixture(env?: NodeJS.ProcessEnv) {
   const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true, small: true, paths: ['logic/totals.ts'] })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const wait = async (ref: number | string, reason: string, until: string, agentId = worker!.id) => {
-    const client = await tools(agentId);
-    expect((await client.listTools()).tools.map(t => t.name)).toContain('wait_for');
-    return await client.callTool({ name: 'wait_for', arguments: { task: ref, reason, until } }) as { isError?: boolean; content: { text: string }[] };
+    await tools(agentId);
+    const row = (await db.select().from(tasks).where(and(eq(tasks.companyId, company!.id), typeof ref === 'number' ? eq(tasks.number, ref) : eq(tasks.id, ref))))[0];
+    if (!row) return { isError: true, content: [{ text: 'Unknown task.' }] };
+    try {
+      await waitFor(app.ctx, agentId, row.id, { reason, until });
+      return { isError: false, content: [] };
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      return { isError: true, content: [{ text: err.message }] };
+    }
   };
   const messageState = async (task: Awaited<ReturnType<typeof read>>) => ({ ...taskWakeOf(task, { why: 'comment' }, routeSnapshot(await routeOf(db, task), task.assigneeAgentId)), why: 'message' });
   const atReview = async (task: Awaited<ReturnType<typeof read>>) => {
@@ -184,6 +192,28 @@ describe('the record of a wait_for', () => {
 });
 
 describe('external task wait', () => {
+  it('waits for a named person through their question card, with no fixed deadline', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const [owner] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    const result = await (await c.tools()).callTool({ name: 'wait_for', arguments: { task: task.number, person: owner!.id, reason: 'Which photo matches your brief?' } });
+    expect(result.isError).toBeFalsy();
+    expect(await c.read(task.id)).toMatchObject({ status: 'waiting', externalWait: null });
+    const response = await c.app.inject({ url: '/api/requests', ...as(c.owner) });
+    expect(response.json().requests).toMatchObject([{ ownerPersonId: owner!.id, kind: 'question' }]);
+  });
+
+  it('rejects work as a human wait and records an active operation with its next check', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const client = await c.tools();
+    const nextCheck = new Date(c.ctx.clock() + 24 * 3_600_000).toISOString();
+    expect((await client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Build', until: nextCheck, on: { kind: 'employee', employee: c.peer.id } } })).isError).toBe(true);
+    expect((await client.callTool({ name: 'track_work', arguments: { task: task.number, work: 'Build running on CI', nextCheck } })).isError).toBeFalsy();
+    expect(await c.read(task.id)).toMatchObject({ status: 'working', externalWait: { work: true, until: nextCheck } });
+    expect(await c.db.select().from(requests)).toEqual([]);
+  });
+
   it('stores the holder wait for two hours without changing the workflow status', async () => {
     const c = await fixture();
     const task = await c.task();
@@ -529,13 +559,16 @@ describe('external task wait', () => {
     expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
   });
 
-  it('keeps a concurrent task message visible when wait_for races with it', async () => {
+  it('keeps a concurrent task message visible when a legacy wait races with it', async () => {
     const c = await messaging();
     const task = await c.task();
-    const worker = await c.tools();
+    await c.tools();
     const head = await c.tools(c.head.id);
+    const heard = await lastEventOf(c.ctx, c.worker.id);
     const [, sent] = await Promise.all([
-      worker.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Images', until: new Date(Date.now() + 3_600_000).toISOString() } }),
+      waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: new Date(c.ctx.clock() + 3_600_000).toISOString() }, new Date(c.ctx.clock()), heard).catch((err: unknown) => {
+        if (!(err instanceof ApiError) || err.reason !== 'task_invalid') throw err;
+      }),
       head.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } }),
     ]);
     expect(sent.isError).toBeFalsy();

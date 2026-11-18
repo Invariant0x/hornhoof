@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -24,7 +24,7 @@ import { registerMergeTools } from '../merge/tools.js';
 import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
-import { registerHolderTools, registerTaskTools } from '../tasks/tools.js';
+import { registerDepartmentTaskTools, registerHolderTools, registerTaskTools } from '../tasks/tools.js';
 import { registerTrackerTools } from '../tracker/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
@@ -96,6 +96,10 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
   /* A department's own tools go for the department the orchestrator names. */
   shelf?.shelve(true);
   registerBriefingTool(server, ctx, job);
+  if (shelf) {
+    registerDepartmentTaskTools(server, ctx, job);
+    registerTrackerTools(server, ctx, job, new Set(['tracker']));
+  }
   shelf?.shelve();
   const grants = new Set(shelf ? GRANTS : job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
   registerWatchTools(server, ctx, job, grants);
@@ -122,7 +126,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
     'propose_structure',
     {
       description:
-        'Shows the CEO a card with departments to create or change and returns at once. The CEO decides with one click; wait for their answer. ' +
+        'Prepares an optional preview of department changes. Use build_structure to apply a requested change directly, with or without a preview. ' +
         'brief: two to five sentences about the company. Each item is a new department { template, name?, checked, note, products?, staff? } ' +
         '(name only when a template is used a second time; staff true brings the people of its template with it, each on the plan and model its role asks for, or waiting for a plan) or a change { department, checked, note, products?, remove? }. A newer card replaces the older one.',
       inputSchema: Proposal.shape,
@@ -131,13 +135,13 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
       const problem = await checkItems(ctx.db, job.companyId, items);
       if (problem) return say(problem, true);
       const proposal = await ctx.db.transaction(async tx => {
-        await tx.update(proposals).set({ status: 'dismissed' }).where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')));
-        const [row] = await tx.insert(proposals).values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, brief, items }).returning({ id: proposals.id });
+        await tx.update(proposals).set({ status: 'dismissed' }).where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'structure'), inArray(proposals.status, ['draft', 'pending'])));
+        const [row] = await tx.insert(proposals).values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, brief, items, status: 'draft' }).returning({ id: proposals.id });
         return row!;
       });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, brief, items } });
       ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
-      return say('Shown to the CEO. Wait for their answer.');
+      return say(`Prepared structure preview ${proposal.id}. Apply the selected changes with build_structure and this proposalId.`);
     },
   );
   server.registerTool(
@@ -145,7 +149,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
     {
       description:
         'What a department can be staffed with: the department with its products and employees, its roster of roles with their skills ' +
-        '(locked ones every employee keeps), and the subscriptions and API keys that may serve it with the models each can run. Call it before propose_staff.',
+        '(locked ones every employee keeps), and the subscriptions and API keys that may serve it with the models each can run. Use it to prepare hire.',
       inputSchema: { department: z.uuid() },
     },
     async ({ department }) => {
@@ -158,7 +162,7 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
     'propose_staff',
     {
       description:
-        'Shows the CEO a card with employees to hire into one department and returns at once. The CEO unticks, changes models or subscriptions, and decides with one click; wait for their answer. ' +
+        'Prepares an optional preview of staffing changes. Use hire to carry out the department’s staffing decision directly. ' +
         'brief: what the department will do first, in one to three sentences. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off }, checked }: ' +
         'role and product ids from staffing_options, model one the subscription runs (left out for Default), skills only where they differ from the role. A newer card for the same department replaces the older one. ' +
         'The roles staffing_options marks required are always on the card, ticked; a role with a holder is not hired again, so propose what the department needs on top.',
@@ -175,16 +179,16 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
         await tx
           .update(proposals)
           .set({ status: 'dismissed' })
-          .where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')));
+          .where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), inArray(proposals.status, ['draft', 'pending'])));
         const [row] = await tx
           .insert(proposals)
-          .values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'staff', departmentId: dept.id, brief, items: lines })
+          .values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'staff', departmentId: dept.id, brief, items: lines, status: 'draft' })
           .returning({ id: proposals.id });
         return row!;
       });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, kind: 'staff', department: dept.id, brief, people: lines } });
       ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
-      return say('Shown to the CEO. Wait for their answer.');
+      return say(`Prepared staffing preview ${proposal.id}. Apply the selected changes with hire and this proposalId.`);
     },
   );
   registerControlTools(server, ctx, app, job);
