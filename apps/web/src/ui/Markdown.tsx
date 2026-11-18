@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+import { useT } from '../i18n';
 
 type Block = { kind: 'p' | 'ul' | 'ol' | 'h2' | 'h3' | 'code'; lines: string[] };
 
@@ -127,4 +128,59 @@ function renderBlock(b: Block, key: number): ReactNode {
 /* An agent's answer or Markdown material: headings, paragraphs, lists, fenced code, bold, inline code, and safe links. */
 export function Markdown({ text }: { text: string }) {
   return <div className="md">{blocks(text).map(renderBlock)}</div>;
+}
+
+/* End the excerpt at a word or an entire inline token so links and formatting stay intact. */
+function previewLine(line: string, room: number): string {
+  let preview = '';
+  for (const [i, part] of line.split(INLINE_SPLIT).entries()) {
+    const words = i % 2 === 1 ? [part] : part.match(/\S+\s*|\s+/g) ?? [];
+    for (const word of words) {
+      if (preview.length + word.trimEnd().length > room) return preview.trimEnd();
+      preview += word;
+    }
+  }
+  return preview.trimEnd();
+}
+
+function previewBlocks(content: Block[]): Block[] {
+  const preview: Block[] = [];
+  let rows = 3;
+  let room = 160;
+  for (const block of content) {
+    const lines: string[] = [];
+    preview.push({ kind: block.kind, lines });
+    for (const line of block.lines) {
+      if (!rows || room <= 0) return preview.filter(b => b.lines.length);
+      if (line.length > room) {
+        const first = block.kind === 'code' ? '' : previewLine(line, room);
+        if (first) lines.push(first);
+        return preview.filter(b => b.lines.length);
+      }
+      lines.push(line);
+      rows--;
+      room -= line.length;
+    }
+  }
+  return content;
+}
+
+export function FoldedMarkdown({ text }: { text: string }) {
+  const t = useT();
+  const id = useId();
+  const [expanded, setExpanded] = useState(false);
+  const content = blocks(text);
+  const preview = previewBlocks(content);
+  if (!content.length) return null;
+
+  return (
+    <div className="tp-body">
+      <div className="md" id={id} dir="auto">{(expanded ? content : preview).map(renderBlock)}</div>
+      {preview !== content && (
+        <button className="t-link tp-disclosure" type="button" aria-controls={id} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? t.tasks.showLess : t.tasks.moreDescription}
+        </button>
+      )}
+    </div>
+  );
 }

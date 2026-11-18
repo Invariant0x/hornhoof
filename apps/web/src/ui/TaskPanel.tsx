@@ -1,128 +1,26 @@
-import { PriorityWord } from './TrackerMarks';
-import { StateWord, WaitLine } from './TaskActivity';
-import { HIDDEN } from '@hornhoof/protocol/redaction';
-import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Messages } from '../i18n';
-import { mapPeople, useOrg } from '../org';
-import { cutLine } from '../restarts';
+import { HIDDEN } from '@hornhoof/protocol/redaction';
+import { errorText, useLanguage, useT } from '../i18n';
+import { useOrg } from '../org';
+import { routePath } from '../routes';
 import { placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
-import { humanStatus, isClosed, matchesExternalWait, taskWaits } from '../task-tree';
-import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
+import { humanStatus, isClosed } from '../task-tree';
+import type { GoalView, Org, TaskDetail, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { TaskEdit } from './TrackerForms';
-import { dueText, localeOf, momentText, sinceSeconds, spanText, trackerLine, waitClass, waitLabel } from './tracker-words';
-import { OfflineMachine } from './OfflineMachine';
-import { Markdown } from './Markdown';
+import { dueText, sinceSeconds, spanText } from './tracker-words';
+import { FoldedMarkdown, Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
 import { HideSecret } from './HideSecret';
-import { resetDuration } from './reset';
 import { PhoneRecordings } from './PhoneRecordings';
-
-const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
-
-/* Who wrote a log line; the orchestrator answering for a person says for whom. */
-function authorOf(t: Messages, e: TaskLogLine): string {
-  if (e.by?.for) return t.tasks.actedFor(t.window.orchestrator, e.by.for.name);
-  return e.by?.name ?? t.window.hornhoof;
-}
-
-function eventKey(e: TaskLogLine): string {
-  if (e.kind === 'verdict') return field(e.data, 'pass') ? 'passed' : 'sentBack';
-  if (e.kind === 'report') return field(e.data, 'done') ? 'reported' : 'notDone';
-  if (e.kind === 'call') return field(e.data, 'judge') ? 'judgeCall' : 'call';
-  return e.kind;
-}
-
-/* A log line in words: who did what, with its text and, for work handed in, the evidence. */
-function eventTitle(t: Messages, e: TaskLogLine): string {
-  const by = authorOf(t, e);
-  const ev = t.tasks.events as Record<string, ((who: string) => string) | undefined>;
-  return ev[eventKey(e)]?.(by) ?? by;
-}
-
-/* Hornhoof's line about a turn a node restart cut off, in the person's language, from what it kept: where, when and why,
-   then the retry, or who in Operations was called when the retry was cut off too. Its English text is for the agents. */
-function cutText(t: Messages, data: unknown, when: (at: string) => string): string | null {
-  const [job, cause, at, node] = [field(data, 'job'), field(data, 'cause'), field(data, 'at'), field(data, 'node')];
-  if (typeof job !== 'string' || typeof cause !== 'string' || typeof at !== 'string') return null;
-  const named = field(node, 'id') ? String(field(node, 'name')) : null;
-  const [retry, called] = [field(data, 'retry'), field(data, 'called')];
-  const then =
-    field(data, 'first') !== undefined
-      ? called
-        ? t.restarts.called(String(field(called, 'name')))
-        : t.restarts.nobody
-      : retry
-        ? t.restarts.retry(Number(field(retry, 'n')), Number(field(retry, 'of')))
-        : t.restarts.notRetried;
-  return `${cutLine(t, { node: named, cause, job }, when(at))} ${then}`;
-}
-
-/* Hornhoof's line about a turn whose machine it cannot reach, and about that machine coming back, in the person's
-   language. Its English text is for the agents. */
-function awayText(t: Messages, e: TaskLogLine, when: (at: string) => string): string | null {
-  const [stage, host, since] = [field(e.data, 'stage'), field(e.data, 'host'), field(e.data, 'since')];
-  const machine = typeof host === 'string' && host ? host : null;
-  if (stage === 'back') return t.tasks.away.back(machine);
-  if (stage === 'ended') return t.tasks.away.ended(machine);
-  return stage === 'away' && typeof since === 'string' ? t.tasks.away.gone(machine, when(since)) : null;
-}
-
-/* How a one-shot call ended and how long it took, with its verdict when it gave one. */
-function callText(t: Messages, e: TaskLogLine): string | null {
-  const [n, judge, status, verdict] = [field(e.data, 'number'), field(e.data, 'judge'), field(e.data, 'status'), field(e.data, 'verdict')];
-  if (typeof n !== 'number') return null;
-  const [from, to] = [field(e.data, 'startedAt'), field(e.data, 'finishedAt')];
-  const took = typeof from === 'string' && typeof to === 'string' ? resetDuration(t, Date.parse(to) - Date.parse(from)) : null;
-  const done = status === 'done';
-  const line = judge ? (done ? t.tasks.calls.judgeAnswered(took) : t.tasks.calls.judgeFailed(took)) : done ? t.tasks.calls.answered(n, took) : t.tasks.calls.failed(n, took);
-  if (!verdict || typeof verdict !== 'object') return line;
-  const reason = field(verdict, 'reason');
-  return `${line} ${field(verdict, 'pass') ? t.tasks.calls.passed : t.tasks.calls.notPassed}${typeof reason === 'string' && reason ? ` ${reason}` : ''}`;
-}
-
-/* What a one-shot call was given and what it answered, as written. */
-function CallParts({ data }: { data: unknown }) {
-  const t = useT();
-  const parts = [[t.tasks.calls.brief, field(data, 'brief')], [t.tasks.calls.input, field(data, 'input')], [t.tasks.calls.answer, field(data, 'result')]] as const;
-  return (
-    <>
-      {parts.map(([name, text]) => (typeof text === 'string' && text ? <LogParagraph key={name} text={text} fullRef={null} prefix={`${name}: `} /> : null))}
-    </>
-  );
-}
-
-function skippedText(t: Messages, e: TaskLogLine): string {
-  const wake = field(e.data, 'wake');
-  if (typeof wake !== 'string') return e.text;
-  const run = t.tasks.skippedRuns[wake] ?? t.tasks.skippedRuns.task!;
-  const text = t.tasks.skippedRun(authorOf(t, e), run);
-  const job = field(e.data, 'job');
-  return typeof job === 'string' ? `${text} ${t.tasks.skippedJob(job)}` : text;
-}
-
-function obsoleteText(t: Messages, e: TaskLogLine): string {
-  const wake = field(e.data, 'wake');
-  if (typeof wake !== 'string') return e.text;
-  const run = t.tasks.skippedRuns[wake] ?? t.tasks.skippedRuns.task!;
-  return t.tasks.obsoleteRun(authorOf(t, e), run);
-}
-
-/* System log lines use the person's language; employees' own words stay as they wrote them. */
-const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string) => string) => string | null> = {
-  wake_skipped: skippedText,
-  wake_obsolete: obsoleteText,
-  interrupted: (t, e, when) => cutText(t, e.data, when),
-  away: awayText,
-  call: callText,
-};
-const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => field(e.data, 'secretHidden') === true ? t.tasks.hideSecret.done : systemText[e.kind]?.(t, e, when) || e.text;
+import { FullTaskLog, ShortTaskLog } from './TaskHistory';
+import { PriorityWord } from './TrackerMarks';
+import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
@@ -133,39 +31,21 @@ type Leads = { onOpenGoal?: (id: string) => void; onGraph?: (root: { task: strin
 function WorkLabels({ task }: { task: TaskDetail }) {
   const t = useT();
   const labels = [task.workKind && t.tasks.workKinds[task.workKind], task.riskClass && t.tasks.riskLine(t.tasks.riskClasses[task.riskClass])].filter(Boolean);
-  return labels.length > 0 && <p className="muted tp-kind">{labels.join(', ')}</p>;
+  return labels.length > 0 && <p className="muted">{labels.join(', ')}</p>;
 }
 
-function TaskHeader({ task, org, asksYou }: { task: TaskDetail; org: Org | null; asksYou: boolean }) {
+function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void; inline?: boolean }) {
   const t = useT();
-  const turnText = task.turn !== null ? t.tasks.turn(task.turn) : null;
-  const meta = [placeName(t, org, task.department), task.product?.name, turnText].filter(Boolean).join(' / ');
-  return (
-    <header className="ac-head">
-      <p className="muted tp-type">{task.parentId ? t.tracker.card.kinds.subtask : t.tracker.card.kinds.task}</p>
-      <h3>{task.title}</h3>
-      <p className="muted">{meta}</p>
-      <WorkLabels task={task} />
-      <p className="tp-state">
-        <StateWord status={humanStatus(task, asksYou)} />
-        {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
-      </p>
-      {task.assigneeOffline && <OfflineMachine offline={task.assigneeOffline} />}
-      {task.paused && <p className="muted">{t.tasks.pausedLine(task.paused.reason)}</p>}
-      {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
-    </header>
-  );
-}
+  const requests = inline ? waiting.requests.filter(request => request.canAnswer) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
+  if (requests.length === 0) return null;
+  const heading = inline ? t.tasks.waitingHere : t.tasks.questions;
 
-function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void }) {
-  const t = useT();
-  if (waiting.requests.length === 0) return null;
-  const heading = waiting.requests.some(request => request.canAnswer) ? t.tasks.waitingHere : t.tasks.questions;
   return (
-    <section className="tp-wait" aria-label={heading}>
-      <h4>{heading}</h4>
+    <section className={inline ? 'tp-wait tp-question' : 'tp-wait'} aria-label={heading}>
+      {!inline && <h4>{heading}</h4>}
       <Requests
-        requests={waiting.requests}
+        requests={requests}
+        inline={inline}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();
@@ -174,30 +54,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Wait
         onOpenAgent={waiting.onOpenAgent}
         placeName={p => placeName(t, org, p)}
       />
-      {wordsAnswer(waiting.requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
-    </section>
-  );
-}
-
-type RelatedItem = { id: string; number: number; title: string; status: TaskStatus };
-
-function TaskRelatedSection({ heading, items, onOpen }: { heading: string; items: RelatedItem[]; onOpen: (id: string) => void }) {
-  const t = useT();
-  if (items.length === 0) return null;
-  return (
-    <section aria-label={heading}>
-      <h4>{heading}</h4>
-      <ul className="tp-subs">
-        {items.map(item => (
-          <li key={item.id}>
-            <button className="linkish" type="button" onClick={() => onOpen(item.id)}>
-              #{item.number} {item.title}
-            </button>
-            <small>{item.status === 'done' ? t.tasks.states.done : t.tracker.groups[humanStatus(item)]}</small>
-            <WaitLine task={item} />
-          </li>
-        ))}
-      </ul>
+      {!inline && wordsAnswer(waiting.requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
     </section>
   );
 }
@@ -243,35 +100,6 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
   );
 }
 
-const evidenceOf = (data: unknown): string | null => {
-  const raw = field(data, 'evidence');
-  return typeof raw === 'string' && raw ? raw : null;
-};
-
-/* The words of the tracker's own lines: a status in the person's language, and a person's name by id. */
-type Words = { states: Record<string, string>; names: (id: string) => string | undefined };
-
-/* A log line in words: who did what, with its text and, for work handed in, the evidence. The tracker's own lines, a status
-   change, an edit or work passed on to someone else, say it all in their title. */
-export function LogEntry({ entry, when, words, task, onChanged }: { entry: TaskLogLine; when: (at: string) => string; words: Words; task?: TaskDetail; onChanged?: () => void }) {
-  const t = useT();
-  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names, 'task');
-  const said = own !== null || entry.kind === 'created' ? null : lineText(t, entry, when) || null;
-  const evidence = evidenceOf(entry.data);
-
-  return (
-    <li className={entry.kind}>
-      <span className="tp-ev">
-        {own ?? eventTitle(t, entry)} {entry.by?.byOrchestrator && <><small>{t.tasks.byOrchestrator}</small> </>}<time dateTime={entry.at}>{when(entry.at)}</time>
-      </span>
-      <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
-      <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
-      {task?.mayHideSecret && onChanged && (said || evidence) && <HideSecret taskId={task.id} onChanged={onChanged} />}
-      {entry.kind === 'call' && <CallParts data={entry.data} />}
-    </li>
-  );
-}
-
 /* Where the task belongs: the goals above it, from the company's, and the task it is part of. Each opens its own card. */
 export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
   const t = useT();
@@ -304,50 +132,86 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
   return <span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span>;
 }
 
-/* Who answers for it, who does it, its pipeline and stage, its date, and its time in words. */
-function TaskFacts({ task, asksYou }: { task: TaskDetail; asksYou: boolean }) {
+function TaskFacts({ task, asksYou, onOpen }: { task: TaskDetail; asksYou: boolean; onOpen: (id: string) => void }) {
   const t = useT();
   const { language } = useLanguage();
-  const { pipelines } = usePipelines(!!task.pipelineId);
   const words = t.tracker.card;
+  const due = dueText(t, language, task);
+  const related = [
+    ...(task.parent ? [{ ...task.parent, relation: words.path }] : []),
+    ...task.after.map(item => ({ ...item, relation: words.waitsFor })),
+    ...(task.neededFor ?? []).map(item => ({ ...item, relation: words.neededFor })),
+    ...task.subtasks.map(item => ({ ...item, relation: t.tasks.subtasks })),
+  ];
+
+  return (
+    <div className="tp-facts muted" role="group" aria-label={words.facts}>
+      <span>{t.tracker.groups[humanStatus(task, asksYou)]}</span>{' · '}
+      <span>{words.executor}: <bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></span>{' · '}
+      <span>{words.responsible}: <bdi>{task.responsible?.name ?? t.tracker.nobody}</bdi></span>{' · '}
+      {due && <><span>{words.due}: <bdi>{due.text}</bdi></span>{' · '}</>}
+      <bdi dir="ltr">#{task.number}</bdi>
+      {related.map(item => (
+        <Fragment key={item.id}>
+          {' · '}<a href={routePath({ kind: 'tasks', id: item.id })} title={item.relation} onClick={event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onOpen(item.id);
+          }}><bdi>#{item.number} {item.title}</bdi></a>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function TaskDetails({ task, waiting, leads, onOpen, onChanged }: { task: TaskDetail; waiting: Waiting; leads: Leads; onOpen: (id: string) => void; onChanged: () => void }) {
+  const t = useT();
+  const { org } = useOrg();
+  const { goals } = useGoals(!!task.goal);
+  const { pipelines } = usePipelines(!!task.pipelineId);
   const pipeline = pipelines?.find(p => p.id === task.pipelineId);
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
-  const due = dueText(t, language, task);
+  const words = t.tracker.card;
+  const meta = [placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ');
   const time = task.time;
-  const now = Date.now();
-  const waits = taskWaits(task, now);
-  const external = task.externalWait;
-  const setter = task.assignee?.name;
-  const until = external && new Date(external.until).toLocaleTimeString(localeOf(language), { hour: '2-digit', minute: '2-digit' });
-  const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
+  const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
+
   return (
-    <dl className="facts tp-facts" aria-label={words.facts}>
-      <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
-      <Fact name={words.executor}>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</Fact>
-      {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
-      <Fact name={t.tracker.priority.label}><PriorityWord task={task} /></Fact>
-      {due && <Fact name={words.due}><DueDay due={due} /></Fact>}
-      {(time || waits.length > 0) && (
-        <Fact name={words.time}>
-          {time && words.inStatus(t.tracker.groups[humanStatus(task, asksYou)], spanText(t, sinceSeconds(time.inStatusSince, now)))}
-          {time && time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
-          {waits.map((wait, i) => {
-            const recorded = external && matchesExternalWait(wait, external) ? external : null;
-            return (
-              <Fragment key={i}>
-                <small className={`tr-wait ${waitClass(wait)}`} dir="auto">{waitLabel(t, task, wait, now, language, asksYou && wait.event !== 'ceo')}</small>
-                {recorded && (wait.kind === 'run' || wait.kind === 'work') && <small dir="auto">{recorded.reason}</small>}
-                {recorded && !wait.failure && wait.event !== 'time' && deadline && <small dir="auto">{deadline}</small>}
-              </Fragment>
-            );
-          })}
-        </Fact>
+    <>
+      <CardPath goals={goalChain(task.goal?.id, goals)} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
+      {meta && <p className="muted">{meta}</p>}
+      <WorkLabels task={task} />
+      {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
+      {task.why && (
+        <section className="tp-why" aria-label={words.why}>
+          <h4>{words.why}</h4>
+          <p dir="auto">{task.why}</p>
+        </section>
       )}
-    </dl>
+      <dl className="facts" aria-label={words.facts}>
+        <Fact name={t.tracker.priority.label}><PriorityWord task={task} /></Fact>
+        {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
+        {time && <Fact name={words.time}>
+          {words.inStatus(t.tracker.groups[humanStatus(task, waiting.requests.some(request => request.canAnswer))], spanText(t, sinceSeconds(time.inStatusSince)))}
+          {time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
+        </Fact>}
+      </dl>
+      <TaskWorkflow workflow={task.echelons} task={task} org={org} />
+      <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
+      <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
+      <PhoneRecordings taskId={task.id} />
+      <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
+      <TaskQuestionsSection requests={task.requests.filter(request => !waiting.requests.some(live => live.id === request.id))} />
+      {masked && <p className="muted"><a href="/settings/passwords">{t.tasks.hideSecret.vault}</a></p>}
+    </>
   );
 }
 
 const LINK = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
+
+const hasMaterials = (task: TaskDetail) => !!task.files?.length || task.log.some(entry =>
+  (entry.kind === 'report' && entry.text) || (entry.kind === 'comment' && entry.text.match(LINK)),
+);
 
 /* What the work brought: its files, the last report on it, and the links people and employees left in comments. */
 function Materials({ task }: { task: TaskDetail }) {
@@ -382,81 +246,77 @@ export function goalChain(id: string | null | undefined, goals: GoalView[] | und
   return graphPath({ goal: id }, goals ?? [], []);
 }
 
-function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting; leads: Leads }) {
+type View = 'menu' | 'details' | 'materials' | 'log' | 'edit' | 'comment' | 'cancel' | 'pause' | 'secret';
+
+function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onClose: () => void; active: boolean; onChanged: () => void; waiting: Waiting; leads: Leads }) {
   const t = useT();
-  const { language } = useLanguage();
   const { org } = useOrg();
-  const { goals } = useGoals(!!task.goal);
-  const [editing, setEditing] = useState(false);
-  const when = (at: string) => momentText(language, at);
-  const closed = isClosed(task);
-  const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
-  const people = mapPeople(org);
-  const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };
-  const { version, revision } = task;
+  const [view, setView] = useState<View | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const selection = useRef('');
+  const menuId = useId();
   const asksYou = waiting.requests.some(request => request.canAnswer);
-  const mayEdit = !!task.mayEdit && typeof version === 'number' && typeof revision === 'number';
+  const closeMenu = () => {
+    selection.current = '';
+    setView(null);
+    trigger.current?.focus();
+  };
+  function openMenu() {
+    if (task.mayHideSecret && !selection.current) selection.current = window.getSelection()?.toString() ?? '';
+    setView('menu');
+  }
+  useEscapeCloses(view ? closeMenu : onClose, active);
 
   return (
     <>
-      <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
-      <TaskHeader task={task} org={org} asksYou={asksYou} />
-      {task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} />}
-      {masked && <p className="muted"><a href="/settings/passwords">{t.tasks.hideSecret.vault}</a></p>}
-      <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
-      {task.why && (
-        <section className="tp-why" aria-label={t.tracker.card.why}>
-          <h4>{t.tracker.card.why}</h4>
-          <p dir="auto">{task.why}</p>
-        </section>
-      )}
-      <TaskFacts task={task} asksYou={asksYou} />
-      {(leads.onGraph || (mayEdit && !editing)) && (
-        <div className="entry-actions tp-leads">
-          {leads.onGraph && <button className="btn ghost" type="button" onClick={() => leads.onGraph!({ task: task.id })}>{t.tracker.card.graphFromHere}</button>}
-          {mayEdit && !editing && <button className="btn ghost" type="button" onClick={() => setEditing(true)}>{t.tracker.card.edit}</button>}
+      <header className="ac-head tp-head">
+        <div className="tp-title">
+          <h3 dir="auto">{task.title}</h3>
+          <button className="tp-menu-button" type="button" ref={trigger} aria-label={t.tasks.taskActions} aria-expanded={view !== null} aria-controls={view ? menuId : undefined}
+            onMouseDown={() => { if (!view && task.mayHideSecret) selection.current = window.getSelection()?.toString() ?? ''; }}
+            onClick={() => view ? closeMenu() : openMenu()}>
+            <span aria-hidden="true">…</span>
+          </button>
         </div>
-      )}
-      {mayEdit && editing && <TaskEdit task={{ ...task, version, revision }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} onReload={onChanged} />}
-      <TaskWorkflow workflow={task.echelons} task={task} org={org} />
-      <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
-      <TaskRelatedSection heading={t.tracker.card.waitsFor} items={task.after} onOpen={onOpen} />
-      <TaskRelatedSection heading={t.tracker.card.neededFor} items={task.neededFor ?? []} onOpen={onOpen} />
-      <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
+        <TaskFacts task={task} asksYou={asksYou} onOpen={onOpen} />
+      </header>
+      <TaskMenu id={menuId} task={task} view={view} selection={selection.current} onView={next => {
+        if (next !== 'secret') selection.current = '';
+        setView(next);
+      }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} leads={leads} />
       {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
-      {task.body && (
-        <section className="tp-body">
-          <h4>{t.tasks.details}</h4>
-          <Markdown text={task.body} />
-        </section>
-      )}
-      <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
-      <Materials task={task} />
-      <PhoneRecordings key={task.id} taskId={task.id} />
-      <TaskQuestionsSection requests={task.requests} />
-      <section>
-        <h4>{t.tasks.log}</h4>
-        <ol className="tp-log" aria-label={t.tasks.log}>
-          {task.log.map((e, i) => (
-            <LogEntry key={i} entry={e} when={when} words={words} task={task} onChanged={onChanged} />
-          ))}
-        </ol>
-      </section>
-      {closed ? null : <Actions task={task} onChanged={onChanged} />}
+      {task.body && <FoldedMarkdown text={task.body} />}
+      <ShortTaskLog task={task} asksYou={asksYou} />
+      <TaskWaitingSection inline waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
     </>
   );
 }
 
-/* A comment for the log, and cancelling the task with what is under it after asking. */
-function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void }) {
+function TaskMenu({ id, task, view, selection, onView, onClose, onOpen, onChanged, waiting, leads }: {
+  id: string; task: TaskDetail; view: View | null; selection: string; onView: (view: View) => void; onClose: () => void; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting; leads: Leads;
+}) {
   const t = useT();
   const [text, setText] = useState('');
-  const [asking, setAsking] = useState(false);
-  const [pausing, setPausing] = useState(false);
   const [why, setWhy] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const { version, revision } = task;
+  const mayEdit = task.mayEdit && typeof version === 'number' && typeof revision === 'number';
+  const mayAct = !isClosed(task);
+  const mayPause = mayAct && task.mayPause;
+  const canResume = mayPause && task.paused?.root === task.id;
+  const words = t.tracker.card;
+
+  useEffect(() => {
+    menu.current?.querySelector('button')?.focus();
+  }, [view]);
+
+  function done() {
+    onClose();
+    onChanged();
+  }
 
   async function run(action: () => Promise<unknown>) {
     if (sending.current) return;
@@ -466,10 +326,8 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
     try {
       await action();
       setText('');
-      setAsking(false);
-      setPausing(false);
       setWhy('');
-      onChanged();
+      done();
     } catch (err) {
       setFailure(err);
     } finally {
@@ -478,78 +336,79 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
     }
   }
 
+  function select(next: View) {
+    setFailure(null);
+    onView(next);
+  }
+
   function comment(e: FormEvent) {
     e.preventDefault();
     if (text.trim()) void run(() => api.post(`/api/tasks/${task.id}/comments`, { text: text.trim() }));
   }
 
+  function pause(paused: boolean, reason: string) {
+    void run(() => api.put(`/api/tasks/${task.id}/paused`, { paused, reason }));
+  }
+
+  if (!view) return null;
+  const back = () => select('menu');
   return (
-    <>
-      <form className="tp-comment" onSubmit={comment}>
-        <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} onChange={e => setText(e.target.value)} />}</Field>
-        <div className="form-foot" role="group" aria-label={t.tasks.actions}>
-          <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.tasks.addComment}</button>
-        </div>
-      </form>
-      <div className="ac-actions">
-        <div className="entry-actions" role="group" aria-label={task.title}>
-          {asking ? (
-            <>
-              <span className="tp-ask">{t.tasks.cancelAsk(task.number)}</span>
-              <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/tasks/${task.id}/cancel`, {}))}>
-                {t.tasks.yesCancel}
-              </button>
-              <button className="btn ghost" type="button" onClick={() => setAsking(false)}>
-                {t.tasks.keep}
-              </button>
-            </>
-          ) : (
-            <button className="btn ghost" type="button" onClick={() => setAsking(true)}>
-              {t.tasks.cancelTask}
+    <div className="tp-menu" id={id} ref={menu} role="group" aria-label={t.tasks.taskActions} aria-busy={busy}>
+      {view !== 'menu' && <button className="t-link tp-disclosure" type="button" onClick={back}>{t.tasks.backToActions}</button>}
+      {view === 'menu' && (
+        <div className="tp-menu-list">
+          <button className="linkish" type="button" onClick={() => select('details')}>{t.tasks.details}</button>
+          {hasMaterials(task) && <button className="linkish" type="button" onClick={() => select('materials')}>{words.materials}</button>}
+          {task.log.length > 0 && <button className="linkish" type="button" onClick={() => select('log')}>{t.tasks.fullLog}</button>}
+          {leads.onGraph && <button className="linkish" type="button" onClick={() => leads.onGraph?.({ task: task.id })}>{words.graphFromHere}</button>}
+          {task.mayHideSecret && <button className="linkish" type="button" onClick={() => select('secret')}>{t.tasks.hideSecret.action}</button>}
+          {mayEdit && <button className="linkish" type="button" onClick={() => select('edit')}>{words.edit}</button>}
+          {mayAct && <button className="linkish" type="button" onClick={() => select('comment')}>{t.tasks.comment}</button>}
+          {mayPause && !task.parentId && (
+            <button className="linkish" type="button" disabled={busy} onClick={() => void run(() => api.put(`/api/tasks/${task.id}/urgent`, { urgent: !task.urgent }))}>
+              {task.urgent ? words.notUrgent : words.makeUrgent}
             </button>
           )}
+          {mayPause && !task.paused && <button className="linkish" type="button" onClick={() => select('pause')}>{t.tasks.pause}</button>}
+          {canResume && <button className="linkish" type="button" disabled={busy} onClick={() => pause(false, '')}>{t.tasks.resume}</button>}
+          {mayAct && <button className="linkish" type="button" onClick={() => select('cancel')}>{t.tasks.cancelTask}</button>}
         </div>
-      </div>
-      {task.mayPause && <PauseActions task={task} busy={busy} pausing={pausing} why={why} setPausing={setPausing} setWhy={setWhy} run={run} />}
-      {task.mayPause && !task.parentId && (
-        <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tracker.card.urgent}>
-          <button className="btn ghost" type="button" disabled={busy} onClick={() => void run(() => api.put(`/api/tasks/${task.id}/urgent`, { urgent: !task.urgent }))}>
-            {task.urgent ? t.tracker.card.notUrgent : t.tracker.card.makeUrgent}
-          </button>
-        </div></div>
       )}
-      {failure !== null && (
-        <p className="alert" role="alert">
-          {proseErrorText(t, failure)}
-        </p>
+      {view === 'details' && <TaskDetails task={task} waiting={waiting} leads={leads} onOpen={onOpen} onChanged={onChanged} />}
+      {view === 'materials' && <Materials task={task} />}
+      {view === 'log' && <FullTaskLog task={task} onChanged={onChanged} />}
+      {view === 'secret' && task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} onClose={back} initialValue={selection} />}
+      {view === 'edit' && mayEdit && <TaskEdit task={{ ...task, version, revision }} onCancel={back} onDone={done} onReload={onChanged} />}
+      {view === 'comment' && mayAct && (
+        <form className="tp-comment" onSubmit={comment}>
+          <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} onChange={e => setText(e.target.value)} />}</Field>
+          <div className="form-foot" role="group" aria-label={t.tasks.actions}>
+            <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.tasks.addComment}</button>
+          </div>
+        </form>
       )}
-    </>
-  );
-}
-
-type PauseProps = { task: TaskDetail; busy: boolean; pausing: boolean; why: string; setPausing(on: boolean): void; setWhy(text: string): void; run(action: () => Promise<unknown>): Promise<void> };
-
-/* Pausing asks why, since the reason is what the holder reads; resuming is one step. Work paused with the task above it
-   is resumed there. */
-function PauseActions({ task, busy, pausing, why, setPausing, setWhy, run }: PauseProps) {
-  const t = useT();
-  const put = (paused: boolean, reason: string) => run(() => api.put(`/api/tasks/${task.id}/paused`, { paused, reason }));
-  if (task.paused) {
-    if (task.paused.root !== task.id) return null;
-    return <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tasks.pause}>
-      <button className="btn" type="button" disabled={busy} onClick={() => void put(false, '')}>{t.tasks.resume}</button>
-    </div></div>;
-  }
-  if (!pausing) return <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tasks.pause}>
-    <button className="btn ghost" type="button" onClick={() => setPausing(true)}>{t.tasks.pause}</button>
-  </div></div>;
-  return <form className="tp-comment" onSubmit={e => { e.preventDefault(); if (why.trim()) void put(true, why.trim()); }}>
-    <Field label={t.tasks.pauseWhy}>{p => <textarea {...p} rows={2} value={why} onChange={e => setWhy(e.target.value)} />}</Field>
-    <div className="form-foot" role="group" aria-label={t.tasks.pause}>
-      <button className="btn" type="submit" disabled={busy || !why.trim()}>{t.tasks.yesPause}</button>
-      <button className="btn ghost" type="button" onClick={() => setPausing(false)}>{t.tasks.keep}</button>
+      {view === 'cancel' && mayAct && (
+        <>
+          <p>{t.tasks.cancelAsk(task.number)}</p>
+          <div className="entry-actions" role="group" aria-label={task.title}>
+            <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/tasks/${task.id}/cancel`, {}))}>{t.tasks.yesCancel}</button>
+            <button className="btn ghost" type="button" onClick={back}>{t.tasks.keep}</button>
+          </div>
+        </>
+      )}
+      {view === 'pause' && mayPause && !task.paused && (
+        <form className="tp-comment" onSubmit={e => { e.preventDefault(); if (why.trim()) pause(true, why.trim()); }}>
+          <Field label={t.tasks.pauseWhy}>{p => <textarea {...p} rows={2} value={why} onChange={e => setWhy(e.target.value)} />}</Field>
+          <div className="form-foot" role="group" aria-label={t.tasks.pause}>
+            <button className="btn" type="submit" disabled={busy || !why.trim()}>{t.tasks.yesPause}</button>
+            <button className="btn ghost" type="button" onClick={back}>{t.tasks.keep}</button>
+          </div>
+        </form>
+      )}
+      {busy && <p className="muted" role="status">{t.tasks.sending}</p>}
+      {failure !== null && <p className="alert" role="alert">{proseErrorText(t, failure)}</p>}
     </div>
-  </form>;
+  );
 }
 
 /* One task in the left panel, kept fresh from the live stream. */
@@ -573,11 +432,12 @@ export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, o
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
-  useEscapeCloses(onClose, active);
+  const shown = task && !unavailableFailure(failure);
+  useEscapeCloses(onClose, active && !shown);
   return (
-    <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} kind={kind} onClose={onClose}>
+    <PanelFrame label={title} heading="" busy={!task && failure === null} kind={kind} onClose={onClose}>
       {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
-      {task && !unavailableFailure(failure) && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />}
+      {shown && <TaskBody key={task.id} task={task} onOpen={onOpen} onClose={onClose} active={active} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />}
     </PanelFrame>
   );
 }

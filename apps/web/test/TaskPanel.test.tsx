@@ -4,8 +4,10 @@ import userEvent from '@testing-library/user-event';
 import type { MaterialManifest } from '../src/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
-import { openFromTracker } from './open-task';
+import { openFromTracker, openTaskAction } from './open-task';
 import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
@@ -31,6 +33,129 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole('complementary', { name: '#12 Checkout API' });
 }
 
+describe('the simple task card', () => {
+  it('shows the title, plain facts, brief, body and log in order', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: {
+      ...TASK_DETAIL, why: 'Accept card payments.', responsible: { id: 'p1', name: 'Ivan' }, dueAt: '2099-11-20T00:00:00.000Z',
+    } }] });
+    const panel = await openTask(user);
+    const card = within(panel);
+    const facts = card.getByRole('group', { name: 'Facts' });
+    expect(facts).toHaveTextContent(/Review.*Executor: Bruno.*Responsible: Ivan.*Due: 20 Nov.*#12/);
+    expect(facts.querySelector('.tstate, .badge')).toBeNull();
+    expect(within(facts).getByRole('link', { name: '#13 Refunds' })).toBeInTheDocument();
+    const content = [card.getByRole('heading', { name: 'Checkout API' }), facts, card.getByText('Take card payments.'), card.getByText('card token'), card.getByRole('list', { name: 'Log' })];
+    for (const [index, element] of content.slice(1).entries()) {
+      expect(content[index]!.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API']);
+    expect(card.getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Close', 'Task actions']);
+    expect(panel).not.toHaveTextContent('Accept card payments.');
+  });
+
+  it('folds a long description and opens it with one More control', async () => {
+    const user = userEvent.setup();
+    const body = ['Start with a **card token**.', 'Check the amount.', 'Record the payment.', 'Return the receipt.'].join('\n\n');
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, body } }] });
+    const card = within(await openTask(user));
+    expect(card.getByText('card token').tagName).toBe('STRONG');
+    expect(card.queryByText('Return the receipt.')).not.toBeInTheDocument();
+    const more = card.getByRole('button', { name: 'More' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    await user.click(more);
+    expect(card.getByText('Return the receipt.')).toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Show less' }));
+    expect(card.queryByText('Return the receipt.')).not.toBeInTheDocument();
+  });
+
+  it('shows the latest four plain steps in time order and opens earlier steps without internal wake-ups', async () => {
+    const user = userEvent.setup();
+    const log = [...TASK_DETAIL.log, { ...TASK_DETAIL.log[3]!, text: 'Receipt sent.', at: '2026-10-30T08:55:00.000Z' }, {
+      kind: 'wake_obsolete', text: 'An internal wake-up', data: { wake: 'merge' }, by: null, at: '2026-10-30T09:00:00.000Z',
+    }].reverse();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, log } }] });
+    const card = within(await openTask(user));
+    const rows = () => within(card.getByRole('list', { name: 'Log' })).getAllByRole('listitem');
+    expect(rows().map(row => row.firstElementChild?.tagName)).toEqual(['TIME', 'TIME', 'TIME', 'TIME']);
+    expect(rows()[0]).toHaveTextContent('Bruno handed it in');
+    expect(rows()[3]).toHaveTextContent('Ivan commented: Receipt sent.');
+    await user.click(card.getByRole('button', { name: 'Earlier steps' }));
+    expect(rows()).toHaveLength(5);
+    expect(rows()[0]).toHaveTextContent('Dana gave the task');
+    expect(rows()[4]).toHaveTextContent('Ivan commented: Receipt sent.');
+  });
+
+  it('shows only the question this person can answer and puts it after the log', async () => {
+    const user = userEvent.setup();
+    const task = { ...REQUESTS[0]!.task, id: 't12', number: 12, title: TASK_DETAIL.title };
+    const mine = { ...REQUESTS[0]!, task };
+    const theirs = { ...mine, id: 'r-elsewhere', ownerPersonId: 'p2', canAnswer: false, text: 'A question for someone else.' };
+    const log = [mine, theirs].map(request => ({ kind: 'asked', text: request.text, data: { kind: request.kind }, by: null, at: request.at }));
+    shell({ 'GET /api/requests': [200, decisions([mine, theirs])], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, log } }] });
+    const panel = await openTask(user);
+    const card = within(panel);
+    const question = card.getByRole('region', { name: 'Waiting for your answer' });
+    expect(card.getByRole('list', { name: 'Log' }).compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(question).toHaveTextContent(mine.text);
+    expect(within(question).getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    expect(panel).not.toHaveTextContent(theirs.text);
+    expect(card.getByRole('list', { name: 'Log' })).toHaveTextContent('asked a person');
+    expect(card.getByRole('list', { name: 'Log' })).not.toHaveTextContent(mine.text);
+  });
+
+  it('puts a current wait in the log and keeps other task details in the menu', async () => {
+    const user = userEvent.setup();
+    const task = {
+      ...TASK_DETAIL, why: 'Accept card payments.', independentPart: { reason: 'The same author owns every file.' },
+      files: [{ id: 'f1', name: 'contract.txt', size: 512, by: null, at: TASK_DETAIL.createdAt }],
+      externalWait: { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2099-11-03T11:30:00.000Z' },
+    };
+    shell({ 'GET /api/tasks/t12': [200, { task }] });
+    const card = within(await openTask(user));
+    expect(card.getByRole('list', { name: 'Log' })).toHaveTextContent(task.externalWait.reason);
+    expect(card.queryByText(task.why)).not.toBeInTheDocument();
+    expect(card.queryByText(task.independentPart.reason)).not.toBeInTheDocument();
+    expect(card.queryByRole('link', { name: 'contract.txt' })).not.toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Task actions' }));
+    await user.click(card.getByRole('button', { name: 'Details' }));
+    expect(card.getByText(task.why)).toBeInTheDocument();
+    expect(card.getByText(task.independentPart.reason)).toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Back to actions' }));
+    await user.click(card.getByRole('button', { name: 'Materials' }));
+    expect(card.getByRole('link', { name: 'contract.txt' })).toBeInTheDocument();
+  });
+
+  it('keeps edit, urgency and the graph behind the title menu', async () => {
+    const user = userEvent.setup();
+    const task = { ...TASK_DETAIL, parentId: null, parent: null, mayEdit: true, mayPause: true, version: 2, revision: 4 };
+    const calls = shell({
+      'GET /api/tasks/t12': [200, { task }],
+      'PATCH /api/tasks/t12': [200, { task }],
+      'PUT /api/tasks/t12/urgent': [200, { task }],
+    });
+    const card = within(await openTask(user));
+    expect(card.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(card.queryByRole('button', { name: 'Make urgent' })).not.toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Task actions' }));
+    await user.click(card.getByRole('button', { name: 'Edit' }));
+    const form = within(card.getByRole('form', { name: 'Edit the task' }));
+    const title = form.getByRole('textbox', { name: 'Title' });
+    await user.clear(title);
+    await user.type(title, 'Checkout and refunds');
+    await user.click(form.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/tasks/t12')?.body).toEqual({ title: 'Checkout and refunds', version: 2, revision: 4 });
+    await waitFor(() => expect(card.queryByRole('form', { name: 'Edit the task' })).not.toBeInTheDocument());
+    await user.click(card.getByRole('button', { name: 'Task actions' }));
+    await user.click(card.getByRole('button', { name: 'Make urgent' }));
+    expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/urgent')?.body).toEqual({ urgent: true });
+    await waitFor(() => expect(card.queryByRole('button', { name: 'Make urgent' })).not.toBeInTheDocument());
+    await user.click(card.getByRole('button', { name: 'Task actions' }));
+    await user.click(card.getByRole('button', { name: 'Graph from here' }));
+    expect(location.search).toBe('?root=t12&view=graph');
+  });
+});
+
 describe('a task', () => {
   it.each([
     ['en', 'Save passwords in the company vault'],
@@ -40,6 +165,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, body: 'password=[hidden]' } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     expect(within(panel).getByRole('link', { name: label })).toHaveAttribute('href', '/settings/passwords');
   });
 
@@ -51,7 +177,7 @@ describe('a task', () => {
       'POST /api/tasks/t12/hide-secret': [200, { task: { ...task, body: '[hidden]' } }],
     });
     const panel = await openTask(user);
-    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    await openTaskAction(user, panel, 'Hide secret');
     await user.type(within(panel).getByLabelText('Secret to hide'), 'OldMarker1077!');
     await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
     await waitFor(() => expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(true));
@@ -62,6 +188,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell();
     const panel = await openTask(user);
+    await openTaskAction(user, panel);
     expect(within(panel).queryByRole('button', { name: 'Hide secret' })).not.toBeInTheDocument();
   });
 
@@ -72,7 +199,7 @@ describe('a task', () => {
       'POST /api/tasks/t12/hide-secret': [403, { error: { code: 'forbidden', message: 'Access changed.' } }],
     });
     const panel = await openTask(user);
-    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    await openTaskAction(user, panel, 'Hide secret');
     const input = within(panel).getByLabelText('Secret to hide');
     expect(within(panel).getByRole('button', { name: 'Hide everywhere' })).toBeDisabled();
     await user.type(input, 'OldMarker1077!');
@@ -95,14 +222,16 @@ describe('a task', () => {
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
     await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    expect(within(panel).getByText(line)).toHaveClass('tp-kind');
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
+    expect(within(panel).getByText(line)).toBeInTheDocument();
   });
 
   it.each([{}, { workKind: null, riskClass: null }])('has no line of kind and risk without them: %j', async labels => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, ...labels } }] });
     const panel = await openTask(user);
-    expect(panel.querySelector('.tp-kind')).toBeNull();
+    await openTaskAction(user, panel, 'Details');
+    expect(within(panel).queryByText(/risk:/)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -116,7 +245,9 @@ describe('a task', () => {
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
     await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    const lines = within(within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' })).getAllByRole('listitem');
+    const label = language === 'ru' ? ru.tasks.fullLog : en.tasks.fullLog;
+    await openTaskAction(user, panel, label);
+    const lines = within(within(panel).getByRole('list', { name: label })).getAllByRole('listitem');
     expect(lines).toHaveLength(4);
     for (const [i, line] of lines.entries()) expect(line).toHaveTextContent(`${heading} Bruno: ${actions[i]}.`);
     expect(lines[0]).toHaveTextContent('abcdefgh-0000');
@@ -134,7 +265,9 @@ describe('a task', () => {
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
     await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    const logList = within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
+    const label = language === 'ru' ? ru.tasks.fullLog : en.tasks.fullLog;
+    await openTaskAction(user, panel, label);
+    const logList = within(panel).getByRole('list', { name: label });
     expect(within(logList).getByRole('listitem')).toHaveTextContent(expected);
     expect(panel).not.toHaveTextContent('Server fallback.');
   });
@@ -150,8 +283,10 @@ describe('a task', () => {
     const clock = new Date(externalWait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
     const reason = /Images on the registry/;
     const deadline = language === 'ru' ? `ожидание поставил Rita, до ${clock}` : `set by Rita, until ${clock}`;
-    expect(within(panel).getByText(reason)).toBeInTheDocument();
-    expect(within(panel).getByText(deadline)).toBeInTheDocument();
+    const log = within(panel).getByRole('list', { name: language === 'ru' ? ru.tasks.log : en.tasks.log });
+    expect(log).toHaveTextContent(reason);
+    expect(log).toHaveTextContent(deadline);
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.comment : en.tasks.comment);
     mockApi({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait: null } }] });
     await user.type(within(panel).getByRole('textbox', { name: language === 'ru' ? 'Комментарий' : 'Comment' }), 'Images ready.');
     await user.click(within(panel).getByRole('button', { name: language === 'ru' ? 'Добавить комментарий' : 'Add comment' }));
@@ -160,7 +295,7 @@ describe('a task', () => {
     localStorage.removeItem('hh-lang');
   });
 
-  it("puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too", async () => {
+  it("shows the orchestrator's plain question above the answer and keeps the technical explanation in Details", async () => {
     const user = userEvent.setup();
     const plain = 'Bruno cannot finish the checkout because the tests fail on the payment provider. He needs the provider keys, or a yes to leave those tests for later.';
     const stuck = {
@@ -184,10 +319,12 @@ describe('a task', () => {
     const answer = within(waiting).getByLabelText('Your answer');
     expect(question.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     /* What Hornhoof noted stays at hand, in the person's language. */
-    const more = within(waiting).getByText('In more detail');
+    await openTaskAction(user, panel, 'Details');
+    const questions = within(panel).getByRole('region', { name: 'Questions' });
+    const more = within(questions).getByText('In more detail');
     expect(more.closest('details')).toHaveTextContent('Bruno ended several turns in a row without moving #12, so Hornhoof stopped waking it.');
     expect(waiting).not.toHaveTextContent('Ended 3 turns');
-    expect(waiting).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
+    expect(questions).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
     /* One way to answer: write it and send it. */
     expect(within(waiting).queryByRole('button', { name: 'Let it go on' })).toBeNull();
     const send = within(waiting).getByRole('button', { name: 'Send answer' });
@@ -208,8 +345,9 @@ describe('a task', () => {
     await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
     await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
-    await user.click(within(waiting).getByRole('button', { name: "Open Bruno's terminal" }));
+    await openTaskAction(user, panel, 'Details');
+    const questions = within(panel).getByRole('region', { name: 'Questions' });
+    await user.click(within(questions).getByRole('button', { name: "Open Bruno's terminal" }));
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
   });
 
@@ -218,6 +356,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell();
     const panel = await openTask(user);
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     const workflow = within(panel).getByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
     expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
     expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
@@ -225,17 +364,12 @@ describe('a task', () => {
     expect(workflow).not.toHaveTextContent('Cleanup');
   });
 
-  it('opens with its current workflow, brief, body, subtasks and log', async () => {
+  it('keeps submission evidence, verdicts and comments in the full log', async () => {
     const user = userEvent.setup();
     shell();
     const panel = await openTask(user);
-    const workflow = within(panel).getByRole('list', { name: 'Task workflow' });
-    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review In progressOwner: Rita');
-    expect(panel).toHaveTextContent('Take card payments.');
-    expect(within(panel).getByText('card token').tagName).toBe('STRONG');
-    expect(within(panel).getByRole('button', { name: /#13 Refunds/ })).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: /#10 Payments/ })).toBeInTheDocument();
-    const log = within(panel).getByRole('list', { name: 'Log' });
+    await openTaskAction(user, panel, 'Full log');
+    const log = within(panel).getByRole('list', { name: 'Full log' });
     expect(within(log).getAllByRole('listitem').map(li => li.textContent)).toEqual([
       expect.stringContaining('Dana gave the task'),
       expect.stringMatching(/Bruno handed it in.*Endpoint done.*npm test: 42 passed/),
@@ -258,8 +392,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -278,12 +412,13 @@ describe('a task', () => {
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
       await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      await openTaskAction(user, panel, lang === 'ru' ? ru.tasks.details : en.tasks.details);
       const workflow = within(panel).getByRole('list', { name: words.workflow });
       expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
       expect(within(panel).getByRole('status')).toHaveTextContent(words.phase);
-      const after = within(panel).getByRole('region', { name: words.after });
-      expect(within(after).getAllByRole('listitem').map(li => li.textContent)).toEqual([expect.stringMatching(new RegExp(`#9 Pick a payment provider.*${words.done}`)), expect.stringContaining('#11 Cart page')]);
-      expect(within(after).getByRole('button', { name: /#11 Cart page/ })).toBeInTheDocument();
+      const facts = within(panel).getByRole('group', { name: lang === 'ru' ? ru.tracker.card.facts : en.tracker.card.facts });
+      expect(within(facts).getByRole('link', { name: '#9 Pick a payment provider' })).toHaveAttribute('title', words.after);
+      expect(within(facts).getByRole('link', { name: '#11 Cart page' })).toHaveAttribute('title', words.after);
       expect(panel).toHaveTextContent(words.started);
       unmount();
       localStorage.removeItem('hh-lang');
@@ -350,7 +485,10 @@ describe('a task', () => {
       await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       expect(panel).toHaveTextContent(line);
-      expect(within(panel).getAllByText(mark)).toHaveLength(2);
+      expect(within(panel).getByRole('list', { name: lang === 'ru' ? ru.tasks.log : en.tasks.log })).toHaveTextContent(mark);
+      await openTaskAction(user, panel, lang === 'ru' ? ru.tasks.details : en.tasks.details);
+      const question = within(panel).getByRole('heading', { name: lang === 'ru' ? ru.tasks.questions : en.tasks.questions }).closest('section');
+      expect(question).toHaveTextContent(mark);
       unmount();
       localStorage.removeItem('hh-lang');
     }
@@ -378,8 +516,9 @@ describe('a task', () => {
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
       await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-      await within(panel).findAllByRole('listitem');
-      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title) || text.includes(words.judge));
+      const label = lang === 'ru' ? ru.tasks.fullLog : en.tasks.fullLog;
+      await openTaskAction(user, panel, label);
+      const lines = within(within(panel).getByRole('list', { name: label })).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title) || text.includes(words.judge));
       expect(lines).toHaveLength(3);
       for (const said of [words.title, words.answered, words.verdict, words.brief, words.input, words.answer]) expect(lines[0]).toContain(said);
       expect(lines[1]).toContain(words.failed);
@@ -414,8 +553,9 @@ describe('a task', () => {
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
       await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-      await within(panel).findAllByRole('listitem');
-      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
+      const label = lang === 'ru' ? ru.tasks.fullLog : en.tasks.fullLog;
+      await openTaskAction(user, panel, label);
+      const lines = within(within(panel).getByRole('list', { name: label })).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
       expect(lines).toHaveLength(3);
       for (const said of words.gone) expect(lines[0]).toContain(said);
       expect(lines[1]).toContain(words.back);
@@ -449,8 +589,9 @@ describe('a task', () => {
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
       await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-      await within(panel).findAllByRole('listitem');
-      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
+      const label = lang === 'ru' ? ru.tasks.fullLog : en.tasks.fullLog;
+      await openTaskAction(user, panel, label);
+      const lines = within(within(panel).getByRole('list', { name: label })).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
       expect(lines).toHaveLength(2);
       for (const said of words.first) expect(lines[0]).toContain(said);
       for (const said of words.again) expect(lines[1]).toContain(said);
@@ -466,6 +607,7 @@ describe('a task', () => {
       stages: TASK_DETAIL.echelons.stages.map(step => ({ ...step, status: step.status === 'skipped' ? 'skipped' as const : 'complete' as const })) };
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assignee: null, echelons } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, 'Details');
     expect(within(panel).getByRole('status')).toHaveTextContent('Ready to merge');
     expect(within(panel).getByRole('list', { name: 'Task workflow' })).not.toHaveTextContent('Owner:');
   });
@@ -474,6 +616,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, 'Comment');
     await user.type(within(panel).getByRole('textbox', { name: 'Comment' }), 'Ship it today.');
     await user.click(within(panel).getByRole('button', { name: 'Add comment' }));
     expect(calls.find(c => c.path === '/api/tasks/t12/comments')?.body).toEqual({ text: 'Ship it today.' });
@@ -484,7 +627,7 @@ describe('a task', () => {
     const paused = { at: '2026-11-09T05:00:00.000Z', reason: 'Wait for the release.', root: 't12', by: { personId: 'p1' } };
     const calls = shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true } }], 'PUT /api/tasks/t12/paused': [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }] });
     const panel = await openTask(user);
-    await user.click(within(panel).getByRole('button', { name: 'Pause' }));
+    await openTaskAction(user, panel, 'Pause');
     await user.type(within(panel).getByRole('textbox', { name: 'Why pause it' }), 'Wait for the release.');
     await user.click(within(panel).getByRole('button', { name: 'Yes, pause it' }));
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/paused')?.body).toEqual({ paused: true, reason: 'Wait for the release.' });
@@ -496,7 +639,7 @@ describe('a task', () => {
     const calls = shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }], 'PUT /api/tasks/t12/paused': [200, { task: { ...TASK_DETAIL, mayPause: true } }] });
     const panel = await openTask(user);
     expect(within(panel).getByText('Paused: Wait for the release. Nobody is woken on it until it is resumed.')).toBeTruthy();
-    await user.click(within(panel).getByRole('button', { name: 'Resume' }));
+    await openTaskAction(user, panel, 'Resume');
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/paused')?.body).toEqual({ paused: false, reason: '' });
   });
 
@@ -504,6 +647,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: false } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel);
     expect(within(panel).queryByRole('button', { name: 'Pause' })).toBeNull();
   });
 
@@ -511,7 +655,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/cancel': [200, { task: { ...TASK_DETAIL, status: 'cancelled' } }] });
     const panel = await openTask(user);
-    await user.click(within(panel).getByRole('button', { name: 'Cancel task' }));
+    await openTaskAction(user, panel, 'Cancel task');
     expect(calls.some(c => c.path === '/api/tasks/t12/cancel')).toBe(false);
     expect(panel).toHaveTextContent('Cancel #12 and its open subtasks?');
     await user.click(within(panel).getByRole('button', { name: 'Yes, cancel it' }));
@@ -522,7 +666,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t13': [200, { task: { ...TASK_DETAIL, id: 't13', number: 13, title: 'Refunds', subtasks: [], parent: { id: 't12', number: 12, title: 'Checkout API' } } }] });
     const panel = await openTask(user);
-    await user.click(within(panel).getByRole('button', { name: /#13 Refunds/ }));
+    await user.click(within(panel).getByRole('link', { name: /#13 Refunds/ }));
     expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
   });
 
@@ -539,6 +683,7 @@ describe('a task', () => {
     };
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, independentPart } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     const part = within(panel).getByRole('region', { name: heading });
     expect(part).toHaveTextContent('Cover the API contract.');
     expect(part).toHaveTextContent('Bruno');
@@ -554,6 +699,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, independentPart: { reason: 'The same author owns every file.' } } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, language === 'ru' ? ru.tasks.details : en.tasks.details);
     expect(within(panel).getByRole('region', { name: heading })).toHaveTextContent('The same author owns every file.');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('#13');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('Bruno');
@@ -567,6 +713,7 @@ describe('a task', () => {
     ];
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, requests } }] });
     const panel = await openTask(user);
+    await openTaskAction(user, panel, 'Details');
     const questions = within(panel).getByRole('heading', { name: 'Questions' }).closest('section')!;
     expect(questions).toHaveTextContent('Hornhoof: Use the existing token? answered');
     expect(questions).toHaveTextContent('Yes, keep it.');
@@ -680,7 +827,12 @@ describe('a task', () => {
     await user.click(within(await openTask(user)).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
     await openFromTracker(user, 12);
-    await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const reopened = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    await openTaskAction(user, reopened);
+    await user.keyboard('{Escape}');
+    const menu = within(reopened).getByRole('button', { name: 'Task actions' });
+    expect(menu).toHaveAttribute('aria-expanded', 'false');
+    expect(menu).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
   });
