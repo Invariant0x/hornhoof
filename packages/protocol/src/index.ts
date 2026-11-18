@@ -412,6 +412,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     publicKey: AgeRecipient.optional(),
     account: Account.nullable().optional(),
     boot: Boot.optional(),
+    checkClaims: z.array(z.uuid()).optional(),
     programs: Programs.optional(),
     /* The node build CI wrote into the node's image, the last commit that changed its files; none from a node built by
        hand or from before. One that is not a commit is left out rather than the hello refused. */

@@ -16,6 +16,7 @@ export class CheckCoordinator {
   private readonly nodes = new Map<string, Member>();
   private readonly pools = new Map<string, CheckSlotQueue>();
   private readonly entries = new Map<string, Entry>();
+  private readonly boots = new Map<string, string>();
   private readonly queueEnds = new Map<string, { node: string; at: number }>();
   private readonly timers = new Set<NodeJS.Timeout>();
   private readonly now: () => number;
@@ -25,6 +26,18 @@ export class CheckCoordinator {
     this.now = options.now ?? Date.now;
     this.readyAt = this.now() + (options.warmupMs ?? CHECK_LEASE_MS);
     this.later(() => this.refresh(), options.warmupMs ?? CHECK_LEASE_MS);
+  }
+
+  /* A restart abandons all leases. A returning process keeps the ones it still claims, or its leases from before claims were sent. */
+  hello(node: string, boot: string | undefined, claims: string[] | undefined): void {
+    const previous = this.boots.get(node), active = claims && new Set(claims);
+    if (boot) this.boots.set(node, boot); else this.boots.delete(node);
+    const restarted = previous !== undefined && boot !== undefined && previous !== boot;
+    if (!restarted && !active && boot && previous === boot) return;
+    for (const entry of this.entries.values()) if (entry.node === node && (restarted || !active?.has(entry.request.id))) {
+      entry.retired = true;
+      this.release(node, entry.request.id);
+    }
   }
 
   node(node: string, host: string, sample: Sample): void {

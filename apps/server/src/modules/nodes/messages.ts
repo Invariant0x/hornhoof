@@ -27,13 +27,13 @@ import { appendTurnEvent, cleanTurnEvent, publishWorking, sensitiveTurn } from '
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
-import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
+import { ownMachine, sameNode, type NodeIdentity, type NodeTransport } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { type Hello } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
-import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
+import { checkQueueLoad, nodeCheckQueueAway, nodeCheckQueueHello, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { privateTurn } from '../tools/private-turns.js';
@@ -323,11 +323,11 @@ async function privateIncoming(ctx: Pick<Ctx, 'db'>, msg: NodeMessage): Promise<
   return msg;
 }
 
-export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
+export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date(), transport?: NodeTransport): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
   msg = await privateIncoming(ctx, msg);
   if (await parkUnknown(ctx, id, msg)) return;
-  await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
+  await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx), transport);
   await wordMessage(ctx, id, msg, now);
   if (await testNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
@@ -361,9 +361,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settleAndPlace(ctx, plan);
       }
+      if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
+      nodeCheckQueueHello(ctx, id, msg);
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
+      if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
       ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
-      if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
+      if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id, transport); }
       /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
       programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
@@ -394,7 +397,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       const { type: _, live, ...load } = msg;
       ctx.hub.report(id, load);
       await touchNodeSeen(ctx, id, now);
-      await checkQueueLoad(ctx, id);
+      await checkQueueLoad(ctx, id, transport);
       /* A machine that freed up takes a part that waits, and one whose kernel killed nothing more for want of memory starts
          the programs that waited. */
       await pumpTests(ctx);

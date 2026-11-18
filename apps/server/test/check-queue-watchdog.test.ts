@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from './builtin.js';
-import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
-import { checkQueueLoad } from '../src/modules/nodes/check-slots.js';
+import { checkQueueLoad, checkQueueSnapshot } from '../src/modules/nodes/check-slots.js';
+import { CHECK_LEASE_MS } from '@hornhoof/protocol';
 import { jobs } from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
@@ -79,6 +80,41 @@ describe('machine check waiting and the watchdog', () => {
 /* #1060: the load of home-api waited behind its other frames and the shared pump of test runs, so the one handled was old
    while frames kept coming. The lease of a machine heard within 90 s holds; one silent for 90 s ends. */
 describe('a machine check lease and the frames heard from the machine', () => {
+  it.each(['restart', 'reconnect', 'legacy reconnect', 'no claims'] as const)('reconciles held and queued leases on %s inside the lease window', async kind => {
+    const c = await failureCompany();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const load = { cpus: 1, load: 0, tests: 0, jobs: 0, memFree: 1e9, memTotal: 2e9 };
+    const boot = { startedAt: new Date().toISOString(), machineUpAt: new Date(0).toISOString(), container: 'same-container' };
+    const hello = { type: 'hello' as const, version: '0.33.0', running: [], loggedIn: true, load, boot };
+    const acquire = (label: string) => ({ type: 'check.acquire' as const, id: randomUUID(), label });
+    const [first, second, next] = ['held', 'queued', 'new'].map(acquire) as [ReturnType<typeof acquire>, ReturnType<typeof acquire>, ReturnType<typeof acquire>];
+    const online = vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'loadOf').mockImplementation(() => ({ ...load, at: Date.now() }));
+    await handleNodeMessage(c.ctx, BUILTIN, hello);
+    vi.setSystemTime(Date.now() + CHECK_LEASE_MS);
+    await handleNodeMessage(c.ctx, BUILTIN, first);
+    await handleNodeMessage(c.ctx, BUILTIN, second);
+    const slots = () => checkQueueSnapshot(c.ctx, BUILTIN);
+    expect(slots()).toMatchObject({ holders: [{ request: first }], queue: [{ request: second }] });
+    online.mockReturnValue(false);
+    await handleNodeClose(c.ctx, BUILTIN);
+    vi.setSystemTime(Date.now() + 1000);
+    online.mockReturnValue(true);
+    const returning = { ...hello, boot: kind === 'restart' ? { ...boot, startedAt: new Date().toISOString() } : boot,
+      ...(kind === 'legacy reconnect' ? {} : { checkClaims: kind === 'no claims' || kind === 'restart' ? [] : [first.id, second.id] }) };
+    const sameProcess = kind === 'reconnect' || kind === 'legacy reconnect';
+    await handleNodeMessage(c.ctx, BUILTIN, returning);
+    if (sameProcess) {
+      await handleNodeMessage(c.ctx, BUILTIN, { ...first, resume: true });
+      await handleNodeMessage(c.ctx, BUILTIN, { ...second, resume: true });
+    }
+    await handleNodeMessage(c.ctx, BUILTIN, next);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const held = slots()!.holders.map(claim => claim.request.id), queued = slots()!.queue.map(claim => claim.request.id);
+    expect({ held, queued }).toEqual(sameProcess ? { held: [first.id], queued: [second.id, next.id] } : { held: [next.id], queued: [] });
+  });
+
   it('grants a slot to a machine heard just now whose last handled load is 90 s old, and ends the one of a silent machine', async () => {
     const c = await failureCompany();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'check', createdBy: null });

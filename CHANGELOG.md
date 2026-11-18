@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Nested checks share the machine slot of their test part, harness, or parent check, so they can finish even when the machine has only one slot.
+- A restarted node releases its old machine check slots when it reconnects, while a brief connection loss keeps the slots the same process still owns.
 - People listed one under another (in Russian on a wide screen, in every language on a phone) are as high in Chromium, Firefox and Safari: a name leaves no room under its line, and each label sits on the line of its value.
 - Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
 - Product test runs resend an unanswered environment description request after a minute or when its node reconnects, and a failed socket write stays retryable under the same request id.

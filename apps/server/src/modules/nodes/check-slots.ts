@@ -2,7 +2,7 @@ import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
 import { and, desc, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, nodes, machines, testParts } from '../../db/schema.js';
-import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
+import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity, type NodeTransport } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator, type CheckSnapshot } from './check-slots-queue.js';
@@ -19,11 +19,11 @@ function queueFor(ctx: Ctx): CheckCoordinator {
   return queue;
 }
 
-export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity): Promise<void> {
+export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity, transport?: NodeTransport): Promise<void> {
   const load = ctx.hub.loadOf(id);
   if (!load) return;
   const fallback = await machineKey(ctx, id);
-  if (!fallback) return;
+  if (!fallback || (transport && !ctx.hub.isCurrentLink(id, transport.linkId))) return;
   const host = load.host && /^[0-9a-f]{64}$/.test(load.host) ? `host:${load.host}` : fallback;
   queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at });
 }
@@ -36,7 +36,9 @@ async function machineKey(ctx: Ctx, id: NodeIdentity): Promise<string | null> {
   return row ? `host:${hashToken(`hornhoof-host:${row.key}`)}` : null;
 }
 
-export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: CheckQueueRequest, scope: SQL): Promise<void> {
+export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: CheckQueueRequest, scope: SQL, transport?: NodeTransport): Promise<void> {
+  const current = () => !transport || ctx.hub.isCurrentLink(id, transport.linkId);
+  if (!current()) return;
   const queue = queueFor(ctx), key = keyOf(id);
   if (request.type === 'check.release') { queue.release(key, request.id); return; }
   let actor = request;
@@ -44,15 +46,19 @@ export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: C
     const [job] = await ctx.db.select({ id: jobs.id, agentId: jobs.agentId }).from(jobs).where(and(scope, eq(jobs.status, 'running'),
       request.agentId ? eq(jobs.agentId, request.agentId) : undefined,
       request.jobId ? eq(jobs.id, request.jobId) : undefined)).orderBy(desc(jobs.createdAt)).limit(1);
+    if (!current()) return;
     if (!job) { ctx.hub.send(id, { type: 'check.state', id: request.id, state: 'ended', position: 0 }); return; }
     actor = { ...request, jobId: job.id };
   }
-  await checkQueueLoad(ctx, id);
-  queue.acquire(key, actor);
+  await checkQueueLoad(ctx, id, transport);
+  if (current()) queue.acquire(key, actor);
 }
 
 /* A machine whose connection dropped keeps its leases while it may come back (#1060). */
 export function nodeCheckQueueAway(ctx: Ctx, id: NodeIdentity): void { queues.get(ctx)?.away(keyOf(id)); }
+export function nodeCheckQueueHello(ctx: Ctx, id: NodeIdentity, hello: Extract<NodeMessage, { type: 'hello' }>): void {
+  queueFor(ctx).hello(keyOf(id), hello.boot?.startedAt, hello.checkClaims);
+}
 export function jobCheckQueued(ctx: Ctx, jobId: string, now?: number): boolean { return queues.get(ctx)?.waiting(jobId, now) ?? false; }
 export function jobCheckLastEnd(ctx: Ctx, jobId: string, now: number): number | null { return queues.get(ctx)?.lastEnd(jobId, now) ?? null; }
 export function closeCheckQueue(ctx: Ctx): void { queues.get(ctx)?.close(); queues.delete(ctx); }
@@ -72,8 +78,8 @@ async function updateCheckPart(ctx: Ctx, id: NodeIdentity, partId: string, value
     waitingOnly ? like(testParts.tail, 'Waiting for a machine check slot.%') : undefined));
 }
 
-export async function routeCheckMessage(ctx: Ctx, id: NodeIdentity, frame: NodeMessage, scope: SQL): Promise<void> {
-  if (frame.type === 'check.acquire' || frame.type === 'check.release') return receiveCheckRequest(ctx, id, frame, scope);
+export async function routeCheckMessage(ctx: Ctx, id: NodeIdentity, frame: NodeMessage, scope: SQL, transport?: NodeTransport): Promise<void> {
+  if (frame.type === 'check.acquire' || frame.type === 'check.release') return receiveCheckRequest(ctx, id, frame, scope, transport);
   if (frame.type === 'tests.waiting') return recordPartQueueWait(ctx, id, frame);
   if (frame.type === 'tests.started') return updateCheckPart(ctx, id, frame.partId, { tail: '' }, true);
 }

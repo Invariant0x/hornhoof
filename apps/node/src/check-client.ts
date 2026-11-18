@@ -27,6 +27,9 @@ export class CheckClient {
   private away: NodeJS.Timeout | undefined;
   constructor(private readonly send: (frame: CheckQueueRequest) => boolean, private readonly graceMs = CHECK_LEASE_MS) {}
 
+  /* A running check still claims its slot during cleanup, until it releases it. */
+  claims(): string[] { return [...this.entries.keys()]; }
+
   online(value: boolean): void {
     if (this.connected === value) return;
     this.connected = value;

@@ -444,7 +444,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, checkClaims: checks.claims(), programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -460,7 +460,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onClose: () => {
       /* A drop stops no part: its leases wait for the node to come back, and end, with what runs under them, if it does not
          within a lease (#1060). */
-      online = false; outside.closed(); checks.online(false); testMessages.cancelDescriptions(); phones.close();
+      online = false; outside.closed(); checks.online(false); phones.close();
     },
     onRefused: () => {
       log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
