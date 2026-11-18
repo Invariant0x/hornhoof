@@ -218,6 +218,18 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
       return calls.filter(c => c.departmentId && ids.has(c.departmentId));
     };
+    const oneShotsOf = (d: (typeof depts)[number]) => {
+      const key = defaults.get(d.id) ?? null;
+      const catalog = templates.catalogs.get(d.templateKey ?? 'development');
+      const pipeline = catalog?.pipelines.find(p => p.key === key)
+        ?? catalog?.pipelines.find(p => p.key === catalog.default);
+      const owners = new Map(pipeline?.stages.map(step => [step.echelon, step.ownerRole]));
+      return catalogRoute(templates, d.templateKey, key).stages.flatMap(({ stage, oneShot }) => {
+        if (!oneShot) return [];
+        const ownerRole = owners.get(stage);
+        return [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null, ownerRole, gate: ownerRole ? templates.roles.get(ownerRole)?.gate : undefined }];
+      });
+    };
 
     return {
       company,
@@ -272,9 +284,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
-          oneShotStages: catalogRoute(templates, d.templateKey, defaults.get(d.id) ?? null).stages.flatMap(({ stage, oneShot }) =>
-            oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
-          ),
+          oneShotStages: oneShotsOf(d),
           calls: callsOf(d.id),
         }))),
     };

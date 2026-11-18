@@ -223,7 +223,7 @@ export type Department = {
   calls?: CallMark[];
 };
 
-export type OneShotStage = { stage: EchelonStage; fanOut: number; judge: boolean };
+export type OneShotStage = { stage: EchelonStage; fanOut: number; judge: boolean; ownerRole?: string; gate?: number | null };
 export type CallMark = { id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null };
 
 export type { ApprovalChannel, ApprovalMode };

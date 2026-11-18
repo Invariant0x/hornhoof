@@ -220,7 +220,7 @@ describe('one-shot calls', () => {
     expect((await callLines(c)).map(l => l.data.stage)).toEqual(['review', 'review', 'review']);
   });
 
-  it('show on the map in their department while they run, and leave it when they end', async () => {
+  it("appear in their department's live data while they run, and leave it when they end", async () => {
     const c = await company();
     const mac = await c.machine(c.ceo, 'dev-mac');
     const call = await callerOn(c, c.bruno, mac);

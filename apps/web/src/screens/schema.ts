@@ -1,5 +1,5 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
-import type { Department, DeptRole, Employee, Team } from '../types';
+import type { Department, DeptRole, Employee, OneShotStage, Team } from '../types';
 import type { Point } from '../ui/wires';
 
 /* A department's schema in world pixels. From the top: the head with the people who reach the
@@ -13,7 +13,7 @@ const PEOPLE_Y = 12, PEOPLE_STEP = 66;
 export type Placed = { e: Employee; x: number; y: number; cy: number };
 /* key: the role's id, 'team:<id>' for a sub-unit frame, or '' for the frame of employees whose role the department does not know. */
 /* check: the frame stands behind a gate, as every check after the ordinary work does. */
-export type Frame = { key: string; role: DeptRole | null; team?: Team | null; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
+export type Frame = { key: string; role: DeptRole | null; team?: Team | null; oneShot?: OneShotStage; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
 /* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; gate: between stages. */
 export type Line = { cls: 'tr' | 'tick' | 'pl' | 'gate'; pts: Point[]; arrow?: boolean };
 
@@ -55,26 +55,38 @@ function splitMembers(d: Department) {
   return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
 }
 
-type Group = { role: DeptRole | null; key: string }[];
+type Group = { role: DeptRole | null; key: string; oneShot?: OneShotStage }[];
 
 /* Role metadata decides the pipeline, in the order of the development stages: design, ordinary work, each check in its order,
    then the final check. Every check after the work is a numbered gate the work passes in turn. */
-function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[]) {
+function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[], oneShots: OneShotStage[]) {
   const roles = [...known.values()].filter(r => r.schema !== 'observer');
-  const before = roles.filter(r => r.schema === 'before_work');
-  const plain = roles.filter(r => r.gate === null && !r.schema);
-  const checks = roles.filter(r => r.gate !== null && !r.schema);
-  const final = roles.filter(r => r.schema === 'final_check');
-  const gateNumbers = [...new Set(checks.map(r => r.gate!))].sort((a, b) => a - b);
+  const entries = roles.map(role => ({ key: role.id, role, gate: role.gate, schema: role.schema }));
+  const lastGate = Math.max(0, ...roles.map(r => r.gate ?? 0), ...oneShots.map(s => s.gate ?? 0));
+  const calls = oneShots.map((oneShot, i) => {
+    const owner = roles.find(r => r.id === oneShot.ownerRole);
+    const early = oneShot.stage === 'architecture' || oneShot.stage === 'development';
+    const gate = oneShot.gate === undefined ? (early ? null : lastGate + i + 1) : oneShot.gate;
+    return { key: `one-shot:${oneShot.stage}`, role: null, oneShot, gate, schema: owner?.schema ?? (oneShot.stage === 'architecture' ? 'before_work' : null) };
+  });
+  const frames = [...entries, ...calls];
+  const before = frames.filter(f => f.schema === 'before_work');
+  const plain = frames.filter(f => f.gate === null && !f.schema);
+  const checks = frames.filter(f => f.gate !== null && !f.schema);
+  const final = frames.filter(f => f.schema === 'final_check');
+  const gateNumbers = [...new Set(checks.map(f => f.gate!))].sort((a, b) => a - b);
   const groups: Group[] = [];
-  if (before.length) groups.push(before.map(r => ({ role: r, key: r.id })));
-  const workGroup: Group = [...plain.map(r => ({ role: r, key: r.id })), ...(loose.length ? [{ role: null, key: '' }] : [])];
+  if (before.length) groups.push(before);
+  const workGroup: Group = [...plain, ...(loose.length ? [{ role: null, key: '' }] : [])];
   if (workGroup.length) groups.push(workGroup);
   const firstCheck = groups.length;
-  for (const n of gateNumbers) groups.push(checks.filter(r => r.gate === n).map(r => ({ role: r, key: r.id })));
-  if (final.length) groups.push(final.map(r => ({ role: r, key: r.id })));
+  for (const n of gateNumbers) groups.push(checks.filter(f => f.gate === n));
+  if (final.length) groups.push(final);
   return { groups, firstCheck };
 }
+
+/* A 280 px frame with heading padding holds thirteen 14 px marks with 3 px gaps. */
+const callFrameHeight = ({ fanOut, judge }: OneShotStage) => FHEAD + Math.ceil((fanOut + Number(judge)) / 13) * 17;
 
 /* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
 export const leadsStage = (e: Employee): boolean => Boolean(e.task && isStaged(e.task.echelons.resultKind) && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
@@ -93,7 +105,7 @@ export function schemaLayout(d: Department, people: number): Schema {
   const { teamFrames, members, startX, teamEnd } = splitMembers(d);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
-  const { groups, firstCheck } = pipelineGroups(known, loose);
+  const { groups, firstCheck } = pipelineGroups(known, loose, d.oneShotStages ?? []);
   const observers = observerFrames(known, members, startX);
   const lastObserver = observers[observers.length - 1];
   const outsideEnd = lastObserver ? lastObserver.x + FW : teamEnd;
@@ -106,12 +118,13 @@ export function schemaLayout(d: Department, people: number): Schema {
   for (const [k, group] of groups.entries()) {
     starts.push(x);
     const frames = group.map(g => {
-      const held = g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
+      const held = g.oneShot ? [] : g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
       const frame: Frame = {
         key: g.key,
         role: g.role,
+        oneShot: g.oneShot,
         x,
-        h: FHEAD + Math.max(1, held.length) * PY + 8,
+        h: g.oneShot ? callFrameHeight(g.oneShot) : FHEAD + Math.max(1, held.length) * PY + 8,
         stage: k,
         check: k >= firstCheck,
         members: placeMembers(held, x),

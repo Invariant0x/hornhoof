@@ -87,7 +87,7 @@ describe('POST /api/setup staffs the template', () => {
     expect(res.body).not.toContain('Private judge brief');
     const { departments: org } = res.json();
     const marketing = org.find((d: { templateKey: string }) => d.templateKey === 'marketing');
-    expect(marketing).toMatchObject({ oneShotStages: [{ stage: 'review', fanOut: 3, judge: true }], calls: [] });
+    expect(marketing).toMatchObject({ oneShotStages: [{ stage: 'review', fanOut: 3, judge: true, ownerRole: 'MKT-EDIT', gate: 1 }], calls: [] });
     const [generalist, ordinary] = [true, false].map(turnkey => marketing.employees.find((e: { teamId?: string }) => Boolean(e.teamId) === turnkey));
     expect(generalist).toMatchObject({ turnkey: true, state: 'needs_subscription' });
     expect(ordinary).toMatchObject({ turnkey: false, state: 'needs_subscription' });
@@ -154,7 +154,7 @@ describe('POST /api/setup staffs the template', () => {
 });
 
 describe('every ready-made company', () => {
-  it.each([...COMPANY_TEMPLATE_KEYS])('%s shows its declared ghost places on the map before any subscription is connected', async template => {
+  it.each([...COMPANY_TEMPLATE_KEYS])('%s declares its one-shot stages before any subscription is connected', async template => {
     const { app } = await testApp();
     const { ceo } = await setUp(app, { ...LATER, template });
     expect(await plans(app)).toEqual([]);
@@ -171,7 +171,9 @@ describe('every ready-made company', () => {
     }));
     expect(expected.some(dept => dept.oneShotStages.length > 0)).toBe(true);
     expect(org).toHaveLength(expected.length);
-    expect(org).toEqual(expect.arrayContaining(expected.map(dept => expect.objectContaining(dept))));
+    expect(org).toEqual(expect.arrayContaining(expected.map(dept => expect.objectContaining({
+      ...dept, oneShotStages: dept.oneShotStages.map(stage => expect.objectContaining(stage)),
+    }))));
   });
 
   it.each([...COMPANY_TEMPLATE_KEYS])('%s brings each department with its head and employees, each with skills, waiting for a subscription', async template => {

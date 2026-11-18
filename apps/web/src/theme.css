@@ -1350,6 +1350,7 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .fn { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fa { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fc { font-size: 12px; color: var(--muted); }
+.frame-calls .fn { overflow: visible; overflow-wrap: anywhere; white-space: normal; }
 .far .fn { font-size: calc(18px * var(--k, 1)); }
 .far .fc { font-size: calc(12px * var(--k, 1)); }
 .far .fa { display: none; }
@@ -1460,19 +1461,11 @@ body:has(.dview) .version-mark { display: none; }
 .dot.needs_subscription { background: var(--amber); }
 .worker-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
 .worker-name > b { min-inline-size: 0; }
-/* Worker marks use the current skin's ink roles and the tracker's status rings. */
-:root {
-  --worker-employee-fill: var(--muted);
-  --worker-generalist-fill: var(--tracker-working-ring);
-  --worker-ghost-ink: var(--muted);
-  --worker-ghost-running: var(--tracker-working-ring);
-  --worker-ghost-waiting: var(--tracker-waiting-ring);
-}
-.worker-mark { display: inline-grid; place-items: center; flex: none; inline-size: 14px; block-size: 14px; color: var(--worker-employee-fill); }
-.worker-mark[data-worker-kind='generalist'] { color: var(--worker-generalist-fill); }
-.worker-mark[data-worker-kind='ghost'] { color: var(--worker-ghost-ink); }
-.worker-mark .ic { inline-size: 100%; block-size: 100%; }
-.worker-mark:is([data-worker-kind='employee'], [data-worker-kind='generalist']) .ic { fill: currentColor; }
+.worker-mark { display: inline-grid; place-items: center; flex: none; inline-size: 14px; block-size: 14px; color: var(--muted); }
+.worker-mark .ic { inline-size: 100%; block-size: 100%; fill: currentColor; }
+.call-marks { display: flex; flex-wrap: wrap; gap: 3px; min-inline-size: 0; }
+.call-marks .worker-mark.running { color: var(--tracker-working-ring); filter: drop-shadow(0 0 2px var(--tracker-working-ring)); }
+.call-marks .worker-mark.waiting { color: var(--tracker-waiting-ring); }
 /* One square per employee on a department's card on the map. */
 .cells { display: flex; flex-wrap: wrap; gap: 3px; margin-block-start: 2px; }
 .cell { inline-size: 9px; block-size: 9px; background: var(--idle); }
@@ -2266,13 +2259,14 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tgates li { position: relative; padding: 6px 0 6px 22px; font-size: 13.5px; }
 .tgates li::before { content: ''; position: absolute; left: 4px; top: 12px; width: 9px; height: 9px; border-radius: 50%; background: var(--idle); }
 .tgates li:not(:last-child)::after { content: ''; position: absolute; left: 8px; top: 23px; bottom: -6px; width: 1px; background: var(--line2); }
-.tgates li span { color: var(--muted); }
+.tgates li > span { color: var(--muted); }
 .tgates li.passed::before { background: var(--ok); }
 .tgates li.returned::before { background: var(--amber); }
 .tgates li.skipped { opacity: 0.6; }
 .tgates li.current::before { background: var(--cyan); box-shadow: 0 0 0 4px var(--glow); }
-.tgates li.current span { color: var(--cyan-ink); font-weight: 600; }
-.tgates .worker-mark[data-worker-kind='ghost'] { margin-inline-end: 4px; vertical-align: middle; color: var(--worker-ghost-ink); }
+.tgates li.current > span { color: var(--cyan-ink); font-weight: 600; }
+.tgates li > .worker-mark { margin-inline-end: 4px; vertical-align: middle; color: var(--muted); }
+.tgates .call-marks { margin-block-start: 4px; }
 .tp-brief { font-weight: 500; }
 .tp-body { display: grid; gap: 6px; font-size: 14px; }
 .tp-subs, .tp-log { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }

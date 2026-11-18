@@ -450,9 +450,9 @@ export const en = {
   workers: {
     employee: 'Employee',
     generalist: 'Generalist: does a task whole',
-    ghost: 'Ghost: a one-shot call, appears for one task and is gone',
-    slot: (stage: string, number: number) => `${stage}, call ${number}`,
-    judge: (stage: string) => `${stage}, judge call`,
+    ghost: 'A one-shot call appears for one task and is gone',
+    slot: (number: number) => `Call ${number}`,
+    judge: 'Judge call',
     idle: 'Idle',
     running: 'Running',
     waiting: 'Waiting',

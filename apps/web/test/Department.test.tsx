@@ -65,7 +65,51 @@ describe('Department view', () => {
     expect(within(schema).getByText('Bruno').closest('button')?.querySelector(`[title="${generalist}"]`)).toHaveAttribute('data-worker-kind', 'generalist');
     await drawer(user, 'About the department');
     const staff = within(screen.getByRole('complementary', { name: 'About the department' })).getByRole('region', { name: 'Members' });
-    expect(within(staff).getByText('Bruno').closest('li')?.querySelector(`[title="${generalist}"]`)).toHaveAttribute('data-worker-kind', 'generalist');
+    expect(within(staff).getByRole('img', { name: generalist }).querySelector('svg rect')).toBeInTheDocument();
+  });
+
+  it('lights fixed call places in their own pipeline card as the org feed changes', async () => {
+    const stream = fakeStream();
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const oneShotStages = [
+      { stage: 'review', ownerRole: 'DEV-REV', gate: 1, fanOut: 3, judge: true },
+      { stage: 'security', ownerRole: 'DEV-SEC', gate: 2, fanOut: 1, judge: false },
+    ];
+    const call = { task: 12, by: 'b1', stage: 'review', judge: false, startedAt: null };
+    const active = [
+      { ...call, id: 'queued', number: 1 },
+      { ...call, id: 'running', number: 1, task: 13, startedAt: '2026-11-17T10:00:00.000Z' },
+      { ...call, id: 'judge', number: 4, judge: true },
+      { ...call, id: 'ad-hoc', number: 2, stage: null },
+    ];
+    let calls: typeof active = [];
+    shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [{ ...dev!, oneShotStages, calls }] }] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    const review = within(schema).getByRole('group', { name: 'Review' });
+    const marks = () => within(review).getAllByRole('img', { name: /^A one-shot call appears for one task and is gone/ });
+    const diamonds = marks();
+    expect(diamonds).toHaveLength(4);
+    expect(diamonds.every(mark => mark.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]'))).toBe(true);
+    expect(diamonds[3]).toHaveAccessibleName(/Judge call.*Idle/i);
+    expect(within(within(schema).getByRole('group', { name: 'Security' })).getAllByRole('img')).toHaveLength(1);
+    expect(within(within(schema).getByRole('group', { name: 'Backend engineer' })).queryByRole('img', { name: /one-shot call/i })).toBeNull();
+
+    calls = active;
+    await act(async () => stream.send({ type: 'org' }));
+    expect(marks()).toEqual(diamonds);
+    expect(diamonds[0]).toHaveClass('running');
+    expect(diamonds[0]).toHaveAccessibleName(/Call 1.*Running/);
+    expect(diamonds[1]).toHaveClass('idle');
+    expect(diamonds[2]).toHaveClass('idle');
+    expect(diamonds[3]).toHaveClass('waiting');
+    expect(diamonds[3]).toHaveAttribute('title', 'A one-shot call appears for one task and is gone. Judge call. Waiting');
+
+    calls = [];
+    await act(async () => stream.send({ type: 'org' }));
+    expect(marks()).toEqual(diamonds);
+    expect(diamonds.every(mark => mark.classList.contains('idle'))).toBe(true);
   });
 
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
@@ -906,6 +950,24 @@ describe('Department work tree', () => {
     expect(within(summary).getByRole('list', { name: 'Task workflow' }).querySelector('[aria-current="step"]')).toHaveTextContent('Review');
     await user.click(within(summary).getByRole('button', { name: /Vera/ }));
     expect(await screen.findByRole('complementary', { name: 'Vera, Backend engineer' })).toBeInTheDocument();
+  });
+
+  it('shows the call places for the task opened in the department tree', async () => {
+    const user = userEvent.setup();
+    const tree = { ...REVIEW_TREE, lines: REVIEW_TREE.lines.map(line => line.number === 54 ? {
+      ...line, echelons: { ...line.echelons, oneShot: { review: { fanOut: 2, judge: 'Read the answers' } } },
+    } : line) };
+    const call = { id: 'c1', number: 1, judge: false, by: 'b6', task: 54, stage: 'review', startedAt: null };
+    const org = { ...TREE_ORG, departments: TREE_ORG.departments.map(d => ({ ...d, calls: [call] })) };
+    shell(treeRoute(tree), org);
+    const graph = await showTree(user);
+    await user.click(graph.querySelector('[data-row="b6"]')!);
+    const summary = screen.getByRole('dialog');
+    const marks = within(summary).getAllByRole('img', { name: /^A one-shot call appears for one task and is gone/ });
+    expect(marks).toHaveLength(3);
+    expect(marks[0]).toHaveAccessibleName(/Call 1.*Waiting/);
+    expect(marks[1]).toHaveAccessibleName(/Call 2.*Idle/);
+    expect(marks[2]).toHaveAccessibleName(/Judge call.*Idle/);
   });
 
   it.each([

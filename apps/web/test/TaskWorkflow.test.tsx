@@ -2,6 +2,7 @@ import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons'
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { ru } from '../src/i18n/ru';
 import { TaskWorkflow, WorkflowStages } from '../src/ui/TaskWorkflow';
 import type { TaskDetail } from '../src/types';
 
@@ -13,16 +14,35 @@ const workflow = (stages: EchelonStep[], phase: EchelonsSnapshot['phase'] = 'esc
   security: { required: false, reason: null, addedBy: null },
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.removeItem('hh-lang');
+});
 
 describe('task workflow', () => {
   it('marks a one-shot stage in the pipeline before it runs', () => {
     const route = workflow([step('development', 'active', null), step('review', 'pending', null)], 'active');
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={{ ...route, oneShot: { review: { fanOut: 2, judge: null } } }} /></LanguageProvider>);
-    const ghost = 'Ghost: a one-shot call, appears for one task and is gone';
+    const ghost = 'A one-shot call appears for one task and is gone';
     const [work, review] = screen.getAllByRole('listitem');
     expect(within(work!).queryByRole('img', { name: ghost })).toBeNull();
-    expect(within(review!).getByRole('img', { name: ghost })).toHaveAttribute('data-worker-kind', 'ghost');
+    expect(within(review!).getByRole('img', { name: ghost }).querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
+  });
+
+  it('shows the chosen task’s call places in the department route, with Russian names', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const route = { ...workflow([step('review', 'active', null), step('security', 'pending', null)], 'active'), stage: 'review' as const,
+      oneShot: { review: { fanOut: 2, judge: 'Judge' }, security: { fanOut: 1, judge: null } } };
+    const call = { id: 'c1', task: 12, number: 1, by: 'b1', judge: false, stage: 'review', startedAt: '2026-11-17T10:00:00.000Z' };
+    const calls = [call, { ...call, id: 'c2', task: 13, number: 2 }, { ...call, id: 'c3', task: 13, judge: true }];
+    render(<LanguageProvider><WorkflowStages workflow={route} resolveOwner={id => id} departmentTask={{ number: 12, calls }} /></LanguageProvider>);
+    const [review, security] = screen.getAllByRole('listitem');
+    const marks = within(review!).getAllByRole('img', { name: /^Разовый вызов появляется на одну задачу и исчезает/ });
+    expect(marks).toHaveLength(3);
+    expect(marks[0]).toHaveAccessibleName(new RegExp(ru.workers.running + '$'));
+    expect(marks[1]).toHaveAccessibleName(new RegExp(ru.workers.idle + '$'));
+    expect(marks[2]).toHaveAccessibleName(/Вызов судьи.*Без работы/i);
+    expect(within(security!).getAllByRole('img')).toHaveLength(1);
   });
 
   it('names every reason a stage can carry in plain words', () => {

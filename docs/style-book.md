@@ -349,17 +349,9 @@ The tracker uses the approved list reference and the existing skin roles. Tracke
 
 ### Worker marks
 
-Cyberpunk, Light, Matrix, Pixel and custom skins use the same aliases. Each resolves to the selected skin's role in the current mode.
+The company map shows one 9 px square per employee, in the employee's status color. Generalists use the same square and keep their label for hover and screen readers wherever the worker kind is shown.
 
-| Token | Light | Dark | Mark |
-|---|---|---|---|
-| `--worker-employee-fill` | `--muted` | `--muted` | Filled square for employees |
-| `--worker-generalist-fill` | `--cyan-ink` | `--cyan` | Filled diamond for generalists |
-| `--worker-ghost-ink` | `--muted` | `--muted` | Outlined ghost for a one-shot stage or an idle call place |
-| `--worker-ghost-running` | `--cyan-ink` | `--cyan` | Lit ghost for a running call |
-| `--worker-ghost-waiting` | `--amber-ink` | `--amber` | Warning outline for a waiting call |
-
-The company map shows one 9 px square per employee, in the employee's status color. The tracker keeps the program fill and initials and adds a diamond in the mark's own ink for a generalist.
+A filled diamond means a one-shot call. In the department diagram and its task route, the stage card has one diamond per declared call and another for the judge when there is one. Idle uses `--muted`, running uses `--tracker-working-ring` with a glow, and waiting uses `--tracker-waiting-ring`. The tracker and the standalone task route use one diamond to identify a one-shot stage.
 
 ## 5. Languages
 

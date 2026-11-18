@@ -11,6 +11,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The company map shows only employee squares again, in their original status colors and with their usual blinking.
 - The company map has no worker kinds legend.
+- Departments show one-shot calls as diamonds inside their stage cards, with running, waiting and idle states.
+- One-shot stages use diamonds in the tracker and task routes.
+- Generalists use squares and keep their label.
 
 ## [0.34.0] - 2026-11-18
 

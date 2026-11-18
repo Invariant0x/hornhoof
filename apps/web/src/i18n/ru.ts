@@ -475,9 +475,9 @@ export const ru: Messages = {
   workers: {
     employee: 'Сотрудник',
     generalist: 'Универсал: делает задачу целиком',
-    ghost: 'Призрак: разовый вызов, появляется на одну задачу и исчезает',
-    slot: (stage, number) => `${stage}, вызов ${number}`,
-    judge: stage => `${stage}, вызов судьи`,
+    ghost: 'Разовый вызов появляется на одну задачу и исчезает',
+    slot: number => `Вызов ${number}`,
+    judge: 'Вызов судьи',
     idle: 'Без работы',
     running: 'В работе',
     waiting: 'Ждет',
