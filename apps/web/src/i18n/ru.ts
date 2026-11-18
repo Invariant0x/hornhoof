@@ -2086,12 +2086,10 @@ export const ru: Messages = {
       machine: 'Машина недоступна',
       expired: 'Время вышло',
       unavailable: 'Сотрудник недоступен',
-      failedRun: (number, work) => work
-        ? (number ? `Сбой прогона работы ${number}` : 'Сбой прогона работы')
-        : (number ? `Сбой прогона тестов ${number}` : 'Сбой прогона тестов'),
+      failedRun: (number, work) => `Упал прогон ${work ? 'работы' : 'тестов'}${number ? `\u00a0№${number}` : ''}`,
       runErrors: {
         timeout: 'Время вышло', machine: 'Машина недоступна', repository: 'Не удалось открыть репозиторий',
-        files: 'Не удалось загрузить файлы задачи', revision: 'Проверили другую версию', stopped: 'Остановлено на машине',
+        files: 'Не удалось загрузить файлы задачи', revision: 'Проверили не ту версию', stopped: 'Остановлено на машине',
       },
       detail: (label, reason) => `${label}: ${reason}`,
       setBy: (name, until) => `ожидание поставил ${name}, до ${until}`,

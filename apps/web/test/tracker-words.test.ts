@@ -1,3 +1,4 @@
+import type { TaskWaitFact, WaitRunError } from '@hornhoof/protocol/waits';
 import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -9,6 +10,46 @@ const DUE = '2026-11-20T00:00:00.000Z';
 const zone = process.env.TZ;
 afterEach(() => {
   process.env.TZ = zone;
+});
+
+describe('why a task failed', () => {
+  const since = '2026-11-17T21:45:00.000Z';
+  const wordsOf = (fact: Pick<TaskWaitFact, 'kind' | 'failure' | 'reason' | 'runError'>) => {
+    const task = { status: 'working' as const, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ ...fact, who: null, since }] } };
+    return [waitText(en, task), waitText(ru, task)];
+  };
+
+  it.each([
+    ['run', '17', 'Test run\u00a0#17 failed', 'Упал прогон тестов\u00a0№17'],
+    ['run', null, 'Test run failed', 'Упал прогон тестов'],
+    ['work', '17', 'Work run\u00a0#17 failed', 'Упал прогон работы\u00a0№17'],
+    ['work', null, 'Work run failed', 'Упал прогон работы'],
+  ] as const)('keeps the number with its word in a %s failure (%s)', (kind, reason, english, russian) => {
+    expect(wordsOf({ kind, reason, failure: 'run' })).toEqual([english, russian]);
+  });
+
+  const causes = {
+    timeout: ['Time ran out', 'Время вышло'],
+    machine: ['Machine unavailable', 'Машина недоступна'],
+    repository: ['Could not open the repository', 'Не удалось открыть репозиторий'],
+    files: ['Could not load the task files', 'Не удалось загрузить файлы задачи'],
+    revision: ['Checked the wrong version', 'Проверили не ту версию'],
+    stopped: ['Stopped on the machine', 'Остановлено на машине'],
+  } satisfies Record<WaitRunError, string[]>;
+
+  it.each(Object.keys(causes) as WaitRunError[])('names the %s cause after the failed run in both languages', runError => {
+    const [english, russian] = causes[runError];
+    expect(wordsOf({ kind: 'run', reason: '17', failure: 'run', runError }))
+      .toEqual([`Test run\u00a0#17 failed: ${english}`, `Упал прогон тестов\u00a0№17: ${russian}`]);
+  });
+
+  it.each([
+    ['machine', 'Machine unavailable', 'Машина недоступна'],
+    ['expired', 'Time ran out', 'Время вышло'],
+    ['unavailable', 'Employee unavailable', 'Сотрудник недоступен'],
+  ] as const)('names the %s wait failure in both languages', (failure, english, russian) => {
+    expect(wordsOf({ kind: 'external', reason: null, failure })).toEqual([english, russian]);
+  });
 });
 
 describe('a due day', () => {

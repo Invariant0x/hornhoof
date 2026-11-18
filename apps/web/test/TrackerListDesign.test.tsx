@@ -178,6 +178,6 @@ it('surfaces a failed subtask while its parent stays folded', () => {
     time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'run', who: null, reason: '42', since, failure: 'run' }] } });
   list([task(), child]);
   const failures = screen.getByRole('region', { name: 'Failures: 1' });
-  expect(within(failures).getByRole('listitem', { name: '#268 Check the addresses' })).toHaveTextContent('Test run 42 failed');
+  expect(within(failures).getByRole('listitem', { name: '#268 Check the addresses' })).toHaveTextContent('Test run #42 failed');
   expect(within(screen.getByRole('region', { name: 'In work: 1' })).getByRole('button', { name: 'Subtasks: 0 of 1 done' })).toHaveAttribute('aria-expanded', 'false');
 });

@@ -581,7 +581,7 @@ it('shows a failed run in Turns with the full task title and no question action'
   });
   const row = await screen.findByRole('listitem', { name: `#78 ${title}` });
   expect(within(row).getByRole('button', { name: title })).toBeInTheDocument();
-  expect(within(row).getByText('Test run 12 failed: Machine unavailable')).toHaveClass('failure');
+  expect(within(row).getByText('Test run #12 failed: Machine unavailable')).toHaveClass('failure');
   expect(within(row).queryByRole('button', { name: 'Open question' })).toBeNull();
   expect(row).not.toHaveTextContent('Waits');
 });
@@ -646,18 +646,22 @@ it('keeps complete names together inside board facts', async () => {
   expect(record.getByText('Lee Chen', { selector: 'bdi' }).parentElement).toHaveTextContent('Does it: Lee Chen');
 });
 
-it('surfaces failed work in its own column on both boards', async () => {
+it.each([
+  ['en', 'Board', 'Failures', 'Task lists', 'Test run #17 failed'],
+  ['ru', 'Доска', 'Сбои', 'Списки задач', 'Упал прогон тестов №17'],
+])('surfaces failed work with its run number in both board views (%s)', async (language, boardName, failures, lists, phrase) => {
+  localStorage.setItem('hh-lang', language);
   const user = userEvent.setup();
   const failed = line({ id: 'failed-step', number: 79, title: 'Check the card form', parentId: PAY.id, pipelineId: 'pl1', pipelineStageId: 's1',
     time: { ...LOGIN.time!, waitsOn: [{ kind: 'run', who: null, since: LOGIN.createdAt, reason: '17', failure: 'run' }] } });
   shell('/tasks?department=d2&view=board', { 'GET /api/tasks?status=all': [200, { tasks: [PAY, failed] }] });
-  const board = await main();
-  const failure = await within(board).findByRole('region', { name: 'Failures' });
-  expect(within(failure).getByRole('article', { name: '#79 Check the card form' })).toHaveTextContent('Test run 17 failed');
-  const side = screen.getByRole('navigation', { name: 'Task lists' });
+  const board = await screen.findByRole('region', { name: boardName });
+  const failure = await within(board).findByRole('region', { name: failures });
+  expect(within(failure).getByRole('article', { name: '#79 Check the card form' })).toHaveTextContent(phrase);
+  const side = screen.getByRole('navigation', { name: lists });
   await user.click(await within(side).findByRole('button', { name: 'Payments way' }));
   const build = await within(board).findByRole('region', { name: 'Build' });
   expect(build).toHaveTextContent('Take card payments');
   expect(build).not.toHaveTextContent('Check the card form');
-  expect(within(board).getByRole('region', { name: 'Failures' })).toHaveTextContent('Check the card form');
+  expect(within(board).getByRole('region', { name: failures })).toHaveTextContent(phrase);
 });

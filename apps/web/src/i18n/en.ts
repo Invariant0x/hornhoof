@@ -2090,9 +2090,7 @@ export const en = {
       machine: 'Machine unavailable',
       expired: 'Time ran out',
       unavailable: 'Employee unavailable',
-      failedRun: (number: string | null, work: boolean) => work
-        ? (number ? `Work run ${number} failed` : 'Work run failed')
-        : (number ? `Test run ${number} failed` : 'Test run failed'),
+      failedRun: (number: string | null, work: boolean) => `${work ? 'Work' : 'Test'} run${number ? `\u00a0#${number}` : ''} failed`,
       runErrors: {
         timeout: 'Time ran out', machine: 'Machine unavailable', repository: 'Could not open the repository',
         files: 'Could not load the task files', revision: 'Checked the wrong version', stopped: 'Stopped on the machine',

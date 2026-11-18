@@ -152,7 +152,9 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             } : task));
             await frame.goto(paths.board);
             const failures = region.getByRole('region', { name: t.tracker.statuses.failure });
-            await expect(failures.getByRole('article', { name: '#224 Sunlight meter calibration on iPhone' })).toBeVisible();
+            const failed = failures.getByRole('article', { name: '#224 Sunlight meter calibration on iPhone' });
+            await expect(failed).toBeVisible();
+            await expect(failed.locator('.tr-wait.failure')).toHaveText(t.tracker.wait.failedRun('17', false));
             await assertBoard(region, wide);
             await assertTrackerFit(frame);
             if (!wide) await failures.scrollIntoViewIfNeeded();
