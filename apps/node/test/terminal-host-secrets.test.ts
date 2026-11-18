@@ -1,7 +1,7 @@
 import type { NodeMessage } from '@hornhoof/protocol';
 import { existsSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createMaskServer, type AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jobDone } from '../src/runner.js';
 import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
@@ -78,16 +78,24 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
-  it.each([true, false])('restores private output after a node restart, resuming the secret turn: %s', async resumed => {
-    const marker = 'private-node-restart-marker-1178';
-    const jobId = resumed ? 'job-private' : 'job-next';
-    const t = await liveTerminal('claude', 'queued', { jobId, privateJob: 'job-private' });
-    t.finish(resumed ? `Report with ${marker}.` : 'Safe follow-up report.');
+  it('keeps the orchestrator screen and completion readable after repeated vault reads', async () => {
+    const t = await liveTerminal('claude', 'queued', { key: 'orchestrator', watched: true });
+    const term = t.views[0]!.view;
+    for (let i = 0; i < 12; i++) {
+      const password = `z${i}z`;
+      const code = String(810804 + i);
+      t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `vault-${i}`, name: 'mcp__hornhoof__vault_entry', input: { entry: 'Partner' } }] } });
+      t.record({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `vault-${i}`, content: JSON.stringify({ name: 'Partner', site: 'https://example.test', login: 'nora', password, code }) }] } });
+      await t.until(() => t.host['agents'].get('orchestrator')?.turn?.privacy?.values.text(code) === '[hidden]');
+      term.stdout.write(`Working on https://example.test as nora with ${password} ${code}\r\n`);
+    }
+    t.screen.mockResolvedValue('Working on https://example.test as nora with z0z 810804\n');
+    expect(await t.host.screen('orchestrator')).toBe('Working on https://example.test as nora with [hidden] [hidden]\n');
+    const screen = frames(t.sent, 'watching');
+    expect(screen.match(/Working on https:\/\/example\.test as nora with \[hidden\] \[hidden\]/g)).toHaveLength(12);
+    t.finish('Signed in as nora with z0z 810804.');
     const result = await t.on(t.running);
-    const done = jobDone(jobId, result, []);
-    expect(JSON.stringify(t.sent)).not.toContain(marker);
-    expect(JSON.stringify(done)).not.toContain(marker);
-    expect(done.result).toBe(resumed ? 'Sensitive tool data and raw terminal output hidden.' : 'Safe follow-up report.');
+    expect(jobDone('job-receipt', result, [])).toMatchObject({ result: 'Signed in as nora with [hidden] [hidden].', tail: expect.stringContaining('Working on https://example.test as nora') });
   });
 
   it.each(['vault_entry', 'vault_save', 'custom_secret'])('learns %s through the bridge when the program emits no tool transcript', async name => {
@@ -102,31 +110,47 @@ describe('what a turn tells Hornhoof', () => {
         if (call.method === 'tools/call') fileAtCall = existsSync(recordingFile);
         const result = call.method === 'tools/list' ? { tools: [{ name, _meta: { sensitive: true } }] }
           : { content: [{ type: 'image', data: 'aaaa', mimeType: 'image/png' }, { type: 'text', text: name === 'vault_entry' ? JSON.stringify({ password: marker }) : name === 'vault_save' ? 'Saved.' : marker }] };
-        res.writeHead(200, { 'content-type': 'application/json' });
+        res.writeHead(200, { 'content-type': 'application/json', connection: 'close' });
         res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
       });
     });
     await listenIn(server);
     cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
     const t = await liveTerminal('claude', 'queued', { host: { hornhoof: `http://127.0.0.1:${(server.address() as AddressInfo).port}` } });
-    const recording = t.tmux['recordings'].create('a-receipt', t.tmux.scratch());
+    const recording = t.tmux['recordings'].create('a-receipt', t.tmux.scratch(), true);
     recordingFile = recording.file;
-    writeFileSync(recordingFile, marker);
+    writeFileSync(recordingFile, 'Output before the tool call.\n');
+    const received = new Set<string>();
+    const recorder = createMaskServer({ allowHalfOpen: true }, socket => {
+      let body = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => { body += chunk; });
+      socket.on('end', () => {
+        for (const value of JSON.parse(body) as string[]) received.add(value);
+        socket.end('ok');
+      });
+    });
+    await new Promise<void>((resolve, reject) => recorder.once('error', reject).listen(recording.control!, resolve));
+    cleanups.push(async () => {
+      await new Promise<void>(resolve => recorder.close(() => resolve()));
+      t.tmux['recordings'].remove('a-receipt');
+    });
     const post = (method: string, params?: unknown) => fetch(t.host['bridge'].agent('receipt').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
     await t.on(t.carry(async () => {
       if (name === 'custom_secret') await (await post('tools/list')).text();
       const response = await post('tools/call', { name, arguments: { password: marker } });
       expect(response.status).toBe(200);
       await response.text();
+      expect(received.has(marker)).toBe(true);
     }));
-    expect(fileAtCall).toBe(false);
-    expect(existsSync(recordingFile)).toBe(false);
-    t.screen.mockResolvedValueOnce(`screen with ${marker}`);
-    expect((await t.host['operatorPane']('receipt')).cells).toMatch(/hidden/i);
+    expect(fileAtCall).toBe(true);
+    expect(existsSync(recordingFile)).toBe(true);
+    t.screen.mockResolvedValue(`screen with ${marker}`);
+    expect((await t.host['operatorPane']('receipt')).cells).toBe('screen with [hidden]');
     t.finish(`Report with ${marker}.`);
     const result = await t.on(t.running);
     expect(result.result).toBe('Report with [hidden].');
-    expect(jobDone('job-receipt', result, []).tail).toMatch(/hidden/i);
+    expect(jobDone('job-receipt', result, []).tail).toBe('screen with [hidden]');
     expect(JSON.stringify(t.sent)).not.toContain(marker);
   });
 
@@ -142,7 +166,10 @@ describe('what a turn tells Hornhoof', () => {
     const opened = t.sent.find((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open')!;
     t.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed-after-secret', toolToken: 'typed-token', ref: opened.ref });
     await t.on(prompted);
-    if (completed) t.finish('Follow-up delivered.');
+    if (completed) {
+      t.screen.mockResolvedValue(`retained pane ${marker}`);
+      t.finish('Follow-up delivered.');
+    }
     else t.ends(`retained pane ${marker}`, 3);
     await t.until(() => t.sent.some(m => m.type === 'job.done' && m.jobId === 'typed-after-secret'));
     const done = t.sent.find((m): m is Extract<NodeMessage, { type: 'job.done' }> => m.type === 'job.done' && m.jobId === 'typed-after-secret')!;
@@ -173,11 +200,10 @@ describe('what a turn tells Hornhoof', () => {
     await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
     t.ends(`raw transcript ${marker}`, 3);
     const result = await t.on(t.running);
-    expect(result.sensitive).toBe(true);
     const done = jobDone('job-receipt', result, []);
     expect(JSON.stringify(t.sent)).not.toContain(marker);
     expect(JSON.stringify(done)).not.toContain(marker);
-    expect(done.tail).toMatch(/hidden/i);
+    expect(done.tail).toContain('raw transcript [hidden]');
   });
 
   it('hides a multiline secret before clipping a typed turn that ended before its acknowledgement', async () => {
@@ -224,6 +250,17 @@ describe('what a turn tells Hornhoof', () => {
     await t.until(() => reports().some(m => m.state === 'tool'));
     expect(reports().find(m => m.state === 'tool')?.tool).toBe(hidden);
     expect(shows(JSON.stringify(reports()))).toBe(false);
+  });
+
+  it('masks a short vault password in a later tool name before sending program diagnostics', async () => {
+    const t = await liveTerminal('claude', 'queued', { host: { lookMs: 20, reportMs: 40 } });
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'save', name: 'mcp__hornhoof__vault_save', input: { password: 'zqx' } }] } });
+    t.record({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'save', content: 'Saved.' }] } });
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'next', name: 'mcp__fixture__use_zqx_here', input: {} }] } });
+    const reports = () => t.sent.flatMap(message => message.type === 'job.program' && message.tool ? [message.tool] : []);
+    await t.until(() => reports().some(tool => tool.startsWith('fixture.use_')));
+    expect(reports()).toContain('fixture.use_[hidden]_here');
+    expect(reports().join()).not.toContain('zqx');
   });
 
   it('never lets a known secret into the words of a person it keeps for them', async () => {

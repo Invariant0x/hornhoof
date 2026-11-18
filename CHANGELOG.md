@@ -21,6 +21,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Assignment changes made by a department head show the head and the person whose authority it used.
 - Editing an employee card preserves a tracker nudge that arrives during the edit.
 - One-shot batches save the wake with their delivery claim so a failed write can be retried.
+- Agent terminals, recordings, and output tails stay readable after vault calls, with only known secret values masked.
+- Sensitive tool history shows the entry, site, and login with passwords and codes masked.
 - A cancelled turn in the phone queue no longer delays lending to the next waiting turn.
 - Tasks and goals keep their recorded responsible person if they close while responsibility is being passed on.
 - A failed tracker upgrade notice no longer stops other hiring notices from being sent.
