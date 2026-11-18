@@ -3,11 +3,11 @@ import type { AssistantEventKind, AssistantProgram } from '../../db/schema.js';
 
 /* How Hornhoof reaches each program an assistant runs: a wake in the program's own form, and the settings that connect the
    program to Hornhoof, which the person puts into it once. OpenClaw and Hermes Agent take Hornhoof's tools over MCP and
-   are woken at their own webhooks; AvaClone and other programs take the wake docs/assistant-api.md describes. */
+   are woken at their own webhooks; compatible programs take the wake docs/assistant-api.md describes. */
 
 const hex = (secret: string, text: string) => createHmac('sha256', secret).update(text).digest('hex');
 
-/* What a wake is signed with for AvaClone and other programs: HMAC-SHA256 of the exact body under the signing secret. */
+/* What a wake is signed with for compatible programs: HMAC-SHA256 of the exact body under the signing secret. */
 export const signature = (secret: string, body: string): string => `sha256=${hex(secret, body)}`;
 
 /* A wake of OpenClaw or Hermes starts a turn of the program's model, which costs and may write to the owner. So an event

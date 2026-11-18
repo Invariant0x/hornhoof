@@ -48,6 +48,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Removed computer access details from agent windows, including the orchestrator's window.
 - The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
 - Telegram sends only the finished answer and its files, in the language you write to the bot.
+- Pull requests from forks run without access to private runners or installer credentials.
 
 ### Added
 
@@ -70,6 +71,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The task log shows the latest four steps, including waits, and lets you open earlier steps.
 - A question appears below the log when you can answer it from the card.
 - The title menu holds task actions, details, materials and the full log.
+- The compatible assistant uses a generic name in People and in the documentation.
+- Public examples use invented names and machines, and internal test records are removed from the source tree.
 
 ## [0.34.0] - 2026-11-18
 
@@ -407,7 +410,7 @@ an account the company has, so no password passes through it.
 ### Added
 
 - outbound_account_add connects one more mail account to a channel with the settings of an account the company already
-  has, sending from its own address, like kate@ next to hello@; the settings go from one account to the other inside
+  has, sending from its own address, like team@northwind.example next to hello@; the settings go from one account to the other inside
   Hornhoof and never through a model. outbound_account_bind makes an employee the one who writes from an account. Both
   are the orchestrator's; a new password or another server a person still gives on the channel's screen.
 
@@ -427,7 +430,7 @@ an account the company has, so no password passes through it.
 - Навыки оркестратора и блокнота говорят то же: ограничения записаны в блокноте компании, остальное делается без
   просьб о подтверждении.
 - outbound_account_add подключает к каналу еще один почтовый ящик с настройками ящика, который у компании уже есть, со
-  своим адресом отправителя, например kate@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
+  своим адресом отправителя, например team@northwind.example рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
   проходят через модель. outbound_account_bind назначает сотрудника, который пишет с ящика. Оба инструмента у
   оркестратора; новый пароль или другой сервер по-прежнему вводит человек на экране канала.
 
@@ -446,7 +449,7 @@ moment, and parts of test runs no longer stop when a machine's connection drops 
 
 ### Changed
 
-- The server log now names a machine's built-in node by the machine it runs on, as in machine "home-api", node
+- The server log now names a machine's built-in node by the machine it runs on, as in machine "test-server", node
   "builtin", instead of machine "built-in". A built-in node of a server with no machine of a company is still named
   machine "built-in", node "builtin".
 
@@ -513,7 +516,7 @@ moment, and parts of test runs no longer stop when a machine's connection drops 
   встроенного узла машины попадали в ее историю подключений. Это одно изменение таблицы, строки она не меняет, и ни до,
   ни после обновления ничего делать не нужно.
 - Журнал сервера теперь называет встроенный узел машины по машине, на которой он работает, например machine
-  "home-api", node "builtin", а не machine "built-in". Встроенный узел сервера без машины компании по-прежнему
+  "test-server", node "builtin", а не machine "built-in". Встроенный узел сервера без машины компании по-прежнему
   называется machine "built-in", node "builtin".
 - Узел мог закрыть программу агента или усыпить ее в тот самый миг, когда она начинала новый ход: Codex берет слова,
   которые придержал, когда его ход закончен, а Kimi Code берет слова из своей очереди и сообщает о них через хук с
@@ -1207,7 +1210,7 @@ ask the assistant's program for the program's own skills.
   keeps its conversation between messages. `GET /api/assistant/me` says which agent that is and whether it can answer now.
 - The assistant's card takes a skills address. The assistant's own agent asks the program for its skills there with a
   signed call, and reads the answer.
-- For an AvaClone assistant with an events or skills address, Copy for the assistant adds the signing secret, which the
+- For a compatible assistant with an events or skills address, Copy for the assistant adds the signing secret, which the
   program checks Hornhoof's calls with.
 - A general skill for an assistant's own agent: answer only with the words for the owner, and leave code work to the
   company's agents.
@@ -1282,7 +1285,7 @@ waiting a day, and a message on a task no longer slips under a wait its holder a
 ## [0.18.10] - 2026-11-12
 
 OpenClaw and Hermes Agent join a company as a person's assistant with one piece of settings, and an assistant such as
-AvaClone takes the company's address and its key in one message. A line on the company map stays on while the agent
+A compatible assistant takes the company's address and its key in one message. A line on the company map stays on while the agent
 under it works, even after it writes to the one above it.
 
 ### Added
@@ -1345,7 +1348,7 @@ and takes a file of any kind.
 
 ## [0.18.8] - 2026-11-11
 
-A person can connect their own assistant, a program such as AvaClone or OpenClaw, which does for them in the company all
+A person can connect their own assistant, a program such as OpenClaw, which does for them in the company all
 they may do themselves: it writes to agents and answers requests in their name. The company map shows at a glance how
 many departments work in the current turn, and how far each of them has come.
 

@@ -14,12 +14,13 @@ import { listenIn } from '../../../test-support/ports.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/images.yml'), 'utf8');
-/* The runners the repository variable names, GitHub's machines without it, and always for a pull request from a fork. */
+/* Runner variables apply to trusted events in private repositories. */
 const TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
-const runsOn = (variable: string) => `\${{ ${TRUSTED} && vars.${variable} && fromJSON(vars.${variable}) || 'ubuntu-latest' }}`;
+const PRIVATE = 'github.event.repository.private';
+const runsOn = (variable: string) => `\${{ ${PRIVATE} && ${TRUSTED} && vars.${variable} && fromJSON(vars.${variable}) || 'ubuntu-latest' }}`;
 const TESTS_RUNS_ON = runsOn('TESTS_RUNS_ON');
 const BUILD_RUNS_ON = runsOn('BUILD_RUNS_ON');
-const BUILDER = { driver: "${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}", endpoint: '${{ vars.BUILDKIT_ENDPOINT }}' };
+const BUILDER = { driver: "${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}", endpoint: "${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT || '' }}" };
 const run = promisify(execFile);
 const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...IDENTITY } }).trim();
@@ -69,7 +70,7 @@ async function github(marks: Marks, answer?: (res: ServerResponse) => void) {
   return { api: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, asked };
 }
 
-const PUSH = { repository: { full_name: 'acme/shop' } };
+const PUSH = { repository: { full_name: 'acme/shop', private: true } };
 const FROM_FORK = { ...PUSH, pull_request: { head: { repo: { full_name: 'stranger/shop' } } } };
 const FROM_BRANCH = { ...PUSH, pull_request: { head: { repo: { full_name: 'acme/shop' } } } };
 const FROM_GONE_FORK = { ...PUSH, pull_request: { head: { repo: null } } };
@@ -271,20 +272,20 @@ const JOBS = (parse(WORKFLOW) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job) => [job.needs ?? []].flat();
 
 type Results = Record<string, 'success' | 'failure' | 'skipped'>;
-type Scenario = { event?: string; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; images?: 'success' | 'failure'; cancelled?: boolean };
+type Scenario = { event?: string; payload?: unknown; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; images?: 'success' | 'failure'; cancelled?: boolean };
 
 /* Which jobs run, from the workflow's own conditions, as GitHub reads them: a condition with no status function of its own
    runs only when every job before it, however far back, succeeded. Every job that runs ends as the scenario says. */
-function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', images = 'success', cancelled = false }: Scenario): Results {
+function runWorkflow({ event = 'push', payload = FROM_BRANCH, ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', images = 'success', cancelled = false }: Scenario): Results {
   const results: Results = {};
   const ancestors = (name: string): string[] => needsOf(JOBS[name]!).flatMap(n => [n, ...ancestors(n)]);
   const context = () => ({
-    github: { event_name: event, ref },
+    github: { event_name: event, event: payload, repository: 'acme/shop', ref },
     cancelled: () => cancelled,
     needs: Object.fromEntries(Object.keys(results).map(n => [n, { result: results[n], outputs: { proved: n === 'mark' && results[n] === 'success' ? String(proved) : '' } }])),
   });
   for (const name of ['mark', 'test', 'passed', 'images', 'publish', 'release']) {
-    const expression = (JOBS[name]!.if ?? 'true').replace(/^\$\{\{|\}\}$/g, '').trim();
+    const expression = (JOBS[name]!.if ?? 'true').replace(/^\$\{\{|\}\}$/g, '').trim().replace(/\.(?=[A-Za-z_])/g, '?.');
     const ownStatus = /\b(always|cancelled|failure|success)\(\)/.test(expression);
     const allowed = ownStatus || (ancestors(name).every(n => results[n] === 'success') && !cancelled);
     const runs = allowed && Boolean(runInNewContext(expression, context()));
@@ -351,7 +352,7 @@ describe('.github/workflows/images.yml', () => {
     expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
-  it('runs the tests in the parts the first job chose, four without its answer, on GitHub’s machines unless the repository variable names other runners', () => {
+  it('runs the tests in the parts the first job chose, four without its answer, with runner variables for private repositories', () => {
     expect(JOBS.test!['runs-on']).toBe(TESTS_RUNS_ON);
     expect(JOBS.test!.strategy!.matrix.part).toBe("${{ fromJSON(needs.mark.outputs.parts || '[1, 2, 3, 4]') }}");
     expect(JOBS.test!.env).toEqual({ PART: '${{ matrix.part }}/4', SELECTION: '${{ needs.mark.outputs.selection }}' });
@@ -372,7 +373,7 @@ describe('.github/workflows/images.yml', () => {
     const buildx = (job: Job) => job.steps.filter(step => step.uses?.startsWith('docker/setup-buildx-action@'));
     for (const name of ['images', 'publish']) expect(buildx(JOBS[name]!).map(step => step.with)).toEqual([BUILDER]);
     const qemu = JOBS.images!.steps.filter(step => step.uses?.startsWith('docker/setup-qemu-action@'));
-    expect(qemu.map(step => step.if)).toEqual(["${{ steps.fresh.outputs.version == 'new' && !vars.BUILDKIT_ENDPOINT }}"]);
+    expect(qemu.map(step => step.if)).toEqual(["${{ steps.fresh.outputs.version == 'new' && !(github.event.repository.private && vars.BUILDKIT_ENDPOINT) }}"]);
   });
 
   it('gives the first job the whole history, the token, and only the rights to read', () => {
@@ -380,7 +381,7 @@ describe('.github/workflows/images.yml', () => {
     expect(permissions).toEqual({ contents: 'read', statuses: 'read' });
     expect(outputs).toEqual({ proved: '${{ steps.mark.outputs.proved }}', parts: '${{ steps.select.outputs.parts }}', selection: '${{ steps.select.outputs.selection }}', base: '${{ steps.select.outputs.base }}' });
     expect(steps[0]!.uses).toMatch(/^actions\/checkout@/);
-    expect(steps[0]!.with).toEqual({ 'fetch-depth': 0 });
+    expect(steps[0]!.with).toEqual({ 'fetch-depth': 0, 'persist-credentials': false });
     expect(steps[1]).toEqual({ id: 'mark', env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }, run: 'node scripts/tests-mark.mjs' });
     expect(steps.filter(step => step.env?.GITHUB_TOKEN).map(step => step.id)).toEqual(['mark', 'select']);
   });
@@ -412,7 +413,7 @@ describe('the runners of every workflow', () => {
   /* A label written into a workflow, self-hosted or a machine's own, would send a job to that machine whatever the
      repository's settings say: a job runs on GitHub's machines or on the runners a repository variable names, and nowhere
      else. */
-  it('sends a push, a run by hand and a pull request from a branch of this repository where the variables say, to GitHub’s machines without them, and names no runner of its own', () => {
+  it('uses configured runners for trusted events in private repositories and otherwise uses GitHub runners', () => {
     for (const name of WORKFLOWS) {
       for (const [job, { 'runs-on': runs }] of jobsOf(name)) {
         const fromVariable = typeof runs === 'string' && /\bvars\./.test(runs);
@@ -431,5 +432,51 @@ describe('the runners of every workflow', () => {
       expect(events, name).not.toContain('pull_request_target');
       expect(events, name).not.toContain('workflow_run');
     }
+  });
+});
+
+describe('public repository workflow boundaries', () => {
+  it('uses GitHub runners for every job of a public repository even when runner variables are set', () => {
+    const publicEvent = { ...FROM_BRANCH, repository: { ...PUSH.repository, private: false } };
+    for (const name of WORKFLOWS) {
+      for (const [job, { 'runs-on': runs }] of jobsOf(name)) {
+        for (const event of ['push', 'workflow_dispatch', 'pull_request']) {
+          expect(runnerOf(runs, event, publicEvent, OWN), `${name} ${job} ${event}`).toBe('ubuntu-latest');
+        }
+      }
+    }
+  });
+
+  it('runs fork tests without the job that passes the status token to repository scripts', () => {
+    for (const payload of [FROM_FORK, FROM_GONE_FORK]) {
+      expect(runWorkflow({ event: 'pull_request', payload, ref: 'refs/pull/1/merge', proved: true })).toEqual({
+        mark: 'skipped', test: 'success', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped',
+      });
+    }
+  });
+
+  it('keeps checkout credentials out of jobs that run on forks', () => {
+    for (const [workflow, names] of [['images.yml', ['test', 'test-real']], ['sign-off.yml', ['sign-off']]] as const) {
+      for (const [name, job] of jobsOf(workflow)) {
+        if (!(names as readonly string[]).includes(name)) continue;
+        const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+        expect(checkout?.with?.['persist-credentials'], `${workflow} ${name}`).toBe(false);
+        expect(JSON.stringify(job)).not.toMatch(/secrets\.|github\.token/);
+      }
+    }
+  });
+
+  it('dispatches the installer only from main and scopes its credential to the deployment environment', () => {
+    const send = Object.fromEntries(jobsOf('installer-site.yml')).send;
+    expect(send).toMatchObject({
+      if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
+      environment: 'installer-site',
+    });
+    const upload = send!.steps.find(step => step.env?.EDGE_INSTALL_KEY);
+    expect(upload?.env).toMatchObject({
+      EDGE_INSTALL_KEY: '${{ secrets.EDGE_INSTALL_KEY }}',
+      EDGE_INSTALL_HOST: '${{ secrets.EDGE_INSTALL_HOST }}',
+      EDGE_KNOWN_HOSTS: '${{ secrets.EDGE_KNOWN_HOSTS }}',
+    });
   });
 });

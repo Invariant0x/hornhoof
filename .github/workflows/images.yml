@@ -38,13 +38,12 @@ jobs:
   # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
   # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
   # runs the whole suite, and so does a choice that fails.
-  # The repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this job and the tests to the
-  # repository's own runners; without it they run on GitHub's machines. A pull request from a fork runs on GitHub's
-  # machines whatever the variable says, as every job here with a runner from a variable does, so code from outside
-  # never runs on them. A fork can still change this file in its own pull request, so the repository's settings must
-  # also hold the runs of pull requests from outside until a maintainer approves them.
+  # A private repository can choose its runners with TESTS_RUNS_ON. Public repositories and fork pull requests use
+  # GitHub's machines. A fork can change its workflow, so public repositories also need to detach their own runners.
+  # Fork pull requests run the full suite without the job that reads commit statuses.
   mark:
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       statuses: read
@@ -59,6 +58,7 @@ jobs:
           # The whole history: a merge may take the mark of its second parent, and the tests are chosen against a commit
           # further back.
           fetch-depth: 0
+          persist-credentials: false
       - id: mark
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,7 +90,7 @@ jobs:
     needs: mark
     # A first job that failed leaves no answer, so the whole suite runs.
     if: ${{ !cancelled() && needs.mark.outputs.proved != 'true' }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +101,8 @@ jobs:
       SELECTION: ${{ needs.mark.outputs.selection }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -159,7 +161,7 @@ jobs:
   passed:
     needs: [mark, test]
     if: ${{ needs.test.result == 'success' && github.event_name != 'pull_request' }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       statuses: write
@@ -179,9 +181,11 @@ jobs:
   # fork runs it on GitHub's machines, which have Docker.
   test-real:
     if: ${{ vars.REAL_RUNS_ON != '' }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -197,11 +201,8 @@ jobs:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    # The repository variable BUILD_RUNS_ON can send the image, publish and release jobs to the repository's own runner,
-    # and BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. These jobs run only for a push to main or a
-    # run by hand, never for a pull request, and their runner keeps a pull request from a fork on GitHub's machines as
-    # well.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    # Private repositories may set BUILD_RUNS_ON and BUILDKIT_ENDPOINT. Public repositories build on GitHub.
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -243,13 +244,13 @@ jobs:
           node=$(bash scripts/node-build.sh)
           echo "node=$node" >> "$GITHUB_OUTPUT"
       # Our own builder's machine runs other platforms' programs already.
-      - if: ${{ steps.fresh.outputs.version == 'new' && !vars.BUILDKIT_ENDPOINT }}
+      - if: ${{ steps.fresh.outputs.version == 'new' && !(github.event.repository.private && vars.BUILDKIT_ENDPOINT) }}
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
-          driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
-          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
+          driver: ${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
+          endpoint: ${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT || '' }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
@@ -295,7 +296,7 @@ jobs:
     needs: [mark, test, images]
     # Tests the mark left out count as passed here too.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.images.result == 'success' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -323,8 +324,8 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
-          driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
-          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
+          driver: ${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
+          endpoint: ${{ github.event.repository.private && vars.BUILDKIT_ENDPOINT || '' }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
@@ -380,7 +381,7 @@ jobs:
     needs: publish
     # Tests skipped further back would skip this job too, so it asks only that the images went out.
     if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: write
       actions: write

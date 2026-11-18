@@ -1,12 +1,12 @@
 # Assistant API
 
-A personal assistant is an outside program, such as AvaClone, OpenClaw, Hermes Agent or any program that speaks HTTP or MCP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, sends them files of any kind, reads what they answer with the files they attach, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
+A personal assistant is an outside program, such as OpenClaw, Hermes Agent or any program that speaks HTTP or MCP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, sends them files of any kind, reads what they answer with the files they attach, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
 
 This document is the whole contract. A program built from it alone works with Hornhoof.
 
 ## How an assistant comes to be
 
-In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they may also give its skills address, and its owner may pick the plan its own agent thinks on: see "The assistant's own agent". On the card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"). For an AvaClone assistant whose card has an events or a skills address, a last line "Secret: <signing secret>" (in Russian "Секрет:") follows, as the program checks Hornhoof's calls with it; for any other program the text never has the signing secret. For OpenClaw and Hermes Agent the window also shows the settings that connect the program, ready to copy into its file: see "Connecting OpenClaw" and "Connecting Hermes Agent".
+In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they may also give its skills address, and its owner may pick the plan its own agent thinks on: see "The assistant's own agent". On the card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"). For the Compatible assistant option with an events or a skills address, a last line "Secret: <signing secret>" (in Russian "Секрет:") follows, as the program checks Hornhoof's calls with it; for any other program the text never has the signing secret. For OpenClaw and Hermes Agent the window also shows the settings that connect the program, ready to copy into its file: see "Connecting OpenClaw" and "Connecting Hermes Agent".
 
 * The owner may set up their own assistant. A person who may edit people in People may set one up for anyone. Only the CEO sets up the assistant of the CEO or the CEO delegate, besides the delegate for their own.
 * "Replace" makes a new key and a new signing secret. The ones before stop working at once.
@@ -28,7 +28,7 @@ Everything an assistant does is recorded as done by its owner through the assist
 
 ## The assistant's own agent
 
-An assistant may have an agent of its own in Hornhoof that thinks for it. A program such as AvaClone keeps its persona, its memory and its chat with the owner, and sends the owner's words to this agent to answer.
+An assistant may have an agent of its own in Hornhoof that thinks for it. A compatible program keeps its persona, its memory and its chat with the owner, and sends the owner's words to this agent to answer.
 
 * Only the owner picks the plan the agent thinks on, on the assistant's card in People, and only one of the owner's own personal plans. The first plan picked makes the agent; another plan moves it there. With "No plan" it stays without one and cannot answer.
 * Only the owner sees the agent and writes to it, in its window or through the assistant. Nobody else does, the CEO included, and the orchestrator does not change it. It is not an employee: it has no department or role, takes no tasks and is not counted on the map.
@@ -390,7 +390,7 @@ The program may download the file again, for example when it tries again. Hornho
 
 ## Wake
 
-When the assistant's card has an events address, Hornhoof also wakes the program there each time a new event of the assistant is kept, so it need not hold a long poll open. A wake for AvaClone and other programs is this POST; OpenClaw and Hermes Agent take it in their own form, below:
+When the assistant's card has an events address, Hornhoof also wakes the program there each time a new event of the assistant is kept, so it need not hold a long poll open. A wake for compatible programs is this POST; OpenClaw and Hermes Agent take it in their own form, below:
 
 ```
 POST <events address>

@@ -348,7 +348,7 @@ describe('GET /api/org', () => {
 
     await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { departments: [sales!.id, support!.id] } });
     await invitePerson(app, ceo, { name: 'Mira', email: 'mira@acme.com', access: { departments: [mascot!.id], teams: [inbound!.id] } });
-    await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [mascot!.id] } });
+    await invitePerson(app, ceo, { name: 'Elin', email: 'elin@acme.com', access: { departments: [mascot!.id] } });
 
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     const byName = Object.fromEntries(org.people.map((p: { name: string; deputy: boolean; departments?: string[] }) => [p.name, { deputy: p.deputy, departments: p.departments }]));
@@ -363,7 +363,7 @@ describe('GET /api/org', () => {
       departments: [{ id: mascot!.id, name: 'Mascot' }],
       teams: [{ id: inbound!.id, name: 'Inbound', departmentId: sales!.id }],
     });
-    expect(org.departments.find((d: { id: string }) => d.id === dev!.id).people.map((p: { name: string }) => p.name)).toEqual(['Kate']);
+    expect(org.departments.find((d: { id: string }) => d.id === dev!.id).people.map((p: { name: string }) => p.name)).toEqual(['Elin']);
   });
 
   it("shows every agent's program, tool, and alarm to everyone, and opens the card only of agents the person opens", async () => {

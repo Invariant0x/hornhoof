@@ -16,7 +16,6 @@ The logos in this folder mark, in the README, the programs, services and systems
 | `telegram.svg` | Telegram | Simple Icons, `telegram.svg`, in its colour from Simple Icons, `#26A5E4` | CC0 1.0 |
 | `macos.svg`, `macos-dark.svg` | Apple | Simple Icons, `apple.svg`, in its colour from Simple Icons, `#000000`, or white | CC0 1.0 |
 | `linux.svg`, `linux-dark.svg` | Linux | Simple Icons, `linux.svg`, black or white | CC0 1.0 |
-| `avaclone.svg` | AvaClone | The AvaClone tab icon, `public/favicon.svg` in [Invariant0x/AvaClone-Frontend](https://github.com/Invariant0x/AvaClone-Frontend), without its comment | Ivan Korol's own; AvaClone is his product |
 | `windows.svg`, `windows-dark.svg` | WSL | Made for Hornhoof: a plain tile with the letters WSL, as Windows has no logo under a free licence and Hornhoof runs there in WSL 2 | MIT, as Hornhoof |
 
 Lobe Icons: [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons), the files of the npm package `@lobehub/icons-static-svg` 1.102.0, folder `icons`.

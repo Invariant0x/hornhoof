@@ -553,7 +553,7 @@ export const en = {
     assistantOwner: 'Owner',
     assistantOwnerHint: 'Person on whose behalf this assistant operates.',
     program: 'Program',
-    programs: { avaclone: 'AvaClone', openclaw: 'OpenClaw', hermes: 'Hermes Agent', other: 'Other' },
+    programs: { avaclone: 'Compatible assistant', openclaw: 'OpenClaw', hermes: 'Hermes Agent', other: 'Other' },
     eventsUrl: 'Events address',
     eventsUrlHint: 'Optional. Here Hornhoof tells the program that something is new.',
     eventsUrlOpenclaw: 'For OpenClaw: the address of the computer it runs on, then :18789/hooks/wake, for example http://192.168.1.5:18789/hooks/wake.',

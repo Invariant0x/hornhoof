@@ -579,7 +579,7 @@ export const ru: Messages = {
     assistantOwner: 'Владелец',
     assistantOwnerHint: 'Человек, от имени которого работает ассистент.',
     program: 'Программа',
-    programs: { avaclone: 'AvaClone', openclaw: 'OpenClaw', hermes: 'Hermes Agent', other: 'Другая' },
+    programs: { avaclone: 'Совместимый ассистент', openclaw: 'OpenClaw', hermes: 'Hermes Agent', other: 'Другая' },
     eventsUrl: 'Адрес событий',
     eventsUrlHint: 'Необязательно. Сюда Hornhoof сообщает программе о новом.',
     eventsUrlOpenclaw: 'Для OpenClaw: адрес машины, на которой он работает, и дальше :18789/hooks/wake, например http://192.168.1.5:18789/hooks/wake.',
