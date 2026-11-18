@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Operations templates assign access, recovery and shared changes to the people who can carry them out.
 - Design and household templates adapt handoffs, reminders and checks to the work.
 - Marketing, Sales and Business Development templates use the department's own terms and choose evidence for each decision.
 - Finance and Support templates route decisions to the people responsible and describe what each check needs to prove.
