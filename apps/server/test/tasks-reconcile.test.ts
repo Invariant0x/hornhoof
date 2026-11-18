@@ -33,7 +33,6 @@ async function company() {
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const ready = vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
-  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
   const turn = await echelonsTurn(db, companyId);
   let number = 0;

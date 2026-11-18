@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Ctx } from '../src/app.js';
-import { programsLive, roomFor, START_FREE_BYTES, turnSent } from '../src/modules/nodes/program-room.js';
+import { programsLive, roomFor, turnSent } from '../src/modules/nodes/program-room.js';
 import type { NodeLoad } from '@hornhoof/protocol';
 
 const GIB = 2 ** 30;
@@ -8,44 +8,65 @@ const node = { kind: 'node' as const, nodeId: 'recorded-node' };
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-01-01T00:00:00Z') }); });
 afterEach(() => { vi.useRealTimers(); });
 
-function machine(free: number, live: string[] = []) {
-  let load: NodeLoad = { cpus: 10, load: 1, memFree: free, memTotal: 12 * GIB, tests: 0, jobs: 0 };
+/* What a node said of its machine on 18 November 2026: 7 GB of 15 free, while its tests kept the processors busy. */
+const SAID: NodeLoad = { cpus: 16, load: 6.95, memFree: 7 * GIB, memTotal: 15 * GIB, tests: 0, jobs: 3, memoryShort: false };
+
+/* A node that reports its machine: each report says whether the kernel killed for want of memory since the one before,
+   and names the programs that run there unless live is null. */
+function machine(first: Partial<NodeLoad>, live: string[] | null = []) {
+  let load: NodeLoad = { ...SAID, ...first };
   const ctx = { hub: { loadOf: () => load } } as unknown as Ctx;
-  programsLive(ctx, node, live, 0);
-  return { ctx, report: (free: number, live: string[], working: number, busy = 1) => {
-    load = { ...load, memFree: free, load: busy };
-    return programsLive(ctx, node, live, working);
+  programsLive(ctx, node, live ?? undefined);
+  return { ctx, report: (said: Partial<NodeLoad>, now: string[] | null = live) => {
+    load = { ...SAID, ...said };
+    return programsLive(ctx, node, now ?? undefined);
   } };
 }
 
-it('reserves half a GiB for an unreported start and expires that reservation on virtual time', () => {
-  expect(START_FREE_BYTES).toBe(1.5 * GIB);
-  const m = machine(1.75 * GIB);
-  expect(roomFor(m.ctx, node, 'first')).toBe(true);
-  turnSent(m.ctx, node, 'first');
-  expect(roomFor(m.ctx, node, 'second')).toBe(false);
-  vi.setSystemTime(Date.now() + 2 * 60_000);
-  expect(m.report(1.75 * GIB, [], 0)).toEqual(['second']);
-  expect(roomFor(m.ctx, node, 'second')).toBe(true);
-});
-
-it('admits an existing program after CPU pressure ends despite another unreported start, then eases one turn per report', () => {
-  const m = machine(1.75 * GIB, ['first', 'waiting']);
-  turnSent(m.ctx, node, 'starting');
-  m.report(1.75 * GIB, ['first', 'waiting'], 1, 20);
-  expect(roomFor(m.ctx, node, 'waiting')).toBe(false);
-  expect(m.report(1.75 * GIB, ['first', 'waiting'], 1)).toEqual(['waiting']);
-  expect(roomFor(m.ctx, node, 'waiting')).toBe(true);
-  turnSent(m.ctx, node, 'waiting');
-  expect(roomFor(m.ctx, node, 'first')).toBe(false);
-  expect(m.report(1.75 * GIB, ['first', 'waiting'], 2)).toEqual(['first']);
-  expect(roomFor(m.ctx, node, 'first')).toBe(true);
-});
-
-it('lets an idle resident program continue below the new-program memory threshold', () => {
-  const m = machine(0.5 * GIB, ['resident']);
+it('starts a new program however little memory is free and however busy the processors are, while the kernel killed nothing', () => {
+  const m = machine({ memFree: 0.2 * GIB, load: 64 }, ['resident']);
+  expect(roomFor(m.ctx, node, 'new')).toBe(true);
+  turnSent(m.ctx, node, 'new');
+  expect(roomFor(m.ctx, node, 'another')).toBe(true);
   expect(roomFor(m.ctx, node, 'resident')).toBe(true);
-  expect(roomFor(m.ctx, node, 'new')).toBe(false);
-  expect(m.report(3 * GIB, ['resident'], 0)).toEqual(['new']);
+});
+
+it('holds new programs after a report of a kill, lets the programs that run or start there go on, and lets every one that waited go with the next report that finds none', () => {
+  const m = machine({}, ['resident']);
+  turnSent(m.ctx, node, 'starting');
+  expect(m.report({ memoryShort: true })).toEqual([]);
+  expect(roomFor(m.ctx, node, 'resident')).toBe(true);
+  expect(roomFor(m.ctx, node, 'starting')).toBe(true);
+  expect(roomFor(m.ctx, node, 'first')).toBe(false);
+  expect(roomFor(m.ctx, node, 'second')).toBe(false);
+  /* An agent's window only asks, and so waits nowhere. */
+  expect(roomFor(m.ctx, node, 'looking', true)).toBe(false);
+  /* Another kill holds them again. */
+  expect(m.report({ memoryShort: true })).toEqual([]);
+  expect(m.report({ memoryShort: false, memFree: 0.1 * GIB })).toEqual(['first', 'second']);
+  expect(roomFor(m.ctx, node, 'first')).toBe(true);
+  expect(roomFor(m.ctx, node, 'second')).toBe(true);
+  expect(m.report({ memoryShort: false })).toEqual([]);
+});
+
+it('stops counting a program sent to start as there two minutes on, if its node never names it', () => {
+  const m = machine({});
+  turnSent(m.ctx, node, 'starting');
+  m.report({ memoryShort: true }, []);
+  expect(roomFor(m.ctx, node, 'starting')).toBe(true);
+  vi.setSystemTime(Date.now() + 2 * 60_000);
+  expect(roomFor(m.ctx, node, 'starting')).toBe(false);
+});
+
+it('holds every turn after a kill on a node that does not name its programs, for each of its turns starts one', () => {
+  const m = machine({}, null);
+  expect(roomFor(m.ctx, node, 'any')).toBe(true);
+  m.report({ memoryShort: true });
+  expect(roomFor(m.ctx, node, 'any')).toBe(false);
+  expect(m.report({ memoryShort: false })).toEqual(['any']);
+});
+
+it('never holds a turn on a node that says nothing of kills, as one from before does, whatever its memory', () => {
+  const m = machine({ memoryShort: undefined, memFree: 0 }, []);
   expect(roomFor(m.ctx, node, 'new')).toBe(true);
 });

@@ -194,8 +194,6 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
-    const takesSkillFiles = c.ctx.hub.takesSkillFiles.bind(c.ctx.hub);
-    vi.spyOn(c.ctx.hub, 'takesSkillFiles').mockImplementation(id => rexs(id) || takesSkillFiles(id));
     const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();

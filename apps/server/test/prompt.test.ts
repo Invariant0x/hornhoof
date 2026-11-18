@@ -9,6 +9,8 @@ import type { Task } from '../src/modules/tasks/engine.js';
 describe('orchestrator instructions', () => {
   const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const steady = orchestratorSteady(templates);
+  /* Every part of his instructions whole, skills too, as his card has them. */
+  const whole = steady.parts.map(part => part.text).join('\n\n');
   /* What he carries in every turn: his standing role and the skills kept whole in it. */
   const told = steady.text;
   /* Everything he can read, the skills his program reads from files included. */
@@ -36,7 +38,7 @@ describe('orchestrator instructions', () => {
     for (const label of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство']) {
       expect(structure, label).toContain(label);
     }
-    expect(steady.whole).toContain(structure);
+    expect(whole).toContain(structure);
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Операции');
   });
 
@@ -46,7 +48,6 @@ describe('orchestrator instructions', () => {
     expect(packet.parts[0]).toMatchObject({ kind: 'base', text: ORCHESTRATOR_INSTRUCTIONS, overridden: false });
     expect(packet.parts[1]).toMatchObject({ kind: 'assignment', id: null, text: block, overridden: assignment !== undefined, templateChanged: false });
     expect(packet.text.startsWith(`${ORCHESTRATOR_INSTRUCTIONS}\n\n${block}`)).toBe(true);
-    expect(packet.whole).toContain(block);
     expect(packet.parts.map(part => part.text).join('\n\n')).toContain(block);
     expect(packet.skills.some(file => file.name === 'assignment')).toBe(false);
   });
@@ -58,7 +59,7 @@ describe('orchestrator instructions', () => {
       expect(files, id).toHaveLength(1);
       expect(ability(id), id).not.toBe('');
       expect(told, id).toContain(`\n- ${id}:`);
-      expect(steady.whole, id).toContain(ability(id));
+      expect(whole, id).toContain(ability(id));
       expect(files[0]!.body, id).toBe(`# ${source.title.en}\n\n${source.body}`);
       expect(files[0]!.body, id).not.toMatch(/\b(?:hh|orch|dev)-[a-z0-9-]+\b/);
     }

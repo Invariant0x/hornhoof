@@ -71,7 +71,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
 - The approval and release guides explain when to ask and which checks prove the exact commit.
 - Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
-- Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Turns carry the full instructions and notebook, with skills delivered as files.
 - Employees can send messages and file improvements throughout a turn.
 - People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
 - One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
@@ -87,6 +87,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
 - Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
+- A new agent program or one-shot call waits only after its machine's system killed a program for want of memory, until a report without one; Hornhoof's own memory and processor thresholds for agents are gone, and the machine's card and the agent's window say so in one line.
+- Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
 
 ## [0.32.1] - 2026-11-17
 
