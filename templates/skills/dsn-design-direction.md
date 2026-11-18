@@ -8,7 +8,7 @@ sources: [anthropics/skills skills/frontend-design/SKILL.md]
 Define the visual character for the product or flow named in the assignment, within the approved design system.
 
 1. Read the brief, users and current system document. The system defines the parts; direction explains their use for this product.
-2. Name three or four observable qualities, such as "calm, dense, precise" or "warm, spacious, guided". Avoid labels that cannot guide a decision.
+2. Name the observable qualities that will guide choices about the user's task.
 3. Specify layout density, type contrast, use of colour, motion and imagery, with reasons tied to the user's task.
 4. Choose one memorable element grounded in the product, such as its data presentation or empty state.
 5. Identify stock interface conventions and retain them only when their function is justified.
