@@ -52,6 +52,28 @@ describe('the parts of a run of the whole release, by what its files took in run
   });
 });
 
+/* When no count of parts keeps each within three quarters of the limit, the run takes the count whose longest part is shortest:
+   every part may still run into its limit, but the fewest files with it. */
+describe('a run that no count of parts fits', () => {
+  it('takes as many parts as its budget when even that many run past three quarters of the limit, and loses no file', () => {
+    /* At 5 minutes a part, ten parts of the 90 minutes of 109 would still take 9 each. */
+    const plan = planTestParts(run109(5, false));
+    expect(plan.parts).toHaveLength(10);
+    expect(Math.min(...plan.parts.map(partMs))).toBeGreaterThan(0.75 * 5 * MINUTE);
+    expect(plan.reason).toContain('no count fits');
+    expect(planned(plan)).toEqual(all);
+  });
+
+  it('gives each of three files no part measured a part of its own when its limit is shorter than the estimate of one', () => {
+    const three = ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts'].map(file => ({ suiteId: 'server', file, selectionUnit: file }));
+    const plan = planTestParts({ units: three, durations: [], availableMachines: 1, costs: { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000, ...partSpread(false, 10_000) });
+    expect(plan.parts.map(part => part.units.map(unit => unit.file))).toEqual([['test/a.test.ts'], ['test/b.test.ts'], ['test/c.test.ts']]);
+    expect(plan.parts.map(part => part.testMs)).toEqual([30_000, 30_000, 30_000]);
+    expect(plan.unknownUnits).toEqual(three);
+    expect(plan.reason).toContain('no count fits');
+  });
+});
+
 /* Run 109's part ran 90 minutes and was stopped before its last files: what it ran in that time is less than all its files take. */
 describe('the pace of a machine, from parts that ran all their files', () => {
   const row = (error: string | null) => ({ computer: 'host:home-api', files: [], error,
