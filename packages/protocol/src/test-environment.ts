@@ -378,7 +378,7 @@ export const KeptFiles = z.array(z.strictObject({ suiteId: Id, files: z.array(z.
 export type KeptFiles = z.infer<typeof KeptFiles>;
 
 export const EnvironmentProblem = z.strictObject({
-  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout']),
+  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'transaction_timeout', 'save_failed', 'build_failed', 'cancelled', 'timeout']),
   detail: Text.max(2000),
 });
 export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;

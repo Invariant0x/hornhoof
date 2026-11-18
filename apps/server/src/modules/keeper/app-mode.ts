@@ -1,16 +1,8 @@
 import type { FastifyRequest } from 'fastify';
-import { ApiError, loggable } from '../../errors.js';
+import { loggable, modeRefusal, type ModeRefusal } from '../../errors.js';
 import { FRESH_MS, freshState, type KeeperState, type Mode } from './state.js';
 
 const CHECK_EVERY_MS = 1000;
-
-export const READ_ONLY_MESSAGE = 'Hornhoof only reads on this machine now, so nothing was changed.';
-const MESSAGES = {
-  read_only: READ_ONLY_MESSAGE,
-  maintenance: 'Hornhoof is installing an update and takes no changes until it ends.',
-  starting: 'Hornhoof is starting.',
-} as const;
-type Refusal = keyof typeof MESSAGES;
 
 type Hook = { enter: () => unknown; leave: () => unknown };
 /* One stay in lead: the hooks it entered, which are the only ones it leaves, and whether it has ended. */
@@ -184,7 +176,7 @@ const wantsSocket = (req: Asked): boolean => String(req.headers.upgrade ?? '').t
 const READ_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait', '/mcp']);
 
 /* Why this mode turns the request away, or null when it lets it through. */
-export function refusalOf(mode: Mode, req: Asked): Refusal | null {
+export function refusalOf(mode: Mode, req: Asked): ModeRefusal | null {
   if (mode === 'lead') return null;
   if (mode === 'off') return req.method === 'GET' && pathOf(req.url) === '/api/health' ? null : 'starting';
   if (mode === 'read' && req.method === 'POST' && READ_POSTS.has(pathOf(req.url))) return null;
@@ -194,7 +186,7 @@ export function refusalOf(mode: Mode, req: Asked): Refusal | null {
 export function modeGate(mode: AppMode): (req: FastifyRequest) => Promise<void> {
   return async req => {
     const refusal = refusalOf(mode.current(), req);
-    if (refusal) throw new ApiError(503, 'unavailable', MESSAGES[refusal], refusal);
+    if (refusal) throw modeRefusal(refusal);
   };
 }
 

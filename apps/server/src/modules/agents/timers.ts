@@ -9,6 +9,7 @@ import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
+import { retryCallBatches } from '../calls/calls.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
 import { checkWaitHealth } from '../tasks/wait-monitor.js';
 import { checkExternalWaits } from '../tasks/external-wait.js';
@@ -122,6 +123,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   await Promise.all([
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
     closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
@@ -143,6 +145,7 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
   await Promise.all([
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
   ]);
 }

@@ -1,5 +1,5 @@
 import type { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import type { Db } from '../src/db/client.js';
@@ -25,6 +25,11 @@ export async function withoutOperations(db: Db): Promise<void> {
     const staff = await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.departmentId, id));
     for (const agent of staff) await db.delete(schema.agentChanges).where(eq(schema.agentChanges.agentId, agent.id));
     await db.delete(schema.agents).where(eq(schema.agents.departmentId, id));
+    const pipelines = await db.select({ id: schema.pipelines.id }).from(schema.pipelines).where(eq(schema.pipelines.departmentId, id));
+    if (pipelines.length) {
+      await db.delete(schema.pipelineStages).where(inArray(schema.pipelineStages.pipelineId, pipelines.map(p => p.id)));
+      await db.delete(schema.pipelines).where(eq(schema.pipelines.departmentId, id));
+    }
     /* The open turn every department gets, its release never begun. */
     await db.delete(schema.turns).where(eq(schema.turns.departmentId, id));
     await db.delete(schema.departments).where(eq(schema.departments.id, id));

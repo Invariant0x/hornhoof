@@ -2,12 +2,14 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import { agents, departments, pipelines, pipelineStages, tasks } from '../../db/schema.js';
+import { catalogRoute, type CatalogPipeline } from '../templates/load.js';
 import { deptName } from '../departments/templates.js';
 import { published, refuse, type Actor, type Task, type Tx } from '../tasks/engine.js';
 import { nextRevision } from './edit.js';
 import { spotOf } from './responsible.js';
 
 type Pipeline = typeof pipelines.$inferSelect;
+type Department = typeof departments.$inferSelect;
 /* A stage as it is written: key names it in the list, its id when it is there already; parent: the key of the stage above
    it, none for the first ones after the head. One owner: a role of the department, or one of its employees. */
 type StageInput = { key: string; id?: string; parent: string | null; name: string; ownerRole?: string; ownerAgentId?: string };
@@ -16,8 +18,8 @@ type PipelineInput = { name: string; why: string; stages: StageInput[] };
 export type PipelineGuard = (spot: Spot) => Promise<void>;
 type Live = Pick<Ctx, 'db' | 'bus' | 'templates'>;
 
-type StageView = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: { id: string; name: string } | null; position: number };
-type PipelineView = { id: string; department: { id: string; name: string }; name: string; why: string; archived: boolean; version: number; stages: StageView[] };
+type StageView = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: { id: string; name: string } | null; position: number; brief?: string; oneShot?: { fanOut: number; judge: boolean } };
+type PipelineView = { id: string; department: { id: string; name: string }; name: string; why: string; catalogKey: string | null; isDefault: boolean; archived: boolean; version: number; stages: StageView[] };
 
 export const MAX_STAGES = 40;
 const invalid = (message: string) => refuse(400, 'pipeline_invalid', message);
@@ -123,17 +125,63 @@ async function writeStages(tx: Tx, pipeline: Pipeline, stages: StageInput[]): Pr
 
 const publish = (ctx: Live, companyId: string) => ctx.bus.publish(companyId, { type: 'tracker' });
 
+async function insertPipeline(tx: Tx, dept: Department, actor: Actor | null, input: PipelineInput, stages: StageInput[], stock?: { key: string; isDefault: boolean }): Promise<Pipeline> {
+  const [last] = await tx.select({ n: sql<number>`coalesce(max(${pipelines.position}), -1)` }).from(pipelines).where(eq(pipelines.departmentId, dept.id));
+  const [row] = await tx.insert(pipelines).values({
+    companyId: dept.companyId, departmentId: dept.id, name: input.name.trim(), why: input.why.trim(),
+    position: Number(last?.n ?? -1) + 1, createdByPersonId: actor?.personId ?? null, createdByAgentId: actor?.agentId ?? null,
+    ...(stock ? { catalogKey: stock.key, isDefault: stock.isDefault } : {}),
+  }).returning();
+  await writeStages(tx, row!, stages);
+  return row!;
+}
+
+function insertCatalogPipeline(tx: Tx, dept: Department, actor: Actor | null, stock: CatalogPipeline, isDefault: boolean): Promise<Pipeline> {
+  const stages = stock.stages.map(({ name, ownerRole }, i) => ({ key: String(i), parent: i ? String(i - 1) : null, name, ownerRole }));
+  return insertPipeline(tx, dept, actor, { name: stock.name, why: stock.why, stages }, stages, { key: stock.key, isDefault });
+}
+
+export async function seedDefaultPipeline(ctx: Pick<Ctx, 'templates'>, tx: Tx, dept: Department, actor: Actor | null): Promise<void> {
+  const catalog = dept.templateKey && ctx.templates.catalogs.get(dept.templateKey);
+  const stock = catalog ? catalog.pipelines.find(p => p.key === catalog.default) : undefined;
+  if (stock) await insertCatalogPipeline(tx, dept, actor, stock, true);
+}
+
+/* Switching a default leaves the earlier pipeline and all its tasks in place. Applying a pipeline twice reuses it. */
+export async function applyCatalogPipeline(ctx: Live, companyId: string, actor: Actor, departmentId: string, key: string, isDefault: boolean): Promise<Pipeline> {
+  const selected = await ctx.db.transaction(async tx => {
+    const [dept] = await tx.select().from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, companyId))).for('no key update');
+    if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
+    const stock = dept.templateKey ? ctx.templates.catalogs.get(dept.templateKey)?.pipelines.find(p => p.key === key) : undefined;
+    if (!stock) throw invalid('This ready pipeline is not available for this department.');
+    const [installed] = await tx.select().from(pipelines)
+      .where(and(eq(pipelines.departmentId, dept.id), eq(pipelines.catalogKey, key))).for('update');
+    if (installed && !installed.archivedAt && (!isDefault || installed.isDefault)) return installed;
+    const touched = { version: sql`${pipelines.version} + 1`, updatedAt: new Date() };
+    if (isDefault) await tx.update(pipelines).set({ isDefault: false, ...touched })
+      .where(and(eq(pipelines.departmentId, dept.id), eq(pipelines.isDefault, true)));
+    if (!installed) return insertCatalogPipeline(tx, dept, actor, stock, isDefault);
+    const [saved] = await tx.update(pipelines).set({ archivedAt: null, isDefault, ...touched }).where(eq(pipelines.id, installed.id)).returning();
+    return saved!;
+  });
+  publish(ctx, companyId);
+  ctx.bus.publish(companyId, { type: 'org' });
+  return selected;
+}
+
+export async function defaultPipelineOf(db: Live['db'], companyId: string, spot: Spot): Promise<string | null> {
+  const department = spot.parentId ?? spot.departmentId;
+  if (!department) return null;
+  const [row] = await db.select({ id: pipelines.id }).from(pipelines).where(and(eq(pipelines.companyId, companyId), eq(pipelines.departmentId, department), eq(pipelines.isDefault, true)));
+  return row?.id ?? null;
+}
+
 export async function createPipeline(ctx: Live, companyId: string, actor: Actor, guard: PipelineGuard, departmentId: string, input: PipelineInput): Promise<Pipeline> {
   const dept = await departmentOf(ctx.db, companyId, departmentId);
   await guard(await spotOf(ctx.db, companyId, dept.id));
   const stages = checkStages(input);
   await checkOwners(ctx, dept, stages);
-  const made = await ctx.db.transaction(async tx => {
-    const [last] = await tx.select({ n: sql<number>`coalesce(max(${pipelines.position}), -1)` }).from(pipelines).where(eq(pipelines.departmentId, dept.id));
-    const [row] = await tx.insert(pipelines).values({ companyId, departmentId: dept.id, name: input.name.trim(), why: input.why.trim(), position: Number(last?.n ?? -1) + 1, createdByPersonId: actor.personId ?? null, createdByAgentId: actor.agentId ?? null }).returning();
-    await writeStages(tx, row!, stages);
-    return row!;
-  });
+  const made = await ctx.db.transaction(tx => insertPipeline(tx, dept, actor, input, stages));
   publish(ctx, companyId);
   return made;
 }
@@ -154,7 +202,7 @@ export async function editPipeline(ctx: Live, companyId: string, guard: Pipeline
     const [saved] = await tx.update(pipelines).set({
       ...(change.name !== undefined ? { name: change.name.trim() } : {}),
       ...(change.why !== undefined ? { why: change.why.trim() } : {}),
-      ...(change.archived ? { archivedAt: current!.archivedAt ?? new Date() } : {}),
+      ...(change.archived ? { archivedAt: current!.archivedAt ?? new Date(), isDefault: false } : {}),
       version: sql`${pipelines.version} + 1`,
       updatedAt: new Date(),
     }).where(eq(pipelines.id, id)).returning();
@@ -166,24 +214,32 @@ export async function editPipeline(ctx: Live, companyId: string, guard: Pipeline
 }
 
 /* The pipelines of the company, or of one department, with their stages in tree order. */
-export async function pipelineViews(ctx: Pick<Ctx, 'db'>, companyId: string, departmentId?: string): Promise<PipelineView[]> {
+export async function pipelineViews(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, departmentId?: string): Promise<PipelineView[]> {
   const rows = await ctx.db.select().from(pipelines).where(and(eq(pipelines.companyId, companyId), departmentId ? eq(pipelines.departmentId, departmentId) : undefined)).orderBy(asc(pipelines.position), asc(pipelines.createdAt));
   if (!rows.length) return [];
   const stages = await ctx.db.select().from(pipelineStages).where(inArray(pipelineStages.pipelineId, rows.map(p => p.id)));
   const agentIds = [...new Set(stages.flatMap(s => (s.ownerAgentId ? [s.ownerAgentId] : [])))];
   const named = new Map((agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, agentIds)) : []).map(a => [a.id, a.name]));
-  const depts = new Map((await ctx.db.select().from(departments).where(inArray(departments.id, [...new Set(rows.map(p => p.departmentId))]))).map(d => [d.id, { id: d.id, name: deptName(d) }]));
-  return rows.map(p => ({
-    id: p.id,
-    department: depts.get(p.departmentId)!,
-    name: p.name,
-    why: p.why,
-    archived: p.archivedAt !== null,
-    version: p.version,
-    stages: inTreeOrder(stages.filter(s => s.pipelineId === p.id)).map(s => ({
-      id: s.id, parentId: s.parentStageId, name: s.name, ownerRole: s.ownerRole, owner: s.ownerAgentId ? { id: s.ownerAgentId, name: named.get(s.ownerAgentId) ?? '' } : null, position: s.position,
-    })),
-  }));
+  const depts = new Map((await ctx.db.select().from(departments).where(inArray(departments.id, [...new Set(rows.map(p => p.departmentId))]))).map(d => [d.id, d]));
+  return rows.map(p => {
+    const dept = depts.get(p.departmentId)!;
+    const stock = dept.templateKey && ctx.templates.catalogs.get(dept.templateKey)?.pipelines.find(entry => entry.key === p.catalogKey);
+    const route = stock ? catalogRoute(ctx.templates, dept.templateKey, stock.key) : null;
+    return {
+      id: p.id, department: { id: dept.id, name: deptName(dept) }, name: p.name, why: p.why,
+      catalogKey: p.catalogKey, isDefault: p.isDefault, archived: p.archivedAt !== null, version: p.version,
+      stages: inTreeOrder(stages.filter(s => s.pipelineId === p.id)).map(s => {
+        const step = stock ? stock.stages.find(entry => entry.name === s.name && entry.ownerRole === s.ownerRole) : undefined;
+        const oneShot = step?.echelon ? route?.stages.find(entry => entry.stage === step.echelon)?.oneShot : undefined;
+        return {
+          id: s.id, parentId: s.parentStageId, name: s.name, ownerRole: s.ownerRole,
+          owner: s.ownerAgentId ? { id: s.ownerAgentId, name: named.get(s.ownerAgentId) ?? '' } : null, position: s.position,
+          ...(step?.brief ? { brief: step.brief } : {}),
+          ...(oneShot ? { oneShot: { fanOut: oneShot.fanOut, judge: oneShot.judge !== null } } : {}),
+        };
+      }),
+    };
+  });
 }
 
 /* The first stage, in tree order, that this employee holds: as its owner, or by its role. None: no stage is theirs. */

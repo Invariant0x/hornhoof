@@ -1,6 +1,6 @@
-import { eq, isNull } from 'drizzle-orm';
+import { eq, inArray, isNull, or } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, people, personAccess, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, personAccess, pipelines, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, statements, TEST_API_KEY, testApp, until, type FakeNode } from './helpers.js';
 import { rowsRead, statementReads } from './rows-read.js';
@@ -309,14 +309,18 @@ describe('removing a department of a company with a long history', () => {
       expect(free.result).toBeNull();
       expect(free.read.tasks).toBeLessThanOrEqual(DEV_TASKS);
     }
-    /* The removal's own changes to tasks, each read through the department's index. Deleting the department rows also
-       makes Postgres look for tasks still pointing at them, which reads every task until product_id has an index. */
+    /* The removal's own changes to tasks, each read through the department's index: off its products, off the
+       department, and off its pipelines when it has some, as a new department has its default one. Deleting the
+       department rows also makes Postgres look for tasks still pointing at them, which reads every task until product_id
+       has an index. */
     const seen = statements();
     for (const place of [mascot.id, dev.id]) {
+      const inside = (await db.select(idOnly(departments)).from(departments).where(or(eq(departments.id, place), eq(departments.parentId, place)))).map(d => d.id);
+      const itsPipelines = await db.select(idOnly(pipelines)).from(pipelines).where(inArray(pipelines.departmentId, inside));
       const from = seen.length;
       expect((await build(app, ceo, { items: [{ department: place, note: '', remove: true }] })).statusCode).toBe(201);
       const changes = seen.slice(from).filter(q => q.sql.startsWith('update "tasks"'));
-      expect(changes).toHaveLength(2);
+      expect(changes).toHaveLength(itsPipelines.length ? 3 : 2);
       for (const change of changes) expect(await statementReads(db, change, 'tasks')).toBeLessThanOrEqual(DEV_TASKS);
     }
   });

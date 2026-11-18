@@ -56,9 +56,6 @@ const LEFT_SLOTS = `SELECT format('pg_%s_sync_%s_%s', r.srsubid, r.srrelid, (SEL
    unless every field of it is set, and a file's time of creation never is on Linux. */
 export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL AS there';
 
-/* The steps of putting a copy that was made again in the place of the old one, each written down before it runs. */
-export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'drop_db' | 'read';
-
 /* What a copy says of itself in its keeper's report. at: the leader's pulse it holds. name: the name of its
    subscription, its slot on the leader and its connection there. old: the attempt whose database waits to be merged. */
 /* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is

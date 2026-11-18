@@ -254,7 +254,7 @@ function ChannelFieldset({
   onSaved(next: ApprovalPolicyView): void;
 }) {
   const t = useT().dept.approvals;
-  const editable = view.canChangePolicy && rule.channel !== 'commit';
+  const editable = view.canChangePolicy;
   return (
     <fieldset className="field-group appr-rule">
       <legend>{t.channels[rule.channel]}</legend>

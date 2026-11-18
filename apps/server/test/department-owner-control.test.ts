@@ -98,6 +98,15 @@ describe('hiring with a skill that shows the whole company', () => {
     expect((await c.db.select(only(agents, 'name')).from(agents).where(and(eq(agents.departmentId, c.sales.id), isNull(agents.removedAt)))).map(a => a.name).sort()).toEqual(['Ola', 'Pia', 'Sid', 'Sue']);
   });
 
+  it('lets a head enable department tracker work for its own employee', async () => {
+    const c = await company();
+    const head = await c.tools(c.salesHead, c.ids.ceo);
+    const tracker = 'hh-keep-tracker';
+    const changed = await call(head, 'change_employee', { employee: c.seller.id, skills: { [tracker]: true } });
+    expect(changed.isError, changed.content[0]!.text).toBeFalsy();
+    expect((await c.db.select(only(agents, 'skills')).from(agents).where(eq(agents.id, c.seller.id)))[0]!.skills).toContain(tracker);
+  });
+
   it('is never done by a head, even on the CEO\'s word, for a new employee or one there is', async () => {
     const c = await company();
     const head = await c.tools(c.salesHead, c.ids.ceo);
@@ -130,16 +139,17 @@ describe("a head's own approval and wait policies", () => {
     expect(await c.db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, c.dev.id))).toEqual([]);
   });
 
-  it('are set in any turn with the rights of whoever runs the department, whoever wrote or nobody, but never for commits', async () => {
+  it('are set in any turn with the rights of whoever runs the department, whoever wrote or nobody, commits included', async () => {
     const c = await company();
     for (const person of [c.ids.dana, null]) {
       const set = await call(await c.tools(c.salesHead, person), 'set_approval_policy', { department: c.sales.id, ...RULE });
       expect(set.isError, `${String(person)}: ${set.content[0]!.text}`).toBeFalsy();
     }
-    const commit = await call(await c.tools(c.salesHead, c.ids.sam), 'set_approval_policy', { department: c.sales.id, channel: 'commit', mode: 'new_kinds' });
-    expect(commit.isError, commit.content[0]!.text).toBe(true);
+    const commit = await call(await c.tools(c.salesHead, c.ids.sam), 'set_approval_policy', { department: c.sales.id, channel: 'commit', mode: 'every' });
+    expect(commit.isError, commit.content[0]!.text).toBeFalsy();
     /* Sales names no owner, so its head goes with the CEO's rights. */
-    expect(await c.db.select({ departmentId: approvalPolicies.departmentId, channel: approvalPolicies.channel, mode: approvalPolicies.mode, updatedBy: approvalPolicies.updatedBy }).from(approvalPolicies)).toEqual([
+    expect(await c.db.select({ departmentId: approvalPolicies.departmentId, channel: approvalPolicies.channel, mode: approvalPolicies.mode, updatedBy: approvalPolicies.updatedBy }).from(approvalPolicies).orderBy(approvalPolicies.channel)).toEqual([
+      { departmentId: c.sales.id, channel: 'commit', mode: 'every', updatedBy: c.ids.ceo },
       { departmentId: c.sales.id, channel: 'message', mode: 'new_kinds', updatedBy: c.ids.ceo },
     ]);
     /* A worker has none of them. */

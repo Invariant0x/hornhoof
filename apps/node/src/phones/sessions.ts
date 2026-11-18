@@ -10,6 +10,10 @@ export class PhoneSessions {
   readonly #serials = new Map<string, Held>();
   readonly #fences = new Map<string, number>();
 
+  holds(serial: string, hardwareKey: string): boolean {
+    return this.#serials.has(serial) || [...this.#held.values()].some(held => held.grant.binding.hardwareKey === hardwareKey);
+  }
+
   open(input: PhoneGrant): void {
     const grant = PhoneGrant.parse(input);
     const until = Date.parse(grant.expiresAt);

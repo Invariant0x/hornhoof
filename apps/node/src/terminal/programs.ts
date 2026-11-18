@@ -8,7 +8,7 @@ import type { JobUser } from '../isolation.js';
 import { agyPlanLimits } from '../providers/antigravity.js';
 import { CLAUDE_UNSIGNED } from '../providers/claude-attribution.js';
 import { readPrivate } from '../providers/process.js';
-import { WHOLE_AGENTS_MD } from '../providers/codex.js';
+import { projectDocArgs } from '../providers/codex.js';
 import { CLAUDE_NO_AUTO_UPDATE, CODEX_NO_AUTO_UPDATE, KIMI_NO_AUTO_UPDATE } from '../providers/session-updates.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
@@ -26,6 +26,7 @@ export type LaunchInput = {
   /* How full Claude Code's context gets before it compacts the conversation; none leaves it at its own. */
   compactWindow?: number | null;
   instructionsFile: string | null;
+  instructionsBytes?: number;
   urls: AgentUrls;
 };
 /* sessionId: known before the program starts, or null when the program names it later in its log. */
@@ -107,9 +108,9 @@ const CODEX_SECRET_ENV = 'HH_MCP_SECRET';
 
 export const codexProgram: TermProgram = {
   kind: 'codex',
-  launch({ bin, home, workDir, sessionId, model, effort, urls }) {
+  launch({ bin, home, workDir, sessionId, model, effort, instructionsBytes, urls }) {
     /* Codex sends the agent's secret from its environment as a bearer token, to the address that carries none. */
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpAddress)}`, '-c', `mcp_servers.hornhoof.bearer_token_env_var="${CODEX_SECRET_ENV}"`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpAddress)}`, '-c', `mcp_servers.hornhoof.bearer_token_env_var="${CODEX_SECRET_ENV}"`, ...projectDocArgs(instructionsBytes), ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
     const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', CODEX_MAIN_SCREEN, ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */

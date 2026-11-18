@@ -28,6 +28,7 @@ A report, version 1:
 {
   "v": 1,
   "installation": "32 hex characters, a one-way hash of the installation's secret",
+  "submission": "64 hex characters identifying this submission",
   "kind": "bug | improvement | idea",
   "title": "1 to 200 characters",
   "text": "up to 5000 characters",
@@ -62,7 +63,7 @@ What the inbox answers:
 | 202 `{ "received": true, "number": 7, "issue": { "number": 1347, "url": "https://github.com/invariant0x/hornhoof/issues/1347" } }` | Taken: the number of its card in the inbox, and its issue, or `null` while it has none |
 | 400 | Not a report of version 1, or a field out of its limits |
 | 413 | A body over 16 KB |
-| 429 with `Retry-After` | Over 2000 signals in a rolling hour from all installations, over 10 reports from one installation, or over 200 new cards from all |
+| 429 with `Retry-After` | Over 2000 signals or 200 new cards in a rolling hour across the anonymous inbox |
 | 404 | The server is not Hornhoof's own installation |
 
 ## The inbox
@@ -78,8 +79,8 @@ cards were opened; an installation calls its report by it.
 
 The shared budget counts signals, not requests: `repeats: N` consumes N of the 2000 signals, and an ordinary report
 consumes one. A batch that would exceed it is refused whole, with `Retry-After` naming when enough budget returns.
-This check runs before the per-installation limit, so rotating installation IDs cannot bypass the shared limit or fill
-the limiter with new installation entries after that budget is exhausted.
+The sender keeps the identity of a submission and, for repeats, the count it first offered. The inbox counts each
+identified submission once. Reports from older installations may omit the submission id.
 
 **Known limit.** An installation ID is claimed by the sender, without proof that it represents a distinct installation.
 Made-up IDs can still inflate the installation count and priority within the shared signal budget. Priority is only a

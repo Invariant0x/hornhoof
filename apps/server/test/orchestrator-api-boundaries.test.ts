@@ -29,7 +29,7 @@ it('distinguishes a department head, the orchestrator and a person when showing 
   const view = await detail();
   expect(view.requests.find(row => row.id === own.id)!.byOrchestrator).toBe(true);
   expect(view.requests.find(row => row.id === human.id)!.byOrchestrator).toBe(false);
-  expect(view.log.find(row => row.text === 'Orchestrator answer')!.by).toMatchObject({ id: owner, byOrchestrator: true });
+  expect(view.log.find(row => row.text === 'Orchestrator answer')!.by).toMatchObject({ id: orchestrator!.id, for: { id: owner } });
   expect(view.log.find(row => row.text === 'Head answer')!.by).toMatchObject({ id: c.head.id });
 });
 
@@ -52,7 +52,7 @@ it('keeps owner API and delegation off other agents and confines a foreign orche
   const clientFor = async (agent: typeof agents.$inferSelect, subscription: string) => {
     const token = `boundary-${randomUUID()}`;
     await c.db.insert(jobs).values({ companyId: agent.companyId, agentId: agent.id, subscriptionId: subscription, kind: 'conversation', prompt: 'recorded boundary check', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
-    return mcp(c.app, token);
+    return { client: await mcp(c.app, token), headers: { authorization: `Bearer ${token}` } };
   };
   const refused = async (client: Awaited<ReturnType<typeof mcp>>, name: string, args: Record<string, unknown>) => {
     try {
@@ -66,7 +66,8 @@ it('keeps owner API and delegation off other agents and confines a foreign orche
   };
   const payload = { method: 'PATCH', path: `/api/people/${localPerson}`, body: { title: 'Forged title' }, via: 'orchestrator', agentKind: 'orchestrator' };
   for (const agent of [c.bruno, c.head]) {
-    const client = await clientFor(agent, agent.subscriptionId!);
+    const { client, headers } = await clientFor(agent, agent.subscriptionId!);
+    expect((await c.app.inject({ url: '/api/people', headers })).statusCode).toBe(401);
     expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('api');
     await refused(client, 'api', payload);
     await refused(client, 'use_tool', { name: 'api', arguments: payload });
@@ -75,7 +76,9 @@ it('keeps owner API and delegation off other agents and confines a foreign orche
   const [foreignOwner] = await c.db.insert(people).values({ companyId: foreign!.id, name: 'Foreign owner', email: 'foreign-owner@example.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
   const [sub] = await c.db.insert(subscriptions).values({ companyId: foreign!.id, provider: 'claude', kind: 'personal', label: 'Foreign fixture plan', ownerPersonId: foreignOwner!.id, status: 'ready' }).returning();
   const [foreignAgent] = await c.db.insert(agents).values({ companyId: foreign!.id, kind: 'orchestrator', name: 'Foreign orchestrator', model: '', subscriptionId: sub!.id }).returning();
-  const client = await clientFor(foreignAgent!, sub!.id);
+  const { client, headers } = await clientFor(foreignAgent!, sub!.id);
+  const direct = await c.app.inject({ method: 'PATCH', url: `/api/people/${localPerson}`, headers, payload: { title: 'Forged title' } });
+  expect(direct.statusCode).toBe(404);
   const response = await client.callTool({ name: 'api', arguments: { path: '/api/people' } });
   expect(response.isError).not.toBe(true);
   const text = response.content as { text: string }[];

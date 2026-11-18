@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions } from '../src/db/schema.js';
-import { decisionPrincipal, machinePrincipal } from '../src/modules/conversation/decision-context.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
@@ -48,10 +48,8 @@ describe("the orchestrator on an assistant's word", () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     const [olga] = await c.db.insert(people).values({ companyId: c.acme.id, name: 'Olga', email: 'olga@acme.com', status: 'active', scopeKind: 'company' }).returning();
-    const seq = await c.wrote('Invite Pia, let Olga own Development and rename Bruno.', true);
-    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ivan.id, sourceSeq: seq });
-    /* On a machine that is open, of the CEO's own or of another person's. */
-    for (const owner of [c.ivan.id, olga!.id]) expect(await machinePrincipal(c.db, c.job.id, owner)).toBe(c.ivan.id);
+    await c.wrote('Invite Pia, let Olga own Development and rename Bruno.', true);
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ivan.id, sourceSeq: null });
     expect((await call(client, 'invite_person', { name: 'Pia', email: 'pia@acme.com', title: '', access: { whole: true } })).isError).toBeFalsy();
     expect(await c.db.select().from(people).where(eq(people.email, 'pia@acme.com'))).toHaveLength(1);
     expect((await call(client, 'set_department_owner', { department: c.dev.id, person: olga!.id })).isError).toBeFalsy();

@@ -383,10 +383,11 @@ export class NodeHub {
     return this.hasTerminals(id) && this.sockets.get(keyOf(id))?.programOperatorV1 === true;
   }
 
-  send(id: NodeIdentity, msg: ProgramServerMessage): boolean {
+  /* True means queued on this socket; written reports its local write, not the node's receipt. */
+  send(id: NodeIdentity, msg: ProgramServerMessage, written?: (error?: Error) => void): boolean {
     const entry = this.sockets.get(keyOf(id));
     if (entry?.socket.readyState !== 1) return false;
-    entry.socket.send(JSON.stringify(msg));
+    entry.socket.send(JSON.stringify(msg), written);
     return true;
   }
 

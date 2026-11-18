@@ -31,11 +31,11 @@ async function stand() {
 }
 
 describe("the CEO's conflicts of a merge", () => {
-  it('lets only the CEO pick his conflicts, by himself or through the orchestrator', async () => {
+  it("shows all conflicts to the orchestrator and the CEO's cards on the owner's screen", async () => {
     const s = await stand();
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const inside = { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) };
-    expect(((await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] }).conflicts).toHaveLength(2);
+    expect(((await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] }).conflicts.map(row => row.table).sort()).toEqual(['machine_access', 'people', 'tasks']);
     /* A person of the whole company, and nobody at all. */
     for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) {
       const [read, write] = [await s.conflictsOf(who), await s.pick({ merge: s.id, take: 'here' }, who)];

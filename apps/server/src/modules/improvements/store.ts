@@ -97,17 +97,16 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'> & Fate, companyId: s
 /* A finding about Hornhoof itself that its developers have already: one sent to them and not fixed yet, told by the same
    fingerprint their inbox tells repeats by, under whichever kind it went as. One more round found it, so it counts on that
    card instead of a new one, and its developers hear of it once a person reports the repeats. */
-export async function countOnSent(ctx: Pick<Ctx, 'db' | 'bus'> & Fate, companyId: string, finding: { title: string; code: string | null }): Promise<{ id: string; number: number | null } | null> {
+export async function countOnSent(ctx: Fate, tx: Tx, companyId: string, finding: { title: string; code: string | null }): Promise<{ id: string; number: number | null } | null> {
   const prints = FEEDBACK_KINDS.map(kind => fingerprintOfReport({ kind, title: finding.title, facts: { errorCode: finding.code } }));
-  const sent = await ctx.db
+  const sent = await tx
     .select()
     .from(improvements)
     .where(and(eq(improvements.companyId, companyId), eq(improvements.scope, 'platform'), eq(improvements.status, 'sent'), inArray(improvements.sentFingerprint, prints)))
     .orderBy(desc(improvements.sentAt));
   const open = sent.find(i => !fateOf(ctx.released, ctx.config.version, i.reportNumber).fixedIn);
   if (!open) return null;
-  await ctx.db.update(improvements).set({ seen: sql`${improvements.seen} + 1`, updatedAt: new Date() }).where(eq(improvements.id, open.id));
-  improvementsChanged(ctx, companyId);
+  await tx.update(improvements).set({ seen: sql`${improvements.seen} + 1`, updatedAt: new Date() }).where(eq(improvements.id, open.id));
   return { id: open.id, number: open.reportNumber };
 }
 
@@ -115,7 +114,7 @@ export async function countOnSent(ctx: Pick<Ctx, 'db' | 'bus'> & Fate, companyId
 export const improvementsChanged = (ctx: Pick<Ctx, 'bus'>, companyId: string) => ctx.bus.publish(companyId, { type: 'improvements', spot: { departmentId: null } });
 
 /* Moves an improvement inside a caller's transaction, with the same company and source-status guards everywhere. */
-async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
+export async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
   const [moved] = await db
     .update(improvements)
     .set({ ...to, updatedAt: new Date() })

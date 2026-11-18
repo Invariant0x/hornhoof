@@ -1,5 +1,5 @@
 {
-  "id": "57a9fb77-a71d-4a55-9c2e-def5e1b71e1b",
+  "id": "9ef0b79c-b4d1-437b-ad11-bdb2cf06262d",
   "prevId": "4d13c900-f20f-40c6-b0f8-561a6e8de0fe",
   "version": "7",
   "dialect": "postgresql",
@@ -11318,6 +11318,24 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "deletion_approved_by": {
+          "name": "deletion_approved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_approved_at": {
+          "name": "deletion_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_completed_at": {
+          "name": "deletion_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -11402,6 +11420,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "assistant_of"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "people_deletion_approved_by_people_id_fk": {
+          "name": "people_deletion_approved_by_people_id_fk",
+          "tableFrom": "people",
+          "tableTo": "people",
+          "columnsFrom": [
+            "deletion_approved_by"
           ],
           "columnsTo": [
             "id"
@@ -18658,12 +18689,6 @@
         "closed_at": {
           "name": "closed_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "closed_because": {
-          "name": "closed_because",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         }

@@ -239,8 +239,8 @@ describe('Codex in a terminal', () => {
 
   it('reads all of AGENTS.md, which Codex cuts at 32 KiB unless told otherwise', () => {
     for (const sessionId of [null, 'th-9']) {
-      const { command } = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
-      expect(command[command.indexOf('project_doc_max_bytes=1048576') - 1]).toBe('-c');
+      const { command } = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, instructionsBytes: 1_200_000, urls: URLS });
+      expect(command[command.indexOf('project_doc_max_bytes=1200000') - 1]).toBe('-c');
     }
   });
 

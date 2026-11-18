@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { departments, jobs, machineAccess, machines, people, sessions, tasks, turns } from '../src/db/schema.js';
 import type { ConflictView } from '../src/modules/merge/picks.js';
-import { listen, mcp, ownDatabases } from './helpers.js';
+import { as, listen, mcp, ownDatabases } from './helpers.js';
 import { mergeApp, ORCHESTRATOR_TOKEN, rowsOf } from './merge-app-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
@@ -60,7 +60,7 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     expect([next.conflicts.length, next.more, next.conflicts[0]!.id === first.conflicts[0]!.id]).toEqual([1, false, false]);
   });
 
-  it("keeps secrets from the orchestrator and lists only its own conflicts, while it settles the CEO's it names", async () => {
+  it("lists ordinary conflicts in every table and masks protected columns", async () => {
     const s = await stand();
     const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'company' }).returning();
     await s.db.insert(sessions).values({ tokenHash: 'a'.repeat(64), personId: maria!.id, expiresAt: new Date('2026-12-01T00:00:00Z') });
@@ -76,17 +76,31 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     const all = await s.conflicts(id);
     expect(all.map(conflict => conflict.tbl)).toEqual(['jobs', 'people', 'sessions']);
     const { conflicts } = await listed(s.tools);
-    expect(conflicts.map(conflict => conflict.table)).toEqual(['jobs']);
-    expect(conflicts[0]).toMatchObject({ cols: ['tool_token_hash'], here: { tool_token_hash: '(hidden)' }, there: { tool_token_hash: '(hidden)' }, whose: 'orchestrator' });
+    expect(conflicts.map(conflict => conflict.table).sort()).toEqual(['jobs', 'people', 'sessions']);
+    expect(conflicts.find(conflict => conflict.table === 'jobs')).toMatchObject({ cols: ['tool_token_hash'], here: { tool_token_hash: '(hidden)' }, there: { tool_token_hash: '(hidden)' }, whose: 'orchestrator' });
     expect(JSON.stringify(conflicts)).not.toContain(hashToken('there'));
-    for (const table of ['people', 'sessions']) expect((await listed(s.tools, { table })).conflicts).toEqual([]);
     const person = all.find(conflict => conflict.tbl === 'people')!;
-    /* Named, one of the CEO's he settles too. */
     expect(text(await call(s.tools, 'merge_pick', { ids: [person.id], take: 'there' }))).toBe('Settled 1: kept here 0, took there 1.');
-    /* In bulk he settles his own alone, and is not told of the others. */
-    expect(text(await call(s.tools, 'merge_pick', { merge: id, take: 'here' }))).toBe('Settled 1: kept here 1, took there 0.');
-    expect((await s.picked()).map(row => [row.tbl, row.picked])).toEqual([['jobs', 'here'], ['people', 'there'], ['sessions', null]]);
+    expect(text(await call(s.tools, 'merge_pick', { merge: id, take: 'here' }))).toBe('Settled 2: kept here 2, took there 0.');
+    expect((await s.picked()).map(row => [row.tbl, row.picked])).toEqual([['jobs', 'here'], ['people', 'there'], ['sessions', 'here']]);
     expect((await s.db.select().from(people).where(eq(people.id, maria!.id)))[0]!.name).toBe('Maria There');
+  });
+
+  it('leaves a permanent row deletion to a direct human pick', async () => {
+    const s = await stand();
+    const fork = await s.fork();
+    await fork.db.delete(tasks).where(eq(tasks.id, s.one.id));
+    await s.db.update(tasks).set({ title: 'Still here' }).where(eq(tasks.id, s.one.id));
+    await s.merge(fork);
+    const { conflicts } = await listed(s.tools);
+    expect(conflicts).toHaveLength(1);
+    expect(text(await call(s.tools, 'merge_pick', { ids: [conflicts[0]!.id], take: 'there' }))).toContain('Only the CEO can choose a permanent deletion.');
+    expect(await s.db.select().from(tasks).where(eq(tasks.id, s.one.id))).toHaveLength(1);
+    const picked = await s.app.inject({ method: 'POST', url: '/api/merges/pick', payload: { ids: [conflicts[0]!.id], take: 'there' }, ...as(s.ceo) });
+    expect(picked.statusCode).toBe(200);
+    expect(picked.json()).toMatchObject({ settled: 1, there: 1 });
+    expect(await s.db.select().from(tasks).where(eq(tasks.id, s.one.id))).toEqual([]);
+    expect(await s.picked()).toMatchObject([{ id: conflicts[0]!.id, picked_by: `person:${s.owner.id}` }]);
   });
 
   it('settles one or many', async () => {

@@ -8,8 +8,45 @@ export const hideJoinCodes = (text: string): string => text.replace(/--join [A-Z
 
 type Pattern = readonly [{ [Symbol.replace](text: string, replacement: string): string }, string];
 
-/* The shortest secret hidden by its exact value: shorter ones would hide ordinary words. */
+/* The minimum for encoded forms and for exact values in general diagnostics. */
 export const MIN_SECRET_LENGTH = 8;
+
+type ShortSecrets = 'ignore' | 'literal';
+const UTF8 = new TextEncoder();
+
+function base64(value: string): string {
+  let bytes = '';
+  for (const byte of UTF8.encode(value)) bytes += String.fromCharCode(byte);
+  return btoa(bytes);
+}
+
+/* Known credentials can also be hidden as short literals on an operator surface. Forms go longest first. */
+export function secretForms(secrets: readonly string[], short: ShortSecrets): string[] {
+  const forms = new Set<string>();
+  for (const secret of secrets) {
+    if (secret.length < MIN_SECRET_LENGTH) {
+      if (short === 'literal' && secret) forms.add(secret);
+      continue;
+    }
+    const encoded = base64(secret);
+    const unpadded = encoded.replace(/=+$/, '');
+    forms.add(secret);
+    forms.add(encoded);
+    forms.add(unpadded);
+    forms.add(unpadded.replaceAll('+', '-').replaceAll('/', '_'));
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
+}
+
+export function redactExact(text: string, secrets: readonly string[], short: ShortSecrets): string {
+  for (const value of secretForms(secrets, short)) {
+    /* A pane or question can be masked before it leaves the node and again when the server receives it. */
+    text = HIDDEN.includes(value)
+      ? text.split(HIDDEN).map(part => part.replaceAll(value, HIDDEN)).join(HIDDEN)
+      : text.replaceAll(value, HIDDEN);
+  }
+  return text;
+}
 
 /* A password after its label, with = or :, quoted or not. */
 const LABELLED_PASSWORD: Pattern = [/((?<![\p{L}\p{N}_])(?:пароль|password|passwd)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}&]+)/giu, `$1${HIDDEN}`];

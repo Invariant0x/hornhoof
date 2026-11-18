@@ -69,13 +69,9 @@ function opening(row: (typeof machineAccess.$inferSelect & { personName: string 
   return { until: row.until.toISOString(), scope: row.scope, openedBy: row.openedBy && row.personName ? { id: row.openedBy, name: row.personName } : null, openedAt: row.openedAt?.toISOString() ?? null };
 }
 
-type OpenOptions = { grant?: Grant; scope?: AccessScope; duration?: AccessDuration; confirm?: boolean };
+type OpenOptions = { grant?: Grant; scope?: AccessScope; duration?: AccessDuration };
 function openingOptions(options: OpenOptions): { scope: AccessScope; seconds: number } {
   return { scope: options.scope ?? 'orchestrator', seconds: ACCESS_DURATIONS[options.duration ?? '1h'] };
-}
-
-function confirmScope(scope: AccessScope, confirmed: boolean | undefined): void {
-  if (scope === 'all_agents' && confirmed !== true) throw new ApiError(400, 'validation', 'Confirm that you are opening full access to all company agents.', 'confirm_needed');
 }
 
 type Row = typeof machines.$inferSelect;
@@ -292,7 +288,6 @@ export class Computers {
       if (!this.reachable(machineId)) throw unreachable(machine.name);
       const now = this.now();
       const { scope, seconds } = openingOptions(options);
-      confirmScope(scope, options.confirm);
       const opened = await this.untilOf(tx, opener, row, options.grant, now, seconds);
       const [before] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
       await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);

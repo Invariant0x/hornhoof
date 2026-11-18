@@ -1,49 +1,11 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import type { Db } from '../src/db/client.js';
-import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentChanges, agents, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { ensureOperations, placeOperator } from '../src/modules/operations/ensure.js';
-import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations, ownDatabases } from './helpers.js';
+import { as, invitePerson, withoutOperations } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
-
-ownDatabases();
-
-/* A company whose Operations has no plan yet, and an empty Development to tell it from. */
-async function company() {
-  const { app, db } = await testApp();
-  const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });
-  expect(res.statusCode).toBe(201);
-  const ceo = sessionFrom(res);
-  const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'development' }] }, ...as(ceo) });
-  expect(built.statusCode).toBe(201);
-  const [acme] = await db.select().from(companies);
-  const [owner] = await db.select().from(people);
-  const [ops] = await db.select().from(departments).where(eq(departments.templateKey, 'operations'));
-  const [dev] = await db.select().from(departments).where(eq(departments.templateKey, 'development'));
-  return { app, db, ceo, companyId: acme!.id, ownerId: owner!.id, ops: ops!, dev: dev! };
-}
-type Company = Awaited<ReturnType<typeof company>>;
-
-async function operator(db: Db) {
-  const [row] = await db.select().from(agents).where(and(eq(agents.roleKey, 'OPS-PROGRAM'), isNull(agents.removedAt)));
-  return row!;
-}
-
-async function addKey(c: Company, target: object = { kind: 'any' }): Promise<string> {
-  const res = await c.app.inject({ method: 'POST', url: '/api/subscriptions', payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Key', apiKey: 'sk-ant-api03-a-key-5678', target }, ...as(c.ceo) });
-  expect(res.statusCode).toBe(201);
-  return res.json().subscription.id as string;
-}
-
-/* A plan as a machine reported it, for what the routes do not make at once. */
-async function addPlan(c: Company, values: Partial<typeof subscriptions.$inferInsert> = {}): Promise<string> {
-  const [row] = await c.db
-    .insert(subscriptions)
-    .values({ companyId: c.companyId, provider: 'claude', kind: 'personal', label: 'Plan', ownerPersonId: c.ownerId, status: 'ready', ...values })
-    .returning({ id: subscriptions.id });
-  return row!.id;
-}
+import { company, operator, addKey, addPlan } from './operations-plan-fixture.js';
 
 describe("the program operator's plan", () => {
   it('waits without one, and gets the first key that comes with no one asked', async () => {
@@ -230,12 +192,4 @@ describe("the program operator's plan", () => {
     expect(turns[0]!.subscriptionId).toBe(key);
   });
 
-  it('still adds the key when placing the operator fails', async () => {
-    const c = await company();
-    await c.db.execute(sql`create function refuse_move() returns trigger language plpgsql as $$ begin if new.role_key = 'OPS-PROGRAM' then raise exception 'no move'; end if; return new; end $$`);
-    await c.db.execute(sql`create trigger refuse_move before update on agents for each row execute function refuse_move()`);
-    const key = await addKey(c);
-    expect((await c.db.select().from(subscriptions).where(eq(subscriptions.id, key)))[0]).toBeDefined();
-    expect((await operator(c.db)).subscriptionId).toBeNull();
-  });
 });

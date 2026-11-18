@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OperatorReason, type OperatorCheck, type OperatorInputLine, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
-import { HIDDEN, redact, secretForms } from '../redact.js';
+import { HIDDEN, redactOperator, secretForms } from '../redact.js';
 import type { OperatorIdentity } from './operator-observer.js';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 
@@ -35,7 +35,7 @@ export function operatorCells(cells: string, secrets: string[]): string {
 
 /* A known credential may cross hard capture rows. Keep the original row layout outside its masked span. */
 function maskOperatorRows(text: string, secrets: string[]): string {
-  let masked = redact(text, secrets);
+  let masked = redactOperator(text, secrets);
   for (const value of secretForms(secrets)) masked = maskWrappedSecret(masked, value);
   return masked;
 }

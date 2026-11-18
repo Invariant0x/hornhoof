@@ -276,7 +276,8 @@ describe('agent window task and controls', () => {
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     const user = userEvent.setup();
-    render(<Shell me={ME} welcome onSignOut={() => {}} />);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Open the orchestrator' }));
     await user.click(await screen.findByRole('button', { name: 'Task' }));
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
   });
