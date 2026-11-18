@@ -35,7 +35,7 @@ describe('orchestrator instructions', () => {
   it('delivers every Russian department label from the CEO screen through the structure ability', () => {
     const structure = ability('orch-company');
     expect(structure).toContain("CEO's screen");
-    for (const label of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство']) {
+    for (const label of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство', 'Производство видео']) {
       expect(structure, label).toContain(label);
     }
     expect(whole).toContain(structure);
@@ -65,14 +65,14 @@ describe('orchestrator instructions', () => {
     }
   });
 
-  it('staffs a department through its options and a card, by the staffing guideline', () => {
+  it('uses staffing options and applies permitted changes without requiring a card', () => {
     const staffing = ability('orch-staff');
-    for (const rule of [/staffing_options/, /propose_staff/, /start from the default roster/i, /a pool of developers/i, /another provider than most (?:developers|builders)/i, /one security reviewer/i, /one (?:employee )?per product/i, /nothing secret goes into names or notes/i]) {
+    for (const rule of [/staffing_options/, /hire[^.]*without waiting for a staffing card/i, /start from the default roster/i, /eligible independent owner/i, /one (?:employee )?per product[^.]*`perProduct`/i, /nothing secret goes into names or notes/i]) {
       expect(staffing).toMatch(rule);
     }
-    expect(staffing).toMatch(/one subscription(?:'s)? limit does not stop both/i);
+    expect(staffing).toMatch(/separate plans[^.]*shared point of failure/i);
     expect(staffing).toMatch(/role is an identity[\s\S]*assignment says why this employee exists/i);
-    expect(staffing).toMatch(/provider\/model\/effort choices unless that person authorized a change/i);
+    expect(staffing).toMatch(/selected provider, model and effort unless the assignment changes it/i);
     expect(carried).not.toMatch(/heads on another provider/);
     expect(carried).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
@@ -91,8 +91,8 @@ describe('orchestrator instructions', () => {
     }
   });
 
-  it('knows a waiting employee takes a new subscription itself, unless a person took its own off by hand', () => {
-    for (const rule of [/employee waiting for a subscription takes a new one by itself/i, /runs the role's level/i, /do not assign it to each of them by hand/i, /took off by hand keeps waiting/i]) {
+  it('knows an employee without a subscription takes a new eligible one unless a person removed its plan by hand', () => {
+    for (const rule of [/employee without a subscription takes a new eligible one automatically/i, /runs the role's level/i, /do not assign it to each of them by hand/i, /took off by hand stays unassigned/i]) {
       expect(ability('orch-staff')).toMatch(rule);
     }
   });
@@ -101,8 +101,8 @@ describe('orchestrator instructions', () => {
     for (const words of ['build_structure', 'hire', 'change_employee', 'message_employee', 'answer_request', 'update_task', 'api', 'database']) {
       expect(carried).toContain(words);
     }
-    expect(ability('orch-company')).toMatch(/already requested an exact structure change[\s\S]*build_structure within that authorization[\s\S]*read its actual result/i);
-    expect(ability('orch-staff')).toMatch(/authorized person already named whom to hire[\s\S]*use hire[\s\S]*actual result/i);
+    expect(ability('orch-company')).toMatch(/use build_structure[^.]*standing owner authority[\s\S]*verify the resulting structure/i);
+    expect(ability('orch-staff')).toMatch(/apply reversible staffing changes with hire[\s\S]*read the actual result/i);
     expect(ability('orch-people')).toMatch(/exact intended person and scope before an irreversible action/i);
     expect(carried).not.toContain('You cannot create, change or remove departments yourself');
   });
@@ -115,7 +115,7 @@ describe('orchestrator instructions', () => {
     expect(people).toMatch(/never use database SQL to create people, change their permissions or bypass these checks/i);
     expect(people).toMatch(/delete a person or an assistant for good[\s\S]*ask the CEO first[\s\S]*DELETE \/api\/people\/<id>/i);
     expect(ability('orch-resources')).toMatch(/what is not forbidden is allowed[\s\S]*dedicated tool in any turn, whoever asked[\s\S]*Do not ask a person to confirm what the company allows/i);
-    expect(ability('orch-resources')).toMatch(/skill supplies a method, not tool access/i);
+    expect(ability('orch-resources')).toMatch(/skill can make a tool available[^.]*selection alone does not authorize an action/i);
   });
 
   it('runs staff and a department in a later turn too, and never asks a person to write again so a tool works', () => {
@@ -176,7 +176,7 @@ describe('orchestrator instructions', () => {
     expect(trouble).toMatch(/responsible operations owner/i);
     expect(trouble).toMatch(/repair a wrong row only after reading its current value and checking the narrow target/i);
     expect(trouble).toMatch(/database repair is not permission to change people or protected access through SQL/i);
-    /* Operations only reads the database, so no data fix goes there. */
+    /* Operations uses its authorized repair route. */
     expect(carried).not.toContain('data fix you cannot make');
   });
 
@@ -191,8 +191,8 @@ describe('orchestrator instructions', () => {
 
   it('changes employee availability only when authorized and writes notes only when a fact changes', () => {
     expect(ability('orch-staff')).toMatch(/disable or remove employees only when authorized/i);
-    expect(ability('orch-staff')).toMatch(/irreversible removal requires the relevant person's explicit decision/i);
-    expect(ability('orch-staff')).toMatch(/never[\s\S]*restart an employee in active work to apply text/i);
+    expect(ability('orch-staff')).toMatch(/CEO's recorded yes for permanent deletion of the exact target/i);
+    expect(ability('orch-staff')).toMatch(/without restarting an employee in active work/i);
     expect(carried).not.toMatch(/switch off the employees that have no work in the turn/i);
     expect(ability('hh-notebook')).toMatch(/change it only when the fact changes/i);
   });

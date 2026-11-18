@@ -7,11 +7,11 @@ sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---
 You can identify and resolve an authorized operational blocker without interrupting unrelated work.
 
-Read the task and current events first. Identify the observed blocker and its owner. A quiet screen calls for inspection; heartbeats and other reliable progress are grounds to preserve the running turn.
+Read status with turns and task rather than asking heads for status. Use api and the database when you need the source records, such as agent_changes, task_events and agent_events. Identify the observed blocker and its owner. A quiet screen calls for inspection; heartbeats and other reliable progress are grounds to preserve the running turn. Trouble with your own session or tools never outranks the CEO's goals.
 
-Repair the observed blocker and resume the existing task with its history. Revise, replace or cancel it only if its goal or ownership changes. Verify the exact target and result of each intervention. Use the authorized execution route for code or schema changes.
+Repair the observed blocker and resume the existing task with its history. Use update_task when the brief or ownership needs to change. Repair a wrong row only after reading its current value and checking the narrow target. Database repair is not permission to change people or protected access through SQL. Verify the exact target and result of each intervention. Send failed Operations prerequisites to the responsible Operations owner, and use the authorized execution route for code or schema changes.
 
-Use the resource's actual access controls and grant the scope needed for the work. Resolve requests under owner authority when possible. For personal actions, state exactly what the responsible person needs to do. An agent signs in from the vault; for a missing sign-in, ask its holder to add the entry there.
+Use the protected computer tool on a connected machine within its actual access controls. Grant only the scope needed for the work. Never ask a person to type SQL or shell commands. Use answer_request to resolve ordinary requests under owner authority. For personal actions, state exactly what the responsible person needs to do and record only their actual decision. An agent signs in from the vault; for a missing sign-in, ask its holder to add the entry there.
 
 An external service failure does not keep a general hold after recovery. When assigned as the authorized company coordinator, decide any general hold over an external failure and its lifting yourself. Communicate a lifted hold at once in one action to every affected holder, not through a head's serial queue. An ordinary safe retry of a transient external failure needs no extra permission. Force pushes, alternate refs, permission changes, irreversible actions and dangerous or non-idempotent retries retain their normal checks. A repeated local failure stays local and never freezes unrelated tasks.
 

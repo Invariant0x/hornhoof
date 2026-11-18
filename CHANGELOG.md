@@ -9,6 +9,21 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Development instructions keep the independent Security check before shared integration in every ability that can integrate changes.
+- Development instructions keep release checks tied to the exact commit and record why test selection had to use a fallback.
+- Review instructions tell reviewers to flag tests that cap the length of agent instructions or skills.
+- Agents check the sender of quoted text and keep secrets out of messages and notes.
+- Agent replies go through the channel that reaches the intended person or employee.
+- Agents check shell paths before overwriting or deleting files and ask the CEO only for irreversible deletion.
+- Questions include shared and per-option materials that people can inspect before answering.
+- Agents record browser challenges and continue with other pages without bypassing the challenge.
+- Agents track remote checks and delegated work as active work and wait only when a person needs to act.
+- The watchdog alerts the department head when work can start and an eligible employee is free.
+- The orchestrator uses department names from the screen, includes the default staff, and applies permitted staffing changes directly.
+- Staffing instructions explain how Operations keeps its required roles and how eligible subscriptions are assigned.
+- The orchestrator checks employee changes and leaves active work running when applying instruction edits.
+- The orchestrator uses the owner's tools and verifies the result when changing company resources or fixing a blocker.
+- The orchestrator routes small additions before the final check and lets the department release the exact checked commit.
 - Operations templates assign access, recovery and shared changes to the people who can carry them out.
 - Design and household templates adapt handoffs, reminders and checks to the work.
 - Marketing, Sales and Business Development templates use the department's own terms and choose evidence for each decision.
