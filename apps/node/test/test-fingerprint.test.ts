@@ -365,6 +365,19 @@ describe('when the graph cannot tell', () => {
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
   });
 
+  /* The updater's script lies in a folder of its own that no suite holds: it can lead anywhere in that folder, not in every package. */
+  it('a program in no package can lead anywhere in its own folder, and no further', async () => {
+    const files = { ...app, 'tools/update/run.sh': 'source ./lib.sh\n', 'tools/update/lib.sh': 'echo 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst script = new URL('../../../tools/update/run.sh', import.meta.url);\nit('b', () => script);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'tools/update/lib.sh': 'echo 2\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
+  it('a log is data, as a text is', async () => {
+    const files = { ...app, 'docs/evidence/red.log': 'not ok 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst log = new URL('../../../docs/evidence/red.log', import.meta.url);\nit('b', () => log);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'docs/evidence/red.log': 'ok 1\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
   it('data leads nowhere, and neither does a fixture of a test folder, which changes its package anyway', async () => {
     const test = (name: string) => `import { it } from 'vitest';\nconst data = new URL('${name}', import.meta.url);\nit('b', () => data);\n`;
     for (const named of ['../../a/data/values.json', '../../a/data/page.css', '../../a/LICENSE', '../../a/test/fakes/program']) {
