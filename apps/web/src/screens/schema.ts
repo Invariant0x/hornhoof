@@ -61,18 +61,19 @@ type Group = { role: DeptRole | null; key: string }[];
    then the final check. Every check after the work is a numbered gate the work passes in turn. */
 function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[]) {
   const roles = [...known.values()].filter(r => r.schema !== 'observer');
-  const before = roles.filter(r => r.schema === 'before_work');
-  const plain = roles.filter(r => r.gate === null && !r.schema);
-  const checks = roles.filter(r => r.gate !== null && !r.schema);
-  const final = roles.filter(r => r.schema === 'final_check');
-  const gateNumbers = [...new Set(checks.map(r => r.gate!))].sort((a, b) => a - b);
+  const frames = roles.map(role => ({ key: role.id, role, gate: role.gate, schema: role.schema }));
+  const before = frames.filter(f => f.schema === 'before_work');
+  const plain = frames.filter(f => f.gate === null && !f.schema);
+  const checks = frames.filter(f => f.gate !== null && !f.schema);
+  const final = frames.filter(f => f.schema === 'final_check');
+  const gateNumbers = [...new Set(checks.map(f => f.gate!))].sort((a, b) => a - b);
   const groups: Group[] = [];
-  if (before.length) groups.push(before.map(r => ({ role: r, key: r.id })));
-  const workGroup: Group = [...plain.map(r => ({ role: r, key: r.id })), ...(loose.length ? [{ role: null, key: '' }] : [])];
+  if (before.length) groups.push(before);
+  const workGroup: Group = [...plain, ...(loose.length ? [{ role: null, key: '' }] : [])];
   if (workGroup.length) groups.push(workGroup);
   const firstCheck = groups.length;
-  for (const n of gateNumbers) groups.push(checks.filter(r => r.gate === n).map(r => ({ role: r, key: r.id })));
-  if (final.length) groups.push(final.map(r => ({ role: r, key: r.id })));
+  for (const n of gateNumbers) groups.push(checks.filter(f => f.gate === n));
+  if (final.length) groups.push(final);
   return { groups, firstCheck };
 }
 

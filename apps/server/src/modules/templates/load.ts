@@ -62,7 +62,7 @@ export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; d
    at a stage must carry. */
 /* oneShot: its owner runs the stage as one-shot calls, so many at once and a judge. */
 export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null; oneShot?: EchelonOneShot }[] };
-export type CatalogStage = { name: string; ownerRole: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot };
+export type CatalogStage = { name: string; ownerRole: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot; handoffTo?: TemplateKey[] };
 export type CatalogPipeline = { key: string; name: string; why: string; stages: CatalogStage[] };
 export type PipelineCatalog = { department: TemplateKey; default: string; pipelines: CatalogPipeline[] };
 
@@ -318,6 +318,7 @@ const CatalogHead = z.strictObject({
       ownerRole: z.string(),
       brief: z.string().trim().min(1).optional(),
       echelon: z.enum(ECHELON_STAGES).optional(),
+      handoffTo: z.array(z.enum(TEMPLATE_KEYS)).optional(),
       oneShot: OneShot.optional(),
     })).min(1),
   })).min(1),

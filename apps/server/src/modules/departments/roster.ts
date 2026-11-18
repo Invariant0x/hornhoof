@@ -14,13 +14,12 @@ type Plan = Awaited<ReturnType<typeof servingSubscriptions>>[number];
 /* The plan a role starts on: the first one serving the department that runs the role's tier, or none yet. */
 export const planFor = (serving: readonly Plan[], role: Pick<Role, 'tier'>): Plan | undefined => serving.find(s => runsTier(s.provider, role.tier));
 
-/* The people a department's template starts it with: one of each default role, a role kept per product once for each
-   product, each on the first plan that serves the department and runs the role's tier, with the model that tier asks for
-   there. A role no plan serves yet comes without one, and its employee waits for it. */
-export async function templateRoster(ctx: Pick<Ctx, 'db' | 'templates'>, dept: Dept, serving: readonly Plan[]): Promise<HireLine[]> {
+/* The template's default roles, plus any roles needed for the build. A role kept per product comes once for each product.
+   Each employee takes the first plan that runs its tier, or waits for one. */
+export async function templateRoster(ctx: Pick<Ctx, 'db' | 'templates'>, dept: Dept, serving: readonly Plan[], extraRoles?: ReadonlySet<string>): Promise<HireLine[]> {
   const products = await ctx.db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
   const people: HireLine[] = [];
-  for (const role of dept.templateKey ? ctx.templates.roster(dept.templateKey).filter(r => r.inDefault) : []) {
+  for (const role of dept.templateKey ? ctx.templates.roster(dept.templateKey).filter(r => r.inDefault || extraRoles?.has(r.id)) : []) {
     const plan = planFor(serving, role);
     const line = { role: role.id, model: plan ? modelOnPlan(role.tier, plan) : '', subscription: plan?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
     if (role.perProduct && products.length) for (const p of products) people.push({ ...line, name: `${role.title.en} (${deptName(p)})`, product: p.id });
@@ -74,6 +73,9 @@ export function companyRoster(ctx: Pick<Ctx, 'templates'>, staff: readonly Compa
   });
 }
 
-/* The same for a department as the database holds it now. */
-export const rosterOf = async (ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept): Promise<HireLine[]> =>
-  templateRoster(ctx, dept, await servingSubscriptions(ctx, companyId, spotIn(dept)));
+/* A department built with staff also hires the positions that hold its pipeline stages. */
+export async function rosterOf(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept): Promise<HireLine[]> {
+  const catalog = dept.templateKey ? ctx.templates.catalogs.get(dept.templateKey) : undefined;
+  const owners = new Set(catalog?.pipelines.flatMap(p => p.stages.map(s => s.ownerRole)));
+  return templateRoster(ctx, dept, await servingSubscriptions(ctx, companyId, spotIn(dept)), owners);
+}

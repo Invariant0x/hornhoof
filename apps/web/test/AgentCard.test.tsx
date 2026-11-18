@@ -33,7 +33,7 @@ describe('AgentCard', () => {
   it('identifies a turnkey member on the employee card', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, team: { id: 'u1', name: 'Whole tasks' }, turnkey: true }] });
     await screen.findByRole('heading', { name: 'Bruno', level: 3 });
-    expect(screen.getByRole('img', { name: 'Generalist: does a task whole' })).toHaveAttribute('data-worker-kind', 'generalist');
+    expect(screen.getByRole('img', { name: 'Generalist: does a task whole' }).querySelector('svg rect')).toBeInTheDocument();
   });
 
   beforeEach(() => {

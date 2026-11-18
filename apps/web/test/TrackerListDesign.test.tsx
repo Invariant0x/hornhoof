@@ -36,7 +36,9 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   expect(mark).toHaveAttribute('data-program', 'claude');
   expect(mark).toHaveAttribute('data-worker-kind', 'generalist');
   expect(mark).toHaveAccessibleDescription('Generalist: does a task whole');
-  expect(within(row).getByRole('img', { name: 'Ghost: a one-shot call, appears for one task and is gone' })).toHaveAttribute('data-worker-kind', 'ghost');
+  expect(mark.querySelector('svg rect')).toBeInTheDocument();
+  const call = within(row).getByRole('img', { name: 'One-shot call: starts from zero each time, no memory' });
+  expect(call.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
 });
 
 it('reads each task across one line, opens its goal and shows a late date', async () => {

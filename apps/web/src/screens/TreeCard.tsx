@@ -96,7 +96,8 @@ function LaneCard({ tree, department, pick, onOpenTask, onClose }: Props) {
       <LaneRole employee={employee} language={language} />
       <Details pairs={pairs} />
       {row.line && <>
-        <WorkflowStages workflow={row.line.echelons} resolveOwner={id => workflowOwner(id, department, tree)} />
+        <WorkflowStages workflow={row.line.echelons} resolveOwner={id => workflowOwner(id, department, tree)}
+          departmentTask={{ number: row.line.number, calls: department.calls }} />
         <TaskFindings workflow={row.line.echelons} findings={row.line.echelonFindings} />
       </>}
     </>

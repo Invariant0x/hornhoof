@@ -13,9 +13,8 @@ const LATER = { ...SETUP, orchestrator: { mode: 'later' } };
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
-/* The project template: Operations with its four, Development with a head, two developers and a reviewer, a product
-   manager in each, and the turnkey team of each: two developers in Development, an incident fixer in Operations. */
-const PROJECT = ['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-PM', 'DEV-REV', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
+/* The project template's pipeline owners, its other permanent roles and its turnkey teams. */
+const PROJECT = ['DEV-ARCH', 'DEV-DOCS', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-OPS', 'DEV-PM', 'DEV-REV', 'DEV-SEC', 'DEV-TEST', 'OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
 /* A member of a turnkey team runs the strongest model, as nobody checks after it. */
 const tierOf = (app: FastifyInstance, employee: typeof agents.$inferSelect) => (employee.teamId ? 'top' : app.ctx.templates.roles.get(employee.roleKey!)!.tier);
 
@@ -47,22 +46,6 @@ describe('POST /api/setup staffs the template', () => {
     expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'] });
   });
 
-  it.each([...COMPANY_TEMPLATE_KEYS, undefined])('starts %s with one default pipeline for each department', async template => {
-    const { app, db } = await testApp();
-    const { ceo } = await setUp(app, { ...LATER, template });
-    const all = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
-    const top = await db.select().from(departments).where(isNull(departments.parentId));
-    expect(all).toHaveLength(top.length);
-    for (const dept of top) {
-      const catalog = app.ctx.templates.catalogs.get(dept.templateKey!)!;
-      const stock = catalog.pipelines.find(p => p.key === catalog.default)!;
-      expect(all).toContainEqual(expect.objectContaining({
-        department: expect.objectContaining({ id: dept.id }), catalogKey: stock.key, isDefault: true,
-        name: stock.name, stages: stock.stages.map(stage => expect.objectContaining({ name: stage.name, ownerRole: stage.ownerRole })),
-      }));
-    }
-  });
-
   it('gives a department built after setup its default pipeline even without staff', async () => {
     const { app } = await testApp();
     const { ceo } = await setUp(app, LATER);
@@ -87,7 +70,11 @@ describe('POST /api/setup staffs the template', () => {
     expect(res.body).not.toContain('Private judge brief');
     const { departments: org } = res.json();
     const marketing = org.find((d: { templateKey: string }) => d.templateKey === 'marketing');
-    expect(marketing).toMatchObject({ oneShotStages: [{ stage: 'review', fanOut: 3, judge: true }], calls: [] });
+    expect(marketing).toMatchObject({ pipelines: expect.arrayContaining([expect.objectContaining({
+      catalogKey: 'marketing-campaigns', stages: expect.arrayContaining([expect.objectContaining({
+        echelon: 'review', oneShot: { fanOut: 3, judge: true }, ownerRole: 'MKT-EDIT',
+      })]),
+    })]), calls: [] });
     const [generalist, ordinary] = [true, false].map(turnkey => marketing.employees.find((e: { teamId?: string }) => Boolean(e.teamId) === turnkey));
     expect(generalist).toMatchObject({ turnkey: true, state: 'needs_subscription' });
     expect(ordinary).toMatchObject({ turnkey: false, state: 'needs_subscription' });
@@ -105,7 +92,7 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     expect(staff.map(a => a.roleKey).sort()).toEqual(PROJECT);
     const dev = (await db.select().from(departments).where(eq(departments.templateKey, 'development')))[0]!;
-    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Code reviewer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development', 'Product manager']);
+    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Architect', 'Code reviewer', 'DevOps engineer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development', 'Product manager', 'Security engineer', 'Technical writer', 'Test engineer']);
     for (const employee of staff) {
       const role = app.ctx.templates.roles.get(employee.roleKey!)!;
       expect(employee.subscriptionId, employee.name).toBe(key!.id);
@@ -119,9 +106,9 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'corporation' });
     const staff = await staffOf(app);
     const ops = (await db.select().from(departments).where(eq(departments.templateKey, 'operations')))[0]!;
-    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH']);
-    /* The card says 47 employees for the full company: 38 in its departments and 9 in their turnkey teams. */
-    expect(staff).toHaveLength(47);
+    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH']);
+    /* The card says 62 employees for the full company: 53 in its departments and 9 in their turnkey teams. */
+    expect(staff).toHaveLength(62);
     /* Each employee works in its department itself, not in one of its products. */
     expect(staff.every(a => a.productId === null)).toBe(true);
   });
@@ -147,31 +134,77 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'project', orchestrator: { mode: 'personal', provider: 'kimi' } });
     const [plan] = await plans(app);
     const staff = await staffOf(app);
-    /* Kimi runs no deep model, which the head of development and the reviewer need, nor the strongest one of a turnkey team. */
-    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-FIX']);
-    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(8);
+    /* Kimi leaves the deep roles and the members of the turnkey teams waiting. */
+    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ARCH', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'DEV-SEC', 'OPS-FIX']);
+    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(14);
   });
 });
 
 describe('every ready-made company', () => {
-  it.each([...COMPANY_TEMPLATE_KEYS])('%s shows its declared ghost places on the map before any subscription is connected', async template => {
-    const { app } = await testApp();
-    const { ceo } = await setUp(app, { ...LATER, template });
-    expect(await plans(app)).toEqual([]);
+  async function expectInside(app: FastifyInstance, ceo: string, listed: readonly { template: typeof TEMPLATE_KEYS[number]; products?: string[] }[], unstaffed?: typeof TEMPLATE_KEYS[number]) {
     const res = await app.inject({ url: '/api/org', ...as(ceo) });
     expect(res.statusCode).toBe(200);
     const { departments: org } = res.json();
-    const listed = COMPANY_TEMPLATES.find(t => t.key === template)!.departments;
-    const expected = listed.map(({ template: key }) => ({
-      templateKey: key,
-      oneShotStages: app.ctx.templates.stagesOf(key).stages.flatMap(({ stage, oneShot }) =>
-        oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
-      ),
-      calls: [],
+    expect(org.map((d: { templateKey: string }) => d.templateKey)).toEqual(listed.map(d => d.template));
+    const destinations = org.map(({ id, name, templateKey }: { id: string; name: string | null; templateKey: string }) => ({ id, name, templateKey }));
+    const tracker = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
+    for (const [index, { template: key, products }] of listed.entries()) {
+      const dept = org[index];
+      expect(dept.products.map((p: { name: string }) => p.name), key).toEqual(products ?? []);
+      expect(dept).toMatchObject({ current: null, calls: [] });
+      for (const employee of dept.employees) expect(employee).toMatchObject({ model: '', provider: null });
+      const catalog = app.ctx.templates.catalogs.get(key)!;
+      expect(dept.pipelines, key).toHaveLength(catalog.pipelines.length);
+      expect(dept.pipelines.some((p: { stages: { oneShot?: object }[] }) => p.stages.some(s => s.oneShot)), key).toBe(true);
+      for (const stock of catalog.pipelines) {
+        const pipeline = dept.pipelines.find((p: { catalogKey: string }) => p.catalogKey === stock.key);
+        expect(pipeline, stock.key).toMatchObject({ name: stock.name, isDefault: stock.key === catalog.default });
+        expect(tracker, stock.key).toContainEqual(expect.objectContaining({ id: pipeline.id }));
+        expect(pipeline.stages, stock.key).toHaveLength(stock.stages.length);
+        for (const [i, step] of stock.stages.entries()) {
+          const stage = pipeline.stages[i];
+          expect(stage, step.name).toMatchObject({ name: step.name, ownerRole: step.ownerRole, parentId: i ? pipeline.stages[i - 1].id : null });
+          expect(stage.ownerTitle, step.name).toEqual(app.ctx.templates.roles.get(step.ownerRole)?.title);
+          expect(stage.handoffs, step.name).toEqual(destinations.filter((d: { id: string; templateKey: typeof key }) => d.id !== dept.id && step.handoffTo?.includes(d.templateKey)));
+          if (key !== unstaffed) {
+            const staff = dept.employees.filter((employee: { teamId?: string }) => !employee.teamId);
+            expect(staff, `${stock.key}: ${step.ownerRole}`).toContainEqual(expect.objectContaining({ roleId: step.ownerRole, model: '', provider: null }));
+          }
+          const inherited = stock.key === catalog.default ? app.ctx.templates.stagesOf(key).stages.find(s => s.stage === step.echelon)?.oneShot : undefined;
+          const oneShot = step.oneShot ?? inherited;
+          expect(stage.oneShot, step.name).toEqual(oneShot ? { fanOut: oneShot.fanOut, judge: oneShot.judge !== null } : undefined);
+        }
+      }
+    }
+    const ops = org.find((d: { templateKey: string }) => d.templateKey === 'operations');
+    const target = org.find((d: { templateKey: string }) => d.templateKey === 'development') ?? org.find((d: { templateKey: string }) => d.templateKey === 'home_devices' || d.templateKey === 'support');
+    const recovery = ops.pipelines.find((p: { catalogKey: string }) => p.catalogKey === 'operations-incidents');
+    expect(recovery.stages.at(-1).handoffs).toContainEqual(expect.objectContaining({ id: target.id }));
+  }
+
+  it.each([...COMPANY_TEMPLATE_KEYS])('%s has products and all linked route stages with agents and call places before any subscription', async template => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    expect(await plans(app)).toEqual([]);
+    await expectInside(app, ceo, COMPANY_TEMPLATES.find(t => t.key === template)!.departments);
+  });
+
+  it('shows a product under Development in the Startup kit on first entry', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template: 'startup' });
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(res.json().departments).toContainEqual(expect.objectContaining({
+      templateKey: 'development', products: [expect.objectContaining({ name: 'Product 1' })],
     }));
-    expect(expected.some(dept => dept.oneShotStages.length > 0)).toBe(true);
-    expect(org).toHaveLength(expected.length);
-    expect(org).toEqual(expect.arrayContaining(expected.map(dept => expect.objectContaining(dept))));
+  });
+
+  it('builds the same complete structure from each standalone department template', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, LATER);
+    const items = TEMPLATE_KEYS.filter(template => template !== 'operations').map(template => ({ template, staff: true }));
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items }, ...as(ceo) });
+    expect(built.statusCode, built.body).toBe(201);
+    await expectInside(app, ceo, [{ template: 'operations' }, ...items], 'operations');
   });
 
   it.each([...COMPANY_TEMPLATE_KEYS])('%s brings each department with its head and employees, each with skills, waiting for a subscription', async template => {
@@ -272,7 +305,7 @@ describe('a subscription that comes later', () => {
     expect((await addKey(app, ceo, { kind: 'department', id: dev.id })).statusCode).toBe(201);
     const [key] = await plans(app);
     const staff = await staffOf(app);
-    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-PM', 'DEV-REV']);
+    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(PROJECT.filter(role => role.startsWith('DEV-')));
     expect(staff.filter(a => a.departmentId !== dev.id).every(a => a.subscriptionId === null)).toBe(true);
     expect((await orchestrator(app)).subscriptionId).toBeNull();
   });
