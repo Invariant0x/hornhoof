@@ -13,7 +13,6 @@ const purposes = [
   { kind: 'payment', resourceId: 'invoice-7', amount: '19.95', currency: 'USD', payee: 'Example vendor' },
   { kind: 'owner_login', resourceId: 'subscription-7', subscriptionId: SOURCE, ownerPersonId: OPERATION, provider: 'codex' },
   { kind: 'manual_machine_action', resourceId: 'machine-7', machineId: SOURCE, nodeId: null, actionId: 'restart_service', until: null },
-  { kind: 'ceo_permission', resourceId: 'access-7', permission: 'server_computer_access', machineId: null, until: '2026-11-07T00:00:00.000Z' },
 ];
 const snapshot = {
   classificationId: OPERATION, source: guard.source, revision: 3, routeRevision: 2,
@@ -24,7 +23,13 @@ const snapshot = {
 };
 
 describe('canonical internal question references', () => {
-  it.each(['task_request', 'proposal', 'computer_access'])('preserves the native %s source without inventing a task', kind => {
+  it('does not accept computer access as a question or a human permission', () => {
+    expect(SourceRef.safeParse({ kind: 'computer_access', id: SOURCE }).success).toBe(false);
+    expect(HumanActionBinding.safeParse({ kind: 'ceo_permission', resourceId: 'access-7' }).success).toBe(false);
+    expect(QuestionPurpose.safeParse({ kind: 'ceo_permission', resourceId: 'access-7', permission: 'server_computer_access', machineId: SOURCE, until: '2026-11-07T00:00:00.000Z' }).success).toBe(false);
+  });
+
+  it.each(['task_request', 'proposal'])('preserves the native %s source without inventing a task', kind => {
     expect(SourceRef.parse({ kind, id: SOURCE })).toEqual({ kind, id: SOURCE });
   });
   it.each([
@@ -127,8 +132,8 @@ describe('private immutable question classification metadata', () => {
   it('retains the exact source/task capture and nullable unknown original provenance', () => {
     expect(QuestionClassificationSnapshot.parse(snapshot)).toEqual(snapshot);
   });
-  it.each(['proposal', 'computer_access'])('keeps a %s snapshot native with no synthetic task', kind => {
-    const value = { ...snapshot, source: { kind, id: SOURCE }, sourceBinding: { ...snapshot.sourceBinding, taskAssignment: null } };
+  it('keeps a proposal snapshot native with no synthetic task', () => {
+    const value = { ...snapshot, source: { kind: 'proposal', id: SOURCE }, sourceBinding: { ...snapshot.sourceBinding, taskAssignment: null } };
     expect(QuestionClassificationSnapshot.parse(value)).toEqual(value);
   });
   it('retains known original provenance rather than reconstructing it from the current job', () => {
@@ -187,7 +192,7 @@ describe('internal routing and actual human action bindings', () => {
   it.each(['internal', 'human', 'legacy'])('can describe stored %s audience without granting mutation authority', audience => {
     expect(QuestionAudience.parse(audience)).toBe(audience);
   });
-  it.each(['payment', 'owner_login', 'manual_machine_action', 'ceo_permission'])('describes an exact %s resource, not a permission', kind => {
+  it.each(['payment', 'owner_login', 'manual_machine_action'])('describes an exact %s resource, not a permission', kind => {
     expect(HumanActionBinding.parse({ kind, resourceId: SOURCE })).toEqual({ kind, resourceId: SOURCE });
   });
   it.each([
