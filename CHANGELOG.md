@@ -77,7 +77,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Changed
 
 - Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
-
+- Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.

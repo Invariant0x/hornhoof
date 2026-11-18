@@ -1,5 +1,7 @@
 # Task 1282: three regressions before the 0.32.0 run
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1282-regressions.md). These are historical results, not checks of the current release.
+
 Task kind: bug. Risk: secret redaction. Base: `f311bea6312771faabc3d9fece0a6faf97f7ad3e` on `turn-32`.
 
 ## Acceptance and approach
