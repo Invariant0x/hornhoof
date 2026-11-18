@@ -413,7 +413,7 @@ describe('the employee card', () => {
     const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.departments[0].employees).toEqual([
-      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'xhigh', state: 'sleeping', status: 'idle', on: true, opens: true, task: null, timer: null, context: null, alarm: null, program: null, retry: null, failure: null, held: null, obsolete: null },
+      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'xhigh', state: 'sleeping', status: 'idle', on: true, opens: true, task: null, timer: null, context: null, alarm: null, program: null, retry: null, failure: null, held: null, obsolete: null, turnkey: false },
     ]);
   });
 
