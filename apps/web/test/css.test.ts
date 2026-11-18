@@ -1,6 +1,13 @@
 import { expect, it } from 'vitest';
 import { decl, parse, px, RULES, rulesFor } from './css';
 
+it('reserves a footer row for the version outside the screen and its fixed panels', () => {
+  expect(decl('.app-layout', 'display')).toBe('grid');
+  expect(decl('.app-layout', 'grid-template-rows')).toBe('minmax(0, 1fr) auto');
+  expect(decl('.app-screen', 'contain')).toBe('paint');
+  expect(rulesFor('.version-mark').filter(rule => ['fixed', 'absolute', 'sticky'].includes(rule.decls.position ?? ''))).toEqual([]);
+});
+
 function paddingRightPx(selector: string): number | undefined {
   const right = decl(selector, 'padding-right');
   if (right) return px(right);

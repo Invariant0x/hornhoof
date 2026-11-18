@@ -365,6 +365,19 @@ describe('when the graph cannot tell', () => {
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
   });
 
+  /* The updater's script lies in a folder of its own that no suite holds: it can lead anywhere in that folder, not in every package. */
+  it('a program in no package can lead anywhere in its own folder, and no further', async () => {
+    const files = { ...app, 'tools/update/run.sh': 'source ./lib.sh\n', 'tools/update/lib.sh': 'echo 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst script = new URL('../../../tools/update/run.sh', import.meta.url);\nit('b', () => script);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'tools/update/lib.sh': 'echo 2\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
+  it('a log is data, as a text is', async () => {
+    const files = { ...app, 'docs/evidence/red.log': 'not ok 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst log = new URL('../../../docs/evidence/red.log', import.meta.url);\nit('b', () => log);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'docs/evidence/red.log': 'ok 1\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
   it('data leads nowhere, and neither does a fixture of a test folder, which changes its package anyway', async () => {
     const test = (name: string) => `import { it } from 'vitest';\nconst data = new URL('${name}', import.meta.url);\nit('b', () => data);\n`;
     for (const named of ['../../a/data/values.json', '../../a/data/page.css', '../../a/LICENSE', '../../a/test/fakes/program']) {
@@ -475,6 +488,19 @@ describe('what the scanner follows', () => {
     const value = manifest(suites, { prepare: [{ id: 'build', profiles: ['fast'], serviceIds: [], inputs: ['apps/b/src/**'], commands: [], artifacts: [{ path: 'apps/b/dist', format: 'directory' }] }] });
     const files = { ...app, 'apps/a/test/other.test.ts': "import { b } from '../../b/dist/b.js';\nimport { it } from 'vitest';\nit('b', () => b);\n" };
     expect(await changed(input(files, value), input({ ...files, 'apps/b/src/b.ts': 'export const b = 4;\n' }, value))).toEqual(['a:apps/a/test/other.test.ts', 'b:apps/b/test/b.test.ts']);
+  });
+
+  /* The node's output capture loads the built mask by its file: it read as the whole build, and any test that reached the
+     terminal ran again for any change of the node. */
+  it('a built file leads to its own source, and a built file of no source of its name or the built folder to all it is built from', async () => {
+    const value = manifest(suites, { prepare: [{ id: 'build', profiles: ['fast'], serviceIds: [], inputs: ['apps/b/src/**'], commands: [], artifacts: [{ path: 'apps/b/dist', format: 'directory' }] }] });
+    const files: Files = { ...app, 'apps/b/src/c.ts': 'export const c = 5;\n',
+      'apps/a/test/file.test.ts': "const { b } = require('../../b/dist/b.js');\nexport { b };\n",
+      'apps/a/test/asset.test.ts': "const { b } = require('../../b/dist/b.json');\nexport { b };\n",
+      'apps/a/test/folder.test.ts': "const built = '../../b/dist';\nexport { built };\n" };
+    const other = 'apps/b/src/c.ts';
+    expect(await changed(input(files, value), input({ ...files, [other]: 'export const c = 6;\n' }, value))).toEqual(['a:apps/a/test/asset.test.ts', 'a:apps/a/test/folder.test.ts']);
+    expect(await changed(input(files, value), input({ ...files, 'apps/b/src/b.ts': 'export const b = 4;\n' }, value))).toEqual(['a:apps/a/test/asset.test.ts', 'a:apps/a/test/file.test.ts', 'a:apps/a/test/folder.test.ts', 'b:apps/b/test/b.test.ts']);
   });
 
   it('a dotted folder of its own never takes the whole repository', async () => {

@@ -40,7 +40,7 @@ describe('the human state of a task', () => {
     ['open', 'notStarted'],
     ['working', 'working'],
     ['review', 'review'],
-    ['waiting', 'waiting'],
+    ['waiting', 'working'],
     ['blocked', 'stopped'],
     ['done', 'done'],
     ['cancelled', 'cancelled'],
@@ -65,10 +65,10 @@ describe('the human state of a task', () => {
     expect(goalStatus(goal('working'), true)).toBe('waitingYou');
   });
 
-  it('reads a paused task as paused, and a task waiting for an event as waiting for an answer, until it is closed', () => {
+  it('reads a paused task as paused and an expired external wait as a failure', () => {
     const paused = { at: '2026-11-14T10:00:00.000Z', reason: 'Not now.', root: 't1' };
     expect(humanStatus(task({ id: 't1', number: 1, paused }))).toBe('paused');
-    expect(humanStatus(task({ id: 't1', number: 1, externalWait: { since: '2026-11-14T10:00:00.000Z', until: '2026-11-14T11:00:00.000Z', reason: 'The bank answers.' } as TaskLine['externalWait'] }))).toBe('waiting');
+    expect(humanStatus(task({ id: 't1', number: 1, externalWait: { since: '2026-11-14T10:00:00.000Z', until: '2026-11-14T11:00:00.000Z', reason: 'The bank answers.' } as TaskLine['externalWait'] }))).toBe('failure');
     expect(humanStatus(task({ id: 't1', number: 1, status: 'done', paused }))).toBe('done');
   });
 });
@@ -113,7 +113,7 @@ describe('goals with their related tasks folded under them', () => {
   it('lists open goals by what needs people first, then what stopped, is checked, moves and has not started, and folds the closed ones apart, the newest first', () => {
     const tree = goals([
       task({ id: 'w', number: 1, status: 'working' }),
-      task({ id: 'q', number: 2, status: 'waiting' }),
+      task({ id: 'q', number: 2, status: 'waiting', time: { inStatusSince: '2026-11-14T08:00:00.000Z', workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', id: 'owner', name: 'Owner' }, reason: null, since: '2026-11-14T08:00:00.000Z' }] } }),
       task({ id: 'r', number: 3, status: 'review' }),
       task({ id: 's', number: 4, status: 'blocked' }),
       task({ id: 'w2', number: 5, status: 'open' }),

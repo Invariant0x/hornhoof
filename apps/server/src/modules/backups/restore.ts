@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, gt, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import type { Person } from '../../auth/session.js';
+import { personColumns, type Person } from '../../auth/session.js';
 import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
@@ -13,7 +13,7 @@ import { ApiError, loggable, type ErrorReason } from '../../errors.js';
 import { writeChoice } from '../merge/kept.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
-import { disablePerson } from '../people/routes.js';
+import { carryRemoval, disablePerson } from '../people/routes.js';
 import type { Manifest } from './bundle.js';
 import { parseRecoveryFile, type RecoveryFile } from './recovery.js';
 import { bundleRow, type BackupRow } from './records.js';
@@ -61,8 +61,8 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
 }
 
 /* Who may get in now, put into a database that was restored from an earlier time: a restore never brings back a person
-   who was disabled since, a password that was changed, a machine that was disconnected or a recovery file that was
-   replaced. Each part touches only what this database has. Then computer access closes everywhere and every session
+   who was disabled or removed since, a password that was changed, a machine that was disconnected or a recovery file that was
+   replaced. Removed accounts leave a record even if the backup predates them. Then computer access closes and every session
    ends, so each owner opens their machine again and everyone signs in again. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const { db } = ctx;
@@ -74,19 +74,31 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   /* Who stopped being the owner first, so the company never has two. */
   const theirs = carry.people.filter(person => known.has(person.id)).sort((a, b) => Number(a.isOwner) - Number(b.isOwner));
   for (const person of theirs) {
+    if (person.removedAt) continue;
     if (person.status === 'disabled') {
       if (known.get(person.id) !== 'disabled') await disablePerson(ctx, person.id);
       continue;
     }
     await db.transaction(async tx => {
       const now = { status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind as Person['scopeKind'], isOwner: person.isOwner, isCeoDelegate: person.isCeoDelegate };
-      await tx.update(people).set(now).where(eq(people.id, person.id));
+      const [present] = await tx.update(people).set(now).where(and(eq(people.id, person.id), isNull(people.removedAt))).returning(idOnly(people));
+      if (!present) return;
       await tx.delete(personAccess).where(eq(personAccess.personId, person.id));
       const rows = person.access
         .filter(place => (place.departmentId === null || placesD.has(place.departmentId)) && (place.teamId === null || placesT.has(place.teamId)))
         .map(place => ({ companyId: company.id, personId: person.id, departmentId: place.departmentId, teamId: place.teamId }));
       if (rows.length > 0) await tx.insert(personAccess).values(rows);
     });
+  }
+  const removed = carry.people.flatMap(person => person.removedAt ? [{ ...person, removedAt: new Date(person.removedAt) }] : []);
+  if (removed.length) {
+    const [owner] = await db.select(personColumns).from(people).where(and(eq(people.companyId, company.id), eq(people.isOwner, true)));
+    if (!owner) throw new Error('Cannot carry permanent removals without the company owner.');
+    for (const person of removed) {
+      if (known.has(person.id)) await carryRemoval(ctx, person.id, owner, person.removedAt);
+      /* Keep the removal even in a bundle made before this account existed, so a later restore still carries it. */
+      else await db.insert(people).values({ id: person.id, companyId: company.id, name: person.removedName ?? '', status: 'disabled', scopeKind: 'listed', removedAt: person.removedAt }).onConflictDoNothing({ target: people.id });
+    }
   }
   /* An invite that was used or called off since is not open again. */
   await db.delete(invites).where(and(isNull(invites.usedAt), carry.invites.length > 0 ? notInArray(invites.tokenHash, carry.invites) : undefined));

@@ -7,7 +7,13 @@ sources: [obra/superpowers skills/brainstorming/SKILL.md]
 ---
 You can clarify the intended result before planning an authorized change.
 
-Before you lay out a turn or change the company, make sure you know what the CEO wants and why. In a new company, find out first what it does, which products it makes or plans, and what matters most right now.
+At first-contact, ask "What would you like me to do?" and show the short menu for the company's starter kit. Offer real work that those departments can do, plus setting up a way to handle their work, Telegram and a personal assistant. Give each offer one plain line. For a new person who joined an existing company, start with what they can use and ask the same question. Once they pick an offer, start it. Ask only for the next detail you need.
+
+- **Set up a way to handle my work**: ask what kind of work they want to set up. Use the ready pipelines skill to offer the pipeline that fits and apply it when they choose.
+- **Telegram**: read your card at GET /api/agents/orchestrator and look for an existing bot. If none is connected, look in the company vault for its bot token and connect it yourself with PUT /api/agents/orchestrator/telegram. Use a company Telegram sign-in from the vault to set up the bot through BotFather if available. When Telegram needs a person's account or action, walk them through the one step they need to take, starting with /newbot if there is no bot yet. Keep the token in the vault or the bot's secure setup field. Connect the person's Telegram username or numeric ID to their People record with PATCH /api/people/<id>, then show the bot link and ask them to press Start or send a message. When the bot and their link are ready, say they can write to you there. Never put a token in a chat reply.
+- **Personal assistant**: look up the person by id and check their existing assistants before making one. Use POST /api/people/assistants with that person as owner and the program they use, and set its plan when known. Its own agent gets the stock Personal assistant instructions. Its owner's messages come through the orchestrator in that person's name. Guide the person through any setup only they can finish, one step at a time, and keep assistant keys out of chat.
+
+Before laying out a turn or changing the company, make sure you know what the person wants and why. Read what the company already says about its work and products before asking for more.
 
 1. Read what was said, the notebook and the turns first. Never ask what they already tell.
 2. When something that changes what gets built is missing, ask one question at a time in plain words, one or two follow-ups at most, then move on. A guess the CEO can correct, like "I take it this is for the school release?", often beats an open question.

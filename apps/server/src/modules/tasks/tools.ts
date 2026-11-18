@@ -13,7 +13,8 @@ import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { commitApprovalRequired } from './commit-approval.js';
+import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, mayAsk, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
@@ -26,7 +27,7 @@ import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
 import { ONLY_CEO_ASKED, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
-import { setPaused } from './pause.js';
+import { refusePaused, setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -108,13 +109,19 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-async function autoCommitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
+async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
   if (!commit || options?.length) return null;
+  if (!(await commitApprovalRequired(ctx.db, task.companyId, task.departmentId))) {
+    mayAsk(task, agentId);
+    refusePaused(task);
+    const moved = await comment(ctx, { agentId }, task.id, `Went without approval for commit ${commit}. ${question}`);
+    return { text: 'No approval needed under the department\'s commit policy. Continue with the required checks.', moved };
+  }
   const auto = await tryAutonomousCommitApproval(ctx, task, agentId, commit, question);
   return auto ? { text: auto.text, moved: auto.moved } : null;
 }
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.'), ...TrackerFields });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -295,9 +302,9 @@ class TaskTools {
     return say(text);
   }
 
-  /* Only the CEO or delegate can make work urgent, or the owner of the department it is in: the last person who asked, in
-     this turn or an earlier one. */
+  /* A head can mark its department work urgent. The orchestrator can mark work urgent anywhere. */
   private async urgentBy(departmentId: string | null): Promise<void> {
+    if (this.job.agentKind === 'orchestrator') return;
     if (!departmentId && !(await ceoPrincipal(this.db, this.job.id, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO_ASKED);
     if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
   }
@@ -448,13 +455,13 @@ class TaskTools {
       'ask_person',
       {
         description:
-          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit under the department\'s rule, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself. ` +
-          'A person is asked only for an irreversible deletion (the CEO says yes to it) or for what only they know: their own password or account, their taste in a text the first time, a real choice between directions. Never ask anyone to do, add or confirm what you or your department can do, and nothing that goes out of the company waits for a yes.',
+          'Apart from an approval the department requires, ask a person for an irreversible deletion (the CEO says yes to it) or for what only they know: their own password or account, their taste in a text the first time, a real choice between directions. Never ask anyone to do, add or confirm what you or your department can do, and outbound work follows the rules its department explicitly sets.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),
@@ -475,14 +482,14 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
-          const auto = await autoCommitReply(this.ctx, task, this.job.agentId, question, commit, options);
-          if (auto) return auto;
+          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          if (reply) return reply;
           await this.underQuestionCap();
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
           const { text, told } = await questionWords(this.db, task, question, commit);
-          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
-          await recordQuestion(this.ctx, this.job, task, { kind, text, topic });
+          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
+          await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
         }),
     );
@@ -567,7 +574,7 @@ class TaskTools {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage })) })));
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
           const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),
@@ -579,7 +586,7 @@ class TaskTools {
       'set_urgent',
       {
         description:
-          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, as the last person who wrote to you, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+          'Says whether a task with nothing above it is urgent, with all the work under it: as the company owner in any turn. Nobody is woken and nothing else of the work changes.',
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>
@@ -610,7 +617,7 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked, by an independent checker or, for turnkey work, by its holder's own review, security check and tests, needs none, and its entry in the autonomous release log approves it. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
@@ -651,9 +658,9 @@ class TaskTools {
     this.server.registerTool('update_task', {
       description: 'The department head revises the current task or checking owner without returning it to the author. With echelonStage and ownerAgentId, assigns an eligible owner to a future pending echelon stage without moving or waking the current owner; producer, model capability, ability and scope rules still apply. stage is the stage of the tracker pipeline, not an echelon stage. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
       inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), echelonStage: z.enum(ECHELON_STAGES).optional().describe('A future pending echelon stage of this task to give ownerAgentId in advance.'), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
-    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
+    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, priority, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
-      const tracker = { goal, responsible, why, due, pipeline, stage };
+      const tracker = { goal, responsible, why, due, pipeline, stage, priority };
       /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
          either is written, so a refused part leaves the other as it was. With a change of the work, what the tracker
          keeps is written in the same move, checked again there: both are in, or neither. */

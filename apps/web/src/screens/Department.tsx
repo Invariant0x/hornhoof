@@ -20,6 +20,7 @@ import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
+import { employeeKind, WorkerMark } from '../ui/WorkerMark';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
@@ -112,7 +113,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
       <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
         <Edge cut={14} corner halo>
           <span className="hr">
-            <AgentIcon />
+            <WorkerMark kind={employeeKind(head.turnkey)} />
             <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
             <ProviderMark provider={head.provider} />
           </span>

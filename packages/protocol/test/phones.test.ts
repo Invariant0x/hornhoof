@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { PhoneEndpoint, PhoneOperation, PhonePairing } from '../src/phones.js';
+import { PhoneEndpoint, PhoneOperation, PhonePairing, PhoneReply, PhoneServerMessage } from '../src/phones.js';
 
 describe('the company phone protocol', () => {
+  it('checks the phone binding and carries only known readiness issues', () => {
+    const id = '00000000-0000-4000-8000-000000000001';
+    const binding = { phoneId: id, serial: 'ZF525LRDQS', hardwareKey: 'a'.repeat(64) };
+    expect(PhoneServerMessage.safeParse({ type: 'phone.baseline', requestId: id, binding }).success).toBe(true);
+    expect(PhoneServerMessage.safeParse({ type: 'phone.baseline', requestId: id, binding, shell: 'id' }).success).toBe(false);
+    expect(PhoneReply.safeParse({ type: 'phone.reply', requestId: id, status: 'ok', readiness: ['lock'] }).success).toBe(true);
+    expect(PhoneReply.safeParse({ type: 'phone.reply', requestId: id, status: 'ok', readiness: ['raw adb output'] }).success).toBe(false);
+  });
   it('accepts a bounded tap and refuses extra commands at the network boundary', () => {
     expect(PhoneOperation.safeParse({ kind: 'tap', x: 120, y: 240 }).success).toBe(true);
     expect(PhoneOperation.safeParse({ kind: 'tap', x: 120, y: 240, command: 'id' }).success).toBe(false);

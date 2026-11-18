@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, pruneGoals, responsibles, shownEmployees, waitingOn, workingNow, type GraphNode } from '../src/tracker';
+import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, pruneGoals, shownEmployees, waitingOn, workingNow, type GraphNode } from '../src/tracker';
 import type { Employee, GoalView, Org, Pipeline, TaskLine } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -47,22 +47,22 @@ const ids = (tasks: { id: string }[]) => tasks.map(t => t.id);
 const titles = (nodes: GraphNode[]): unknown[] => nodes.map(n => [n.id, ...(n.children.length ? [titles(n.children)] : [])]);
 
 describe('the list', () => {
-  it('groups the tasks by their status in words, what needs people first, with the subtasks under their task', () => {
+  it('groups the tasks by their status in tracker order, with the subtasks under their task', () => {
     const groups = listGroups(filterTasks(TASKS, {}, GOALS), id => id === 't419');
-    expect(groups.map(g => g.status)).toEqual(['waitingYou', 'working', 'notStarted', 'done']);
-    expect(groups.map(g => ids(g.trees.map(tree => tree.task)))).toEqual([['t419'], ['t412'], ['t500'], ['t502']]);
-    const [find] = groups[1]!.trees;
+    expect(groups.map(g => g.status)).toEqual(['working', 'waitingPerson', 'notStarted', 'done']);
+    expect(groups.map(g => ids(g.trees.map(tree => tree.task)))).toEqual([['t412'], ['t419'], ['t500'], ['t502']]);
+    const [find] = groups[0]!.trees;
     expect(ids(find!.children.map(c => c.task))).toEqual(['s1t', 's2t']);
     expect([find!.done, find!.total]).toEqual([1, 2]);
   });
 
   it('counts the subtasks of a task over all the work under it, whatever the list shows', () => {
     /* Max's own open tasks leave out the subtask done and Luisa's; a status filter leaves out what does not match. */
-    const [own] = listGroups(mine(TASKS, GOALS, 'p2').tasks, undefined, TASKS).find(g => g.status === 'working')!.trees;
+    const own = listGroups(mine(TASKS, GOALS, 'p2').tasks, undefined, TASKS).find(g => g.status === 'working')!.trees.find(tree => tree.task.id === 't412');
     expect([own!.task.id, own!.done, own!.total]).toEqual(['t412', 1, 2]);
-    const [working] = listGroups(filterTasks(TASKS, { status: 'working' }, GOALS), undefined, TASKS)[0]!.trees;
+    const working = listGroups(filterTasks(TASKS, { status: 'working' }, GOALS), undefined, TASKS)[0]!.trees.find(tree => tree.task.id === 't412');
     expect([working!.task.id, working!.done, working!.total]).toEqual(['t412', 1, 2]);
-    const card = boardColumns(mine(TASKS, GOALS, 'p2').tasks, null, { all: TASKS }).find(c => c.id === 'working')!.cards[0];
+    const card = boardColumns(mine(TASKS, GOALS, 'p2').tasks, null, { all: TASKS }).find(c => c.id === 'working')!.cards.find(c => c.task.id === 't412');
     expect(card).toMatchObject({ done: 1, total: 2 });
   });
 
@@ -73,17 +73,17 @@ describe('the list', () => {
 });
 
 describe('the board', () => {
-  it('puts the tasks into the status columns, waits for a person among the waits, and cancelled ones only under the filter', () => {
+  it('separates stopped work, and shows cancelled work only when requested', () => {
     const columns = boardColumns([...TASKS, task({ id: 't9', number: 9, status: 'blocked' })], null);
-    expect(columns.map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'done']);
-    expect(columns.map(c => ids(c.cards.map(card => card.task)))).toEqual([['t500'], ['t412'], ['t419'], ['t9'], ['t502']]);
+    expect(columns.map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'stopped', 'done']);
+    expect(columns.map(c => ids(c.cards.map(card => card.task)))).toEqual([['t500'], ['t419', 't412'], [], [], ['t9'], ['t502']]);
     expect(boardColumns(TASKS, null, { cancelled: true }).map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'done', 'cancelled']);
     expect(boardColumns([T412, S1, S2], null, {}, () => false).find(c => c.id === 'working')!.cards[0]).toMatchObject({ done: 1, total: 2 });
   });
 
-  it('puts a waiting subtask in the waits column when its task is not among those shown', () => {
+  it('puts a subtask with a bare waiting status in work', () => {
     const columns = boardColumns([S2], null);
-    expect(columns.find(c => c.id === 'waits')!.cards.map(c => c.task.id)).toEqual(['s2t']);
+    expect(columns.find(c => c.id === 'working')!.cards.map(c => c.task.id)).toEqual(['s2t']);
   });
 
   it('with a pipeline, has its stages in tree order between Not started and Done, and only the tasks of that pipeline', () => {
@@ -103,7 +103,8 @@ describe('the filters', () => {
     expect(ids(filterTasks([checked], { executor: 'b1' }, GOALS))).toEqual([]);
     expect(ids(filterTasks(TASKS, { responsible: 'p3' }, GOALS))).toEqual(['s2t']);
     expect(ids(filterTasks(TASKS, { goal: 'g1' }, GOALS))).toEqual(['t412', 's1t', 's2t', 't419', 't502']);
-    expect(ids(filterTasks(TASKS, { status: 'waits' }, GOALS))).toEqual(['s2t']);
+    expect(ids(filterTasks(TASKS, { status: 'waits' }, GOALS))).toEqual([]);
+    expect(ids(filterTasks(TASKS, { status: 'waits' }, GOALS, id => id === 't419'))).toEqual(['t419']);
     expect(ids(filterTasks(TASKS, { status: 'done' }, GOALS))).toEqual(['s1t', 't502']);
     expect(ids(filterTasks(TASKS, { pipeline: 'pl1' }, GOALS))).toEqual(['t412', 't419', 't500', 't502']);
     expect(ids(filterTasks(TASKS, { department: 'none' }, GOALS))).toEqual([]);
@@ -127,21 +128,13 @@ describe('the filters', () => {
   it('finds the open tasks that wait for a person, and none that wait for an agent or are over', () => {
     const since = '2026-11-16T08:00:00.000Z';
     const waits = (over: Partial<TaskLine> & { id: string; number: number }, who: { kind: 'person' | 'agent'; id: string } | null) =>
-      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ who: who && { ...who, name: '' }, since }] } });
+      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: who?.kind === 'person' ? 'person' : 'review', who: who && { ...who, name: '' }, reason: null, since }] } });
     const tasks = [waits({ id: 'a', number: 1, status: 'waiting' }, { kind: 'person', id: 'p3' }), waits({ id: 'b', number: 2 }, { kind: 'agent', id: 'p3' }), waits({ id: 'c', number: 3, status: 'done' }, { kind: 'person', id: 'p3' }), waits({ id: 'd', number: 4 }, null), ...TASKS];
     expect(ids(waitingOn(tasks, 'p3'))).toEqual(['a']);
   });
 });
 
 describe('the left panel', () => {
-  it('names who answers for the departments and goals, with their departments and how many open tasks they hold', () => {
-    const departments = [{ id: 'd2', name: 'Development', responsible: MAX }, { id: 'd3', name: 'Sales', responsible: LUISA }];
-    expect(responsibles(departments, GOALS, TASKS)).toEqual([
-      { person: MAX, departments: ['d2'], open: 3 },
-      { person: LUISA, departments: ['d3'], open: 1 },
-    ]);
-  });
-
   it('shows the employees at work first and folds the rest, keeping a few in sight', () => {
     const e = (id: string, status: Employee['status']) => ({ id, status }) as Employee;
     const { shown, more } = shownEmployees([e('a', 'idle'), e('b', 'working'), e('c', 'waiting'), e('d', 'idle'), e('e', 'working')], 3);

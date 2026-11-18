@@ -53,6 +53,21 @@ async function flyIn(user: ReturnType<typeof userEvent.setup>) {
 const drawer = (user: ReturnType<typeof userEvent.setup>, name: 'Department tasks' | 'About the department') => user.click(screen.getByRole('button', { name }));
 
 describe('Department view', () => {
+  it('marks generalists in the diagram and in the department staff list', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const team = { id: 'u1', name: 'Whole tasks', about: '', stage: 0, gate: false, turnkey: true };
+    const department = { ...dev!, teams: [team], employees: dev!.employees.map(e => e.id === 'b1' ? { ...e, teamId: team.id, turnkey: true } : e) };
+    shell({}, { ...DEV_ORG, departments: [department] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    const generalist = 'Generalist: does a task whole';
+    expect(within(schema).getByText('Bruno').closest('button')?.querySelector(`[title="${generalist}"]`)).toHaveAttribute('data-worker-kind', 'generalist');
+    await drawer(user, 'About the department');
+    const staff = within(screen.getByRole('complementary', { name: 'About the department' })).getByRole('region', { name: 'Members' });
+    expect(within(staff).getByText('Bruno').closest('li')?.querySelector(`[title="${generalist}"]`)).toHaveAttribute('data-worker-kind', 'generalist');
+  });
+
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
   it('keeps the words of a department with no head and no employees in their own direction', () => {
     mockApi({});
@@ -551,7 +566,7 @@ describe('Department view', () => {
     await flyIn(user);
     await drawer(user, 'Department tasks');
     expect(location.pathname + location.search).toBe('/tasks?department=d2');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Development' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Development / List' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
@@ -1452,6 +1467,7 @@ describe("a department's branches not in main yet", () => {
     await drawer(user, 'About the department');
     expect(await screen.findByText('Every accepted branch of the department is in main.')).toBeInTheDocument();
     cleanup();
+    history.replaceState(null, '', '/');
     const again = userEvent.setup();
     shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, { branches: [], problem: 'Hornhoof could not read the branches of https://github.com/acme/app.git: it answered 404.' }] }, withRepo());
     await flyIn(again);
@@ -1467,6 +1483,7 @@ describe("a department's branches not in main yet", () => {
     expect(screen.queryByRole('region', { name: 'Branches not in main yet' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path.endsWith('/branches'))).toBe(false);
     cleanup();
+    history.replaceState(null, '', '/');
     const ceo = userEvent.setup();
     const noRepo = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, BRANCHES] });
     await flyIn(ceo);

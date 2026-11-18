@@ -1,3 +1,4 @@
+import { seedDefaultPipeline } from '../tracker/pipelines.js';
 import { idOnly, only } from '../../db/selections.js';
 import { notificationMessage } from '../events/notifications.js';
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
@@ -307,6 +308,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .returning();
           await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
           await ensureOpenTurn(tx, me.companyId, dept!.id);
+          await seedDefaultPipeline(ctx, tx, dept!, { personId: me.id });
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
           if (item.staff) hired.push(...(await hireTemplate(tx, dept!)));

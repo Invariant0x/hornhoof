@@ -78,7 +78,7 @@ function company(): TaskLine[] {
     });
   }
   all.push(task('Fix the sign-in page', DEV, {
-    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] },
+    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...IVAN }, reason: null, since: '2026-11-13T08:00:00.000Z' }] },
   }));
   all.push(task('Rename the shop', DEV, { turn: null, status: 'done' }));
   all.push(task('Old checkout', DEV, { turn: 2, status: 'done' }));

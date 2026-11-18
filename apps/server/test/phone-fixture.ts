@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { parseServerMessage, type PhoneReply, type PhoneServerMessage } from '@hornhoof/protocol';
+import { parseServerMessage, type PhoneReadinessIssue, type PhoneReply, type PhoneServerMessage } from '@hornhoof/protocol';
 import { agents, companies, departments, jobs, machines, nodes, people, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -10,7 +10,7 @@ await prepareSharedDatabase();
 
 /* A company with a phone's computer and its node answering adb from records, two employees in two departments, Clara who
    adds the phone, Sam of the other department and Olaf of another company. */
-export async function phoneCompany() {
+export async function phoneCompany(readiness?: () => PhoneReadinessIssue[]) {
   const { app, db } = await testApp({ NODE_KEY: 'v'.repeat(40) });
   /* Lease expiry moves only when a scenario moves this injected clock. */
   app.ctx.clock = () => 1_700_000_000_000;
@@ -51,20 +51,22 @@ export async function phoneCompany() {
   node.ws.on('message', data => {
     const m = parseServerMessage(data.toString());
     if (!m || !m.type.startsWith('phone.')) return;
-    if (m.type === 'phone.probe' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.revoke') {
+    if (m.type === 'phone.probe' || m.type === 'phone.baseline' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.revoke') {
       calls.push(m);
       if (m.type === 'phone.revoke' && holdRevoke) { revokes.push(m.requestId); return; }
       const answer: PhoneReply = { type: 'phone.reply', requestId: m.requestId, status: 'ok' };
       if (m.type === 'phone.probe') answer.devices = [{ serial: m.endpoint, status: 'device', model: 'Pixel_8', hardwareKey: 'a'.repeat(64) }];
+      if (m.type === 'phone.baseline' && readiness) answer.readiness = readiness();
       node.send(answer);
     }
   });
-  node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true });
+  const hello = () => node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true, ...(readiness ? { phoneBaseline: true } : {}) });
+  hello();
   await until(async () => Boolean((await db.select().from(nodes).where(eq(nodes.id, executor!.id)))[0]?.lastSeenAt));
   const addPhone = (session = claraSession) => app.inject({ method: 'POST', url: '/api/phones', ...as(session), payload: { machineId: machine!.id, endpoint: '192.168.1.80:5555', name: 'Clara phone' } });
   return {
     app, db, companyId, ceoSession, clara: clara!, claraSession, samSession, olafSession, other: other!, otherAgent: otherAgent!, mkt: mkt!, nora: nora!, sammy: sammy!, task, startTurn,
-    machine: machine!, executor: executor!, node, calls, addPhone,
+    machine: machine!, executor: executor!, node, calls, addPhone, hello,
     holdRevokes: () => { holdRevoke = true; },
     acknowledgeRevokes: () => { for (const id of revokes.splice(0)) node.send({ type: 'phone.reply', requestId: id, status: 'ok' }); holdRevoke = false; },
   };

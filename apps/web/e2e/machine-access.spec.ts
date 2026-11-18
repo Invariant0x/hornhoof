@@ -28,14 +28,14 @@ const WORDS = {
     machines: 'Machines', block: 'Computer access', closed: 'Access closed', open: 'Access open', full: 'Full access for the team', asks: 'Asks for access',
     forOrchestrator: 'For the orchestrator', forTeam: 'Every company agent', openedBy: 'Opened by: Ivan', until: /^Until /,
     openCard: 'Open the card of ', choose: 'Open access', close: 'Close access', who: 'Who gets access?', duration: 'Access duration', hour: '1 hour', hours: '8 hours', day: '1 day',
-    orchestrator: 'Orchestrator', team: 'Every company agent', cancel: 'Cancel', confirm: 'Open full access for the whole team?', fullButton: 'Open full access',
+    orchestrator: 'Orchestrator', team: 'Every company agent', cancel: 'Cancel',
     openHour: 'Open for 1 hour', notNow: 'Not now', offline: 'The machine is not responding. Access can be opened when it is online.', owner: "Decided by the machine's owner alone.",
   },
   ru: {
     machines: 'Машины', block: 'Доступ к машинам', closed: 'Доступ закрыт', open: 'Доступ открыт', full: 'Полный доступ для команды', asks: 'Просит доступ',
     forOrchestrator: 'Для оркестратора', forTeam: 'Все агенты компании', openedBy: 'Открыл: Ivan', until: /^До /,
     openCard: 'Открыть карточку ', choose: 'Открыть доступ', close: 'Закрыть доступ', who: 'Кому открыть доступ?', duration: 'Срок доступа', hour: '1 ч', hours: '8 ч', day: 'Сутки',
-    orchestrator: 'Оркестратору', team: 'Всем агентам компании', cancel: 'Отмена', confirm: 'Открыть полный доступ всей команде?', fullButton: 'Открыть полный доступ',
+    orchestrator: 'Оркестратору', team: 'Всем агентам компании', cancel: 'Отмена',
     openHour: 'Открыть на 1 ч', notNow: 'Не сейчас', offline: 'Машина не отвечает. Доступ можно открыть, когда она появится в сети.', owner: 'Решение принимает только владелец машины.',
   },
 };
@@ -168,31 +168,24 @@ for (const look of LOOKS) {
     expect(errors).toEqual([]);
   });
 
-  test(`opens full access to every agent only after asking once more, and Cancel opens nothing: ${named(look)}`, async ({ page }) => {
+  test(`opens full access when the owner selects every agent, and Cancel opens nothing: ${named(look)}`, async ({ page }) => {
     const { card, sent, errors, words } = await openMachines(page, look, 'm1');
     const block = blockOf(card, words);
     const choose = block.getByRole('button', { name: words.choose, exact: true });
     await choose.click();
     await block.getByRole('group', { name: words.duration }).getByRole('button', { name: words.hours, exact: true }).click();
-    await block.getByRole('button', { name: words.team, exact: true }).click();
-    await expect(block.getByText(words.confirm, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
-    await snap(card, 'confirm');
-    /* Right to left, the question keeps its mark at its end. */
-    if (look.dir === 'rtl') expect(await block.getByText(words.confirm, { exact: true }).evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
     expect(sent).toEqual([]);
     await block.getByRole('button', { name: words.cancel, exact: true }).click();
-    await expect(block.getByText(words.confirm, { exact: true })).toHaveCount(0);
     await expect(choose).toBeFocused();
     expect(sent).toEqual([]);
     await choose.click();
     await block.getByRole('group', { name: words.duration }).getByRole('button', { name: words.hours, exact: true }).click();
     await block.getByRole('button', { name: words.team, exact: true }).click();
-    await block.getByRole('button', { name: words.fullButton, exact: true }).click();
     await expect(block.getByText(words.full, { exact: true })).toBeVisible();
     await expect(block.getByText(words.forTeam, { exact: true })).toBeVisible();
     await snap(card, 'full');
-    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'all_agents', duration: '8h', confirm: true } }]);
+    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'all_agents', duration: '8h' } }]);
     /* At its time the card closes by itself, before the server says so. */
     await page.clock.fastForward(8 * HOUR + 1000);
     await expect(block.getByText(words.closed, { exact: true })).toBeVisible();

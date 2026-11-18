@@ -1,30 +1,15 @@
 import { useId, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import { askingTask, goalStatus, type Asks, type Goal, type HumanStatus, type Split } from '../task-board';
+import { askingTask, goalStatus, type Asks, type Goal, type Split } from '../task-board';
 import type { TaskLine } from '../types';
+import { QuestionButton, StateWord, WaitLine } from './TaskActivity';
 
 /* How a card opens its task and names where it is: its department or product. asksYou: whether an open question on a task is
    the person's to answer. */
-export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: Asks };
-
-/* The colours of a state as the task lists already draw them; the person's own answer in the colour of attention. */
-const STATE_CLASS: Record<HumanStatus, string> = {
-  notStarted: 'open', working: 'working', review: 'review', waiting: 'waiting', waitingYou: 'you', stopped: 'blocked', paused: 'blocked', done: 'done', cancelled: 'cancelled',
-};
+export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: Asks; questionAt?: (id: string) => string | undefined };
 
 function Chevron() {
   return <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>;
-}
-
-/* A state in plain words, marked when it waits for the person. */
-function StateChip({ status }: { status: HumanStatus }) {
-  const t = useT();
-  return (
-    <span className={`tstate ${STATE_CLASS[status]}`}>
-      {status === 'waitingYou' && <b aria-hidden="true">!</b>}
-      <span>{t.tasks.board.statuses[status]}</span>
-    </span>
-  );
 }
 
 /* How much of a whole is done, in whole goals or tasks, as a bar and in words; the words in their own direction, so "212 of
@@ -56,14 +41,21 @@ function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
+  const status = goalStatus(goal, asking?.id === task.id);
   return (
     <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
-      <StateChip status={goalStatus(goal, asking !== null)} />
-      <button className="linkish goal-row-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-      <span className="goal-row-who" dir="auto">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
-      {(asking || goal.children.length > 0) && (
-        <button className="linkish goal-row-open" type="button" onClick={() => rows.onOpenTask(asking?.id ?? task.id)}>{t.tasks.board.openTask}</button>
-      )}
+      <StateWord status={status} />
+      <div className="goal-row-main">
+        <button className="linkish goal-row-title" type="button" dir="auto" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
+        <span className="goal-row-who" dir="auto">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
+        <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
+        {(asking || goal.children.length > 0) && (
+          <div className="entry-actions goal-row-actions">
+            {asking ? <QuestionButton onOpen={() => rows.onOpenTask(asking.id)} />
+              : <button className="act" type="button" onClick={() => rows.onOpenTask(task.id)}>{t.tasks.board.openTask}</button>}
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -82,7 +74,7 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const [open, setOpen] = useState(false);
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
-  const status = goalStatus(goal, asking !== null);
+  const status = goalStatus(goal, asking?.id === task.id);
   const place = rows.place(task);
   return (
     <article className={`goal${asking ? ' you' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
@@ -94,12 +86,13 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
       </div>
       {task.brief && <p className="goal-brief" dir="auto">{task.brief}</p>}
       <div className="goal-meta">
-        <StateChip status={status} />
+        <StateWord status={status} />
         {task.urgent && <span className="badge urgent">{t.tasks.board.urgent}</span>}
         {place && <span className="badge goal-place" dir="auto">{place}</span>}
         <span dir="auto">{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
         <span dir="auto">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
       </div>
+      <WaitLine task={task} asksYou={asking?.id === task.id} questionAt={rows.questionAt?.(task.id)} hasStatus={status === 'waitingYou'} />
       {goal.total > 0 && <Progress done={goal.done} total={goal.total} label={t.tasks.board.progress(goal.done, goal.total)} />}
       {goal.children.length > 0 && (
         <>
@@ -111,7 +104,7 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
           )}
         </>
       )}
-      {asking && <button className="btn small goal-answer" type="button" onClick={() => rows.onOpenTask(asking.id)}>{t.tasks.board.openTask}</button>}
+      {asking && <div className="entry-actions"><QuestionButton onOpen={() => rows.onOpenTask(asking.id)} /></div>}
     </article>
   );
 }
