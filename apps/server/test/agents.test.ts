@@ -92,7 +92,6 @@ describe('the employee card', () => {
     expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain(assignment);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect((await instructionsOf(app.ctx, orchestrator!)).text).toContain(assignment);
-    expect((await instructionsOf(app.ctx, orchestrator!, false)).text).toContain(assignment);
     expect((await patch(app, ceo, 'orchestrator', { base: null })).statusCode).toBe(200);
     expect((await open(app, ceo, 'orchestrator')).json().parts.find((p: { kind: string }) => p.kind === 'assignment').text).not.toContain(assignment);
   });
@@ -307,7 +306,7 @@ describe('the employee card', () => {
     const skillText = Object.fromEntries(role.skills.filter(s => s.on).slice(0, 4).map(s => [s.id, long]));
     expect((await patch(app, ceo, brunoId, { base: long, skillText })).statusCode).toBe(200);
     const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
-    expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).whole).toContain(long);
+    expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).raw).toContain(long);
   });
 
   it('resets template abilities while preserving the employee assignment', async () => {

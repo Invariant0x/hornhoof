@@ -2084,9 +2084,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
       const role = templates.roles.get(roleId)!;
       const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
-      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
+      expect(rendered.raw).toContain('<!-- hh:skill hh-tables -->');
     }
-    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
+    expect(orchestratorSteady(templates).parts.map(part => part.text).join('\n\n')).toContain('<!-- hh:skill hh-tables -->');
   });
 });
 

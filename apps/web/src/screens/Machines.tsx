@@ -135,6 +135,7 @@ function Resources({ row }: { row: MachineRow }) {
       <Gauge label={t.machines.processor} figure={load.cpus} unit={` ${t.cards.coresWord(load.cpus)}`} sub={[load.cpuModel, fewer ? t.cards.hostCores(load.hostCpus!) : null].filter(Boolean).join(', ')} />
     </div>
     {(fewer || less) && <p className="machine-note">{row.os === 'darwin' ? t.machines.smallerMac : t.machines.smaller}</p>}
+    {load.memoryShort && <p className="machine-note">{t.machines.memoryShort}</p>}
   </>;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CALL_BYTES, CallRoom } from '../src/call-room.js';
+import { CallRoom } from '../src/call-room.js';
 
 /* Whether the promise has settled once everything already due has run. */
 const settled = async (p: Promise<unknown>) => {
@@ -10,50 +10,43 @@ const settled = async (p: Promise<unknown>) => {
 };
 
 describe('the room one-shot calls start in', () => {
-  it('starts every call at once while the memory a new program gets holds them all, with no count of its own', async () => {
-    const room = new CallRoom(() => 1000 * CALL_BYTES);
+  it('starts every call at once while the machine reports no kill for want of memory, with no count of its own', async () => {
+    const room = new CallRoom(() => false);
     const seats = Array.from({ length: 500 }, () => room.enter(new AbortController().signal));
     for (const seat of seats) expect(await settled(seat)).toBe(true);
   });
 
-  it('counts a call that started against the memory until its program says its first word, then the memory it takes shows', async () => {
-    let free = 2.5 * CALL_BYTES;
-    const room = new CallRoom(() => free);
-    const one = await room.enter(new AbortController().signal);
-    const two = await room.enter(new AbortController().signal);
-    const three = room.enter(new AbortController().signal);
-    expect(await settled(three)).toBe(false);
-    /* The two programs are up and hold their memory, which the machine's own measure shows from now on. */
-    free = 1.2 * CALL_BYTES;
-    one.settled();
-    two.settled();
-    expect(await settled(three)).toBe(true);
-  });
-
-  it('keeps a call waiting in its turn while memory is short, and starts it once a call ends or the machine has room', async () => {
-    let free = 0.5 * CALL_BYTES;
-    const room = new CallRoom(() => free);
-    /* Where no call runs, one starts all the same, so a small machine is never left with none. */
-    const first = await room.enter(new AbortController().signal);
-    first.settled();
-    const second = room.enter(new AbortController().signal), third = room.enter(new AbortController().signal);
+  it('keeps new calls waiting in their order while the last report says the kernel killed for want of memory, and starts them once a report says none', async () => {
+    let short = true;
+    const room = new CallRoom(() => short);
+    const first = room.enter(new AbortController().signal), second = room.enter(new AbortController().signal);
+    expect(await settled(first)).toBe(false);
     expect(await settled(second)).toBe(false);
-    first.leave();
-    expect(await settled(second)).toBe(true);
-    expect(await settled(third)).toBe(false);
-    free = 5 * CALL_BYTES;
+    /* Looking again while the machine still says so starts none. */
     room.look();
-    expect(await settled(third)).toBe(true);
+    expect(await settled(first)).toBe(false);
+    short = false;
+    room.look();
+    expect(await settled(first)).toBe(true);
+    expect(await settled(second)).toBe(true);
   });
 
   it('lets a waiting call go when it is stopped, and the ones behind it move up', async () => {
-    const room = new CallRoom(() => 0);
-    const running = await room.enter(new AbortController().signal);
+    let short = true;
+    const room = new CallRoom(() => short);
     const stop = new AbortController();
     const stopped = room.enter(stop.signal), next = room.enter(new AbortController().signal);
     stop.abort();
     await expect(stopped).rejects.toThrow();
-    running.leave();
+    expect(await settled(next)).toBe(false);
+    short = false;
+    room.look();
     expect(await settled(next)).toBe(true);
+  });
+
+  it('refuses a call stopped before it asks', async () => {
+    const stop = new AbortController();
+    stop.abort();
+    await expect(new CallRoom(() => false).enter(stop.signal)).rejects.toThrow();
   });
 });
