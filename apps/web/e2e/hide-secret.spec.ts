@@ -80,6 +80,7 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
       expect(input).toHaveCount(0),
       expect(panel.getByText(marker, { exact: true })).toHaveCount(0),
       expect(panel.getByText('[hidden]', { exact: true })).toBeVisible(),
+      expect(panel.getByRole('button', { name: t.tasks.details, exact: true })).toBeVisible(),
     ]);
     await openTaskAction(panel, t, t.tasks.details);
     await expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords');

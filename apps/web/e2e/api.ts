@@ -187,10 +187,11 @@ export async function openTaskCard(page: Page, number: number) {
 
 export async function openTaskAction(panel: Locator, t: Pick<Messages, 'tasks'>, action?: string) {
   const trigger = panel.getByRole('button', { name: t.tasks.taskActions, exact: true });
-  if (await trigger.getAttribute('aria-expanded') === 'true') {
-    await panel.getByRole('button', { name: t.tasks.backToActions, exact: true }).click();
-  } else {
+  if (await trigger.getAttribute('aria-expanded') !== 'true') {
     await trigger.click();
+  } else {
+    const back = panel.getByRole('button', { name: t.tasks.backToActions, exact: true });
+    if (await back.isVisible()) await back.click();
   }
   if (action) await panel.getByRole('button', { name: action, exact: true }).click();
 }

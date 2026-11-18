@@ -79,6 +79,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/tasks\/t1$/);
     await expect(departmentTask).toBeVisible();
     await expect(department).toBeVisible();
+    await openTaskAction(departmentTask, t, t.tasks.comment);
     const departmentComment = departmentTask.getByRole('textbox', { name: t.tasks.comment, exact: true });
     await departmentComment.fill('Keep this department task draft');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
