@@ -35,7 +35,11 @@ KEEP_MEDIA_RESULTS=1 npm --prefix apps/web run media
 
 `.github/workflows/media.yml` renders the scenes for a push to any `media-*` branch and keeps the new GIFs as the `media-gifs` artifact, and the videos, marks, failure shots and log as `media-results`. Where the repository variables `BUILD_RUNS_ON` and `BUILDKIT_ENDPOINT` name our own runner and its BuildKit, the scenes run in a build of `apps/web/media/Dockerfile` there, as that runner has no Docker daemon; otherwise a GitHub machine runs `run.sh` with Docker. Download the GIFs with `gh run download <run> -n media-gifs`, look at their frames, and commit the ones you want into `.github/assets/`.
 
-`run.sh` also runs inside the Playwright image itself with `MEDIA_IN_CONTAINER=1`, and writes the GIFs to `MEDIA_ASSETS_DIR` when it is set. A failed scene no longer stops the others from being converted; the run still fails at the end.
+`run.sh` also runs inside the Playwright image itself with `MEDIA_IN_CONTAINER=1`, and writes the GIFs to `MEDIA_ASSETS_DIR` when it is set.
+
+### Marketing cuts
+
+A scene named `marketing-*` is a cut for posts, 10 to 30 s, recorded at the size the network shows so nothing is scaled down afterwards. `scenes/marketing-map.spec.ts` records two: `marketing-map-linkedin` at 1080x1350 (4:5, the phone layout at 600x750 and scale 1.8) and `marketing-map-x` at 1920x1080 (16:9, 1280x720 at scale 1.5), with a pointer drawn by `moonfern/cursor.ts`. For each, `run.sh` writes a GIF at that size (up to 15 MB) and an H.264 MP4 (yuv420p, BT.709, CRF 16, `+faststart`) to `MEDIA_VIDEOS_DIR` (by default `results/marketing`, kept with `KEEP_MEDIA_RESULTS=1`), with `ffprobe.txt` and six frames of each MP4 in `frames/`. On GitHub they are the `media-videos` artifact. `MEDIA_STILLS=<dir>` makes the scene save screenshots at each step, to check a cut by eye where no ffmpeg is at hand. A failed scene no longer stops the others from being converted; the run still fails at the end.
 
 Typecheck all media data files and scene specs against `apps/web/src/types.ts`:
 

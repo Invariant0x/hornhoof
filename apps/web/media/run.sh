@@ -6,6 +6,8 @@ REPO_ROOT="$(CDPATH= cd -- "$MEDIA_DIR/../../.." && pwd)"
 RESULTS_DIR="$MEDIA_DIR/results"
 # MEDIA_ASSETS_DIR sends the pictures elsewhere, as the render in apps/web/media/Dockerfile does.
 ASSETS_DIR="${MEDIA_ASSETS_DIR:-$REPO_ROOT/.github/assets}"
+# The marketing cuts (scenes named marketing-*) also leave MP4 videos, their ffprobe report and a few frames here.
+VIDEOS_DIR="${MEDIA_VIDEOS_DIR:-$RESULTS_DIR/marketing}"
 DOCKER_IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble"
 DOCKER_VOLUME="hornhoof-media-work"
 
@@ -25,6 +27,7 @@ fi
 
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR" "$ASSETS_DIR"
+rm -f "$VIDEOS_DIR/ffprobe.txt"
 
 # A scene that fails leaves the others to be converted; the run still fails at the end.
 render_status=0
@@ -112,16 +115,57 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
   start_sec="${trim_args% *}"
   dur_sec="${trim_args#* }"
 
-  for max_colors in 64 48 32 24 16; do
+  # A README picture is 1200 wide and under 6 MB. A marketing cut keeps the size it was recorded at, the size the
+  # network shows, so nothing is scaled down, and may weigh up to 15 MB, the most X takes for a GIF.
+  case "$name" in
+    marketing-*) gif_scale="" gif_limit=15000000 color_steps="128 96 64 48 32" ;;
+    *) gif_scale="scale=1200:-1:flags=lanczos," gif_limit="$MAX_GIF_BYTES" color_steps="64 48 32 24 16" ;;
+  esac
+
+  for max_colors in $color_steps; do
     ffmpeg -hide_banner -loglevel error -y \
       -i "$webm" -ss "$start_sec" -t "$dur_sec" \
-      -vf "fps=12,scale=1200:-1:flags=lanczos,atadenoise=0a=0.04:0b=0.08:1a=0.04:1b=0.08:2a=0.04:2b=0.08,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+      -vf "fps=12,${gif_scale}atadenoise=0a=0.04:0b=0.08:1a=0.04:1b=0.08:2a=0.04:2b=0.08,split[s0][s1];[s0]palettegen=stats_mode=diff:max_colors=$max_colors[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
       -loop 0 "$out_gif"
     gif_bytes="$(wc -c < "$out_gif" | tr -d ' ')"
-    if [ "$gif_bytes" -lt "$MAX_GIF_BYTES" ]; then
+    if [ "$gif_bytes" -lt "$gif_limit" ]; then
       break
     fi
   done
+
+  # A marketing cut also goes out as H.264 MP4, which LinkedIn and X take: 4:2:0 in TV range with BT.709 named, the
+  # way phones expect it so the colours do not wash out, the recorder's own frame rate, and the index at the front so
+  # it starts playing before it has loaded.
+  if [ "${name#marketing-}" != "$name" ]; then
+    mkdir -p "$VIDEOS_DIR/frames"
+    out_mp4="$VIDEOS_DIR/$name.mp4"
+    ffmpeg -hide_banner -loglevel error -y \
+      -i "$webm" -ss "$start_sec" -t "$dur_sec" \
+      -vf "scale=in_color_matrix=bt601:out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p" \
+      -c:v libx264 -preset slow -tune animation -crf 16 -profile:v high -level:v 4.2 \
+      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+      -movflags +faststart -an "$out_mp4"
+    cp "$out_gif" "$VIDEOS_DIR/$name.gif"
+    for file in "$out_mp4" "$VIDEOS_DIR/$name.gif"; do
+      echo "== $(basename "$file") ($(wc -c < "$file" | tr -d ' ') bytes)" >> "$VIDEOS_DIR/ffprobe.txt"
+      ffprobe -v error -show_entries stream=codec_name,profile,width,height,pix_fmt,color_range,color_space,r_frame_rate,nb_frames:format=duration,size,bit_rate \
+        -of default=nw=1 "$file" >> "$VIDEOS_DIR/ffprobe.txt"
+    done
+    mp4_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_mp4")"
+    for part in 1 2 3 4 5 6; do
+      at="$(node -e 'process.stdout.write((Number(process.argv[1]) * (Number(process.argv[2]) - 0.5) / 6).toFixed(2))' "$mp4_dur" "$part")"
+      ffmpeg -hide_banner -loglevel error -y -ss "$at" -i "$out_mp4" -frames:v 1 "$VIDEOS_DIR/frames/$name-$part.png"
+    done
+    printf "  %-28s %6ss  %s bytes\n" "$name.mp4" "$mp4_dur" "$(wc -c < "$out_mp4" | tr -d ' ')"
+    node -e '
+      const [name, durStr] = process.argv.slice(1);
+      const dur = Number(durStr);
+      if (!(dur >= 10 && dur <= 30)) {
+        console.error(`error: ${name}.mp4 duration ${dur}s is outside 10..30s`);
+        process.exit(1);
+      }
+    ' "$name" "$mp4_dur" || check_status=1
+  fi
 
   gif_dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$out_gif")"
   gif_mb="$(node -e 'process.stdout.write((Number(process.argv[1]) / (1024 * 1024)).toFixed(2))' "$gif_bytes")"
@@ -133,17 +177,19 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
     const dur = Number(durStr);
     const bytes = Number(bytesStr);
     const maxBytes = Number(maxBytesStr);
-    const minDur = name === "machines" || name === "subscriptions" ? 8 : 6;
-    const maxDur = name === "machines" || name === "subscriptions" ? 10 : 12;
+    const marketing = name.startsWith("marketing-");
+    const slow = name === "machines" || name === "subscriptions";
+    const minDur = marketing ? 10 : slow ? 8 : 6;
+    const maxDur = marketing ? 30 : slow ? 10 : 12;
     if (!(dur >= minDur && dur <= maxDur)) {
       console.error(`error: ${name}.gif duration ${dur}s is outside ${minDur}..${maxDur}s`);
       process.exit(1);
     }
     if (bytes >= maxBytes) {
-      console.error(`error: ${name}.gif size ${bytes} bytes exceeds 6 MB limit`);
+      console.error(`error: ${name}.gif size ${bytes} bytes exceeds the ${maxBytes / 1e6} MB limit`);
       process.exit(1);
     }
-  ' "$name" "$gif_dur" "$gif_bytes" "$MAX_GIF_BYTES" || check_status=1
+  ' "$name" "$gif_dur" "$gif_bytes" "$gif_limit" || check_status=1
 done
 
 if [ "${KEEP_MEDIA_RESULTS:-0}" != "1" ]; then
