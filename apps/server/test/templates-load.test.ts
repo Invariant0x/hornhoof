@@ -15,7 +15,7 @@ const skills = [...templates.skills.values()];
 
 describe('the template loader', () => {
   it('loads every role and skill', () => {
-    expect(roles).toHaveLength(73);
+    expect(roles).toHaveLength(75);
     expect(skills).toHaveLength(191);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);

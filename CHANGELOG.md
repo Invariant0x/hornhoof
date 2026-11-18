@@ -20,7 +20,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
-- Set up a Video studio or add Video production to plan, make and check videos. Marketing and Design use the same video production laws.
+- Set up a Video studio or add Video production to plan, make, finish and check videos. Marketing and Design use the same video production laws.
+- Video production has a colorist and a sound designer who finish the whole video together before the final check.
 - The Media workflow captures the current map, Startup department, tracker list, task card and agent window at desktop and phone widths in light and dark.
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.

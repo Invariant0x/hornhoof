@@ -380,7 +380,7 @@ describe('templates', () => {
 
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
-    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV', 'VID-HEAD', 'VID-WRITE', 'VID-BOARD', 'VID-KEEP', 'VID-GEN', 'VID-EDIT', 'VID-QA'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV', 'VID-HEAD', 'VID-WRITE', 'VID-BOARD', 'VID-KEEP', 'VID-GEN', 'VID-EDIT', 'VID-COLOR', 'VID-SOUND', 'VID-QA'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 

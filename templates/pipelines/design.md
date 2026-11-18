@@ -23,10 +23,10 @@ pipelines:
     why: "For turning existing footage into a finished video."
     stages:
       - { name: "Sort footage", ownerRole: "DSN-PM", handoffTo: [video_production], brief: "Use vid-laws and send original production to Video production when it exists. Record the brief's look and platform, map the measured set and markers, and name a keeper to approve every clip before editing." }
-      - { name: "Prove the hardest edit", ownerRole: "DSN-HEAD", brief: "Accept a 5 to 8 second probe with the keeper before the full edit." }
+      - { name: "Prove the hardest edit", ownerRole: "DSN-HEAD", brief: "Accept a 5 to 8 second probe with the keeper and set the look reference before the full edit." }
       - { name: "Check shot continuity", ownerRole: "DSN-QA", brief: "The keeper checks the footage against the brief, style sheet and set. Get a new take for any drift before the clip goes to the editor." }
       - { name: "Edit a rough cut", ownerRole: "DSN-UI", echelon: "development", brief: "Cut only from clips the keeper accepted. Keep key events in view and compose for the platform." }
-      - { name: "Add sound and captions", ownerRole: "DSN-UI", brief: "Carry through the sound planned from the first shots. Make the story clear with the sound off." }
-      - { name: "Review the cut", ownerRole: "DSN-QA", echelon: "review", brief: "Check the export against the brief and style sheet. The head checks it at full size and frame by frame under Law 10 before delivery." }
+      - { name: "Add sound and captions", ownerRole: "DSN-UI", brief: "Carry through the sound planned from the first shots. Finish color, sound and titles across the whole cut against the probe's look reference under Law 10, with one owner for each. Make the story clear with the sound off." }
+      - { name: "Review the cut", ownerRole: "DSN-QA", echelon: "review", brief: "Check the export against the brief and style sheet. The head checks it at full size and frame by frame under Law 11 before delivery." }
       - { name: "Export the final video", ownerRole: "DSN-UI" }
 ---

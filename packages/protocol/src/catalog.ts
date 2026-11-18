@@ -111,7 +111,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     key: 'video_studio',
     departments: [
       { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }, { role: 'OPS-FIX', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-ACCT', count: 1 }] },
-      { template: 'video_production', staff: [{ role: 'VID-HEAD', count: 1 }, { role: 'VID-WRITE', count: 1 }, { role: 'VID-BOARD', count: 1 }, { role: 'VID-KEEP', count: 1 }, { role: 'VID-GEN', count: 1 }, { role: 'VID-EDIT', count: 1 }, { role: 'VID-QA', count: 1 }, { role: 'VID-PM', count: 1 }] },
+      { template: 'video_production', staff: [{ role: 'VID-HEAD', count: 1 }, { role: 'VID-WRITE', count: 1 }, { role: 'VID-BOARD', count: 1 }, { role: 'VID-KEEP', count: 1 }, { role: 'VID-GEN', count: 1 }, { role: 'VID-EDIT', count: 1 }, { role: 'VID-COLOR', count: 1 }, { role: 'VID-SOUND', count: 1 }, { role: 'VID-QA', count: 1 }, { role: 'VID-PM', count: 1 }] },
     ],
   },
   {

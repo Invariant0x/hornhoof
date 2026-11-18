@@ -1,13 +1,13 @@
 ---
 id: vid-laws
 title: { en: "The laws of video production", ru: "Правила производства видео" }
-description: { en: "Ten rules for making and checking every video.", ru: "Десять правил создания и проверки любого видео." }
+description: { en: "Eleven rules for making and checking every video.", ru: "Одиннадцать правил создания и проверки любого видео." }
 kind: procedure
 sources: []
 ---
 # The laws of video production
 
-These are ten laws, not a recipe. They hold for any video of any look: live-action film, 3D, 2D animation, anime, stop motion, motion graphics, a screen recording. Each law says what must be true of the finished video and why. How the team meets it is the team's craft and changes as tools change.
+These eleven laws hold for a ten-second clip and for a feature film alike. They hold for any look: live-action film, 3D, 2D animation, anime, stop motion, motion graphics, a screen recording. A long work adds a work level above the scenes. Each law says what must be true of the finished video and why. How the team meets it is the team's craft and changes as tools change.
 
 They come from a real failure (18.11). An order asked for a cinematic film. The team treated the storyboard drawings as the source of the video, animated each drawing on its own and cut the pieces short. The video came out as a half-drawn slideshow, with a monster and a room that changed from shot to shot. The same story, made under these laws, came out as real film on the first try.
 
@@ -35,7 +35,7 @@ The set is the single truth of space for the whole video. Every shot is planned 
 
 ## Law 6. A keeper holds the look and the world
 
-One person, the keeper, checks every shot against the brief's look, against what Law 4 wrote down and against the set and its markers (Law 5), before it reaches the edit. Any drift is made again, not explained away. The keeper also checks that no shot is a still picture pretending to be video.
+The keeper checks every shot against the brief's look, against what Law 4 wrote down and against the set and its markers (Law 5), before it reaches the edit. On a long work one lead keeper holds the shared sheets and sets, and each scene has a keeper who checks its shots against them. Any drift is made again, not explained away. The keeper also checks that no shot is a still picture pretending to be video.
 
 ## Law 7. Each tool does what it does best
 
@@ -47,8 +47,14 @@ Before the whole video, the team makes a short probe (5 to 8 s) of the hardest m
 
 ## Law 9. The platform shapes the frame
 
-The brief's platform sets the frame and the attention: vertical 9:16 for Shorts, Reels and TikTok, with the hook in the first second, the important parts in the middle clear of the platform's buttons, and the story readable without sound.
+The brief's platform sets the frame and the attention. For short vertical video, use 9:16, put the hook in the first second, keep important parts in the middle clear of the platform's buttons, and make the story readable without sound.
 
-## Law 10. Judge the finished video, not the effort
+## Law 10. The whole work is finished as one
+
+Color, contrast, grain, sound and titles of the whole work are finished together at the end, each by one owner, against one look reference. Generated shots always differ a little from each other. The finish makes them one work. Set the look reference with the probe (Law 8): reference frames for each scene and, for a long work, a color script that says where the color changes on purpose, such as for night, memory or mood. Any other change between shots is drift and is corrected.
+
+The owner of color compares neighbouring shots side by side and by measurement (levels, color balance, skin tones). The owner of sound does the same for loudness, voices and room tone. The finish never hides a broken world, scale or motion (Laws 4 to 6). Such a shot is made again.
+
+## Law 11. Judge the finished video, not the effort
 
 Before delivery, the head watches the video at full size, then frame by frame at every cut and key event, and asks one question per law. A video that breaks a law goes back, however much it cost.

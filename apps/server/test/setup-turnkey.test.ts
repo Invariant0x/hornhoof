@@ -44,7 +44,7 @@ describe('POST /api/setup staffs the template', () => {
     const video = response.json().departments.find((d: { templateKey: string }) => d.templateKey === 'video_production');
     expect(video).toMatchObject({ roleCode: 'VID', calls: [], teams: [expect.objectContaining({ turnkey: false })] });
     expect(video.employees.map((e: { roleId: string }) => e.roleId).sort()).toEqual([
-      'VID-BOARD', 'VID-EDIT', 'VID-GEN', 'VID-HEAD', 'VID-KEEP', 'VID-PM', 'VID-QA', 'VID-REF', 'VID-WRITE',
+      'VID-BOARD', 'VID-COLOR', 'VID-EDIT', 'VID-GEN', 'VID-HEAD', 'VID-KEEP', 'VID-PM', 'VID-QA', 'VID-REF', 'VID-SOUND', 'VID-WRITE',
     ]);
     for (const employee of video.employees) expect(employee).toMatchObject({ model: '', provider: null });
     const head = (await staffOf(app)).find(employee => employee.roleKey === 'VID-HEAD')!;
