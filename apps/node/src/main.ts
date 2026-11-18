@@ -422,6 +422,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (terminal) live = await terminal.tmux.livePrograms();
   };
   const liveNow = () => (live ? { live } : {});
+  let checkSequence = 0;
+  const checkLeases = () => ({ sequence: ++checkSequence, ids: checks.leaseIds() });
   /* The node stops once Hornhoof has heard of its removal, not before. */
   const removal = removalWatch(() => outbox.owes('removed'), () => stop());
 
@@ -436,6 +438,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onOpen(next, acks, tools) {
       send = next;
       online = true;
+      checkSequence = 0;
       outside.opened(next, tools);
       confirmed = acks;
       host?.closeViews();
@@ -444,7 +447,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), checkLeases: checkLeases(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -759,7 +762,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* Calls that wait for memory look again as the node looks at its machine. */
     calls.look();
     void recheckWork();
-    void lookLive().then(() => send?.({ type: 'load', ...said, ...liveNow() }));
+    void lookLive().then(() => send?.({ type: 'load', ...said, ...liveNow(), checkLeases: checkLeases() }));
   }, loadMs);
   reporting.unref();
 

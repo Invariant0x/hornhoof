@@ -170,3 +170,57 @@ it('retains the active lease, refuses queued and new checks, then recovers after
   (await next).release(); lease.release();
   expect(changed).toHaveBeenCalledTimes(2);
 });
+
+it('lists a pending grant and keeps an aborted running lease listed through cleanup', async () => {
+  vi.useFakeTimers();
+  onTestFinished(() => { vi.useRealTimers(); });
+  const requests: CheckQueueRequest[] = [];
+  const failure = new Error('resume failed');
+  const client = new CheckClient(frame => {
+    requests.push(frame);
+    if (frame.type === 'check.acquire' && frame.resume) throw failure;
+    return true;
+  });
+  client.online(true);
+  const pending = client.acquire();
+  const id = requests[0]!.id;
+  expect(client.leaseIds()).toEqual([id]);
+  client.receive({ type: 'check.state', id, state: 'running', position: 0 });
+  const lease = await pending;
+  client.online(false);
+  client.online(true);
+  expect(lease.signal.reason).toBe(failure);
+  expect(client.leaseIds()).toEqual([id]);
+  lease.release();
+  expect(client.leaseIds()).toEqual([]);
+  expect(requests.at(-1)).toEqual({ type: 'check.release', id });
+});
+
+it('retries a release on reconnect after its send failed and the offline grace elapsed', async () => {
+  vi.useFakeTimers();
+  onTestFinished(() => { vi.useRealTimers(); });
+  const requests: CheckQueueRequest[] = [];
+  let transportReady = true;
+  const client = new CheckClient(frame => {
+    requests.push(frame);
+    if (!transportReady) throw new Error('socket closed before sending');
+    return true;
+  });
+  client.online(true);
+  const pending = client.acquire();
+  const id = requests[0]!.id;
+  client.receive({ type: 'check.state', id, state: 'running', position: 0 });
+  const lease = await pending;
+  transportReady = false;
+  lease.release();
+  client.online(false);
+  await vi.advanceTimersByTimeAsync(90_000);
+  transportReady = true;
+  client.online(true);
+  expect(requests).toEqual([
+    { type: 'check.acquire', id, label: 'Heavy check' },
+    { type: 'check.release', id },
+    { type: 'check.release', id },
+  ]);
+  expect(client.leaseIds()).toEqual([]);
+});
