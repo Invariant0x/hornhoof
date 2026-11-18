@@ -1,3 +1,4 @@
+import { expireWait, markRecord } from './wait-expiry.js';
 import { randomUUID } from 'node:crypto';
 import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
@@ -6,23 +7,27 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
+import { loadTask, refuse, type Moved, type Task, type Tx } from './state.js';
+import { move } from './transitions.js';
+import { note } from './events.js';
 import { refusePaused } from './pause.js';
-import { wakeAll } from './wake.js';
-import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, reconnecting, type TurnMessage } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
+import { enqueueTurn, insertOrDeliverTurn, pump, reconnecting } from '../conversation/queue.js';
+import { type TurnMessage } from '../conversation/turn-types.js';
+import { conversationOf } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered, NOT_DELIVERED, refusedMessage, taskNamed, undeliveredLine } from '../conversation/undelivered.js';
 import { dropMail, inboxChanged } from '../conversation/inbox.js';
 import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
-import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
+import { endSourceWait, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
 import { checkedWaitTarget } from './wait-target.js';
-import { taskByRef } from './views.js';
-import type { Actor } from './engine.js';
-import { routeOf, routeSnapshot } from './echelons-store.js';
+import { taskByRef } from './lookup.js';
+import type { Actor } from './state.js';
+import { routeOf, routeSnapshot } from './route-records.js';
 import { onTask, taskWakeOf, waitingTaskTurn } from './wake-state.js';
-
 const EXTERNAL_WAIT_MS = 2 * 3_600_000;
 export const TaskReference = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 export const MESSAGE_TASK_HINT = ' With task, the message concerns that task and ends its external wait. Without task, it leaves waits unchanged.';
@@ -66,11 +71,6 @@ async function keepWaitRecord(tx: Tx, task: Task, wait: ExternalWait, plan: Wait
   const ownerBinding: WaitOwnerBinding = { agentId: wait.on?.kind === 'employee' ? wait.on.employee : agentId };
   await bindSource(tx, task, { kind: 'external', sourceKey, owner: ownerBinding, plan, sourceState: { stage: 'waiting', ...(wait.run ? { run: wait.run } : {}) }, actor });
 }
-
-/* Where the record of a wait stands now that the wait itself ended or came back: it has not ended by that. */
-const markRecord = (wait: ExternalWait, stage: 'waiting' | 'check_back') => async (tx: Tx, task: Task): Promise<void> => {
-  if (wait.operation) await setWaitStage(tx, { taskId: task.id, kind: 'external', sourceKey: waitForSourceKey(wait.operation), stage });
-};
 
 /* A holder can end its turn while an external system works; the task keeps its workflow status. heard: the last of the
    holder's events when its call to wait came, so that words which come into its turn while the call waits its line are known. */
@@ -320,25 +320,6 @@ async function taskTurn(ctx: Ctx, task: Task, agentId: string, message: TurnMess
   return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }, routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId)), why: 'message', ...to } } };
 }
 
-const waitEndedWake = (task: Task, agentId: string, reason: string, unavailable?: string): Wake =>
-  ({ agentId, taskId: task.id, why: 'wait_ended', text: reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 });
-
-const waitEndedFact = (agentId: string, reason: string, unavailable?: string) =>
-  ({ kind: 'updated' as const, actor: { agentId }, text: unavailable ?? `The wait for "${reason}" ended.`, data: { externalWait: null, reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) });
-
-export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {
-  if (!task.externalWait || !task.assigneeAgentId) return false;
-  const wakes = [waitEndedWake(task, task.assigneeAgentId, task.externalWait.reason, unavailable)];
-  try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable), markRecord(task.externalWait, 'check_back'), wakes);
-  } catch (error) {
-    if (error instanceof ApiError && error.reason === 'task_changed') return false;
-    throw error;
-  }
-  await wakeAll(ctx, wakes);
-  return true;
-}
-
 /* A run ended, and the one who started it holds its task: the wait for that run goes in the write that ends the run and keeps
    its wake, so a crash cannot leave one without the other. It keeps the wakes other moves kept, which are other news. A wait
    for anything else stays, and so does someone else's: the result reaches its starter anyway, and it can end_wait. */
@@ -367,6 +348,7 @@ export async function checkExternalWaits(ctx: Ctx, now = new Date()): Promise<nu
     notInArray(tasks.status, ['done', 'cancelled']),
   ));
   let ended = 0;
-  for (const task of due) if (await expireWait(ctx, task)) ended++;
+  for (const task of due) if (await expireWait(ctx, task, undefined, now)) ended++;
   return ended;
 }
+export { expireWait } from './wait-expiry.js';

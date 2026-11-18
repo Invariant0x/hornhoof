@@ -14,7 +14,8 @@ import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
-import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
+import { pumpWaiting } from '../conversation/queue.js';
 import { endRemovedPlanCommands, lockCommandOwner } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { createInstallCommand } from '../nodes/command.js';
@@ -23,7 +24,7 @@ import { liveNode, planNodes } from '../nodes/nodes.js';
 import { internalAddress, modelsFrom, modelsRequest, type ModelsAnswer } from './api-models.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
 import { periodsOf, together, tokensByModel, tokensBySubscription, TokensQuery } from './tokens.js';
-import { failOpenJobs } from '../nodes/messages.js';
+import { failOpenJobs } from '../nodes/job-failures.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { onlineIn, subView, subViews } from './views.js';
@@ -487,7 +488,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
    open jobs end. */
 export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<void> {
   const { db, hub } = ctx;
-  await db.transaction(async tx => {
+  if (!sub.removedAt) await db.transaction(async tx => {
     await tx
       .update(subscriptions)
       .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })

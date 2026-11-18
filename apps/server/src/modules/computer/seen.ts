@@ -1,7 +1,7 @@
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 import { canViewComputer, type AccessView } from './access.js';
 
 /* What this person sees of the machines' computer access: every machine that is theirs to open or close, and all of

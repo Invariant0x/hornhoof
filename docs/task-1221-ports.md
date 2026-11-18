@@ -1,5 +1,7 @@
 # Task 1221: keep test addresses owned
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1221-ports.md). These are historical results, not checks of the current release.
+
 Bug, risk class none. Base: da719b0e7094ce0b78e35a48c13085f9f7521e5b.
 
 The worker keeper fixture selected five leader ports and one worker port by probing and closing them. Another Vitest process can claim each port before the keeper binds it. A failed peer listener leaves the fixture waiting for a leader that cannot answer. The fix uses the same atomic port 0 binding as task 1177, retains the actual addresses returned by start/peerPorts, and registers keeper cleanup before start. Fastify and the intercept door retain the existing listenAt/listenIn helpers.

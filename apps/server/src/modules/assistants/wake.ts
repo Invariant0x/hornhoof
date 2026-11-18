@@ -55,6 +55,11 @@ export class Wakes {
     this.due.set(assistantId, earlier ? { after: Math.min(earlier.after, due.after), worth: earlier.worth || due.worth } : due);
   }
 
+  /* Once every send that runs has ended: what was due went, or waits for an event worth a turn. */
+  async idle(): Promise<void> {
+    while (this.running.size) await Promise.all(this.running.values());
+  }
+
   /* Ends every send and pause, and forgets what waited to go: a wake is only a hint, and the events wait to be read. */
   async stop(): Promise<void> {
     this.run.abort.abort();

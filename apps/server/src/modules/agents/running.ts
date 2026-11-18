@@ -5,7 +5,7 @@ import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, departments, jobs, people, subscriptions, tasks } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
-import { taskSpot } from '../tasks/engine.js';
+import { taskSpot } from '../tasks/state.js';
 import { notStep } from '../tools/steps.js';
 
 /* startedByCeo: null for a turn no person started. One the CEO delegate started answers the delegate, not the CEO. */

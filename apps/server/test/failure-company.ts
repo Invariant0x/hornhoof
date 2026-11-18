@@ -17,7 +17,6 @@ export async function failureCompany(env: NodeJS.ProcessEnv = {}) {
   vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'isOnline').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(true);
-  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   /* A node answers the words it is given to type into a running turn. This one says they did not go in, as when the
      program could not take them, so they wait for the next turn at once and no test waits out a silent node. */
   const sent = vi.spyOn(ctx.hub, 'send').mockImplementation((node, message) => {

@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { companies, turnReleases, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
-import { refuse, type Task, type Tx } from './engine.js';
+import { refuse, type Task, type Tx } from './state.js';
 import { exactComparison } from './review-context.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
@@ -29,6 +29,8 @@ export async function integrationTarget(ctx: Reader, task: Pick<Task, 'companyId
   if (found.department.parentId) return { repo: found.repo, branch: found.repo.branch, turn: null };
   const turn = await openTurnOf(ctx.db, task.companyId, found.department.id)
     ?? await ctx.db.transaction(async tx => { await lockCompany(tx, task.companyId); return ensureOpenTurn(tx, task.companyId, found.department.id); });
+  /* Its repository went away meanwhile. */
+  if (!turn) return null;
   return { repo: found.repo, branch: `turn-${turn.number}`, turn };
 }
 

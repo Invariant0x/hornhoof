@@ -1,27 +1,12 @@
-import { HIDDEN, MIN_SECRET_LENGTH } from '@hornhoof/protocol/redaction';
+import { HIDDEN, MIN_SECRET_LENGTH, redactExact, secretForms as exactForms } from '@hornhoof/protocol/redaction';
 export { HIDDEN } from '@hornhoof/protocol/redaction';
 export const MIN_LENGTH = MIN_SECRET_LENGTH;
 
-/* Every form a secret may show in, plain or base64, longest first. Short values are left out, they would hide ordinary words. */
-export function secretForms(secrets: string[]): string[] {
-  const values = new Set<string>();
-  for (const secret of secrets) {
-    if (!secret || secret.length < MIN_LENGTH) continue;
-    const b64 = Buffer.from(secret).toString('base64');
-    values.add(secret);
-    values.add(b64);
-    values.add(b64.replace(/=+$/, ''));
-    values.add(Buffer.from(secret).toString('base64url'));
-  }
-  return [...values].sort((a, b) => b.length - a.length);
-}
+/* Short values in general diagnostics would hide ordinary words. */
+export const secretForms = (secrets: string[]): string[] => exactForms(secrets, 'ignore');
+export const redact = (text: string, secrets: string[]): string => redactExact(text, secrets, 'ignore');
 
-/* Replaces every exact copy of a secret before output leaves the node. */
-export function redact(text: string, secrets: string[]): string {
-  let out = text;
-  for (const value of secretForms(secrets)) out = out.replaceAll(value, HIDDEN);
-  return out;
-}
+export const redactOperator = (text: string, secrets: string[]): string => redactExact(text, secrets, 'literal');
 
 /* How many characters at the end of text could begin one of the values. */
 export function secretPrefixLength(text: string, values: string[]): number {

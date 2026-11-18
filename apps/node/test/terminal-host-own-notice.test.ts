@@ -6,7 +6,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
-import { claudeProgram, claudeTranscript } from '../src/terminal/programs.js';
+import { claudeProgram, claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 /* Claude Code 2.1.325 starts a turn by itself for a task notice of its own, as a turn ends with background commands still
@@ -63,7 +63,7 @@ function program() {
     operator: { dir: join(home, 'operator'), send: frame => { frames.push(frame); return true; }, connected: () => true, now: () => Date.now() },
   });
   /* Someone has the terminal open, so the program stays up between turns, as both programs did. */
-  host['wanted'].set('watching', { key, size: { cols: 160, rows: 48 } });
+  host['viewSessions']['wanted'].set('watching', { key, size: { cols: 160, rows: 48 } });
   const agent = () => host['agents'].get(key)!;
   /* Claude Code ends a turn with its Stop hook and the turn's duration in its log. */
   const notice = () => {

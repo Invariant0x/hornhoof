@@ -3,7 +3,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { limitUntil } from '../conversation/queue.js';
+import { limitUntil } from '../conversation/limits.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
 import { callOperationsOnHold } from './hold-watch.js';

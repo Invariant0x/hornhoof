@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { PhoneEndpoint, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
@@ -10,7 +10,11 @@ import { NOT_A_LOGIN } from './SecretInput';
 
 export type PhoneView = {
   id: string; name: string; owner: { id: string; name: string }; machineId: string; lending: boolean; online: boolean;
-  state: 'owner' | 'busy' | 'available'; queued: number; stopping: boolean; endpoint?: string;
+  state: 'owner' | 'busy' | 'available' | 'offline'; queued: number; stopping: boolean; endpoint?: string;
+  /* not_connected: the computer is online, but its adb does not list the phone ready. */
+  connection?: 'ready' | 'not_connected' | 'computer_offline';
+  /* Settings that need attention, null while they are being checked. Only for a phone its computer lists. */
+  readiness?: PhoneReadinessIssue[] | null;
 };
 export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
 
@@ -117,6 +121,10 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
   </form>;
 }
 
+/* The states the style book draws as a status, each with its role: not connected waits for someone to act, available is
+   good, a computer offline is off. The others stay words of the state line. */
+const STATE_ROLES: Partial<Record<PhoneView['state'] | 'not_connected', string>> = { not_connected: 'not_connected', available: 'active', offline: 'offline' };
+
 function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine: boolean; machine: string; onChanged: (p: PhoneView) => void }) {
   const t = useT();
   const [watching, setWatching] = useState(false);
@@ -129,15 +137,35 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     catch (error) { setFailure(error); }
     finally { setBusy(false); }
   }
-  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={t.phones.states[phone.online ? phone.state : 'offline']} line={t.phones.owner(phone.owner.name)} />}>
-    <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} /><p className="muted">{t.phones.waiting(phone.queued)}</p></Part>
+  const missing = phone.connection === 'not_connected';
+  /* Watching needs the phone on its computer and the computer online; noScreen names which of them is away. */
+  const noScreen = missing ? 'not_connected' : phone.online ? null : 'computer_offline';
+  const reason = useId();
+  /* A screen that closed because its phone left stays closed when the phone comes back, until its owner opens it. */
+  useEffect(() => { if (noScreen) setWatching(false); }, [noScreen]);
+  const open = watching && !noScreen;
+  const shown = phone.online ? phone.state : 'offline';
+  const words = missing ? t.phones.notConnected.state : t.phones.states[shown];
+  const role = STATE_ROLES[missing ? 'not_connected' : shown];
+  const state = role ? <span className={`status ${role}`}>{words}</span> : words;
+  /* Settings belong to a phone that is there: a missing phone or an offline computer says so above, and nothing else. */
+  const readiness = noScreen ? undefined : phone.readiness;
+  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={state} line={t.phones.owner(phone.owner.name)} />}>
+    <Part title={t.phones.computer}>
+      <Facts items={[[t.phones.computer, machine]]} />
+      {missing && <p>{t.phones.notConnected.hint}</p>}
+      <p className="muted">{t.phones.waiting(phone.queued)}</p>
+      {readiness === null && <p className="muted" role="status">{t.phones.readiness.checking}</p>}
+      {readiness?.map(issue => <p key={issue} className="bad">{t.phones.readiness[issue]}</p>)}
+    </Part>
     {mine && <Part title={t.phones.control}>
-      <div className="entry-actions"><button type="button" className="act" aria-expanded={watching} onClick={() => setWatching(v => !v)}>{watching ? t.phones.hide : t.phones.watch}</button>
+      <div className="entry-actions"><button type="button" className="act" aria-expanded={open} disabled={noScreen !== null} aria-describedby={noScreen ? reason : undefined} onClick={() => setWatching(v => !v)}>{open ? t.phones.hide : t.phones.watch}</button>
         {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}
       </div>
+      {noScreen && <p id={reason} className="part-note">{t.phones.noScreen[noScreen]}</p>}
       {phone.stopping && <p role="status">{t.phones.stopping}</p>}
       {failure !== null && <p className="bad" role="alert">{errorText(t, failure)}</p>}
-      {watching && <PhoneScreen phone={phone} />}
+      {open && <PhoneScreen phone={phone} />}
     </Part>}
   </CardFrame>;
 }

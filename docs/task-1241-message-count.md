@@ -1,5 +1,7 @@
 # Task 1241: bounded recovery of the message quota
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1241-message-count.md). These are historical results, not checks of the current release.
+
 Branch: `task-1241`, prepared for the authorized fast-forward into `turn-32`.
 Released base: `82d62a6bebb3ffde6c21ae89274d85ece89b5685`.
 Checked implementation: `d91cd873ba13a60974cd12138e6f46833c73d232`.

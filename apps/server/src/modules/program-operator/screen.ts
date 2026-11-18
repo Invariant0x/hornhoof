@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { HIDDEN, MIN_SECRET_LENGTH, secretForms } from '@hornhoof/protocol/redaction';
 import type { ResvgRenderOptions } from '@resvg/resvg-js';
 import { PAINTER_DEADLINE_MS, ScreenPainter, startPainterWorker } from './painter.js';
 
@@ -43,7 +44,6 @@ const MAX_CELLS_BYTES = 65_536;
 const MAX_PNG_BYTES = 1_048_576;
 const MAX_COLS = 512;
 const MAX_ROWS = 256;
-const MIN_WRAP_SECRET = 8;
 const CELL_WIDTH = 9;
 const CELL_HEIGHT = 18;
 const FONT_SIZE = 14;
@@ -52,7 +52,7 @@ const PADDING = 12;
 const TAB_WIDTH = 8;
 const DEFAULT_BG = '#0f1419';
 const DEFAULT_FG = '#e6edf3';
-const HIDDEN = '[hidden]';
+const HIDDEN_GLYPHS = [...HIDDEN];
 const FONT_FAMILY = 'DejaVu Sans Mono';
 const FONT_FILES = [
   fileURLToPath(new URL('./fonts/DejaVuSansMono.ttf', import.meta.url)),
@@ -219,25 +219,8 @@ function parseTokens(cleaned: string): Token[] {
   return tokens;
 }
 
-function secretForms(secrets: string[]): string[][] {
-  const values = new Set<string>();
-  for (const raw of secrets) {
-    const secret = raw.normalize('NFC');
-    if (!secret) continue;
-    values.add(secret);
-    if (secret.length >= MIN_WRAP_SECRET) {
-      const b64 = Buffer.from(secret, 'utf8').toString('base64');
-      values.add(b64);
-      values.add(b64.replace(/=+$/, ''));
-      values.add(Buffer.from(secret, 'utf8').toString('base64url'));
-    }
-  }
-  return [...values].sort((a, b) => b.length - a.length).map(v => [...v]);
-}
-
-function matchSpan(tokens: Token[], start: number, needle: string[]): number {
+function matchSpan(tokens: Token[], start: number, needle: string[], allowWrap: boolean): number {
   if (tokens[start] === '\n') return 0;
-  const allowWrap = needle.length >= MIN_WRAP_SECRET;
   let pos = start;
   let matched = 0;
   while (pos < tokens.length && matched < needle.length) {
@@ -259,8 +242,14 @@ function maskTokens(tokens: Token[], forms: string[][]): Token[] {
   let current = tokens;
   for (const needle of forms) {
     const next: Token[] = [];
+    const keepMask = HIDDEN.includes(needle.join(''));
     for (let i = 0; i < current.length; ) {
-      const span = matchSpan(current, i, needle);
+      if (keepMask && matchSpan(current, i, HIDDEN_GLYPHS, false)) {
+        next.push(...current.slice(i, i + HIDDEN_GLYPHS.length));
+        i += HIDDEN_GLYPHS.length;
+        continue;
+      }
+      const span = matchSpan(current, i, needle, needle.length >= MIN_SECRET_LENGTH);
       if (span > 0) {
         for (const ch of HIDDEN) next.push({ ch, style: { ...PLAIN_STYLE } });
         i += span;
@@ -355,7 +344,7 @@ function validateInput(input: OperatorScreenInput): void {
 
 export function renderOperatorScreenSvg(input: OperatorScreenInput): OperatorScreenSvgResult {
   validateInput(input);
-  const forms = secretForms(input.secrets);
+  const forms = secretForms(input.secrets.map(value => value.normalize('NFC')), 'literal').map(value => [...value]);
   const lines = splitLines(maskTokens(parseTokens(stripControls(input.cells)), forms));
   const text = plainTextOf(lines);
   const grid = wrapGrid(lines, input.cols, input.rows);

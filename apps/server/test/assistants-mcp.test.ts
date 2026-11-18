@@ -16,7 +16,7 @@ async function company() {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().state.ready);
   app.ctx.assistants.replyGraceMs = 0;
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
@@ -112,7 +112,10 @@ describe("the assistant's MCP server", () => {
     const [ann] = await c.db.select().from(people).where(eq(people.email, 'ann@acme.com'));
     const max = await assistantOf(c, ann!.id, 'Max');
     const client = await mcp(c, max.key);
-    const refused = await call(client, 'send_message', { agentId: c.orchestrator.id, text: 'Plan the launch.' });
+    const [support] = await c.db.insert(departments).values({ companyId: c.acme.id, templateKey: 'support', roleCode: 'SUP' }).returning();
+    const [head] = await c.db.insert(agents).values({ companyId: c.acme.id, kind: 'head', name: 'Tanya', model: '', departmentId: support!.id }).returning();
+    expect((await call(client, 'send_message', { agentId: c.orchestrator.id, text: 'Plan the launch.' })).isError).toBe(false);
+    const refused = await call(client, 'send_message', { agentId: head!.id, text: 'Plan the launch.' });
     expect(refused).toEqual({ json: { error: { code: 'forbidden', message: expect.any(String), reason: 'assistant_agent_refused' } }, isError: true });
     const blank = await misfit(client, 'send_message', { agentId: c.head.id, text: '   ' });
     expect(blank).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('text') }] });

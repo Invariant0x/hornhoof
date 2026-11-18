@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
+import { type SkillFile } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -26,7 +26,7 @@ async function live() {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await state(app, ceo)).ready);
   return { app, db, url, ceo, builtin };
 }
@@ -161,11 +161,36 @@ describe('the orchestrator\'s conversation', () => {
     expect(message.data.text).toBe('Read the task and its log before continuing.');
   });
 
+  it('lets an invited person pick the assistant offer and read their answer without opening shared history', async () => {
+    const { app, ceo, builtin } = await live();
+    const joined = await invitePerson(app, ceo, { name: 'Sam', email: 'sam@example.test', access: { whole: true } });
+    const path = '/api/orchestrator/first-contact';
+    expect((await app.inject({ url: path, ...as(joined) })).json()).toEqual({ offers: ['chooseDepartments', 'setUpPipeline', 'telegram', 'assistant'] });
+    const chosen = await app.inject({ method: 'POST', url: path, ...as(joined), payload: { offer: 'assistant', language: 'en' } });
+    expect(chosen.statusCode).toBe(202);
+    const run = await nextRun(builtin);
+    expect(run.jobId).toBe(chosen.json().jobId);
+    expect(run.prompt).toContain('Set up my personal assistant');
+    expect(run.prompt).toContain('Sam');
+    builtin.send({ type: 'job.started', jobId: run.jobId });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'What should I call your assistant?' } });
+    await finish(builtin, run);
+    const answerUrl = `${path}/${run.jobId}`;
+    await until(async () => (await app.inject({ url: answerUrl, ...as(joined) })).json().status === 'done');
+    expect((await app.inject({ url: answerUrl, ...as(joined) })).json().replies).toEqual(['What should I call your assistant?']);
+    expect((await app.inject({ url: path, ...as(joined) })).json().last).toMatchObject({ id: run.jobId, offer: 'assistant', answer: { status: 'done', replies: ['What should I call your assistant?'] } });
+    expect((await app.inject({ url: path, ...as(ceo) })).json().last).toBeUndefined();
+    expect((await app.inject({ url: answerUrl, ...as(ceo) })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/agents/orchestrator/events', ...as(joined) })).statusCode).toBe(403);
+  });
+
   it('starts with a greeting turn that carries his instructions and a tool token, once', async () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: `From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN}`, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run).toMatchObject({ effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run.prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN}`)).toBe(true);
+    expect(run.prompt).toContain('Set up departments for the work I do');
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -185,7 +210,9 @@ describe('the orchestrator\'s conversation', () => {
     await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
     await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
-    expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
+    const prompt = (await nextRun(builtin)).prompt;
+    expect(prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`)).toBe(true);
+    expect(prompt).toContain('Choose what to ship next');
     expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
 
@@ -194,11 +221,12 @@ describe('the orchestrator\'s conversation', () => {
     const url = await listen(app);
     const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'project' } }));
     const builtin = await connectNode(url, NODE_KEY);
-    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     await until(async () => (await state(app, ceo)).ready);
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const prompt = (await nextRun(builtin)).prompt;
-    expect(prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_STAFFED}`);
+    expect(prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_STAFFED}`)).toBe(true);
+    expect(prompt).toContain('Fix a problem in my project');
     expect(prompt).not.toContain('offer to staff');
   });
 
@@ -251,7 +279,7 @@ describe('the orchestrator\'s conversation', () => {
     });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const [job] = await db.select().from(jobs);
-    expect(job).toMatchObject({ status: 'queued', startedAt: null, toolTokenHash: null, prompt: FIRST_TURN });
+    expect(job).toMatchObject({ status: 'queued', startedAt: null, toolTokenHash: null, prompt: expect.stringContaining(FIRST_TURN) });
     builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     expect((await nextRun(builtin)).jobId).toBe(job!.id);
   });
@@ -393,8 +421,7 @@ describe('the orchestrator\'s conversation', () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
-  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version and, as every node
-     since skill files does, that it writes them. */
+  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version. */
   async function onMac(version: string, provider = 'claude', hello: object = {}) {
     const { app, url, ceo } = await live();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
@@ -402,20 +429,20 @@ describe('the orchestrator\'s conversation', () => {
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
-    mac.send({ type: 'hello', version, loggedIn: true, running: [], skillFiles: true, ...hello });
+    mac.send({ type: 'hello', version, loggedIn: true, running: [], ...hello });
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
     return { app, url, ceo, mac, node };
   }
 
-  it('keeps turns from a machine whose Hornhoof is too old to run them, and says so', async () => {
-    const { app, url, ceo, mac, node } = await onMac('0.2.0');
+  it('keeps turns from a machine whose Hornhoof is older than 0.5.0, and says so', async () => {
+    const { app, url, ceo, mac, node } = await onMac('0.4.0');
     await until(async () => (await state(app, ceo)).reason === 'node_outdated');
     expect((await say(app, ceo, 'Hello')).statusCode).toBe(409);
     expect(await quiet(mac)).toBe(0);
     mac.close();
     await mac.closed;
     const updated = await connectNode(url, node.key);
-    updated.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
     expect((await nextRun(updated)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Hello`);
@@ -444,7 +471,7 @@ describe('the orchestrator\'s conversation', () => {
 
   it("fits his xhigh to a Kimi plan, and keeps a person's pick in the same session", async () => {
     const models = [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }];
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi', { models });
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -459,15 +486,15 @@ describe('the orchestrator\'s conversation', () => {
 
   it('runs him on a Codex plan at xhigh even when it takes more', async () => {
     const models = [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'ultra'], defaultEffort: 'medium' }];
-    const { app, ceo, mac } = await onMac('0.3.0', 'codex', { models });
+    const { app, ceo, mac } = await onMac('0.5.0', 'codex', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     expect((await nextRun(mac)).effort).toBe('xhigh');
   });
 
-  it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
+  it('tells every machine only the list of skills and sends their bodies as files, whatever its hello says of them', async () => {
     stillClock();
-    const { app, url, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    const { app, ceo, mac, node } = await onMac('0.5.0');
     sampleSkillBodies(app);
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
@@ -476,20 +503,16 @@ describe('the orchestrator\'s conversation', () => {
     const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-worktrees', 'dev-tdd'] }).returning();
     const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
     expect(posted.statusCode).toBe(202);
-    const old = await nextRunOrFailed(app, mac, posted.json().jobId);
-    for (const id of ['hh-hornhoof', 'dev-worktrees', 'dev-tdd']) expect(old.instructions).toContain(app.ctx.templates.skills.get(id)!.body);
-    expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
-    expect(old.skills).toBeUndefined();
-    await finish(mac, old);
+    const worker = await nextRunOrFailed(app, mac, posted.json().jobId);
+    for (const id of ['dev-worktrees', 'dev-tdd']) {
+      expect(worker.instructions).not.toContain(`Follow ${id}.`);
+      expect(worker.skills?.find(s => s.name === id)?.body).toContain(app.ctx.templates.skills.get(id)!.body);
+    }
+    await finish(mac, worker);
     await marked(mac);
-    mac.close();
-    await mac.closed;
-    const updated = await connectNode(url, node.key);
-    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true });
-    await until(async () => (await state(app, ceo)).ready);
     const message = await say(app, ceo, 'Hello');
     expect(message.statusCode).toBe(202);
-    const run = await nextRunOrFailed(app, updated, message.json().jobId);
+    const run = await nextRunOrFailed(app, mac, message.json().jobId);
     const plan = app.ctx.templates.skills.get('orch-plan-turn')!;
     expect(run.instructions).not.toContain(plan.body);
     expect(run.instructions).toContain(app.ctx.templates.skills.get('hh-hornhoof')!.body);
@@ -497,41 +520,8 @@ describe('the orchestrator\'s conversation', () => {
     expect(run.skills?.find(s => s.name === 'orch-plan-turn')?.body).toBe(`# ${plan.title.en}\n\n${plan.body}`);
   });
 
-  it("ends the orchestrator's turn at once on a machine that writes no skill files, as his skills come whole there and take more than it does", async () => {
-    const { app, ceo, mac } = await onMac('0.5.0', 'claude', { skillFiles: false });
-    const { db } = app.ctx;
-    await until(async () => (await state(app, ceo)).ready);
-    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    await say(app, ceo, 'Hello');
-    const failed = async () => (await db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id))).find(j => j.status === 'failed');
-    await until(async () => Boolean(await failed()));
-    const job = await failed();
-    expect(job!.error).toBe('node_too_old');
-    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
-    expect(await quiet(mac)).toBe(0);
-  });
-
-  it("ends a turn too long for a machine from before skill files at once, saying its node needs an update", async () => {
-    stillClock();
-    const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
-    const { db } = app.ctx;
-    await until(async () => (await state(app, ceo)).ready);
-    const [acme] = await db.select().from(companies);
-    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-    const base = 'x'.repeat(OLD_NODE_INSTRUCTIONS);
-    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', overrides: { base } }).returning();
-    const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
-    expect(posted.statusCode).toBe(202);
-    await expect(nextRunOrFailed(app, mac, posted.json().jobId)).rejects.toThrow(/^node_too_old: This machine's node is too old for these instructions; update it\./);
-    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id));
-    expect(job).toMatchObject({ status: 'failed', error: 'node_too_old' });
-    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
-    expect(job!.result).toContain(`more than the ${OLD_NODE_INSTRUCTIONS} it takes`);
-    expect(await quiet(mac)).toBe(0);
-  });
-
   it('keeps the next message waiting when the machine says its login ran out', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -543,7 +533,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it("holds turns while the plan is at its limit, says until when, and sends them once the limit starts over", async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     const resetsAt = new Date(Date.now() + 60_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
@@ -563,7 +553,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it.each(['claude', 'codex', 'kimi', 'antigravity'])('does not hold %s turns on a stale rejection, even with a future reset', async provider => {
-    const { app, ceo, mac, node } = await onMac('0.3.0', provider);
+    const { app, ceo, mac, node } = await onMac('0.5.0', provider);
     await until(async () => (await state(app, ceo)).ready);
     const resetsAt = new Date(Date.now() + 3600_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
@@ -576,7 +566,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('waits quietly for a limit that starts over in more than 24 days, too long for one timer', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     /* Node fires a timer longer than it holds at once after a millisecond: Hornhoof asks for the longest it holds, no more. */
     const timers = vi.spyOn(globalThis, 'setTimeout');
@@ -591,7 +581,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('holds turns when the program said the plan ran out of its usage limit, though the plan itself said nothing', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -612,7 +602,7 @@ describe('the orchestrator\'s conversation', () => {
     ['its error event', '{"type":"error","code":"provider.api_error","message":"You exceeded your current token quota","name":"APIProviderQuotaExhaustedError","details":{"statusCode":429,"requestId":null,"traceId":null},"retryable":false}\n'],
     ['its terminal', 'Error: [provider.api_error] 429 You exceeded your current token quota, please check your account balance\n❯ '],
   ])("holds turns when Kimi says in %s that the plan's quota ran out, and tries again in a quarter of an hour", async (_, tail) => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -626,7 +616,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'codex');
+    const { app, ceo, mac } = await onMac('0.5.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
     const [company] = await app.ctx.db.select(idOnly(companies)).from(companies);
     const heard: string[] = [];
@@ -642,7 +632,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('keeps a hold from a refused turn through readings that moved nothing since, and ends it with one that moved', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     const plan = async () => (await app.ctx.db.select({ limits: subscriptions.limits, at: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!;
     const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }], complete: true };
@@ -670,7 +660,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('takes a reading over a hold that is over, though it moved nothing', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     const plan = () => app.ctx.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() - 1000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.provider, 'kimi'));
     const stored = async () => (await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!.limits;
@@ -684,7 +674,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('does not hold turns for an agent that only spoke about usage limits in its work', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -771,18 +761,14 @@ describe("an employee's conversation", () => {
     return { ...company, id };
   }
 
-  it('ends a turn whose instructions are longer than a machine takes at once, saying so, and sends nothing', async () => {
+  it('dispatches a long assignment whole', async () => {
     const { app, db, ceo, builtin, bruno } = await withEmployee();
-    /* Saved before its header grew: Hornhoof refuses such an edit now. */
-    await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS) } }).where(eq(agents.id, bruno.id));
-    expect((await sayTo(app, ceo, bruno.id, 'What do you own?')).statusCode).toBe(202);
-    const log = async () => (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(ceo) })).json().events as { kind: string; data: object }[];
-    await until(async () => (await log()).some(e => e.kind === 'failed'));
-    expect((await log()).at(-1)).toMatchObject({ kind: 'failed', data: { error: 'instructions_too_long' } });
-    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
-    expect(job).toMatchObject({ status: 'failed', error: 'instructions_too_long' });
-    expect(job!.result).toMatch(/^Bruno's instructions are \d+ characters, more than the 200000 a turn carries/);
-    expect(await quiet(builtin)).toBe(0);
+    const base = 'Own checkout.\n'.repeat(17_000);
+    await db.update(agents).set({ overrides: { base } }).where(eq(agents.id, bruno.id));
+    const posted = await sayTo(app, ceo, bruno.id, 'What do you own?');
+    expect(posted.statusCode).toBe(202);
+    const run = await nextRunOrFailed(app, builtin, posted.json().jobId);
+    expect(run.instructions).toContain(base);
   });
 
   it('talks to an employee with its rendered instructions', async () => {

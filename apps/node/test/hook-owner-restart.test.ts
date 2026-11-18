@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { TerminalHost } from '../src/terminal/host.js';
 import { fromAgent, socketOf } from '../src/terminal/peer.js';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { job, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
 import { procFixture } from './terminal-proc-fixture.js';

@@ -334,7 +334,7 @@ describe('keys of the owner while their view of the session opens', () => {
   it('reach the program in order once the view is open', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await c.until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewSessions']['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'first question' });
     c.host.input({ type: 'term.input', termId: 'view', data: '\r', pressedIn: 'job-receipt' });
     expect(stdin).toEqual([]);
@@ -352,12 +352,12 @@ describe('keys of the owner while their view of the session opens', () => {
     const { c, stdin, opened } = await slowView();
     let fitted!: () => void;
     const fitting = new Promise<void>(done => (fitted = done));
-    const fit = vi.spyOn(c.host as unknown as { fit(key: string): Promise<void> }, 'fit').mockImplementation(() => (c.host['views'].has('view') ? fitting : Promise.resolve()));
+    const fit = vi.spyOn(c.host['viewSessions'] as unknown as { fit(key: string): Promise<void> }, 'fit').mockImplementation(() => (c.host['viewSessions']['views'].has('view') ? fitting : Promise.resolve()));
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await c.until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewSessions']['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'first ' });
     opened();
-    await c.until(() => c.host['views'].has('view'));
+    await c.until(() => c.host['viewSessions']['views'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'second' });
     expect(stdin).toEqual([]);
     fitted();
@@ -370,7 +370,7 @@ describe('keys of the owner while their view of the session opens', () => {
   it('go nowhere from someone who only watches', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: false });
-    await c.until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewSessions']['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'not for the program\r', pressedIn: 'job-receipt' });
     opened();
     await c.on(open);
@@ -381,19 +381,19 @@ describe('keys of the owner while their view of the session opens', () => {
   it('go nowhere once the view closed while it opened, and a view that failed to open keeps none', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await c.until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewSessions']['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'gone\r' });
     c.host.close({ type: 'term.close', termId: 'view' });
     opened();
     await c.on(open);
     expect(stdin).toEqual([]);
-    expect(c.host['earlyKeys'].size).toBe(0);
+    expect(c.host['viewSessions']['earlyKeys'].size).toBe(0);
   });
 
   it('are bounded while the view opens', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await c.until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewSessions']['viewsOpening'].has('view'));
     for (let i = 0; i < 600; i++) c.host.input({ type: 'term.input', termId: 'view', data: 'k' });
     opened();
     await c.on(open);

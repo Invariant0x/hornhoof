@@ -152,9 +152,10 @@ function ofItsReleaseRuns(db: Db, scope: RepositoryScope, release: string): SQL 
 type GreenSource = Pick<typeof testFileResults.$inferSelect, 'suiteId' | 'file' | 'fingerprint' | 'note' | 'runId' | 'commitSha'>;
 async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], { mode, release, since }: NonNullable<RunMode>): Promise<Map<string, GreenSource>> {
   if (!prints.length) return new Map();
+  const fingerprints = [...new Set(prints.map(print => print.fingerprint))];
   const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha })
     .from(testFileResults).innerJoin(testRuns, eq(testRuns.id, testFileResults.runId))
-    .where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), since ? gte(testFileResults.createdAt, since) : undefined,
+    .where(and(ofRepository(testFileResults, scope), sql`${testFileResults.fingerprint} = any(${sql.param(fingerprints)}::text[])`, since ? gte(testFileResults.createdAt, since) : undefined,
       mode === 'cached' ? ofItsReleaseRuns(db, scope, release) : undefined));
   return new Map(rows.map(row => [printKey(row, row.fingerprint), row]));
 }

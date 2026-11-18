@@ -5,7 +5,7 @@ import { agentEvents } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { appendEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
-import { onAgent } from './queue.js';
+import { onAgent } from './line.js';
 import { wordsFrom } from './unheard.js';
 
 type Left = Extract<NodeMessage, { type: 'agent.input_left' }>;

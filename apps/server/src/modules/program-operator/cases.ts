@@ -7,7 +7,9 @@ import { agentEvents, agents, attachments, departments, jobs, programDeliveries,
 import { idOnly, only } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
-import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.js';
+import { insertTurn, pump } from '../conversation/queue.js';
+import { limitUntil } from '../conversation/limits.js';
+import { takesTurns } from '../conversation/placement.js';
 import { appendEvent } from '../events/store.js';
 import { nodeHeld } from '../updates/drain.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';

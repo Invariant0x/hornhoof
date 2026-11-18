@@ -284,7 +284,7 @@ describe("following the server's build", () => {
     await c.db.update(machines).set({ role: 'worker', signKey: newKey(), networkId: hashToken('mac'), commit: OLD }).where(eq(machines.id, w));
     await c.db.update(agents).set({ subscriptionId }).where(eq(agents.kind, 'orchestrator'));
     const node = await connectNode(url, key);
-    node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
     await until(async () => (await c.db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status === 'ready');
 
     await c.ready(w);
@@ -390,7 +390,7 @@ async function busyWorker(env: NodeJS.ProcessEnv = {}) {
   await c.db.update(machines).set({ role: 'worker', signKey: newKey(), networkId: hashToken('mac'), commit: OLD }).where(eq(machines.id, w));
   const node = await connectNode(url, key);
   onTestFinished(() => node.close());
-  node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
   await until(async () => (await c.db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status === 'ready');
   const [dept] = await c.db.insert(departments).values({ companyId: c.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker') =>
@@ -441,7 +441,7 @@ describe('a busy worker that waits for its turn to install', () => {
     const machine = hashToken('mac');
     const node = await connectNode(url, `builtin.${machine}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${machine}`).digest('hex')}`);
     onTestFinished(() => node.close());
-    node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
     await until(() => c.ctx.hub.isReady(builtinOf(machine)));
     expect(await pickBuiltin(c.ctx, c.db, machine)).toBe(machine);
     await c.ready(w);

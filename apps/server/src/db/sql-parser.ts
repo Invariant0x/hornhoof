@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module';
 import { Worker } from 'node:worker_threads';
 
 /* The parser's tree as JSON text, what it says is wrong with the text, or why it could not say. The tree crosses as text
@@ -25,10 +24,11 @@ const WORKER_STACK_MB = 2;
 
 /* Only SqlError is the parser's verdict on a text. Anything else means the parser itself gave out, and past a stack overflow
    in its compiled code its memory cannot be trusted any more. A name is all that crosses, as a message could quote the text.
-   A string and not a file, as a file has another name under vitest, under tsx and in dist, and this runs the same in all three. */
+   A string and not a file, as a file has another name under vitest, under tsx and in dist, and this runs the same in all three.
+   The package goes by its name, from where this file is, so what the worker loads can be read here. */
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
-const { parse, SqlError } = require(workerData.libpgQuery);
+const { parse, SqlError } = require('node:module').createRequire(workerData.from)('libpg-query');
 const answerTo = async text => {
   try {
     return { tree: JSON.stringify(await parse(text)) };
@@ -42,7 +42,7 @@ parentPort.on('message', async text => parentPort.postMessage(await answerTo(tex
 export function startParserWorker(): Worker {
   return new Worker(WORKER_SOURCE, {
     eval: true,
-    workerData: { libpgQuery: createRequire(import.meta.url).resolve('libpg-query') },
+    workerData: { from: import.meta.url },
     /* The parser needs neither the company's secrets nor the flags or the loaders of the process around it. */
     env: {},
     execArgv: [],

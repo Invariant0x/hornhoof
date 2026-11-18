@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import type { AgentCardView, Employee, Org, Part } from '../src/types';
-import { ME, serveApi } from './api';
+import { ME, serveApi, streamEndedByPage } from './api';
 
 const EMPLOYEE_NAME = 'Avery';
 const EMPLOYEE_ID = 'assignment-worker';
@@ -57,7 +57,7 @@ function cardOf(state: FixtureState): AgentCardView {
     product: null, team: null, teams: [], model: '', effort: null, subscription: null, machine: null,
     state: 'sleeping', program: null, alarm: null, retry: null, failure: null,
     skills: [{ id: 'dev-tdd', title: SKILL_TITLE, description: SKILL_TITLE, on: true, locked: false, overridden: state.skill !== DEFAULT_SKILL, templateChanged: false }],
-    parts, raw, instructions: { length: raw.length, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: state.canEdit, canRemove: state.canEdit, timer: null,
+    parts, raw, runsOn: [], changes: [], interrupted: [], canEdit: state.canEdit, canRemove: state.canEdit, timer: null,
   };
 }
 
@@ -126,10 +126,7 @@ async function mountFixture(page: Page, state: FixtureState, errors: string[]): 
     if (response.status() >= 400) errors.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
   page.on('requestfailed', request => {
-    const failure = request.failure()?.errorText ?? 'Unknown failure';
-    /* The fixture's deliberately open stream is cancelled when the locale navigation replaces its page. */
-    if (new URL(request.url()).pathname === '/api/stream' && /aborted|cancelled/i.test(failure)) return;
-    errors.push(`${request.method()} ${request.url()}: ${failure}`);
+    if (!streamEndedByPage(request)) errors.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'Unknown failure'}`);
   });
 }
 
@@ -354,3 +351,31 @@ for (const width of [375, 1280]) {
     }
   }
 }
+
+/* The checks above count every failed request as an error of the card, except the page ending its own stream. Here the
+   page ends a stream the fixture holds, at a moment the test chooses, and a stream the server refuses must still count. */
+test('the page ending its stream is no error of the card, a refused stream is', async ({ page }) => {
+  const state = freshState();
+  const errors: string[] = [];
+  const isStream = (url: string) => new URL(url).pathname === '/api/stream';
+  const held = () => state.apiRequests.filter(request => request.path === '/api/stream').length;
+  await openFixture(page, 1280, 'light', state, errors);
+  await openCard(page, 'en', await messagesFor('en'));
+
+  const before = held();
+  const opening = page.waitForRequest(request => isStream(request.url()));
+  await page.evaluate(() => { Object.assign(window, { ownStream: new EventSource('/api/stream') }); });
+  const own = await opening;
+  await expect.poll(held).toBe(before + 1);
+  const ended = page.waitForEvent('requestfailed', request => request === own);
+  await page.evaluate(() => (window as unknown as { ownStream: EventSource }).ownStream.close());
+  await ended;
+  expect(errors).toEqual([]);
+
+  await page.route('**/api/stream', route => route.abort('connectionrefused'));
+  const refusing = page.waitForEvent('requestfailed', request => isStream(request.url()));
+  await page.evaluate(() => { Object.assign(window, { refusedStream: new EventSource('/api/stream') }); });
+  const refused = await refusing;
+  await page.evaluate(() => (window as unknown as { refusedStream: EventSource }).refusedStream.close());
+  expect(errors).toContain(`GET ${refused.url()}: ${refused.failure()?.errorText ?? 'Unknown failure'}`);
+});

@@ -8,11 +8,12 @@ import { isOperatorReply, type NodeIdentity, type NodeTransport } from './hub.js
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
-import { nodeDrainHello } from '../updates/node-drain.js';
+import { nodeDrainHello } from '../updates/drain-state.js';
 import { acceptOperatorEvidence } from '../program-operator/evidence.js';
 import { receiveOperatorReply } from '../program-operator/rpc.js';
 import { restoreOperatorNode } from '../program-operator/health.js';
 import { phoneNodeMessage } from '../phones/rpc.js';
+import { checkConnectedPhones } from '../phones/readiness.js';
 import { nodeLogArrived } from '../tools/logs.js';
 import { recordPhoneFrame } from '../phones/recording.js';
 
@@ -45,7 +46,10 @@ async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<Program
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
   await handleNodeMessage(ctx, id, msg);
-  if (msg.type === 'hello') await restoreOperatorNode(ctx, id);
+  if (msg.type === 'hello') {
+    void checkConnectedPhones(ctx, id);
+    await restoreOperatorNode(ctx, id);
+  }
 }
 
 export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage, transport?: NodeTransport): Promise<void> {

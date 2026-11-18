@@ -275,7 +275,6 @@ describe('a task that comes after others', () => {
     await queueTask(launch.id, head.id, 'Launch moved.', new Date(Date.now() + 1000));
     vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
     vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
-    vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
     const sent: string[] = [];
     vi.spyOn(ctx.hub, 'send').mockImplementation((_, m) => Boolean(m.type === 'job.run' && sent.push(m.prompt)));
     await pump(ctx, head.id);

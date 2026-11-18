@@ -149,7 +149,7 @@ describe('the node hub', () => {
     const node = { kind: 'node' as const, nodeId: 'n1' };
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.buildOf(node)).toBeNull();
-    hub.greet(node, true, true, false, null, 'c0ffee'.padEnd(40, '0'));
+    hub.greet(node, true, false, null, 'c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf(node)).toBe('c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf({ kind: 'node', nodeId: 'n2' })).toBeNull();
     void hub.stop();
@@ -223,7 +223,6 @@ describe('live program metadata in the hub', () => {
     expect(hub.programsOf(BUILTIN)).toBeNull();
     expect(hub.updatePrograms(BUILTIN)).toBe(false);
     hub.attach(BUILTIN, socket as unknown as WebSocket);
-    expect(hub.takesSkillFiles(BUILTIN)).toBe(false);
     expect(hub.updatePrograms(BUILTIN)).toBe(false);
     expect(() => socket.emit('message', '{broken')).not.toThrow();
     expect(() => socket.emit('message', JSON.stringify({ type: 'unknown' }))).not.toThrow();
@@ -233,7 +232,6 @@ describe('live program metadata in the hub', () => {
     expect(hub.updatePrograms(BUILTIN)).toBe(false);
     hub.greet(BUILTIN);
     expect(hub.hasTerminals(BUILTIN)).toBe(false);
-    expect(hub.takesSkillFiles(BUILTIN)).toBe(false);
     expect(hub.runsWork(BUILTIN)).toBe(false);
     const snapshot = hub.programsOf(BUILTIN)!;
     snapshot[0]!.version = 'changed outside';
@@ -292,7 +290,7 @@ describe('live program metadata in the hub', () => {
     expect(hub.noRunsOf(node)).toBeNull();
     expect(hub.loadOf(node)).toBeNull();
 
-    hub.greet(node, true, true, true, null, 'build-1', 'libnss3.so: cannot open shared object file');
+    hub.greet(node, true, true, null, 'build-1', 'libnss3.so: cannot open shared object file');
     expect(hub.browserErrorOf(node)).toBe('libnss3.so: cannot open shared object file');
     expect(hub.noRunsOf(node)).toBe('browser_failed: libnss3.so: cannot open shared object file');
     expect(hub.browserHoldOf(node)).toBeNull();

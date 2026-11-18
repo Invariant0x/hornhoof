@@ -5,7 +5,14 @@ import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
+import { insertTurn, keepLetter, openTypedTurn, pump, turnRefused } from '../conversation/queue.js';
+import { type TurnMessage } from '../conversation/turn-types.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
+import { limitUntil, refusedLimits } from '../conversation/limits.js';
+import { conversationOf, liveSubscription } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
+import { GONE_ALONG } from '../conversation/constants.js';
 import { inboxChanged, mailBack } from '../conversation/inbox.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
@@ -13,14 +20,17 @@ import { appendEvent, publishWorking } from '../events/store.js';
 import { waitedForReturn } from '../nodes/connections.js';
 import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
-import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, uncountedSinceMove, wentOn, wentOnAfterReturn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, handOver, leaveWork, resumeWaitingRoutes, silentTurn, wentOn, wentOnAfterReturn } from './engine.js';
+import { lastMove, NOT_A_MOVE, uncountedSinceMove } from './events.js';
+import { CLOSED, openAfter, taskSpot, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './state.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart, afterRestartOutsideTask } from './restarts.js';
-import { clearTurnProgram, failedProgramData, when } from './silent.js';
+import { clearTurnProgram } from './program-state.js';
+import { failedProgramData, when } from './silent.js';
 import { afterFailure } from './failures.js';
-import { routeOf, routeSnapshot } from './echelons-store.js';
+import { routeOf, routeSnapshot } from './route-records.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
@@ -203,7 +213,7 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
         await wakeQueued(ctx.db, w);
         continue;
       }
-      const key = `${w.agentId}:${w.taskId}:${w.why}:${w.cause?.eventId ?? ""}`;
+      const key = `${w.agentId}:${w.taskId}:${w.why}:${w.cause?.callBatch ?? w.cause?.eventId ?? ""}`;
       const queued = !seen.has(key) && (await queueWake(ctx, w));
       seen.add(key);
       await wakeQueued(ctx.db, w);
@@ -671,7 +681,8 @@ async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: He
 
 async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boolean> {
   const { agentId } = job;
-  const unsent = UNSENT.includes(job.error ?? '');
+  /* Jobs from older builds can still carry these dispatch errors. */
+  const unsent = job.error === 'instructions_too_long' || job.error === 'node_too_old';
   const how = unsent ? null : await keptBreaking(ctx, agentId, task, job);
   if (!unsent && !how) return false;
   const text = unsent ? job.result ?? job.error! : await brokenTurnText(ctx, job, task, how === 'at_once');

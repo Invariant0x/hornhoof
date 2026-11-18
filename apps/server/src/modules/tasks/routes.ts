@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
@@ -14,22 +15,26 @@ import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Pers
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, closeTask, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { resolveStuck } from './stuck.js';
+import { answer, cancel, closeTask, createTask } from './engine.js';
+import { comment } from './comments.js';
+import { CLOSED, refuse, requestSubject, taskSpot, type Task } from './state.js';
 import { editTask } from '../tracker/edit.js';
 import { mayPlan, placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
 import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
-import { commitUrl, picturesOf } from './attachments.js';
+import { commitUrl, picturesOf } from './file-views.js';
 import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
-import { actsOnTask, detailFor, factsFor, linesFor, seesTask } from './sight.js';
+import { actsOnTask, seesTask } from './visibility.js';
+import { detailFor, factsFor, linesFor } from './sight.js';
 import { acknowledgeCard, waitCards } from './wait-cards.js';
 import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
@@ -38,9 +43,11 @@ import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 
+const Priority = z.enum(TASK_PRIORITIES).nullable().optional();
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
   urgent: z.boolean().optional(),
+  priority: Priority,
   title: z.string().trim().min(1).max(120),
   brief: z.string().max(600).default(''),
   body: z.string().max(20000).default(''),
@@ -58,11 +65,12 @@ const NewTaskBody = z.object({
   responsible: z.uuid().optional(),
   why: z.string().trim().max(300).optional(),
   due: z.iso.datetime({ offset: true }).optional(),
-  pipeline: z.uuid().optional(),
+  pipeline: z.uuid().nullable().optional(),
   stage: z.uuid().optional(),
 });
 /* What a person changes of a task beside its work, on the task as they saw it. */
 const TaskPatch = z.strictObject({
+  priority: Priority,
   version: z.number().int().min(0),
   revision: z.number().int().min(0),
   title: z.string().trim().min(1).max(120).optional(),
@@ -95,6 +103,9 @@ export const AnswerBody = z.union([
   z.object({ pick: z.number().int().min(0).max(9), answer: Text.trim().optional() }).strict(),
 ]);
 
+const requestAnswer = (r: Pick<typeof requests.$inferSelect, 'id' | 'status' | 'picked' | 'answer'>) =>
+  ({ request: { id: r.id, status: r.status, picked: r.picked, answer: r.answer } });
+
 /* A person's answer to an open request, given on their screen, by the orchestrator for them or by their assistant. */
 export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.infer<typeof AnswerBody>) {
   const { db } = ctx;
@@ -102,9 +113,16 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
   if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
-  if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-  /* The orchestrator answers for the person its turn answers, under its input lock, checked again as it is kept; its call
-     of its own is the owner's answer, which says the orchestrator gave it. */
+  if (found.kind === 'stuck' && found.audience === 'internal') {
+    const jobId = me.decision?.jobId;
+    const done = viaOrchestrator(me) && me.via && jobId
+      ? await resolveStuck(ctx, { id: jobId, companyId: me.companyId, agentId: me.via }, id, body)
+      : null;
+    if (!done) throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
+    await wakeAll(ctx, done.wakes);
+    return requestAnswer(done.request);
+  }
+  /* Keep the job and who acted. A head's department principal is checked again when the answer is saved. */
   const on = delegationOf(me);
   requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
   const own = me.via && !on ? me.via : undefined;
@@ -113,7 +131,7 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   await wakeAll(ctx, done.wakes);
   /* An agent switched off while it waited for this answer leaves the work now. */
   await leaveIfOff(ctx, done.request.agentId);
-  return { request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } };
+  return requestAnswer(done.request);
 }
 
 /* The requests among these the orchestrator was asked to put into words, in a turn that waits or runs now. */
@@ -375,7 +393,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await createTask(ctx, actorOf(me), {
       title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
       parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
-      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
@@ -388,7 +406,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = TaskPatch.parse(req.body);
     const task = await changed(me, id);
     const row = await editTask(ctx, actorOf(me), task, {
-      title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      title: body.title, brief: body.brief, why: body.why, priority: body.priority, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     }, { version: body.version, revision: body.revision });
     return { task: await detail(me, row) };
   });

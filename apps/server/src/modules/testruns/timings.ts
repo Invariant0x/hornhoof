@@ -4,8 +4,8 @@ import { basename, posix } from 'node:path';
 import type { Db } from '../../db/client.js';
 import { attachments, testPartTimings, testParts, testRuns } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import type { Tx } from '../tasks/engine.js';
-import { logName } from './runs.js';
+import type { Tx } from '../tasks/state.js';
+import { logName } from './run-records.js';
 
 const RUNNER_START = /\bRUN\s+v\S+\s+(\S.*?)\s*$/;
 const FILE_LINE = /^\s*[✓❯×]\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+\(\d+ tests?[^)]*\)\s+(\d+(?:\.\d+)?)(ms|s)\s*$/;

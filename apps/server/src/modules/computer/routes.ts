@@ -5,7 +5,8 @@ import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { actorOf, personOf, requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
-import { enqueueTurn, NoSubscription } from '../conversation/queue.js';
+import { enqueueTurn } from '../conversation/queue.js';
+import { NoSubscription } from '../conversation/turn-records.js';
 import { computerLine } from './expiry.js';
 import { canViewComputer, logName, onMachine, type AccessMachine, type AccessView } from './access.js';
 import { seenAccess } from './seen.js';
@@ -13,7 +14,7 @@ import { STARTS_FIRST } from '../sources/requests.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const Signed = z.string().min(1).max(4096);
-const OpenBody = z.object({ scope: z.enum(['orchestrator', 'all_agents']).default('orchestrator'), duration: z.enum(['1h', '8h', '24h']).default('1h'), confirm: z.boolean().optional(), grant: z.object({ payload: Signed, signature: Signed }).optional() });
+const OpenBody = z.object({ scope: z.enum(['orchestrator', 'all_agents']).default('orchestrator'), duration: z.enum(['1h', '8h', '24h']).default('1h'), grant: z.object({ payload: Signed, signature: Signed }).optional() });
 
 /* Who opened it, as the orchestrator is told. */
 const opener = (by: Person): string => (by.via ? 'The orchestrator' : by.isOwner ? 'The CEO' : actsAsCeo(by) ? `The CEO delegate ${by.name}` : by.name);
@@ -51,7 +52,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await served(machineId);
     const { machine, until, asked, scope } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}));
     changed(me.companyId);
-    const orchestrator = await computerLine(ctx, me.companyId, { state: 'opened', until, scope, ...(scope === 'all_agents' ? { confirm: true } : {}), ...onMachine(logName(machine)) }, personOf(me));
+    const orchestrator = await computerLine(ctx, me.companyId, { state: 'opened', until, scope, ...onMachine(logName(machine)) }, personOf(me));
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
       const note = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: actorOf(me) });

@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
-import { closeTask, report } from '../src/modules/tasks/engine.js';
+import { agents, approvalPolicies, departments, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { ask, closeTask, report } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -14,6 +15,9 @@ prepareTemplates();
 const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
 const STRAY = '2'.repeat(40);
+
+const requireApproval = (f: Awaited<ReturnType<typeof releasing>>) =>
+  f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
 
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
 type Part = typeof testParts.$inferSelect;
@@ -31,12 +35,42 @@ describe('the release step of a turn', () => {
     });
   });
 
-  it('needs a person to approve that exact commit', async () => {
+  it('records a checked release without approval when the department has no commit rule', async () => {
     const f = await releasing();
+    const wrong = await f.fullRun({ commit: EXTRA });
+    expect(await f.recordRelease({ runId: wrong.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') });
+    const run = await f.fullRun();
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result.isError).toBe(false);
+    expect(recorded(result.text)).toMatchObject({ commit: f.R, approvalRequestId: null, autonomousReleaseId: null });
+  });
+
+  it('does not rely on an autonomous approval when the commit rule needs none', async () => {
+    const f = await releasing();
+    await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
+    const run = await f.fullRun();
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result.isError).toBe(false);
+    expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, autonomousReleaseId: null });
+  });
+
+  it('requires the exact commit when the department asks for approval, and accepts the orchestrator for the owner', async () => {
+    const f = await releasing();
+    await requireApproval(f);
     const run = await f.fullRun();
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     await f.approve('6'.repeat(40));
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true });
+    const { request } = await ask(f.ctx, f.head.id, f.release.id, { kind: 'approval', text: 'Approve the release commit.', commit: f.R });
+    const [orchestrator] = await f.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const approved = await f.app.inject({
+      method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true },
+      headers: orchestratorHeaders(f.claude.ownerPersonId, orchestrator!.id),
+    });
+    expect(approved.statusCode).toBe(200);
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result.isError).toBe(false);
+    expect(recorded(result.text)).toMatchObject({ approvalRequestId: request.id });
   });
 
   /* After the first run of a release, a run of it takes what that release proved and runs what failed or changed. */
@@ -235,6 +269,7 @@ describe('whether everything a release brings was checked', () => {
    and its approval is the entry of the autonomous release log, with the full run and the checkers that passed it. */
 describe('the release step with autonomous release on', () => {
   const autonomous = async (f: Awaited<ReturnType<typeof releasing>>, on = true) => {
+    await requireApproval(f);
     await f.db.update(departments).set({ autonomousRelease: on }).where(eq(departments.id, f.task.departmentId!));
   };
   const journal = async (f: Awaited<ReturnType<typeof releasing>>) =>
@@ -292,7 +327,7 @@ describe('the release step with autonomous release on', () => {
   it("says in its description that a turnkey holder's own checks cover its work under autonomous release", async () => {
     const f = await releasing();
     const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
-    expect(tool.description).toMatch(/with autonomous release on, a release every commit of which was checked, by an independent checker or, for turnkey work, by its holder's own review, security check and tests, needs none/);
+    expect(tool.description).toMatch(/With autonomous release on, proof of each change can satisfy the approval rule.*an independent checker or, for turnkey work, the holder's own review, security check and tests/);
   });
 
   /* A member of a turnkey team does its task whole with its own review, security check and tests, and calls no checker:

@@ -11,7 +11,7 @@ import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { mayChangeRules } from '../departments/approval-policy.js';
 import { agentParty, HORNHOOF, personParty, type MessageParty } from '../events/parties.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask } from '../tasks/visibility.js';
 import { inboxChanged, inboxModeOf, letterTotal, lettersPage, logMarked, markMail, picksLetters, readByPerson, unreadCount, type InboxRow } from './inbox.js';
 import { pump } from './queue.js';
 

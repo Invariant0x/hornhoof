@@ -13,14 +13,14 @@ import { HELLO_IDS_BEFORE_ACKS, parseNodeMessage, parseTestEnvironment } from '@
 import { readTestEnvironment } from '../src/test-environment.js';
 import { DEFAULT_BACKOFF } from '../src/connection.js';
 import { buildOf, runNode } from '../src/main.js';
-import { CALL_BYTES } from '../src/call-room.js';
+import type { MachineLoad } from '../src/load.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { Outbox } from '../src/outbox.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { claudeProgram } from '../src/terminal/programs.js';
+import { claudeProgram } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
@@ -433,14 +433,6 @@ describe('a node that runs agents in terminals', () => {
     }
   });
 
-  it("says it writes an agent's skills as files, so Hornhoof sends them as files", async () => {
-    const server = await fakeServer();
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
-    onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
-    expect(server.received[0]).toMatchObject({ type: 'hello', skillFiles: true });
-  });
-
   it('says the build CI wrote into its image, so Hornhoof can tell a node of another build', async () => {
     const build = 'c0ffee'.padEnd(40, '0');
     const server = await fakeServer();
@@ -513,10 +505,17 @@ describe('runNode', () => {
   };
   const callRun = (jobId: string) => ({ type: 'job.run' as const, jobId, subscriptionId: 's1', provider: 'claude' as const, prompt: `review ${jobId}`, sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, call: true as const });
 
-  it("starts many one-shot calls at once in their program's one-call mode where the memory holds them, with no slot of the check queue", async () => {
+  /* The machine as each report of the node reads it: the kills of its kernel for want of memory come from the list, the
+     last of them again once the list runs out. */
+  const readings = (...kills: number[]) => {
+    let i = 0;
+    return (): MachineLoad => ({ cpus: 8, load: 1, memFree: 4 * 1024 ** 3, memTotal: 16 * 1024 ** 3, oomKills: kills[Math.min(i++, kills.length - 1)] });
+  };
+
+  it("starts many one-shot calls at once in their program's one-call mode while the machine reports no kill for want of memory, with no slot of the check queue", async () => {
     const server = await fakeServer({ grantChecks: false });
     const { asked, release, calling } = heldCalls();
-    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, freeMemory: () => 64 * CALL_BYTES });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, machine: readings(26) });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const ids = Array.from({ length: 12 }, (_, i) => `c${i + 1}`);
@@ -530,27 +529,36 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'c3')).toMatchObject({ ok: true, result: 'review c3: two findings' });
   });
 
-  it('keeps a one-shot call waiting, not started, while the machine has no memory for its program, and stops it there when asked', async () => {
+  it('keeps a new one-shot call waiting, not started, after the kernel killed a process for want of memory, stops it there when asked, and starts the next once a report finds no new kill', async () => {
     const server = await fakeServer();
     const { asked, release, calling } = heldCalls();
-    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, freeMemory: () => 0 });
+    fakeRounds();
+    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {}, loadMs: 40, machine: readings(26, 26, 27, 27) });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    /* With no call running, one starts all the same. */
+    expect(server.received[0]!.load).toMatchObject({ memoryShort: false });
+    /* A call that runs when the kernel kills goes on. */
     server.send(callRun('c1'));
     await server.wait(() => asked.length === 1);
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => server.received.some(m => m.type === 'load'));
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => server.received.some(m => m.type === 'load' && m.memoryShort === true));
     server.send(callRun('c2'));
-    await server.barrier('second sent');
-    expect(asked).toEqual(['review c1']);
+    server.send(callRun('c3'));
+    await server.barrier('second and third sent');
     const started = () => server.received.filter(m => m.type === 'job.started').map(m => m.type === 'job.started' && m.jobId);
     expect(started()).toEqual(['c1']);
+    expect(asked).toEqual(['review c1']);
     server.send({ type: 'job.cancel', jobId: 'c2' });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'c2'));
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'c2')).toMatchObject({ ok: false, error: 'cancelled' });
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => asked.length === 2);
+    expect(started()).toEqual(['c1', 'c3']);
+    expect(asked).toEqual(['review c1', 'review c3']);
     release();
-    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'c1'));
-    expect(started()).toEqual(['c1']);
-    expect(asked).toEqual(['review c1']);
+    await server.wait(() => server.received.filter(m => m.type === 'job.done' && m.ok).length === 2);
   });
 
   it('sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does', async () => {

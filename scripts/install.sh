@@ -26,7 +26,7 @@
 # update or an uninstall touches only that server's nodes.
 #
 # On a computer that is not the server's own, joining and updating also start one updater for that server's nodes there, in
-# a container of the updater image of the server's build (see apps/updater/updater.sh). It moves them to the server's build as
+# a container of the updater image of the server's build (see apps/updater/lib/nodes.sh). It moves them to the server's build as
 # their work ends, through the copy of this script inside its image, run with HORNHOOF_FROM_UPDATER=1 and the plan of one node
 # in HORNHOOF_NODES_ONLY, and it goes with the nodes on --uninstall.
 #

@@ -357,7 +357,7 @@ export class Bridge {
 
   toolPolicy(key: string, name: string): ToolPrivacyPolicy | undefined {
     for (const [registered, policy] of this.policies.get(key) ?? []) {
-      if (name === registered || name.endsWith(`__${registered}`) || name.endsWith(`.${registered}`)) return policy;
+      if (name === registered || name.endsWith(`__${registered}`) || name.endsWith(`.${registered}`)) return { ...toolPrivacy(name), ...policy };
     }
     return toolPrivacy(name);
   }
@@ -367,7 +367,7 @@ export class Bridge {
     const call = observedCall(body);
     if (!call) return;
     const target = privateToolCall(call.name, call.input, name => this.toolPolicy(key, name));
-    /* Cleanup failure stops forwarding; it must never be swallowed as a malformed response. */
+    /* Install the masks before the program can print anything from the reply. */
     if (target.policy?.sensitive) await this.options.sensitive?.(key, target.name, target.input, answer ? decodedAnswer(answer) : undefined, target.policy);
   }
 

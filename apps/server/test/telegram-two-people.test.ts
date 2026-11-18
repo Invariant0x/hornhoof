@@ -16,7 +16,7 @@ const setTelegram = (app: FastifyInstance, session: string, personId: string, te
 
 /* The CEO (Telegram name Max, named Ivan in the company) and Clara, who has Marketing, both write to the bot of Marketing's head,
    on a node whose turns take words while they run. */
-async function company() {
+async function company(orchestratorBot = false) {
   const tg = await fakeTelegram();
   tg.bots.set(TOKEN, { id: 123456789, username: 'acme_marketing_bot', first_name: 'Acme marketing' });
   const { app, db } = await testApp({ NODE_KEY, TELEGRAM_API_URL: tg.url });
@@ -36,12 +36,26 @@ async function company() {
   const [clara] = await db.select().from(people).where(eq(people.email, 'clara@acme.com'));
   await setTelegram(app, ceo, owner!.id, '@max_k');
   await setTelegram(app, ceo, clara!.id, '@clara_k');
-  expect((await app.inject({ method: 'PUT', url: `/api/agents/${head!.id}/telegram`, payload: { token: TOKEN }, ...as(ceo) })).statusCode).toBe(200);
+  expect((await app.inject({ method: 'PUT', url: `/api/agents/${orchestratorBot ? orchestrator!.id : head!.id}/telegram`, payload: { token: TOKEN }, ...as(ceo) })).statusCode).toBe(200);
   return { tg, app, db, ceo, builtin, owner: owner!, clara: clara! };
 }
 
 const say = (node: FakeNode, jobId: string, seq: number, text: string) => node.send({ type: 'job.event', jobId, seq, event: { kind: 'text', text } });
 const sentTo = (tg: Awaited<ReturnType<typeof fakeTelegram>>, chat: number) => tg.sent.filter(s => s.chat_id === chat).map(s => s.text);
+
+it('lets a linked invited person write to the company bot and get their own answer', async () => {
+  const { tg, db, builtin } = await company(true);
+  tg.write(TOKEN, CLARA, 'Проверь домашние устройства');
+  await until(() => builtin.queued() > 0 || sentTo(tg, CLARA.id).length > 0);
+  expect(builtin.queued()).toBe(1);
+  const run = await nextOf(builtin, 'job.run');
+  expect(run.prompt).toContain('Clara wrote this in Telegram');
+  builtin.send({ type: 'job.started', jobId: run.jobId });
+  await until(async () => (await db.select().from(telegramReplies)).some(reply => reply.jobId === run.jobId));
+  say(builtin, run.jobId, 0, 'С какого устройства начнем?');
+  await until(() => sentTo(tg, CLARA.id).length > 0);
+  expect(sentTo(tg, CLARA.id)).toEqual(['С какого устройства начнем?']);
+});
 
 describe('two people who write to one head in Telegram', () => {
   it('each get their own turn and only the answers to their own words, while the same person still adds to their turn', async () => {

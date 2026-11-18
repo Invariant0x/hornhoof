@@ -50,7 +50,6 @@ async function company() {
   vi.spyOn(ctx.hub, 'isOnline').mockImplementation(id => id.kind === 'builtin' || online);
   vi.spyOn(ctx.hub, 'awaySince').mockImplementation(id => (id.kind === 'builtin' || online ? null : awayAt));
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
-  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
 
   const later = (ms = MIN) => vi.setSystemTime(Date.now() + ms);

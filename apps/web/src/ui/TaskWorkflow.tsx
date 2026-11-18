@@ -2,6 +2,7 @@ import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/e
 import { useT } from '../i18n';
 import type { Org, TaskDetail } from '../types';
 import { phaseName, stageName } from './stage-name';
+import { WorkerMark } from './WorkerMark';
 
 const STAGE_CLASS = { pending: 'next', active: 'current', complete: 'passed', skipped: 'skipped' };
 
@@ -28,6 +29,7 @@ export function WorkflowStages({ workflow, resolveOwner }: { workflow: EchelonsS
         const current = stage.stage === workflow.stage;
         const owner = current ? workflow.ownerAgentId : stage.ownerAgentId;
         return <li key={stage.stage} className={STAGE_CLASS[stage.status]} aria-current={current ? 'step' : undefined}>
+          {workflow.oneShot?.[stage.stage] && <WorkerMark kind="ghost" />}
           <b>{stageName(t, workflow, stage.stage)}</b>{' '}<span>{labels.statuses[stage.status]}</span>
           {owner && <p>{labels.owner(resolveOwner(owner))}</p>}
           {stage.reason && <p className="muted">{reason(stage.reason)}</p>}

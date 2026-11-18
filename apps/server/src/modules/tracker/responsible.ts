@@ -3,15 +3,28 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
-import type { DecisionSubject } from '../../auth/decision-owner.js';
+import { decisionOwner, type DecisionSubject } from '../../auth/decision-owner.js';
 import { departments, people } from '../../db/schema.js';
-import { candidates, decisionPerson } from '../tasks/decisions.js';
-import { refuse, type Tx } from '../tasks/engine.js';
+import { candidates, decisionPerson } from '../tasks/decision-people.js';
+import { refuse, type Tx } from '../tasks/state.js';
 
 /* Who answers for work in a place nobody named one for: the person who takes the place's own decisions, by the rule its
    questions follow: its named owner, else the one person whose access lists it, else the CEO. */
 export const placeSubject = (spot: Spot): DecisionSubject => ({ source: 'request', kind: 'question', topic: 'task', spot });
 export const placeOwner = (ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<string> => decisionPerson(ctx, companyId, placeSubject(spot));
+
+export type Owners = { reaches(personId: string, spot: Spot): boolean; owner(spot: Spot): string; name(personId: string): string };
+
+/* Who reaches what in the company now, and who takes each place's decisions, read once. */
+export async function ownersOf(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Owners> {
+  const everyone = await candidates(ctx, companyId);
+  const names = new Map((await ctx.db.select({ id: people.id, name: people.name }).from(people).where(eq(people.companyId, companyId))).map(p => [p.id, p.name]));
+  return {
+    reaches: (personId, spot) => everyone.some(p => p.id === personId && p.status === 'active' && canReach(p.access, spot)),
+    owner: spot => decisionOwner(placeSubject(spot), everyone),
+    name: personId => names.get(personId) ?? '',
+  };
+}
 
 /* Where a department sits, for whom reaches it: a sub-unit inside the department that holds it. None: the whole company. */
 export async function spotOf(db: Pick<Ctx['db'], 'select'> | Tx, companyId: string, departmentId: string | null): Promise<Spot> {

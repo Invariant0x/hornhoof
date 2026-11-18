@@ -6,7 +6,7 @@ import { requireAgentView } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
 
 const AgentParams = z.object({ id: z.union([z.literal('orchestrator'), z.uuid()]) });
 

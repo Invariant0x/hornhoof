@@ -1,12 +1,9 @@
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { eq } from 'drizzle-orm';
 import { agentChanges, agents, subscriptions, teams } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import { ApiError } from '../../errors.js';
-import { placeOf, renderInstructions } from '../agents/instructions.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import type { HireLine } from '../tools/staff.js';
 
 export type Hired = { id: string; name: string; role: string; title: string };
@@ -46,11 +43,6 @@ export async function hireEmployee(ctx: Pick<Ctx, 'templates'>, tx: Tx, place: {
       createdBy: by.personId,
     })
     .returning();
-  /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. A head's
-     notebook has room of its own on top, as on the employee's card. */
-  if (renderInstructions(ctx.templates, agent!, await placeOf(tx, agent!)).text.length > MAX_INSTRUCTIONS) {
-    throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
-  }
   await tx.insert(agentChanges).values({ companyId: place.companyId, agentId: agent!.id, ...by, field: 'hired', before: null, after: line });
   return { id: agent!.id, name: line.name, role: role.id, title: role.title.en };
 }

@@ -154,21 +154,21 @@ it('rechecks authority when the answer is committed', async () => {
   expect(await c.answered()).toEqual([]);
 });
 
-it('preserves delegated identity and audit and rejects stale delegation', async () => {
+it('records orchestrator feedback as its own decision with the owner and job', async () => {
   const c = await company();
   const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running' }).returning();
   const { seq } = await appendEvent(c.app.ctx, { companyId: c.companyId, agentId: c.orchestrator.id, jobId: job!.id, kind: 'message', data: { text: FEEDBACK }, personId: c.ceo.id });
   const headers = orchestratorDecisionHeaders({ personId: c.ceo.id, agentId: c.orchestrator.id, jobId: job!.id, sourceSeq: seq });
   const ok = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { answer: FEEDBACK }, headers });
   expect(ok.statusCode, ok.body).toBe(200);
-  expect(await c.saved()).toMatchObject({ status: 'answered', picked: null, answer: FEEDBACK, answeredBy: c.ceo.id, answeredByAgentId: c.orchestrator.id, answerJobId: job!.id, answerSourceSeq: seq });
+  expect(await c.saved()).toMatchObject({ status: 'answered', picked: null, answer: FEEDBACK, answeredBy: c.ceo.id, answeredByAgentId: c.orchestrator.id, answerJobId: job!.id, answerSourceSeq: null });
   const [event] = await c.answered();
-  expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, text: FEEDBACK, data: { onBehalfOfPersonId: c.ceo.id, jobId: job!.id, sourceSeq: seq } });
+  expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, text: FEEDBACK, data: { onBehalfOfPersonId: c.ceo.id, jobId: job!.id, sourceSeq: null } });
   const next = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'choice', text: 'Try again?', options: [{ label: 'One', image: null }, { label: 'Two', image: null }] })).request;
   await appendEvent(c.app.ctx, { companyId: c.companyId, agentId: c.orchestrator.id, jobId: job!.id, kind: 'message', data: { text: 'New words' }, personId: c.ceo.id });
   const stale = await c.app.inject({ method: 'POST', url: `/api/requests/${next.id}`, payload: { answer: FEEDBACK }, headers });
-  expect(stale.statusCode).toBe(409);
-  expect((await c.db.select().from(requests).where(eq(requests.id, next.id)))[0]).toMatchObject({ status: 'open', answer: null, answeredBy: null });
+  expect(stale.statusCode).toBe(200);
+  expect((await c.db.select().from(requests).where(eq(requests.id, next.id)))[0]).toMatchObject({ status: 'answered', answer: FEEDBACK, answeredBy: c.ceo.id });
 });
 
 it("takes the orchestrator's own feedback, with no turn of a person in it, as the owner's", async () => {

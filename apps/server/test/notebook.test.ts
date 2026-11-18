@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
-import { MAX_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
+import { parseServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -24,24 +24,13 @@ const notes = async (app: FastifyInstance, token: string) => (await app.inject({
 const write = (app: FastifyInstance, token: string, text: string) => app.inject({ method: 'POST', url: '/api/notebook', payload: { text }, ...as(token) });
 
 describe("the company's notebook", () => {
-  it('goes to a node as far as it fits, cut after a whole note with where to read the rest', async () => {
+  it('includes the entire company notebook even with a long standing assignment', async () => {
     const { app, db, ceo } = await company();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    const book = companyBook(orchestrator!.companyId);
-    expect(await notebookPart(db, book)).toContain('The notebook is empty.');
-    expect((await instructionsOf(app.ctx, orchestrator!, true)).text).toContain('The notebook is empty.');
-
-    for (let i = 0; i < 20; i++) expect((await write(app, ceo, `Note ${i} ${'x'.repeat(100)}.`)).statusCode).toBe(201);
-    const room = 1_000;
-    const cut = await notebookPart(db, book, room);
-    expect(cut.length).toBeLessThanOrEqual(room);
-    expect(cut).toContain('[#1] Note 0 ');
-    expect(cut).not.toContain('[#20] Note 19 ');
-    expect(cut).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
-    /* Less room than one note leaves the notebook out, and the turn goes without it. */
-    expect(await notebookPart(db, book, 100)).toBe('');
-
-    expect((await instructionsOf(app.ctx, orchestrator!, true)).text).toContain('[#20] Note 19 ');
+    const [assigned] = await db.update(agents).set({ overrides: { base: 'Company rule.\n'.repeat(16_000) } }).where(eq(agents.id, orchestrator!.id)).returning();
+    expect(await notebookPart(db, companyBook(assigned!.companyId))).toContain('The notebook is empty.');
+    expect((await write(app, ceo, 'Keep the final entry.')).statusCode).toBe(201);
+    expect((await instructionsOf(app.ctx, assigned!)).text).toContain('[#1] Keep the final entry.');
   });
 
   it('keeps numbered notes that people who see the whole company write, rewrite and remove', async () => {
@@ -90,23 +79,21 @@ describe("the company's notebook", () => {
     expect((await write(app, dana, 'Mine.')).statusCode).toBe(403);
   });
 
-  /* A note is one fact of 300 characters at most. The notebook itself has no cap of its own: what a program reads bounds
-     it, and the instructions say where they cut it. */
-  it('keeps each note short, and takes a 31st note and more than 4000 characters, all of it in the instructions', async () => {
+  it('keeps long notes whole when creating and rewriting them', async () => {
     const { app, db, ceo } = await company();
-    expect((await write(app, ceo, 'x'.repeat(301))).statusCode).toBe(400);
     for (let i = 1; i <= 31; i++) expect((await write(app, ceo, `Rule ${i} ${'y'.repeat(200)}.`)).statusCode, `note ${i}`).toBe(201);
-    const grown = await app.inject({ method: 'PATCH', url: '/api/notebook/31', payload: { text: `Rule 31 ${'w'.repeat(290)}` }, ...as(ceo) });
+    const full = 'A detailed company decision. '.repeat(80).trim();
+    expect((await write(app, ceo, full)).statusCode).toBe(201);
+    const grown = await app.inject({ method: 'PATCH', url: '/api/notebook/31', payload: { text: `Rule 31 ${full}` }, ...as(ceo) });
     expect(grown.statusCode).toBe(200);
-    const tooLong = await app.inject({ method: 'PATCH', url: '/api/notebook/31', payload: { text: 'w'.repeat(301) }, ...as(ceo) });
-    expect(tooLong.statusCode).toBe(400);
     const kept = await notes(app, ceo);
-    expect(kept).toHaveLength(31);
+    expect(kept).toHaveLength(32);
     expect(kept.reduce((n: number, note: { text: string }) => n + note.text.length, 0)).toBeGreaterThan(4000);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    const { text } = await instructionsOf(app.ctx, orchestrator!, true);
+    const { text } = await instructionsOf(app.ctx, orchestrator!);
     for (let i = 1; i <= 31; i++) expect(text, `note ${i}`).toContain(`[#${i}] Rule ${i} `);
-    expect(text).not.toContain('did not fit');
+    expect(text).toContain(`[#31] Rule 31 ${full}`);
+    expect(text).toContain(`[#32] ${full}`);
   });
 
   it('says on the stream that it changed, to people who see the whole company', async () => {
@@ -160,10 +147,11 @@ describe("a department's notebook", () => {
     const [sub] = await db.select().from(subscriptions);
     const [head] = await db.insert(agents).values({ companyId: acme.id, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning();
     for (let i = 1; i <= 31; i++) expect((await add(app, ceo, dev.id, `Dev rule ${i} ${'d'.repeat(200)}.`)).statusCode, `note ${i}`).toBe(201);
-    expect((await add(app, ceo, dev.id, 'd'.repeat(301))).statusCode).toBe(400);
+    const long = 'A department decision. '.repeat(30).trim();
+    expect((await add(app, ceo, dev.id, long)).statusCode).toBe(201);
     const { text } = await instructionsOf(app.ctx, head!);
     for (let i = 1; i <= 31; i++) expect(text, `note ${i}`).toContain(`[#${i}] Dev rule ${i} `);
-    expect(text).not.toContain('did not fit');
+    expect(text).toContain(`[#32] ${long}`);
   });
 
   it('keeps numbered notes of its own, apart from the company notebook and other departments', async () => {
@@ -190,7 +178,7 @@ describe("a department's notebook", () => {
     expect((await app.inject({ url: book('00000000-0000-4000-8000-000000000000'), ...as(ceo) })).statusCode).toBe(404);
   });
 
-  it('gives a head as much of a full notebook as a turn takes, and its tool for the rest', async () => {
+  it("includes every note in the head's instructions", async () => {
     const { app, db, ceo, acme } = await withDepartments();
     const [mkt] = await db.insert(departments).values({ companyId: acme.id, templateKey: 'marketing', roleCode: 'MKT' }).returning();
     /* Notes of many lines, so that a cut between lines would fall inside one. */
@@ -202,7 +190,6 @@ describe("a department's notebook", () => {
       payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Team key', apiKey: 'sk-ant-api03-team-key-5678', target: { kind: 'any' } },
       ...as(ceo),
     });
-    /* Its own skills, and a role text saved near the limit; the notebook comes on top. */
     const { templates } = app.ctx;
     const role = templates.roles.get('MKT-HEAD')!;
     const skills = role.skills.map(s => s.id);
@@ -214,15 +201,10 @@ describe("a department's notebook", () => {
     });
     expect(hired.statusCode).toBe(201);
     const [hire] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
-    const base = `${role.body} ${'x'.repeat(MAX_INSTRUCTIONS - 2_500 - (await instructionsOf(app.ctx, { ...hire!, kind: 'worker' })).text.length)}`;
+    const base = `${role.body} ${'Long assignment. '.repeat(15_000)}`;
     const [mira] = await db.update(agents).set({ overrides: { base } }).where(eq(agents.id, hire!.id)).returning();
     const { text } = await instructionsOf(app.ctx, mira!);
-    expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-    expect(text).toContain(`[#1] 0 `);
-    expect(text).not.toContain(`[#13] 12 `);
-    /* Only whole notes. */
-    for (let i = 0; i < 13; i++) expect([i, text.includes(`[#${i + 1}] ${i} `)]).toEqual([i, text.includes(`end ${i}.`)]);
-    expect(text).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
+    for (let i = 0; i < 13; i++) expect(text).toContain(`[#${i + 1}] ${note(i)}`);
     /* A node that writes skill files takes the turn. */
     const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: text, toolToken: null };
     expect(parseServerMessage(JSON.stringify(run))).toMatchObject({ instructions: text });
@@ -239,7 +221,7 @@ describe("a department's notebook", () => {
     /* The program carries it all the same, and the card counts it in what every turn sends. */
     const { text } = await instructionsOf(app.ctx, head!);
     expect(text).toContain('Deploy on Fridays never.');
-    expect(card.instructions).toEqual({ length: text.length, max: MAX_INSTRUCTIONS });
+    expect(card).not.toHaveProperty('instructions');
   });
 
   it("goes into its head's instructions, which say to read it again after a compaction", async () => {

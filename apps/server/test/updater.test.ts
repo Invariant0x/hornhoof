@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, PARTS, refs, runOnce, runOnceFrom, SCRIPT, SQL, stand, tempUpdaterDir, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 describe('updater', () => {
   beforeAll(() => {
@@ -43,6 +44,23 @@ describe('updater', () => {
     expect(swap).toBeGreaterThan(install);
     expect(r.calls[swap]).toContain(`--entrypoint docker ${APP}-updater@${UPDATER_DIGESTS['0.4.1']} compose up -d --no-build updater`);
     expect(existsSync(join(s.control, 'alive'))).toBe(true);
+  });
+
+  /* Its image keeps updater.sh as a program of its own, and the parts beside the statements of a restore. */
+  it('finds its parts where its image keeps them', async () => {
+    const dockerfile = readFileSync(new URL('../../updater/Dockerfile', import.meta.url), 'utf8');
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/updater\.sh \/usr\/local\/bin\/hornhoof-updater$/m);
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/lib\/ \/usr\/local\/share\/hornhoof-updater\/lib\/$/m);
+    expect(dockerfile).toMatch(/^COPY apps\/updater\/cutover\.sql apps\/updater\/carry\.sql apps\/updater\/adopt\.sql \/usr\/local\/share\/hornhoof-updater\/$/m);
+    expect(readFileSync(SCRIPT, 'utf8')).toContain('SQL_DIR="${HORNHOOF_SQL_DIR:-/usr/local/share/hornhoof-updater}"');
+    const image = tempUpdaterDir('hh-updater-image-');
+    mkdirSync(join(image, 'bin'));
+    cpSync(SCRIPT, join(image, 'bin', 'hornhoof-updater'));
+    cpSync(PARTS, join(image, 'share', 'lib'), { recursive: true });
+    for (const sql of ['cutover.sql', 'carry.sql', 'adopt.sql']) cpSync(join(SQL, sql), join(image, 'share', sql));
+    const s = stand();
+    const r = await runOnceFrom(join(image, 'bin', 'hornhoof-updater'), s, ask('i1'), { HORNHOOF_SQL_DIR: join(image, 'share') });
+    expect(r.status).toMatchObject({ id: 'i1', version: '0.4.1', state: 'done', step: 'finished' });
   });
 
   it('skips pulling the node image when the node container runs that exact digest already', async () => {
@@ -138,16 +156,26 @@ describe('updater', () => {
     expect(readdirSync(join(s.server, 'backups')).filter(f => f.endsWith('.tunnel.json'))).toEqual([]);
   });
 
-  it("lets a kept copy of the link's settings go with its database copy", async () => {
+  /* The newest settings kept may be the only place a link taken on a build that went back is in, so they stay for good. */
+  it("keeps the newest copy of the link's settings for good, and lets the others go with their database copies", async () => {
     const s = stand();
-    writeFileSync(join(s.control, 'tunnel.json'), '{}', { mode: 0o600 });
-    await runOnce(s, ask('t3'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
     const backups = join(s.server, 'backups');
-    const first = readdirSync(backups).find(f => f.endsWith('.sql.gz'))!;
-    utimesSync(join(backups, first), new Date(2026, 0, 1), new Date(2026, 0, 1));
-    for (const id of ['t4', 't5', 't6']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
-    expect(readdirSync(backups).filter(f => f.includes('-t3.'))).toEqual([]);
-    expect(readdirSync(backups)).toHaveLength(3);
+    const age = (id: string, day: number) => {
+      for (const name of readdirSync(backups).filter(f => f.includes(`-${id}.`))) utimesSync(join(backups, name), new Date(2026, 0, day), new Date(2026, 0, day));
+    };
+    for (const [id, day] of [['t3', 1], ['t4', 2]] as const) {
+      writeFileSync(join(s.control, 'tunnel.json'), JSON.stringify({ url: `https://${id}.hornhoof.org` }), { mode: 0o600 });
+      expect((await runOnce(s, ask(id), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' })).status.state).toBe('rolled_back');
+      age(id, day);
+    }
+    for (const id of ['t5', 't6', 't7']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
+    const left = readdirSync(backups);
+    expect(left.filter(f => f.includes('-t3.'))).toEqual([]);
+    const link = left.filter(f => f.includes('-t4.'));
+    expect(link).toEqual([expect.stringMatching(/^hornhoof-\d{8}T\d{6}Z-t4\.tunnel\.json$/)]);
+    expect(readFileSync(join(backups, link[0]!), 'utf8')).toBe(JSON.stringify({ url: 'https://t4.hornhoof.org' }));
+    expect(left.filter(f => f.endsWith('.sql.gz')).map(f => f.replace(/^hornhoof-\d{8}T\d{6}Z-/, '')).sort()).toEqual(['t5.sql.gz', 't6.sql.gz', 't7.sql.gz']);
+    expect(left).toHaveLength(4);
   });
 
   /* The build from before may not know a service of the new one, as the tunnel, which would carry the public link
@@ -258,6 +286,62 @@ describe('updater', () => {
     const s = stand();
     for (const id of ['b1', 'b2', 'b3', 'b4']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
     expect(readdirSync(join(s.server, 'backups'))).toHaveLength(3);
+  });
+
+  /* Deleting a copy of the database cannot be undone, so no copy goes that a way back may still need. */
+  describe('the copies it keeps', () => {
+    const backups = (s: Stand) => join(s.server, 'backups');
+    const copies = (s: Stand) => readdirSync(backups(s)).filter(name => name.endsWith('.sql.gz')).sort();
+    const MIGRATED = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
+    /* Copies earlier updates left, the first the oldest by the time each file has. */
+    const earlier = (s: Stand, ids: string[], times: (i: number) => Date) => {
+      mkdirSync(backups(s), { recursive: true });
+      return ids.map((id, i) => {
+        const name = `hornhoof-2026010${i + 1}T000000Z-${id}.sql.gz`;
+        writeFileSync(join(backups(s), name), gzipSync(`-- a dump of the hornhoof database\n-- migrations 20\n-- copy ${id}\n`));
+        utimesSync(join(backups(s), name), times(i), times(i));
+        return name;
+      });
+    };
+
+    it('never deletes the copy its own update goes back to, whatever time the clock gave the others', async () => {
+      const s = stand();
+      /* Made while the clock ran years ahead, and set right since. */
+      const [, second, third] = earlier(s, ['e1', 'e2', 'e3'], i => new Date(2099, 0, i + 1));
+      const r = await runOnce(s, ask('k1'), MIGRATED);
+      expect(r.status).toMatchObject({ id: 'k1', state: 'rolled_back', step: 'finished' });
+      expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
+      const own = copies(s).find(name => name.endsWith('-k1.sql.gz'));
+      expect(own).toBeDefined();
+      expect(copies(s)).toEqual([second, third, own].sort());
+    });
+
+    it('deletes none when the copy of the update did not load, since an older one may be the only one that does', async () => {
+      const s = stand();
+      const before = earlier(s, ['e1', 'e2', 'e3'], i => new Date(2026, 0, i + 1));
+      const r = await runOnce(s, ask('k2'), { ...MIGRATED, STUB_RESTORE: 'fail' });
+      expect(r.status).toMatchObject({ id: 'k2', state: 'failed' });
+      expect(r.status.log).toContain('Could not put the database back from backups/');
+      const own = copies(s).find(name => name.endsWith('-k2.sql.gz'))!;
+      expect(copies(s)).toEqual([...before, own].sort());
+      /* The next update that ends on a database that works keeps the newest three again. */
+      expect((await runOnce(s, ask('k3'))).status.state).toBe('done');
+      expect(copies(s)).toEqual([before[2], own, copies(s).find(name => name.endsWith('-k3.sql.gz'))].sort());
+    });
+
+    it('counts no copy a stop cut short, and removes what it left', async () => {
+      const s = stand();
+      const before = earlier(s, ['e1', 'e2'], i => new Date(2026, 0, i + 1));
+      const stopped = await runOnce(s, ask('k4'), { STUB_STOP_IN: 'backup', STUB_MIGRATIONS: '0.4.0=20 0.4.1=22' });
+      expect(stopped.status).toMatchObject({ id: 'k4', state: 'running', step: 'backup' });
+      expect(copies(s)).toEqual(before);
+      const r = await runOnce(s, null, { STUB_MIGRATIONS: '0.4.0=20 0.4.1=22' });
+      expect(r.status).toMatchObject({ id: 'k4', state: 'done' });
+      expect(readdirSync(backups(s)).filter(name => !name.endsWith('.sql.gz'))).toEqual([]);
+      const own = copies(s).find(name => name.endsWith('-k4.sql.gz'))!;
+      expect(copies(s)).toEqual([...before, own].sort());
+      expect(gunzipSync(readFileSync(join(backups(s), own))).toString()).toContain('-- migrations 20\n');
+    });
   });
 
   it('runs each request once', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { agyTranscript } from '../src/terminal/programs.js';
+import { agyTranscript } from '../src/providers/antigravity-terminal.js';
 import { agySteps } from '../src/terminal/transcripts.js';
 
 const lines = readFileSync(new URL('./fixtures/agy-tui/transcript.jsonl', import.meta.url), 'utf8').trim().split('\n').map(line => JSON.parse(line));

@@ -5,7 +5,8 @@ import { agentEvents, jobs, nodeConnections, nodes, tasks, testParts, testRuns }
 import { only } from '../../db/selections.js';
 import { jobCheckLastEnd, jobCheckQueued } from '../nodes/check-slots.js';
 import type { NodeIdentity } from '../nodes/hub.js';
-import { agentProgramState, signInTurn, SILENT_TURN_MS } from '../tasks/silent.js';
+import { agentProgramState, signInTurn } from '../tasks/program-state.js';
+import { SILENT_TURN_MS } from '../tasks/silent.js';
 import { notStep } from '../tools/steps.js';
 
 /* Same grace window checkTestTimes grants a running test part past its run timeout. */
@@ -125,7 +126,7 @@ async function nodeSignAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[
 const partLive = (now: number) => (p: RunningPart): boolean => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
 
 function jobLive(ctx: Ctx, job: RunningJob, externalUntil: string | null, activityAt: number | undefined, now: number): boolean {
-  if (job.kind !== 'conversation') return jobTakenAt(job) + job.timeoutMs > now;
+  if (job.kind !== 'conversation') return job.timeoutMs === 0 || jobTakenAt(job) + job.timeoutMs > now;
   return isConversationLive(ctx, job, externalUntil, activityAt, now);
 }
 

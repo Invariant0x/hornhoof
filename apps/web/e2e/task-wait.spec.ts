@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
 import type { ExternalWait, TaskDetail } from '../src/types';
-import { openTaskCard, serveApi, TASKS } from './api';
+import { openTaskCard, serveApi, streamEndedByPage, TASKS } from './api';
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`named task wait ${language} ${theme} ${width}`, async ({ page }, info) => {
@@ -13,7 +13,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-    page.on('requestfailed', request => errors.push(request.url()));
+    page.on('requestfailed', request => { if (!streamEndedByPage(request)) errors.push(request.url()); });
     await serveApi(page);
     await page.route('**/api/version', route => route.fulfill({ json: { version: '0.6.1', commit: 'task-241' } }));
     await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.6.1', commit: 'task-241' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
@@ -29,14 +29,15 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
     await openTaskCard(page, 1);
     const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-    const text = language === 'en' ? `waits for ${employee}: Acceptance on node-a, until 16:30` : `ждет: Acceptance on node-a; сотрудник: ${employee}, до 16:30`;
-    await expect(panel.getByText(text, { exact: true })).toBeVisible();
+    const text = panel.getByText('Acceptance on node-a');
+    await expect(text).toContainText(employee);
+    await expect(panel.getByText(language === 'en' ? 'set by Bruno, until 16:30' : 'ожидание поставил Bruno, до 16:30', { exact: true })).toBeVisible();
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`task-wait-${language}-${theme}-${width}.png`), fullPage: true });
     await panel.getByLabel(language === 'en' ? 'Comment' : 'Комментарий', { exact: true }).fill('Acceptance is available.');
     await panel.getByRole('button', { name: language === 'en' ? 'Add comment' : 'Добавить комментарий', exact: true }).click();
-    await expect(panel.getByText(text, { exact: true })).toHaveCount(0);
+    await expect(text).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

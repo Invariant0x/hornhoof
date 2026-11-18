@@ -1,20 +1,15 @@
+import { createHash } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { improvements, IMPROVEMENT_SCOPES, jobs, type ImprovementParts } from '../../db/schema.js';
-import { countOnly } from '../../db/selections.js';
+import { improvements, improvementSubmissions, IMPROVEMENT_SCOPES, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement } from './store.js';
+import type { Tx } from '../tasks/state.js';
+import { currentInvocation } from '../tools/calls.js';
+import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement, moveImprovementTx } from './store.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
-
-/* What one turn may put under Improvements, so a round that goes wrong cannot flood the CEO. */
-const TURN_IMPROVEMENTS = 10;
-/* What each running turn put, counted before the next one goes in so parallel calls cannot both pass; the oldest turns
-   are forgotten. */
-const put = new WeakMap<Ctx, Map<string, number>>();
-const PUT_KEPT = 500;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const json = (value: unknown) => say(JSON.stringify(value));
@@ -59,12 +54,11 @@ function kindOf(scope: (typeof IMPROVEMENT_SCOPES)[number] = 'company', code?: s
   return { scope, code: scope === 'platform' ? (code ?? null) : null };
 }
 /* Files a new finding, or counts one about Hornhoof itself on the sent card its developers have it as already. */
-async function fileFinding(ctx: Ctx, job: ToolJob, values: { title: string; text: string; parts: ImprovementParts } & ReturnType<typeof kindOf>) {
-  const known = values.scope === 'platform' ? await countOnSent(ctx, job.companyId, { title: values.title, code: values.code }) : null;
-  if (known) return json({ improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." });
-  const [row] = await ctx.db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, ...values }).returning({ id: improvements.id });
-  improvementsChanged(ctx, job.companyId);
-  return json({ improvement: row!.id });
+async function fileFinding(ctx: Ctx, tx: Tx, job: ToolJob, values: { title: string; text: string; parts: ImprovementParts } & ReturnType<typeof kindOf>) {
+  const known = values.scope === 'platform' ? await countOnSent(ctx, tx, job.companyId, { title: values.title, code: values.code }) : null;
+  if (known) return { improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." };
+  const [row] = await tx.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, ...values }).returning({ id: improvements.id });
+  return { improvement: row!.id };
 }
 
 const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
@@ -73,27 +67,6 @@ const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
 /* For heads and the employees a skill lets: what is under Improvements now, and putting a new one there or finding one
    again. */
 export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
-  const { db } = ctx;
-  /* Whether this turn may put one more, counted at once. A turn's first one reads what it put before, which a restart of
-     Hornhoof would otherwise forget. */
-  async function room(): Promise<boolean> {
-    const counts = put.get(ctx) ?? new Map<string, number>();
-    put.set(ctx, counts);
-    if (!counts.has(job.id)) {
-      const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-      const [before] = await db
-        .select(countOnly())
-        .from(improvements)
-        .where(and(eq(improvements.agentId, job.agentId), gte(improvements.updatedAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
-      if (!counts.has(job.id)) counts.set(job.id, before?.n ?? 0);
-    }
-    const n = counts.get(job.id)!;
-    if (n >= TURN_IMPROVEMENTS) return false;
-    counts.delete(job.id);
-    counts.set(job.id, n + 1);
-    if (counts.size > PUT_KEPT) counts.delete(counts.keys().next().value!);
-    return true;
-  }
   server.registerTool(
     'improvements',
     { description: 'What waits under Improvements for the CEO or is in work now, the latest first, with how many rounds found each. Read it before you put one there, so you find one again instead of twice.' },
@@ -108,20 +81,29 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
         'the title, what is wrong, the facts with where each comes from, apart from what you only guess, why it matters, the exact change and what it gives. ' +
         'Say with scope whether the company can change it itself, or whether Hornhoof itself is at fault: on an installation of another company a platform finding goes to Hornhoof developers once the CEO sends it, ' +
         'and one they have already is counted once more on its card instead of a new one. ' +
-        `With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
+        'With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more.',
       inputSchema: { ...Case, improvement: Id.optional() },
     },
     async ({ title, problem, facts, guesses, why, change, gain, scope, code, improvement }) =>
       refused(async () => {
-        if (!(await room())) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
         const parts = { problem: problem ?? null, facts: facts ?? [], guesses: guesses ?? [], why: why ?? null, change, gain: gain ?? null };
         const text = caseText(parts);
         const kind = kindOf(scope, code);
-        if (improvement) {
-          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` });
-          return json({ improvement });
-        }
-        return fileFinding(ctx, job, { title, text, parts, ...kind });
+        const key = createHash('sha256').update(JSON.stringify([job.companyId, job.id, currentInvocation() ?? [improvement, title, parts, kind]])).digest('hex');
+        const saved = await ctx.db.transaction(async tx => {
+          const [added] = await tx.insert(improvementSubmissions).values({ key }).onConflictDoNothing().returning();
+          if (!added) {
+            const [before] = await tx.select().from(improvementSubmissions).where(eq(improvementSubmissions.key, key));
+            return before!.result!;
+          }
+          const result = improvement
+            ? { improvement: (await moveImprovementTx(tx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` })).id }
+            : await fileFinding(ctx, tx, job, { title, text, parts, ...kind });
+          await tx.update(improvementSubmissions).set({ result }).where(eq(improvementSubmissions.key, key));
+          return result;
+        });
+        improvementsChanged(ctx, job.companyId);
+        return json(saved);
       }),
   );
 }

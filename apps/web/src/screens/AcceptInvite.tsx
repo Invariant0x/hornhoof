@@ -15,7 +15,7 @@ function explain(t: Messages, err: unknown): string {
   return errorText(t, err);
 }
 
-export function AcceptInvite({ token, onDone }: { token: string; onDone: () => void }) {
+export function AcceptInvite({ token, onDone }: { token: string; onDone: (joined: boolean) => void }) {
   const t = useT();
   const [invite, setInvite] = useState<Invite | null>(null);
   const [dead, setDead] = useState<unknown>(null);
@@ -58,7 +58,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
         <p className="alert" role="alert">{explain(t, dead)}</p>
         {/* Whoever joined with this link is signed in already or signs in there. */}
         <div className="actions">
-          <button className="btn" type="button" onClick={onDone}>{t.invite.toCompany}</button>
+          <button className="btn" type="button" onClick={() => onDone(false)}>{t.invite.toCompany}</button>
         </div>
       </Card>
     );
@@ -66,13 +66,14 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
   if (!invite) return <Card><p className="muted">{t.invite.opening}</p></Card>;
   /* Signed in now: connecting their own plans is the one thing left, and it can wait. */
   if (joined) {
+    const enter = () => onDone(true);
     return (
       <Card>
         <div className="wizard-head">
           <h1>{t.invite.join(invite.companyName)}</h1>
           <p>{t.invite.connectNow}</p>
         </div>
-        <ConnectPanel onDone={onDone} onSkip={onDone} />
+        <ConnectPanel onDone={enter} onSkip={enter} />
       </Card>
     );
   }
