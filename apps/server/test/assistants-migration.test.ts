@@ -57,14 +57,22 @@ describe('personal assistants migration', () => {
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner, password_hash) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true, 'hash')`);
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'invited', 'listed')`);
-    /* The deletion of people, later, adds an empty removed_at. */
-    const older = async () => (await db.execute(sql`select to_jsonb(p) - 'is_agent' - 'assistant_of' - 'removed_at' as row from people p order by id`)).rows;
-    const before = await older();
+    const people = async () => (await db.execute<{ data: Record<string, unknown> }>(sql`select to_jsonb(p) as data from people p order by id`)).rows;
+    const before = await people();
+
+    /* 0100 itself keeps every field as it was and adds only that each one is a person and no assistant. */
+    const through0100 = await migrationsUpTo('0100_assistants');
+    await migrate(db, { migrationsFolder: through0100 });
+    await migrate(db, { migrationsFolder: through0100 });
+    expect(await people()).toStrictEqual(before.map(({ data }) => ({ data: { ...data, is_agent: false, assistant_of: null } })));
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect(await older()).toEqual(before);
+    /* The later migrations keep every field 0100 found and its answer; the fields they add, as the empty removed_at of the
+       deletion of people, are theirs to check. */
+    const known = Object.keys(before[0]!.data);
+    expect((await people()).map(({ data }) => ({ data: Object.fromEntries(known.map(field => [field, data[field]])) }))).toStrictEqual(before);
     expect((await db.execute(sql`select distinct is_agent, assistant_of from people`)).rows).toEqual([{ is_agent: false, assistant_of: null }]);
     for (const table of ASSISTANT_TABLES) expect((await db.execute(sql.raw(`select count(*)::int as n from ${table}`))).rows, table).toEqual([{ n: 0 }]);
     expect((await db.execute(sql`select count(*)::int as n from requests where answered_by_assistant_id is not null`)).rows).toEqual([{ n: 0 }]);
