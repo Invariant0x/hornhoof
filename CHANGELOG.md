@@ -17,6 +17,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The tracker in the light skin draws a chosen card, a chosen node and a node under the pointer with a border people can see; a due day reads day before month right to left; a side panel gives its words the same width in Chromium, Firefox and Safari; and a link of two letters is 44 px wide to press.
 - Employees on gpt-6.2-sol or gpt-6.2-astra can hand in their work and be chosen to check others' work, as on gpt-6.1-sol and gpt-6-astra.
+- A test run of a release keeps the results of tests a change does not reach: a script that belongs to no suite, as the updater's, ties the tests that use it to its own folder instead of the whole repository, and a log file counts as data.
 
 ## [0.32.0] - 2026-11-17
 
