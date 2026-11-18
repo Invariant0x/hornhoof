@@ -68,9 +68,17 @@ export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), request
 export const PhoneAction = z.strictObject({ type: z.literal('phone.action'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), operation: PhoneOperation });
 export const PhoneRenew = z.strictObject({ type: z.literal('phone.renew'), sessionId: z.uuid(), generation: z.number().int().nonnegative(), expiresAt: z.iso.datetime() });
 export const PhoneRevoke = z.strictObject({ type: z.literal('phone.revoke'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), binding: PhoneBinding });
+const MissingTextSpan = z.strictObject({ start: z.number().int().min(0).max(4095), count: z.number().int().min(1).max(4096) });
+export const PhoneTypingIssue = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('typing_failed'), reason: z.enum(['phone_adb_failed', 'phone_keyboard_unavailable']) }),
+  z.strictObject({ kind: z.literal('typing_unverified') }),
+  z.strictObject({ kind: z.literal('typing_dropped'), missing: z.array(MissingTextSpan).min(1).max(4096) }),
+  z.strictObject({ kind: z.literal('typing_mismatch') }),
+]);
+export type PhoneTypingIssue = z.infer<typeof PhoneTypingIssue>;
 export const PhoneReply = z.strictObject({
   type: z.literal('phone.reply'), requestId: z.uuid(), status: z.enum(['ok', 'failed', 'needs_person', 'session_gone', 'busy']),
-  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(), readiness: PhoneReadiness.optional(),
+  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(), readiness: PhoneReadiness.optional(), typing: PhoneTypingIssue.optional(),
 });
 export type PhoneReply = z.infer<typeof PhoneReply>;
 export const PhoneFrame = z.strictObject({

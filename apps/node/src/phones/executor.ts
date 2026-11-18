@@ -2,11 +2,14 @@ import { PhoneCapture, PhoneServerMessage, networkEndpoint, type PhoneFrame, typ
 import type { PhoneAdb } from './adb.js';
 import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
+import { checkPhoneText } from './text.js';
 
 export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'readiness'>;
 export type PhoneExecutorDeps = { adb: PhoneDriver; send(message: PhoneReply | PhoneFrame): void };
 const noFrame = (): PhoneCapture => ({ jpeg: null, width: 0, height: 0, elements: [] });
 const FRAME_MS = 1500;
+type ActionResult = Pick<PhoneReply, 'capture' | 'typing'>;
+class PhoneDeviceChanged extends Error {}
 
 /* The agent taps and swipes in the pixels of the picture it sees, adb in the phone's. */
 function onPhone(op: PhoneOperation, scale: number): PhoneOperation {
@@ -51,7 +54,10 @@ export class PhoneExecutor {
     const result = await seen.done;
     this.deps.send(result);
     // Remember the outcome, not megabytes of screenshots for every action of the last ten minutes.
-    if (this.#seen.get(m.requestId) === seen) this.#seen.set(m.requestId, { at: seen.at, done: Promise.resolve({ type: 'phone.reply', requestId: m.requestId, status: result.status, ...(result.readiness ? { readiness: result.readiness } : {}) }) });
+    if (this.#seen.get(m.requestId) === seen) {
+      const { status, readiness, typing } = result;
+      this.#seen.set(m.requestId, { at: seen.at, done: Promise.resolve({ type: 'phone.reply', requestId: m.requestId, status, ...(readiness ? { readiness } : {}), ...(typing ? { typing } : {}) }) });
+    }
   }
 
   close(): void {
@@ -110,19 +116,47 @@ export class PhoneExecutor {
       }
     }
     try {
-      const capture = await this.#sessions.use(m.sessionId, m.generation, async state => {
+      const result = await this.#sessions.use<ActionResult>(m.sessionId, m.generation, async state => {
         await this.assertDevice(state);
         const serial = state.grant.binding.serial;
-        if (m.operation.kind !== 'capture') {
+        const { operation } = m;
+        if (operation.kind === 'text') return this.typeText(state, operation);
+        if (operation.kind !== 'capture') {
           if (!this.#scales.has(serial)) await this.capture(state);
-          await this.deps.adb.act(serial, onPhone(m.operation, this.#scales.get(serial)!), state.signal);
+          await this.deps.adb.act(serial, onPhone(operation, this.#scales.get(serial)!), state.signal);
         }
-        return this.capture(state);
+        return { capture: await this.capture(state) };
       });
       const state = this.#sessions.view(m.sessionId, m.generation);
-      this.emitFrame(state.grant, capture);
-      return reply('ok', { capture });
-    } catch { return reply('session_gone'); }
+      if (result.capture) this.emitFrame(state.grant, result.capture);
+      return reply(result.typing ? 'failed' : 'ok', result);
+    } catch (error) {
+      if (m.operation.kind !== 'text' || error instanceof PhoneDeviceChanged || await this.textSessionGone(m)) return reply('session_gone');
+      const reason = error instanceof Error && error.message === 'phone_keyboard_unavailable' ? 'phone_keyboard_unavailable' : 'phone_adb_failed';
+      return reply('failed', { typing: { kind: 'typing_failed', reason } });
+    }
+  }
+
+  private async typeText(state: PhoneSessionView, operation: Extract<PhoneOperation, { kind: 'text' }>): Promise<ActionResult> {
+    const { grant: { binding: { serial } }, signal } = state;
+    const readTree = () => this.deps.adb.tree(serial, signal).catch(() => '');
+    const before = await readTree();
+    await this.deps.adb.act(serial, operation, signal);
+    const after = await readTree();
+    const typing = checkPhoneText(before, after, operation.text);
+    const capture = await this.capture(state, after).catch((error: unknown) => {
+      if (error instanceof PhoneDeviceChanged) throw error;
+      return undefined;
+    });
+    return { ...(capture ? { capture } : {}), ...(typing ? { typing } : {}) };
+  }
+
+  private async textSessionGone(m: Extract<PhoneServerMessage, { type: 'phone.action' }>): Promise<boolean> {
+    let state: PhoneSessionView;
+    try { state = this.#sessions.view(m.sessionId, m.generation); }
+    catch { return true; }
+    const devices = await this.deps.adb.devices(state.signal).catch(() => undefined);
+    return !state.valid() || Boolean(devices && !devices.some(device => device.serial === state.grant.binding.serial && device.status === 'device'));
   }
 
   private async checkBaseline(m: Extract<PhoneServerMessage, { type: 'phone.baseline' }>): Promise<PhoneReply> {
@@ -139,16 +173,16 @@ export class PhoneExecutor {
     return { ...reply, status: 'ok', readiness: await adb.readiness(serial, signal) };
   }
 
-  private async capture(state: PhoneSessionView): Promise<PhoneCapture> {
+  private async capture(state: PhoneSessionView, tree?: string): Promise<PhoneCapture> {
     const serial = state.grant.binding.serial;
     await this.assertDevice(state);
-    const { capture, scale } = phoneCapture(await this.deps.adb.tree(serial, state.signal), await this.deps.adb.screenshot(serial, state.signal));
+    const { capture, scale } = phoneCapture(tree ?? await this.deps.adb.tree(serial, state.signal), await this.deps.adb.screenshot(serial, state.signal));
     this.#scales.set(serial, scale);
     return PhoneCapture.safeParse(capture).success ? capture : noFrame();
   }
 
   private async assertDevice(state: PhoneSessionView): Promise<void> {
-    if (await this.deps.adb.identity(state.grant.binding.serial, state.signal) !== state.grant.binding.hardwareKey) throw new Error('phone_device_changed');
+    if (await this.deps.adb.identity(state.grant.binding.serial, state.signal) !== state.grant.binding.hardwareKey) throw new PhoneDeviceChanged('phone_device_changed');
   }
 
   private clearTimer(id: string): void {

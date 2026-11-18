@@ -4,6 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { readReadiness, readinessScript } from './readiness.js';
+import { phoneTextSteps } from './text.js';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
@@ -14,13 +15,6 @@ export const ADB_MAX_BYTES = 16 * 1024 * 1024;
 
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
 export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-
-/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written.
-   input text types plain Latin letters, digits and signs only; any other text gives null. */
-function textScript(value: string): string | null {
-  if (!/^[\x20-\x7e]+$/.test(value)) return null;
-  return (value.match(/%|[^%]+/g) ?? []).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}\n`).join('');
-}
 
 /* No stdout, stderr, script or adb error object is logged or returned on failure. */
 export const adbRunner = (executable: string, environment?: NodeJS.ProcessEnv): AdbRun => call => new Promise((resolve, reject) => {
@@ -69,7 +63,7 @@ export function privateAdb(executable: string, keyDir: string): AdbRun {
   return call => (existsSync(host) ? shared : own)(call);
 }
 
-/* The keyboard app that types any text adb gives it, for what Android's input text cannot type: Russian, emoji, new lines. */
+/* The keyboard app for characters Android's input text cannot type, including Russian and emoji. */
 const KEYBOARD_APP = 'com.android.adbkeyboard';
 const KEYBOARD_IME = `${KEYBOARD_APP}/.AdbIME`;
 
@@ -130,7 +124,7 @@ export class PhoneAdb {
   async act(serial: string, input: unknown, signal: AbortSignal): Promise<void> {
     const op = PhoneOperation.parse(input);
     if (op.kind === 'capture') throw new Error('phone_capture_is_not_an_action');
-    const script = await this.script(serial, op, signal);
+    const script = op.kind === 'text' ? await this.textScript(serial, op.text, signal) : await this.script(serial, op, signal);
     await this.call(serial, ['shell'], signal, script);
   }
 
@@ -148,11 +142,10 @@ export class PhoneAdb {
     } catch { throw new Error('phone_adb_failed'); }
   }
 
-  private async script(serial: string, op: Exclude<PhoneOperation, { kind: 'capture' }>, signal: AbortSignal): Promise<string> {
+  private async script(serial: string, op: Exclude<PhoneOperation, { kind: 'capture' | 'text' }>, signal: AbortSignal): Promise<string> {
     switch (op.kind) {
       case 'tap': return `input tap ${op.x} ${op.y}\n`;
       case 'swipe': return `input swipe ${op.x} ${op.y} ${op.toX} ${op.toY} ${op.ms}\n`;
-      case 'text': return textScript(op.text) ?? this.keyboardScript(serial, op.text, signal);
       case 'key': return `input keyevent KEYCODE_${op.key.toUpperCase()}\n`;
       case 'url': return `am start -a android.intent.action.VIEW -d ${shellWord(op.url)} -p com.android.chrome\n`;
       case 'app': {
@@ -164,20 +157,34 @@ export class PhoneAdb {
     }
   }
 
-  /* Switches to the keyboard app for one text, as a person picks another keyboard, and back to the phone's own one. */
-  private async keyboardScript(serial: string, text: string, signal: AbortSignal): Promise<string> {
+  private async textScript(serial: string, text: string, signal: AbortSignal): Promise<string> {
+    const steps = phoneTextSteps(text);
+    const keyboard = steps.some(step => step.kind === 'text' && /[^\x20-\x7e]/.test(step.text));
+    const setup = keyboard ? await this.keyboardSetup(serial, signal) : [];
+    const commands = steps.map(step => {
+      if (step.kind === 'enter') return `input keyevent${' KEYCODE_ENTER'.repeat(step.count)}`;
+      if (keyboard) return `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(step.text).toString('base64')}' >/dev/null`;
+      // adb expands %s even in a quoted word. Split the literal sequence across two invocations.
+      return step.text.split(/(?<=%)(?=s)/).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}`).join('\n');
+    });
+    // Pause between chunks on the device, with a six-second budget for text containing many short lines.
+    const pause = Math.min(60, Math.floor(6000 / commands.length)) / 1000;
+    return ['set -e', ...setup, ...commands.flatMap(command => [command, `sleep ${pause}`]), ''].join('\n');
+  }
+
+  /* Switch once for all Unicode chunks and give the phone its old keyboard back even if input fails. */
+  private async keyboardSetup(serial: string, signal: AbortSignal): Promise<string[]> {
     if (!(await this.call(serial, ['shell', 'pm', 'path', KEYBOARD_APP], signal)).toString().startsWith('package:')) {
-      const apk = await this.keyboard?.();
+      const apk = await this.keyboard?.().catch(() => undefined);
       if (!apk || !(await this.call(serial, ['install', '-r', apk], signal)).toString().includes('Success')) throw new Error('phone_keyboard_unavailable');
     }
     return [
       'p=$(settings get secure default_input_method)',
+      'trap \'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null\' EXIT',
+      'trap \'exit 1\' HUP INT TERM',
       `ime enable ${KEYBOARD_IME} >/dev/null`,
       `ime set ${KEYBOARD_IME} >/dev/null`,
       'sleep 1',
-      `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(text).toString('base64')}' >/dev/null`,
-      'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null',
-      '',
-    ].join('\n');
+    ];
   }
 }

@@ -20,8 +20,10 @@ const SCREEN = screencap(false);
 const PHOTO = screencap(true);
 const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
+const editableField = (value: string) => tree('12:00').replace('••••••••', value).replace('password="true"', 'password="false"');
+
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '') {
+function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -34,8 +36,10 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '') {
     if (a.endsWith('getprop ro.serialno')) return Buffer.from('R58MIDENTITY\n');
     if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
-    if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(tree(`12:0${ticks++}`));
+    if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
+    if (input.failure && call.input?.includes('input text')) throw new Error('ADB echoed a private value');
     if (a.endsWith('screencap -p')) return png;
+    if (a.endsWith('pm path com.android.adbkeyboard')) return Buffer.from('package:/data/app/adbkeyboard/base.apk\n');
     if (a.endsWith('shell sh')) return Buffer.from(baseline);
     return Buffer.alloc(0);
   });
@@ -44,7 +48,7 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '') {
   const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial, hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
   const act = (n: number, operation: Extract<Parameters<PhoneExecutor['handle']>[0], { type: 'phone.action' }>['operation']) =>
     phones.handle({ type: 'phone.action', requestId: id(n), sessionId: SESSION, generation: 1, operation });
-  const reply = (n: number) => out.find((m): m is PhoneReply => m.type === 'phone.reply' && m.requestId === id(n));
+  const reply = (n: number) => out.findLast((m): m is PhoneReply => m.type === 'phone.reply' && m.requestId === id(n));
   const shells = () => calls.filter(c => c.args.join(' ') === `-s ${serial} shell`).map(c => c.input);
   return { phones, calls, grant, act, reply, shells, open: () => phones.handle({ type: 'phone.open', requestId: id(5), grant }) };
 }
@@ -117,8 +121,56 @@ describe('phone messages on the execution node', () => {
     await p.act(6, { kind: 'tap', x: 540, y: 950 });
     await p.act(7, { kind: 'text', text: 'nora@acme.test' });
     await p.act(8, { kind: 'text', text: 'Pass word 1079!' });
-    expect(p.shells()).toEqual(['input tap 827 1454\n', "input text 'nora@acme.test'\n", "input text 'Pass%sword%s1079!'\n"]);
-    expect([p.reply(6)?.status, p.reply(7)?.status, p.reply(8)?.status]).toEqual(['ok', 'ok', 'ok']);
+    expect(p.shells()).toEqual(['input tap 827 1454\n', "set -e\ninput text 'nora@acme.test'\nsleep 0.06\n", "set -e\ninput text 'Pass%sword%s1079!'\nsleep 0.06\n"]);
+    expect(p.reply(6)?.status).toBe('ok');
+    expect(p.reply(8)).toMatchObject({ status: 'failed', typing: { kind: 'typing_unverified' } });
+    p.phones.close();
+  });
+
+  it('reports input failure without echoing adb output and continues to use the session', async () => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { failure: true });
+    await p.open();
+    await p.act(6, { kind: 'text', text: 'a private value' });
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', reason: 'phone_adb_failed' } });
+    expect(JSON.stringify(p.reply(6))).not.toContain('a private value');
+    await p.act(7, { kind: 'capture' });
+    expect(p.reply(7)?.status).toBe('ok');
+    p.phones.close();
+  });
+
+  it.each([
+    ['existing ', 'existing one&#10;&#10;two', 'one\r\n\ntwo'],
+    ['aba', 'ababa', 'ab'],
+  ])('verifies the typed insertion in an existing field', async (before, after, text) => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField(before), editableField(after)] });
+    await p.open();
+    await p.act(6, { kind: 'text', text });
+    expect(p.reply(6)).toMatchObject({ status: 'ok' });
+    expect(p.reply(6)?.typing).toBeUndefined();
+    p.phones.close();
+  });
+
+  it.each([
+    ['', 'typing_unverified'],
+    ['unexpected', 'typing_mismatch'],
+  ])('reports the outcome when the readback is "%s"', async (after, kind) => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField(''), editableField(after)] });
+    await p.open();
+    await p.act(6, { kind: 'text', text: 'intended' });
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind } });
+    p.phones.close();
+  });
+
+  it('reports the offsets of dropped Unicode characters without echoing them', async () => {
+    const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [editableField('Prefix: '), editableField('Prefix: a&#10;c')] });
+    await p.open();
+    await p.act(6, { kind: 'text', text: 'a👋\r\nbc' });
+    expect(p.reply(6)).toMatchObject({ status: 'failed', typing: { kind: 'typing_dropped', missing: [{ start: 1, count: 1 }, { start: 3, count: 1 }] } });
+    const typing = p.reply(6)?.typing;
+    expect(JSON.stringify(typing)).not.toContain('👋');
+    await p.act(6, { kind: 'text', text: 'a👋\r\nbc' });
+    expect(p.reply(6)?.typing).toEqual(typing);
+    expect(p.shells()).toHaveLength(1);
     p.phones.close();
   });
 
