@@ -43,14 +43,14 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Runs every test of a release over the free machines, only on main, a turn's branch turn-<number> or a release-<name> branch: on any other branch it starts nothing, as a change is checked by its author's local tests of what it touched. " +
-        "The first run of a release runs every test file; each later run of the same release runs only what failed or changed since, and a run of the whole product, or of exactly the repository's declared full test command, sets the GitHub status hornhoof/tests on the pinned commit, so GitHub need not run the tests again. " +
+        'Runs release checks on main, the repository’s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
+        'A full release run can reuse passing results from the same release with matching reusable evidence. Without that evidence it runs the selected profile. A whole product run or the exact declared full command can publish hornhoof/tests on the pinned commit. ' +
         `Hornhoof pins the commit the branch is at now, readies the product's harness, and wakes you on the task with the result; with command it runs that command instead, split into up to ${MAX_TEST_PARTS} parts with {part} and {parts} in it.`,
       inputSchema: {
-        command: z.string().trim().min(1).max(4000).optional().describe('Manual command. Dependencies are in place already; omit it for the pinned product environment.'),
+        command: z.string().trim().min(1).max(4000).optional().describe('Manual command. Prepare what it requires. Omit it for the product test environment.'),
         suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run every suite of the release.'),
         task: TaskRef('the run is for'),
-        branch: Branch.describe('The release branch to test: main, turn-<number> or release-<name>.'),
+        branch: Branch.describe('The branch to test: main, the configured main line, turn-<number> or release-<name>.'),
         parts: Parts,
         minutes: TestMinutes,
       },
@@ -65,13 +65,14 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'end_wait',
     {
-      description: "Ends your own wait_for on a task you hold, when what it waited for is over: when a run's result reached you and the wait did not name that run, say. Nobody is woken; you go on in this turn.",
+      description: 'Clears your scheduled progress check or an older external wait on a task you hold. Continue in your current turn.',
       inputSchema: { task: z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.') },
     },
     async ({ task: ref }) => answer(async () => {
       const task = await taskByRef(ctx, job.companyId, ref);
       if (!task) throw refuse(404, 'task_unknown', `There is no task ${ref} you can act on.`);
-      const { reason } = await endOwnWait(ctx, job.agentId, task.id);
+      const { reason, work } = await endOwnWait(ctx, job.agentId, task.id);
+      if (work) return `Cleared the progress check for "${reason}" on #${task.number}. Go on with the task.`;
       return `The wait for "${reason}" on #${task.number} is over. Go on with the task.`;
     }),
   );
@@ -84,8 +85,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'test_harness',
     {
       description:
-        "Where the test harness of a product stands: everything a test needs before it starts, which Hornhoof builds once per architecture and keeps ready on all machines. Shows the head of the branch, the last commit that was good, each machine's word, the builds and what is wrong. " +
-        'Nobody installs or builds it by hand; a failed update leaves the last good version in use and tries again by itself.',
+        'Reports the product test environment, the head of its branch, the last usable commit, which machines have it and the state of its builds. Check the report for missing configuration or preparation.',
       inputSchema: { task: TaskRef('whose product it shows') },
     },
     async input => answer(async () => {
@@ -100,7 +100,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         "Runs any command for a task on whichever machine of the company is free now, not on yours, and returns at once with the run's number: a build, a render, a data job, a long " +
         'check, whatever the task needs done away from your own machine. The command runs in a fresh empty folder, or in a fresh clone of branch when you name one. ' +
         `The task's files you name in files are put in the folder first ($HH_IN holds them; beside a clone it is a folder of its own). Every plain file the command leaves in $HH_OUT goes on ` +
-        `the task as work-<run>-<part>-<name>, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and each part's log as work-<run>-<part>.log. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. You hear of ` +
+        `the task as work-<run>-<part>-<name>, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and each part's log as work-<run>-<part>.log. When every part has ended, however it ended, you are woken on the task. You hear of ` +
         "it with the result. parts splits it into up to " +
         `${MAX_TEST_PARTS} parts on several machines at once: the command says which part with {part} and how many with {parts}, and HH_PART and HH_PARTS hold them too. ` +
         'A machine whose processors are busy takes no new part. A part whose machine restarts runs again on another one, at most twice. A part whose machine goes offline may ' +

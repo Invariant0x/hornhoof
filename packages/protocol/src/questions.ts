@@ -71,7 +71,7 @@ export type QuestionClassificationInput = z.infer<typeof QuestionClassificationI
 const UTC = z.iso.datetime();
 const Amount = z.string().regex(/^(?:0|[1-9][0-9]{0,23})(?:\.[0-9]{1,12})?$/).refine(value => /[1-9]/.test(value), 'Use a positive decimal amount.');
 export const QuestionPurpose = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('decision'), decisionKind: z.enum(['question', 'approval', 'choice', 'stuck', 'staff', 'structure']), authorityKind: z.enum(['ceo_and_delegate', 'department_and_ceo', 'owner_and_ceo']), departmentId: z.uuid().nullable() }),
+  z.strictObject({ kind: z.literal('decision'), decisionKind: z.enum(['question', 'approval', 'choice', 'stuck', 'staff', 'structure']), authorityKind: z.enum(['ceo_and_delegate', 'department_and_ceo', 'owner_and_ceo', 'named_person']), departmentId: z.uuid().nullable() }),
   z.strictObject({ kind: z.literal('payment'), resourceId: ResourceReference, amount: Amount, currency: z.string().regex(/^[A-Z]{3}$/), payee: Plain(QUESTION_LIMITS.labelBytes) }),
   z.strictObject({ kind: z.literal('owner_login'), resourceId: ResourceReference, subscriptionId: z.uuid(), ownerPersonId: z.uuid(), provider: z.enum(PROVIDER_IDS) }),
   z.strictObject({ kind: z.literal('manual_machine_action'), resourceId: ResourceReference, machineId: z.uuid(), nodeId: z.uuid().nullable(), actionId: Identifier, until: UTC.nullable() }),

@@ -32,7 +32,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Work templates keep running work visible and assign repairs and checks to the people who own them.
 - Company templates explain who can act, when to ask a person and how to keep sign-ins private.
 - Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
-
+- Tracking work tells the employee it depends on once and brings the task holder back at the next check or when that employee can no longer do the work.
+- Routine company changes can go ahead directly, and agents can send a question to the person who can answer it.
+- The orchestrator handles reversible merge choices, and only proposed permanent deletions appear among the CEO's requests.
+- Agents ask for missing sign-ins through the vault, and one-shot workers and judges treat outside material as evidence.
+- Tasks wait for a person's answer, while running work gets a scheduled progress check.
+- Task handoffs and setup messages describe the actual checking route, release rules and staffing.
+- Agents can page through their open tasks, and the company watchdog can inspect stalled work across departments.
+- Agents can give out work and ask necessary questions without a quota per turn.
 - Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
 - The README animations show the current map, department routes, tracker, task cards and agent windows.
 - Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.

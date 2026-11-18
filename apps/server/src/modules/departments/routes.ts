@@ -252,6 +252,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const subject = asked.success ? await structureSubject(db, me.companyId, asked.data) : CARD;
     const on = await cardDecision(me, subject);
     const body = BuildBody.parse(req.body);
+    if (body.items.some(item => 'department' in item && item.remove) && (!me.isOwner || me.via || me.assistant)) {
+      throw new ApiError(403, 'forbidden', 'The CEO must approve this permanent deletion.', 'deletion_needs_ceo');
+    }
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
       await stillDecides(tx, me.companyId, me.id, subject, on, standingPrincipal);
@@ -261,7 +264,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
-          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')))
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), inArray(proposals.status, ['draft', 'pending'])))
           .returning({ brief: proposals.brief, agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
         brief ??= taken.brief;
@@ -329,7 +332,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .update(agents)
             .set({ departmentId: null, productId: null, teamId: null })
             .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNotNull(agents.removedAt)));
-          await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), eq(proposals.status, 'pending')));
+          await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), inArray(proposals.status, ['draft', 'pending'])));
           await tx.update(proposals).set({ departmentId: null }).where(inArray(proposals.departmentId, inside));
           /* Finished tasks keep their log without the department. A product's tasks are in the department that holds
              the product, so they are found through the department, not among all the tasks there are. */
@@ -526,7 +529,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
-          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')))
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), inArray(proposals.status, ['draft', 'pending'])))
           .returning({ agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
         agentId = taken.agentId;

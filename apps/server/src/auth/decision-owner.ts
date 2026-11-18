@@ -8,7 +8,7 @@ export type Candidate = { id: string; status: 'active' | 'invited' | 'disabled';
 /* A request of an agent on a task, or a card of the orchestrator. His request for a machine is its owner's, and no
    decision of this kind. A card that names departments changes only their staff, sub-units and products. */
 export type DecisionSubject =
-  | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
+  | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot; recipient?: string | null | undefined }
   | { source: 'proposal'; departments?: readonly string[] }
   /* What a merge could not prove about people, access, plans, machines or protected records: the CEO's alone. */
   | { source: 'merge' };
@@ -49,6 +49,7 @@ export function ownerDepartment(d: DecisionSubject): string | null {
 
 /* The active owner the CEO named for a decision's department, if any. */
 export function namedOwner(d: DecisionSubject, people: readonly Candidate[]): string | null {
+  if (d.source === 'request' && d.recipient) return d.recipient;
   const department = ownerDepartment(d);
   if (!department) return null;
   return people.find(p => p.status === 'active' && p.access.owns?.has(department))?.id ?? null;

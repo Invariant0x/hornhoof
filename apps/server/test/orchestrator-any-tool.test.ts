@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, people, requests, subscriptions } from '../src/db/schema.js';
+import { agents, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, mcp } from './helpers.js';
 import { company, nextOf } from './test-runs-company.js';
@@ -79,6 +79,22 @@ describe('the orchestrator takes any tool of Hornhoof when it needs it', () => {
     expect((await c.db.select().from(agents).where(eq(agents.id, c.bruno.id)))[0]!.overrides.base).toBe('Owns checkout.');
     expect((await call('use_tool', { name: 'set_employee_assignment', department: c.sales.id, arguments: { employee: c.bruno.id, assignment: 'Sells.' } })).error).toBe(true);
     expect((await call('use_tool', { name: 'briefing', department: c.dev.id })).text).toContain('https://github.com/acme/shop.git');
+  });
+
+  it('discovers and uses department task assignment and tidying as the orchestrator', async () => {
+    const c = await company();
+    const { me, call } = await orchestrator(c);
+    for (const name of ['create_task', 'tidy_task']) {
+      const found = await call('find_tool', { name });
+      expect(found.error, found.text).toBe(false);
+      expect(JSON.parse(found.text)).toMatchObject({ name, department: 'required' });
+    }
+    const made = await call('use_tool', { name: 'create_task', department: c.dev.id, arguments: { title: 'Check billing', brief: 'Look at billing.', body: 'Report the gaps.', executor: c.bruno.id, resultKind: 'coordination' } });
+    expect(made.error, made.text).toBe(false);
+    const [row] = await c.db.select().from(tasks).where(eq(tasks.title, 'Check billing'));
+    expect(row).toMatchObject({ departmentId: c.dev.id, createdByAgentId: me.id, assigneeAgentId: c.bruno.id });
+    expect((await call('use_tool', { name: 'tidy_task', department: c.dev.id, arguments: { task: row!.number, title: 'Check invoices' } })).error).toBe(false);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, row!.id)))[0]?.title).toBe('Check invoices');
   });
 
   it('calls any route of the API as the owner, one that refused it too', async () => {

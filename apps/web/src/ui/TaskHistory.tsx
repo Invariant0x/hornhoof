@@ -193,6 +193,7 @@ function currentWaits(t: Messages, task: TaskDetail, language: Language, asksYou
       ? new Date(recorded.until).toLocaleTimeString(localeOf(language), { hour: '2-digit', minute: '2-digit' })
       : null;
     const title = waitLabel(t, task, wait, now, language, asksYou && wait.event !== 'ceo');
+    if (wait.nextCheck) return { at: wait.since, title };
     const reason = recorded && (wait.kind === 'run' || wait.kind === 'work') ? recorded.reason : null;
     const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
     return { at: wait.since, title: t.tasks.waitStep(wait.who?.name ?? (setter || t.window.hornhoof), title), note: [reason, deadline].filter(Boolean).join(' · ') };

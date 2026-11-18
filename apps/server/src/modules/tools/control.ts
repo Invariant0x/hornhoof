@@ -19,6 +19,7 @@ import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { ApiKeyFields, BudgetBody, ConnectBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
+import { entryByName, secretsOf } from '../vault/store.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
@@ -34,6 +35,20 @@ const STREAMS = /^\/api\/(stream|nodes\/socket)$|\/terminal$/;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or api.`);
+const VaultEntry = z.string().trim().min(1).optional().describe('Name of the vault entry for this repository host. Save any missing token in the vault.');
+
+async function repositoryCredential(ctx: Ctx, companyId: string, url: string, entry: string | undefined) {
+  if (!entry) return {};
+  const saved = await entryByName(ctx, companyId, entry);
+  if (!saved) return 'Ask the person responsible to save the repository credential in the vault and give you its entry name.';
+  try {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || new URL(saved.site).origin !== target.origin) return 'Use a vault entry for this repository host.';
+  } catch {
+    return 'Use an HTTPS address for both the repository and its vault entry.';
+  }
+  return { token: secretsOf(ctx, saved).password };
+}
 
 export const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can make this change.";
 export const ONLY_CEO_ASKED = 'Only the CEO or the CEO delegate can make this change.';
@@ -52,7 +67,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'api',
-    "Calls any route of Hornhoof's API as the company's owner and gives its answer: whatever a person can do in Hornhoof's screens, and what they read there. " +
+    "Calls Hornhoof's request and response API as the company's owner. Live streams and terminal sockets require their own connection, and long replies may be cut. Use the protected setup surfaces for credentials. " +
       'method is GET by default; path starts with /api/, with its query; body is the JSON the route takes. Pages worth reading: /api/org, /api/people, /api/subscriptions, /api/machines, /api/task-departments, ' +
       '/api/tasks?status=all&department=<department id, or none for your own>, /api/tasks/<id>, /api/departments/<id>/backlog, /api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), ' +
       "/api/agents/<id>/events (its conversation), /api/departments/<id>/roster, /api/updates, /api/link (the public link), /api/link/names/<name> (whether a name for it is free) and /api/repo-host (the GitHub owner whose key creates the company's repositories).",
@@ -71,8 +86,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'build_structure',
-    'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
-      'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; it comes with the people of its template, each on the plan and model its role asks for, or waiting for a plan; staff false only when the CEO asked for one without people) or a change { department, note?, products?, teams?, remove? }: ' +
+    'Applies requested changes to the company structure. Get the CEO’s yes before an irreversible deletion. Use brief to describe the company when it changes. ' +
+      'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; staff defaults to true) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
       'You apply it as the company owner in any turn.',
     BuildBody.shape,
@@ -82,7 +97,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'hire',
-    'Hires employees into a department, as the CEO\'s click on a staff card does. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } } as in propose_staff: ' +
+    'Carries out the department’s staffing decisions. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } }: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
       'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes. ' +
       'You apply it as the company owner in any turn.',
@@ -96,24 +111,28 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'set_repository',
-    'Connects the git repository a department\'s agents work in: an https address, the branch (main by default), a token that may push, author { name, email } for their commits, ' +
-      'testMemoryGb, the free memory a machine needs to take a test run of it (4 by default), ' +
-      'and fullTestCommand, the command that runs its whole test suite (null takes it away): a run of exactly that sets the GitHub status hornhoof/tests on the commit it checked, for which the token needs the right to write commit statuses, and GitHub then builds images without running the tests again.',
-    { department: Id('department'), ...RepoBody.shape },
-    ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body }),
+    'Connects a department’s repository. Give its HTTPS address, main branch and commit author. Use vaultEntry by name if the repository needs a credential. Use fullTestCommand for the whole test suite. A run of that command can publish hornhoof/tests on the exact checked commit if the repository permits writing commit statuses.',
+    { department: Id('department'), ...RepoBody.omit({ token: true }).shape, vaultEntry: VaultEntry },
+    async ({ department, vaultEntry, ...body }) => {
+      const credential = await repositoryCredential(ctx, job.companyId, body.url, vaultEntry);
+      return typeof credential === 'string' ? credential : { method: 'PUT', url: `/api/departments/${department}/repository`, payload: { ...body, ...credential } };
+    },
   );
   tool(
     'add_repository',
     'Adds a git repository to a department beside its own: it comes as a new product of the department, named after the end of its address unless you give a name, ' +
       'and a task names that product to change it. The fields are those of set_repository. To connect a repository to a product the department has, use set_repository with the product\'s id.',
-    { department: Id('department'), ...RepositoryBody.shape },
-    ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories`, payload: body }),
+    { department: Id('department'), ...RepositoryBody.omit({ token: true }).shape, vaultEntry: VaultEntry },
+    async ({ department, vaultEntry, ...body }) => {
+      const credential = await repositoryCredential(ctx, job.companyId, body.url, vaultEntry);
+      return typeof credential === 'string' ? credential : { method: 'POST', url: `/api/departments/${department}/repositories`, payload: { ...body, ...credential } };
+    },
   );
   tool(
     'create_repository',
     'Creates a private repository on GitHub for a department, with a first commit holding its README, and connects it with the same key: the key the department saved, else the company\'s. ' +
       'It becomes the repository of a department or product that has none, else a new product of the department named after it. name: its name on GitHub; author { name, email } as in set_repository. ' +
-      "Without a key it answers what is missing: tell the CEO or the department's owner that, and offer to connect a repository they have with set_repository instead.",
+      'If a key is missing, ask the person responsible for that account to use protected setup or connect an existing repository with set_repository.',
     { department: Id('department'), ...NewRepositoryBody.shape },
     ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories/new`, payload: body }),
   );
@@ -163,7 +182,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'explain_request',
-    'Puts what an employee asks people into plain words for them, shown above their answer: which task and what for, what is needed from them and why, and the ways to go. In the CEO\'s language, without IT terms.',
+    'Puts what an employee asks into the recipient’s language and plain words. Say what the work is for, what they need to supply and what each choice changes.',
     { request: Id('request'), text: z.string().min(1).max(3000) },
     ({ request, text }) => ({ method: 'POST', url: `/api/requests/${request}/explained`, payload: { text } }),
   );

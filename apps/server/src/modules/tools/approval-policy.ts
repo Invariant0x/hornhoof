@@ -1,14 +1,13 @@
 import { WAIT_SOURCE_KINDS, WaitPlan } from '@hornhoof/protocol/waits';
 import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, eq, gte, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorHeaders, orchestratorJobHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agents, departments, jobs, requests } from '../../db/schema.js';
-import { countOnly } from '../../db/selections.js';
+import { agents, departments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { approvalRuleFor, departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
@@ -23,7 +22,6 @@ import { ask, type Ask } from '../tasks/engine.js';
 import { comment } from '../tasks/comments.js';
 import { mayAsk, refuse, taskSpot, type Task } from '../tasks/state.js';
 import { refusePaused } from '../tasks/pause.js';
-import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { openTurnOf } from '../tasks/turn-department.js';
 import { taskByRef } from '../tasks/lookup.js';
 import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
@@ -76,20 +74,9 @@ async function heldTask(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: number | string
   return task;
 }
 
-/* How many times this turn asked people already. */
-async function askedInTurn(db: Ctx['db'], job: ToolJob): Promise<number> {
-  const [started] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
-  const [asked] = await db
-    .select(countOnly())
-    .from(requests)
-    .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, started?.at ?? new Date(0))));
-  return Number(asked?.n ?? 0);
-}
-
-/* A question to people, kept with the person it goes to, within what one turn may ask. */
+/* A question to people, kept with the person it goes to. */
 async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'question' | 'approval' }): Promise<void> {
   if (carriesFile(q.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
-  if ((await askedInTurn(ctx.db, job)) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
   const moved = await ask(ctx, job.agentId, task.id, q);
   const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
   await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
@@ -201,7 +188,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'approval_policy',
     {
       description:
-        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: none, every, new_kinds, or within_limits with its limit. A channel with no rule of its own asks nothing for what goes out (message, price, publication), every time for a commit, and only for a new kind of spend or other.",
+        "Reads who owns the department's approvals, whether autonomousRelease is on, and the rule and limit for each channel. An unset channel needs no approval.",
       inputSchema: { department: Department },
     },
     ({ department }) => readable(() => readPolicy(ctx, job, department)),
