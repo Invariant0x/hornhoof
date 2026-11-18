@@ -25,8 +25,8 @@ pipelines:
     stages:
       - { name: "Write the script", ownerRole: "MKT-WRITE", echelon: "development", oneShot: {"fanOut": 3, "judge": "Pick the clearest short script that sticks to verified facts."} }
       - { name: "Record the voice", ownerRole: "MKT-WRITE" }
-      - { name: "Render the video", ownerRole: "MKT-SOCIAL" }
-      - { name: "Review the result", ownerRole: "MKT-EDIT", echelon: "review", brief: "Check rights to images and sound, facts, captions and playback." }
+      - { name: "Render the video", ownerRole: "MKT-SOCIAL", brief: "Where the company has Video production, it makes the video. Otherwise make each shot image-to-video from a reference frame checked against the character and style sheets, with the same wording of each look in every prompt.", handoffTo: [video_production] }
+      - { name: "Review the result", ownerRole: "MKT-EDIT", echelon: "review", brief: "Check rights to images and sound, facts, captions and playback, and that every character and the style match their sheets in every shot. A shot that differs is generated again." }
       - { name: "Publish the video", ownerRole: "MKT-SOCIAL" }
   - key: marketing-press-pool
     name: "Press outreach"

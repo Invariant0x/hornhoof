@@ -24,7 +24,7 @@ export const HORNHOOF: MessageParty = { kind: 'hornhoof', id: null, name: 'Hornh
 const DEPARTMENT_RU = {
   operations: 'Операции', development: 'Разработка', marketing: 'Маркетинг', sales: 'Продажи',
   business_development: 'Развитие бизнеса', design: 'Дизайн', support: 'Поддержка', finance: 'Финансы',
-  home_devices: 'Домашние устройства', household: 'Домашнее хозяйство',
+  home_devices: 'Домашние устройства', household: 'Домашнее хозяйство', video_production: 'Видеопроизводство',
 };
 
 export async function agentParty(ctx: PartyContext, companyId: string, agentId: string): Promise<MessageParty> {

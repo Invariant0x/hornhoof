@@ -41,7 +41,7 @@ describe('POST /api/setup staffs the template', () => {
       studio: ['pickProduct', 'reviewScreens'], corporation: ['reviewBills', 'sortRequests', 'planRelease'],
       security: ['reviewSecurity', 'triageReport'], opensource: ['sortIssues', 'writeGuide'],
       agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
-      home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
+      home: ['findDevices', 'checkDevices', 'householdBooks'], video: ['connectVideoKey', 'makeVideo'], empty: ['chooseDepartments'],
     };
     expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'] });
   });
@@ -83,6 +83,27 @@ describe('POST /api/setup staffs the template', () => {
     expect(nonTurnkey).toHaveLength(1);
     const next = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(next.departments.flatMap((d: typeof marketing) => d.employees)).toContainEqual(expect.objectContaining({ id: generalist.id, turnkey: false }));
+  });
+
+  it('shows the whole video production department, its keeper gate and its one-shot drafts, before any model is assigned', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template: 'video' });
+    expect(await plans(app)).toEqual([]);
+    const { departments: org } = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.map((d: { templateKey: string }) => d.templateKey)).toEqual(['operations', 'video_production']);
+    const video = org[1];
+    expect(video.employees.filter((e: { teamId?: string }) => !e.teamId).map((e: { roleId: string }) => e.roleId).sort()).toEqual(['VID-BOARD', 'VID-EDIT', 'VID-GEN', 'VID-HEAD', 'VID-KEEP', 'VID-PM', 'VID-QA', 'VID-SCRIPT']);
+    expect(video.employees.filter((e: { teamId?: string }) => e.teamId)).toEqual([expect.objectContaining({ roleId: 'VID-EDIT', turnkey: true, model: '', state: 'needs_subscription' })]);
+    for (const employee of video.employees) expect(employee).toMatchObject({ model: '', provider: null });
+    const main = video.pipelines.find((p: { catalogKey: string }) => p.catalogKey === 'video-production');
+    expect(main).toMatchObject({ isDefault: true });
+    expect(main.stages.map((s: { name: string; ownerRole: string; echelon?: string; oneShot?: object }) => [s.name, s.ownerRole, s.echelon ?? null, s.oneShot ?? null])).toEqual([
+      ['Take the brief', 'VID-HEAD', null, null], ['Write the script and shot list', 'VID-SCRIPT', null, null], ['Draw the storyboard', 'VID-BOARD', null, null],
+      ['Make the character and style sheets', 'VID-KEEP', null, null], ['Generate draft shots', 'VID-GEN', 'development', { fanOut: 3, judge: true }],
+      ['Check continuity', 'VID-KEEP', 'review', null], ['Edit the cut', 'VID-EDIT', null, null], ['Check quality', 'VID-QA', 'tests', null],
+      ['Make final shots', 'VID-GEN', null, null], ['Deliver the video', 'VID-HEAD', null, null],
+    ]);
+    expect(video.pipelines.map((p: { catalogKey: string }) => p.catalogKey).sort()).toEqual(['video-character-sheet', 'video-production', 'video-reshoot', 'video-short-clip']);
   });
 
   it('hires every employee of the template, with its role, skills and the model its tier asks for on the key', async () => {
@@ -177,7 +198,7 @@ describe('every ready-made company', () => {
       }
     }
     const ops = org.find((d: { templateKey: string }) => d.templateKey === 'operations');
-    const target = org.find((d: { templateKey: string }) => d.templateKey === 'development') ?? org.find((d: { templateKey: string }) => d.templateKey === 'home_devices' || d.templateKey === 'support');
+    const target = org.find((d: { templateKey: string }) => d.templateKey === 'development') ?? org.find((d: { templateKey: string }) => ['home_devices', 'support', 'video_production'].includes(d.templateKey));
     const recovery = ops.pipelines.find((p: { catalogKey: string }) => p.catalogKey === 'operations-incidents');
     expect(recovery.stages.at(-1).handoffs).toContainEqual(expect.objectContaining({ id: target.id }));
   }

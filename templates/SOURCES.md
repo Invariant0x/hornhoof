@@ -10,7 +10,7 @@ The one-shot stage declarations, judge briefs and stage-owner guidance are Hornh
 
 The first-contact offer and setup procedures in `skills/orch-interview.md` and `skills/orch-company.md` are Hornhoof's own text. Telegram's bot guide explains the BotFather and Start steps.
 
-The ready pipelines in `pipelines/` and the setup skill `skills/orch-pipelines.md` are Hornhoof's own procedure. The Marketing, Sales and Operations catalogs draw on the work of two live companies: their task handoffs, department notes and the roles that do the work. The catalog text generalizes the practice for any company.
+The ready pipelines in `pipelines/` and the setup skill `skills/orch-pipelines.md` are Hornhoof's own procedure. The Marketing, Sales and Operations catalogs draw on the work of two live companies: their task handoffs, department notes and the roles that do the work. The catalog text generalizes the practice for any company. The Video production template, its continuity gate and the same rule in Marketing are Hornhoof's own text, written from what a live company met when a character's look changed between the shots of a generated video; no outside text is copied into them.
 
 Each catalog has one department, a default pipeline key and an ordered list of pipelines. Each pipeline names when it fits and gives ordered tracker stages with role owners. A stage can add a brief and map to an echelon for one-shot calls. Stock defaults inherit their department route's one-shot calls. Alternatives declare the calls that suit their work while preserving the department's checks.
 
@@ -218,6 +218,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/mkt-seo-audit.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins | Hornhoof |
 | `skills/mkt-social-posts.md` | Written for Hornhoof | coreyhaines31/marketingskills | Hornhoof |
 | `skills/mkt-telegram-vk.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/mkt-video-continuity.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-yandex-seo.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-account-register.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -287,12 +288,28 @@ Development authors write a failing test before the change, run only affected te
 | `roles/household/HHD-SUPPLY.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/household/HHD-BILLS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/household/HHD-CAL.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-SCRIPT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-BOARD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-KEEP.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-GEN.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-EDIT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-QA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/video_production/VID-PM.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `skills/home-real-world-approval.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-network.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-smart-control.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-shopping.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-bills.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-calendar.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-model-access.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-script.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-storyboard.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-continuity-gate.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-shot-generation.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-editing.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/vid-quality-review.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `teams/development/DEV-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/design/DSN-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/marketing/MKT-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
@@ -303,6 +320,7 @@ Development authors write a failing test before the change, run only affected te
 | `teams/operations/OPS-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/home_devices/HOM-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/household/HHD-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/video_production/VID-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `echelons/development.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/operations.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/marketing.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
@@ -313,6 +331,7 @@ Development authors write a failing test before the change, run only affected te
 | `echelons/finance.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/home_devices.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `echelons/household.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/video_production.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
 | `pipelines/business_development.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
 | `pipelines/design.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
 | `pipelines/development.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
@@ -323,3 +342,4 @@ Development authors write a failing test before the change, run only affected te
 | `pipelines/operations.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/sales.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/support.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `pipelines/video_production.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |

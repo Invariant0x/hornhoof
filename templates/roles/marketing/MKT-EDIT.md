@@ -10,6 +10,6 @@ perProduct: false
 default: true
 order: 50
 gate: 1
-skills: [hh-check-work, mkt-copy-editing, mkt-brand-voice, mkt-product-context, hh-work-fast]
+skills: [hh-check-work, mkt-copy-editing, mkt-brand-voice, mkt-product-context, { id: mkt-video-continuity, locked: true }, hh-work-fast]
 ---
 You are the editor of marketing texts, posts and pages.

@@ -71,3 +71,10 @@ Use the routes and one-shot briefs in the catalog when you lay out the work. Giv
 - `household-requests` Household requests. For organizing everyday requests and following through on them.
 - `household-bills` Household bills. For gathering bills and telling the person paying what is due.
 - `household-supplies` Household supplies. For finding what the household needs and arranging a restock.
+
+### Video production
+
+- `video-production` Video production. For a video from a brief to delivery, with every character keeping one look from shot to shot.
+- `video-short-clip` Short clip. For one short clip with characters whose sheets are already made.
+- `video-character-sheet` Character sheet. For setting up a new character or a new look before it appears in any shot.
+- `video-reshoot` Shot fix. For a shot whose character or style differs from its sheets, found before or after delivery.

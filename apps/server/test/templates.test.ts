@@ -84,7 +84,7 @@ describe('templates', () => {
   });
 
   it('makes each ability self-contained instead of relying on another selected skill', () => {
-    const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
+    const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|vid|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
     for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch', 'hh-browse', 'hh-xlsx'].includes(ref)), skill.id).toEqual([]);
   });
 
@@ -380,7 +380,7 @@ describe('templates', () => {
 
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
-    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV', 'VID-SCRIPT', 'VID-KEEP', 'VID-QA'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 
@@ -448,7 +448,7 @@ describe('templates', () => {
   });
 
   it('names each role after its department code', () => {
-    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD' };
+    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD', video_production: 'VID' };
     for (const r of roles) expect(r.id.startsWith(`${codes[r.department]}-`), r.id).toBe(true);
   });
 
@@ -531,7 +531,7 @@ describe('templates', () => {
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
-    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM']);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
   });
 
   it('tells the watchdog that a machine getting ready for an update waits and has not hung, while a silent program there is still silent', () => {
@@ -741,8 +741,8 @@ describe('templates', () => {
        comes in a stream, and the middle one for everyone whose work is checked after. */
     const asked: Record<string, string[]> = {
       top: ['DEV-ARCH', 'DEV-SEC'],
-      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA'],
-      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1'],
+      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'VID-KEEP', 'VID-QA'],
+      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1', 'VID-PM'],
     };
     for (const role of templates.roles.values()) {
       const tier = Object.keys(asked).find(key => asked[key]!.includes(role.id)) ?? 'standard';
@@ -2127,5 +2127,82 @@ describe('every test together once per release', () => {
     expect(
       failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, leadTasks: `${base.leadTasks}\nRun run_tests strictly once ever.` }),
     ).toContain('no-turnkey-merge-and-release-ambiguity');
+  });
+});
+
+describe('the video production template', () => {
+  const body = (id: string) => templates.skills.get(id)!.body;
+  const on = (role: string) => templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id);
+
+  it('staffs every role of a video, with the keeper and the quality reviewer as its gates in that order', () => {
+    const roster = templates.roster('video_production');
+    expect(roster.filter(r => r.inDefault).map(r => r.id)).toEqual(['VID-HEAD', 'VID-SCRIPT', 'VID-BOARD', 'VID-KEEP', 'VID-GEN', 'VID-EDIT', 'VID-QA', 'VID-PM']);
+    expect(roster.filter(r => r.gate !== null).sort((a, b) => a.gate! - b.gate!).map(r => r.id)).toEqual(['VID-KEEP', 'VID-QA']);
+    expect(on('VID-HEAD')).toEqual(expect.arrayContaining(['vid-work-pipeline', 'vid-model-access']));
+    expect(on('VID-KEEP')).toContain('vid-continuity-gate');
+    expect(on('VID-GEN')).toContain('vid-shot-generation');
+    expect(on('VID-EDIT')).toContain('vid-editing');
+    expect(on('VID-QA')).toContain('vid-quality-review');
+    expect(templates.stagesOf('video_production').stages.map(({ stage, ability }) => ({ stage, ability }))).toEqual([
+      { stage: 'development', ability: null }, { stage: 'review', ability: 'vid-continuity-gate' }, { stage: 'tests', ability: 'vid-quality-review' },
+    ]);
+  });
+
+  it('keeps a sheet for every character and one style sheet per video, and lets nothing reach editing without the keeper', () => {
+    const gate = body('vid-continuity-gate');
+    expect(templates.skills.get('vid-continuity-gate')!.kind).toBe('gate');
+    for (const part of [/front, the side and the back/, /hair/, /head covering[^\n]*how it is tied/, /clothes/, /colours/, /accessories/, /face/, /proportions/, /one fixed wording of the look/]) expect(gate).toMatch(part);
+    expect(gate).toMatch(/\*\*The style sheet\.\*\* One for each video/);
+    expect(gate).toMatch(/Nothing goes to editing without your yes/);
+    expect(gate).toMatch(/differs in any detail[\s\S]*rejected and generated again from its reference frame with the same wording[\s\S]*never fixed in the edit and never accepted as close enough/);
+    expect(gate).toMatch(/Compare each final shot with its accepted draft/);
+  });
+
+  it('generates shots image-to-video from the keeper\'s frame with one wording, drafts before finals, and records every call', () => {
+    const gen = body('vid-shot-generation');
+    expect(gen).toMatch(/reference frame, the one the keeper approved for it, image-to-video\. Never make a shot from text alone/);
+    expect(gen).toMatch(/fixed wording[\s\S]*word for word[\s\S]*Do not reword a look/);
+    expect(gen).toMatch(/drafts first, at the lowest resolution[\s\S]*final shots only for shots the keeper accepted/i);
+    expect(gen).toMatch(/reference frame, the whole prompt, the model and its settings, the seed, the file or link of the result and its cost/);
+    expect(gen).toMatch(/Never put the key into a record/);
+  });
+
+  it('reaches the video model through an API key in the vault with a spend limit, never through a consumer subscription', () => {
+    const access = body('vid-model-access');
+    expect(access).toMatch(/aggregator API that serves several video models under one key, and the API of the model's maker/);
+    expect(access).toMatch(/consumer subscriptions of video sites and apps give no API, so agents cannot use them/);
+    expect(access).toMatch(/keeps its ordinary subscription[\s\S]*never added as an employee's plan/);
+    expect(access).toMatch(/saved in the vault[\s\S]*spend limit on the provider's own account[\s\S]*department's spend limit/);
+    expect(access).toMatch(/request_approval on the spend channel/);
+    expect(access).toMatch(/never delivers a slideshow of still images as video/);
+    for (const id of ['vid-editing', 'vid-quality-review', 'mkt-video-continuity']) expect(body(id), id).toMatch(/slideshow of still images is never|still image passed off as video/);
+  });
+
+  it('lays a video out from the brief to delivery, with the gates in order and one-shot calls for the drafts', () => {
+    const catalog = templates.catalogs.get('video_production')!;
+    const main = catalog.pipelines.find(p => p.key === catalog.default)!;
+    expect(main.stages.map(s => [s.name, s.ownerRole, s.echelon ?? null])).toEqual([
+      ['Take the brief', 'VID-HEAD', null], ['Write the script and shot list', 'VID-SCRIPT', null], ['Draw the storyboard', 'VID-BOARD', null],
+      ['Make the character and style sheets', 'VID-KEEP', null], ['Generate draft shots', 'VID-GEN', 'development'], ['Check continuity', 'VID-KEEP', 'review'],
+      ['Edit the cut', 'VID-EDIT', null], ['Check quality', 'VID-QA', 'tests'], ['Make final shots', 'VID-GEN', null], ['Deliver the video', 'VID-HEAD', null],
+    ]);
+    expect(main.stages.find(s => s.name === 'Deliver the video')!.brief).toMatch(/never a slideshow[\s\S]*Prompts, reference frames and the cost of the video are in git/);
+    for (const pipeline of catalog.pipelines) {
+      const draft = pipeline.stages.find(s => s.echelon === 'development')!;
+      expect(draft.oneShot ?? templates.stagesOf('video_production').stages.find(s => s.stage === 'development')!.oneShot, pipeline.key).toMatchObject({ fanOut: 3 });
+    }
+  });
+
+  it('gives Marketing the same continuity rule wherever it makes video, and points it to Video production', () => {
+    for (const id of ['MKT-HEAD', 'MKT-SOCIAL', 'MKT-EDIT']) expect(templates.roles.get(id)!.skills, id).toContainEqual({ id: 'mkt-video-continuity', on: true, locked: true });
+    expect(templates.teams.get('MKT-TEAM')!.skills).toContain('mkt-video-continuity');
+    const rule = body('mkt-video-continuity');
+    expect(rule).toMatch(/has a Video production department[\s\S]*the video is that department's work/);
+    expect(rule).toMatch(/front, the side and the back[\s\S]*image-to-video from a reference frame[\s\S]*never from text alone[\s\S]*differs in any detail is generated again/);
+    const videos = templates.catalogs.get('marketing')!.pipelines.find(p => p.key === 'marketing-news-videos')!;
+    const render = videos.stages.find(s => s.name === 'Render the video')!;
+    expect(render.handoffTo).toEqual(['video_production']);
+    expect(render.brief).toMatch(/Video production[\s\S]*image-to-video from a reference frame/);
+    expect(videos.stages.find(s => s.name === 'Review the result')!.brief).toMatch(/match their sheets in every shot/);
   });
 });

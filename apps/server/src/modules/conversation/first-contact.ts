@@ -23,6 +23,7 @@ const WORDS = {
   planExperiment: 'Plan an experiment', reviewResults: 'Review the results and suggest what to try next',
   findDevices: 'Find my TVs and other home devices and help clean up junk', checkDevices: 'Check my home devices and Wi-Fi',
   householdBooks: 'Set up Accounting to keep my household books and receive my bills and papers',
+  connectVideoKey: 'Connect an API key for video generation and set its spend limit', makeVideo: 'Make a short video whose characters look the same in every shot',
   setUpPipeline: 'Set up a way to handle my work',
   chooseDepartments: 'Set up departments for the work I do',
   telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
@@ -34,7 +35,7 @@ const MENUS = {
   studio: ['pickProduct', 'reviewScreens'], corporation: ['reviewBills', 'sortRequests', 'planRelease'],
   security: ['reviewSecurity', 'triageReport'], opensource: ['sortIssues', 'writeGuide'],
   agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
-  home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
+  home: ['findDevices', 'checkDevices', 'householdBooks'], video: ['connectVideoKey', 'makeVideo'], empty: ['chooseDepartments'],
 } as const satisfies Record<CompanyTemplateKey | 'empty', readonly Offer[]>;
 
 const offersFor = (kit: CompanyTemplateKey | null): Offer[] => [...MENUS[kit ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'];

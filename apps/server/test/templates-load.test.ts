@@ -15,8 +15,8 @@ const skills = [...templates.skills.values()];
 
 describe('the template loader', () => {
   it('loads every role and skill', () => {
-    expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(188);
+    expect(roles).toHaveLength(72);
+    expect(skills).toHaveLength(197);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);

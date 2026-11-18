@@ -18,10 +18,11 @@ const PIPELINES: Record<TemplateKey, string> = {
   operations: 'ops-work-pipeline', development: 'dev-work-pipeline', design: 'dsn-work-pipeline',
   marketing: 'mkt-work-pipeline', sales: 'sal-work-pipeline', business_development: 'biz-work-pipeline',
   support: 'sup-work-pipeline', finance: 'fin-work-pipeline', home_devices: 'home-work-pipeline', household: 'home-work-pipeline',
+  video_production: 'vid-work-pipeline',
 };
 const SKILL_IDS = [...new Set(Object.values(PIPELINES))];
 const bodyOf = (id: string) => templates.skills.get(id)!.body;
-const localIds = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
+const localIds = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|vid|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
 
 /* Assertions protect meaning and evidence, not one heading layout, role roster or review schedule. */
 const COMMON = [
@@ -101,6 +102,15 @@ const POINTS: Record<string, RegExp[]> = {
     /score totals[\s\S]*market-size arithmetic[\s\S]*sourced inputs[\s\S]*formulas or a script/i,
     /unsupported number is a finding/i,
     /No model result waives a check the department set/i,
+  ],
+  'vid-work-pipeline': [
+    /Nothing goes to editing without the keeper's yes/,
+    /differs from its sheets in any detail[\s\S]*generated again from its reference frame[\s\S]*never patched in the edit/i,
+    /image-to-video from the keeper's reference frame, never from text alone, with the same wording of each look in every shot's prompt/i,
+    /Drafts come first at low resolution\. Finals are made only for shots the keeper accepted/i,
+    /budget and the key's spend limit[\s\S]*only the person who set a limit raises it/i,
+    /prompt, reference frame[\s\S]*cost go into the department's git/i,
+    /slideshow of still images is never delivered as video/i,
   ],
   'dev-work-pipeline': [
     /task, employee assignment[\s\S]*rather than a fixed sequence of roles/i,
