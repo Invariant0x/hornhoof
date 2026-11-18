@@ -4,7 +4,7 @@ import type { AgentViewer } from '../../auth/agent-view.js';
 import { knowsAgentId } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
 import { tasks, taskWaits } from '../../db/schema.js';
-import type { Task, Tx } from './engine.js';
+import type { Task, Tx } from './state.js';
 import { afterSourceKey, waitOwner, type TaskWait } from './wait-state.js';
 
 /* What a reader gets of the waits on a task: who answers by when and at which level, with no source, proof or route. */

@@ -8,7 +8,7 @@ import { agents, companyPhones } from '../src/db/schema.js';
 
 it('reports readiness for a registered phone and checks again when the node comes back', async () => {
   let issues: PhoneReadinessIssue[] = ['lock'];
-  const c = await phoneCompany(() => issues);
+  const c = await phoneCompany({ readiness: () => issues });
   const made = await c.addPhone();
   expect(made.statusCode).toBe(201);
   expect(made.json().readiness).toEqual(['lock']);

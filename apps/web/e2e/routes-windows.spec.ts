@@ -71,7 +71,8 @@ for (const settings of SETTINGS) {
     await page.getByRole('button', { name: /^Development/ }).click();
     await page.getByRole('button', { name: t.dept.tasksButton, exact: true }).click();
     await expect(page).toHaveURL(/\/tasks\?department=d2$/);
-    const department = page.getByRole('heading', { level: 1, name: 'Development', exact: true });
+    /* The tracker's heading names the department and the view it shows. */
+    const department = page.getByRole('heading', { level: 1, name: `Development / ${t.tracker.views.list}`, exact: true });
     await page.locator('.tr-main').getByRole('listitem', { name: '#1 Checkout step 1', exact: true }).locator('.tr-title').click();
     const departmentTask = page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true });
     await expect(page).toHaveURL(/\/tasks\/t1$/);

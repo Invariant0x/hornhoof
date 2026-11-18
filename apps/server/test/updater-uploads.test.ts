@@ -245,6 +245,8 @@ describe('the updater and what a machine held when it stopped holding the data',
     for (const name of ['schema.json', 'dump.json', 'upload.json']) writeFileSync(join(s.control, name), '{}');
     mkdirSync(join(s.server, 'backups'));
     writeFileSync(join(s.server, 'backups', 'hornhoof-20261110T000000Z-u1.sql.gz'), 'rows');
+    /* And what a copy of the database a restart cut short left. */
+    writeFileSync(join(s.server, 'backups', 'hornhoof-20261111T000000Z-u2.sql.gz.part'), 'rows');
     writeFileSync(join(s.control, 'wipe.json'), JSON.stringify({ id }), { mode: 0o600 });
     return { s, id };
   }

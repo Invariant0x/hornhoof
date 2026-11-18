@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { knowsAgentId, maskEvent, seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
 import { tasks } from '../../db/schema.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask } from '../tasks/visibility.js';
 import type { Endpoint, StreamMessage } from './bus.js';
 import { workingCount } from './store.js';
 

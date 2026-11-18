@@ -5,9 +5,9 @@ import { agents, companies, departments, goals, tasks } from '../../db/schema.js
 import { loggable } from '../../errors.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { tellOrchestrator } from '../operations/ensure.js';
-import { CLOSED, taskSpot, type Tx } from '../tasks/engine.js';
+import { CLOSED, taskSpot, type Tx } from '../tasks/state.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
-import { nextRevision } from './edit.js';
+import { nextRevision } from './revision.js';
 import { ownersOf } from './responsible.js';
 
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */

@@ -490,6 +490,19 @@ describe('what the scanner follows', () => {
     expect(await changed(input(files, value), input({ ...files, 'apps/b/src/b.ts': 'export const b = 4;\n' }, value))).toEqual(['a:apps/a/test/other.test.ts', 'b:apps/b/test/b.test.ts']);
   });
 
+  /* The node's output capture loads the built mask by its file: it read as the whole build, and any test that reached the
+     terminal ran again for any change of the node. */
+  it('a built file leads to its own source, and a built file of no source of its name or the built folder to all it is built from', async () => {
+    const value = manifest(suites, { prepare: [{ id: 'build', profiles: ['fast'], serviceIds: [], inputs: ['apps/b/src/**'], commands: [], artifacts: [{ path: 'apps/b/dist', format: 'directory' }] }] });
+    const files: Files = { ...app, 'apps/b/src/c.ts': 'export const c = 5;\n',
+      'apps/a/test/file.test.ts': "const { b } = require('../../b/dist/b.js');\nexport { b };\n",
+      'apps/a/test/asset.test.ts': "const { b } = require('../../b/dist/b.json');\nexport { b };\n",
+      'apps/a/test/folder.test.ts': "const built = '../../b/dist';\nexport { built };\n" };
+    const other = 'apps/b/src/c.ts';
+    expect(await changed(input(files, value), input({ ...files, [other]: 'export const c = 6;\n' }, value))).toEqual(['a:apps/a/test/asset.test.ts', 'a:apps/a/test/folder.test.ts']);
+    expect(await changed(input(files, value), input({ ...files, 'apps/b/src/b.ts': 'export const b = 4;\n' }, value))).toEqual(['a:apps/a/test/asset.test.ts', 'a:apps/a/test/file.test.ts', 'a:apps/a/test/folder.test.ts', 'b:apps/b/test/b.test.ts']);
+  });
+
   it('a dotted folder of its own never takes the whole repository', async () => {
     const files = { ...app, 'apps/a/test/used.test.ts': "const root = new URL('../..', import.meta.url);\nconst here = new URL('./', import.meta.url);\nexport { root, here };\n" };
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/b/src/b.ts': 'export const b = 4;\n' }, manifest(suites)))).toEqual(['b:apps/b/test/b.test.ts']);

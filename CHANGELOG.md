@@ -9,6 +9,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- People listed one under another (in Russian on a wide screen, in every language on a phone) are as high in Chromium, Firefox and Safari: a name leaves no room under its line, and each label sits on the line of its value.
+- Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
+- Product test runs resend an unanswered environment description request after a minute or when its node reconnects, and a failed socket write stays retryable under the same request id.
+- Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
 - The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
 - Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
 - The orchestrator can use an open machine grant whoever started the turn or last wrote.
@@ -45,6 +49,18 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The task lists panel sits against the start edge below app navigation and fills the available height.
 - Tracker goal links get more room and underline on hover or keyboard focus.
 - Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
+- A part of a test run takes as many Vitest workers as the machine's free memory holds, at 2.5 GiB each, and the processors its load leaves free, so a machine short of memory no longer runs half its cores of workers into swap.
+- A test run of a release goes out in as many parts as keep each within three quarters of its time limit by what its files took before, at once on free machines and one after another on one, so a run whose tests pass no longer runs into the limit with everything in one part; a part stopped at its limit no longer makes its machine look faster to the next plan.
+- A department that keeps no repository gets no turn, and a turn whose department's work is all done or cancelled, with no result accepted into it and nothing in its branch that main lacks, closes by itself with no version and says why; a turn holding accepted work still closes only by its release.
+- The `turns` tool lists a result accepted into a turn whose parent task is in no turn, such as a member of a coordination task.
+- A program operator who answers No to a protected question, such as Claude Code's check before a removal, can report it as `denied`, as on a permission question; a `denied` report with no denial recorded says so plainly instead of refusing access to the case.
+- A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back, and while its computer is offline. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
+- Right to left, the tracker keeps the order of a goal's name and of its progress in words, of a person's task in the left panel, and of each value with its name in a narrow list, "Executor: Hana".
+- Right to left, every phrase of a goal's card, of Turns and releases with its list for later turns, and of the goal board keeps its order: a goal's name with its number, a task with its number, and each sentence with its full stop at its end.
+- A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
+- An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
+- The public link's settings the updater kept beside the newest copy that has them stay after that copy goes, since a link taken on a build that went back may be in no other place.
+- A browser or password manager no longer fills the Hornhoof email and password into Add phone or any other form with a key, token or site password: the pairing code is a field for six digits, keys and tokens are masked text, and only Log in, an invite, Setup and the password question offer the saved Hornhoof sign-in.
 
 ### Added
 
@@ -63,12 +79,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Changed
 
 - Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
+- Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
+- Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
 - The approval and release guides explain when to ask and which checks prove the exact commit.
 - Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
-- Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Turns carry the full instructions and notebook, with skills delivered as files.
 - Employees can send messages and file improvements throughout a turn.
 - People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
 - One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
@@ -84,6 +102,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
 - Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
+- A new agent program or one-shot call waits only after its machine's system killed a program for want of memory, until a report without one; Hornhoof's own memory and processor thresholds for agents are gone, and the machine's card and the agent's window say so in one line.
+- Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
+- The node's provider and terminal code no longer load each other in a ring: each provider owns how its program runs in a terminal, and people's terminal views and a session's privacy have their own modules outside the terminal host.
 
 ## [0.32.1] - 2026-11-17
 

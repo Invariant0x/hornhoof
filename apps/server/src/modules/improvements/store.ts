@@ -8,7 +8,7 @@ import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { fingerprintOfReport } from '../feedback/inbox.js';
 import { fateOf } from '../feedback/released.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 
 type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
 type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];

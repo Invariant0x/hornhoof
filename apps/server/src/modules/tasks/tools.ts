@@ -14,12 +14,15 @@ import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type Agent
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
-import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, mayAsk, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, closeTask, createTask, report, submit, updateTask, verdict } from './engine.js';
+import { comment } from './comments.js';
+import { CLOSED, listed, mayAsk, openAfter, refuse, taskSpot, type Moved, type Task } from './state.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
-import { agentSeesTask as sees, taskByRef, taskLines, type TaskDetail } from './views.js';
+import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
+import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
 import { recordRelease } from './releases.js';
 import { topDepartment } from './turn-department.js';
@@ -31,7 +34,7 @@ import { refusePaused, setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
-import { decisionPerson } from './decisions.js';
+import { decisionPerson } from './decision-people.js';
 import { TaskReference as Ref, WaitInput, lastEventOf, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
@@ -500,15 +503,18 @@ class TaskTools {
       'turns',
       {
         description: this.boss
-          ? "Each department's turns, which are its releases: its last released turn with its version and commit, and its open one, getting the next release ready, each with its department, title, main point and the results accepted into it."
-          : "Your department's turns, which are its releases: the last released one with its version and commit, and the open one, getting the next release ready, each with its title, main point and the results accepted into it.",
+          ? "Each department's turns, which are its releases: its last released turn with its version and commit, and its open one, getting the next release ready, each with its department, title, main point and the results accepted into it, and for a turn closed with no version, why."
+          : "Your department's turns, which are its releases: the last released one with its version and commit, and the open one, getting the next release ready, each with its title, main point and the results accepted into it, and for a turn closed with no version, why.",
         inputSchema: {},
       },
       async () => {
         const scope = await this.turnScope();
         const all = await turnRows(this.ctx, this.job.companyId, scope ?? undefined);
         const rows = all.filter((t, i) => t.status !== 'closed' || !all.slice(i + 1).some(later => later.status === 'closed' && later.departmentId === t.departmentId));
-        const top = rows.length ? await this.db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
+        /* Each result accepted into a turn, but a subtask that goes with its parent in the same turn: a member of a coordination
+           task is accepted alone while its parent joins no turn. */
+        const held = rows.length ? await this.db.select().from(tasks).where(inArray(tasks.turnId, rows.map(t => t.id))).orderBy(asc(tasks.number)) : [];
+        const top = held.filter(t => !held.some(parent => parent.id === t.parentId && parent.turnId === t.turnId));
         const agent = await this.me();
         const lines = await taskLines(this.ctx, top, t => sees(agent, t));
         const ids = [...new Set(rows.flatMap(t => t.departmentId ?? []))];
@@ -517,7 +523,7 @@ class TaskTools {
           const place = places.find(d => d.id === id);
           return place ? { id: place.id, name: deptName(place) } : null;
         };
-        return json(rows.map(t => ({ number: t.number, department: department(t.departmentId), title: t.title || t.goal, goal: t.goal, status: t.status, version: t.version, commit: t.commit, baseVersion: t.baseVersion, startCommit: t.startCommit, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
+        return json(rows.map(t => ({ number: t.number, department: department(t.departmentId), title: t.title || t.goal, goal: t.goal, status: t.status, version: t.version, commit: t.commit, baseVersion: t.baseVersion, startCommit: t.startCommit, ...(t.closedBecause ? { closedBecause: t.closedBecause } : {}), tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );
   }

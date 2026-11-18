@@ -4,6 +4,7 @@ import { errorText, useT } from '../i18n';
 import type { Department, Repository } from '../types';
 import { Field } from './Field';
 import { DepartmentRepoHost } from './RepoHost';
+import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 
 type Props = {
   /* The department or product whose agents clone it. */
@@ -85,18 +86,18 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
   if (editing) {
     return (
       <form className="repo-form" onSubmit={save}>
-        <Field label={t.dept.address}>{p => <input {...p} value={url} onChange={e => setUrl(e.target.value)} maxLength={500} placeholder="https://github.com/acme/shop.git" required />}</Field>
-        <Field label={t.dept.branch}>{p => <input {...p} value={branch} onChange={e => setBranch(e.target.value)} maxLength={200} />}</Field>
+        <Field label={t.dept.address}>{p => <input {...p} {...NOT_A_LOGIN} value={url} onChange={e => setUrl(e.target.value)} maxLength={500} placeholder="https://github.com/acme/shop.git" autoComplete="off" required />}</Field>
+        <Field label={t.dept.branch}>{p => <input {...p} {...NOT_A_LOGIN} value={branch} onChange={e => setBranch(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
         <Field label={t.dept.token} hint={repository?.tokenLast4 ? t.dept.tokenKeep : t.dept.tokenHint}>
-          {p => <input {...p} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
+          {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
         </Field>
-        <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} />}</Field>
-        <Field label={t.dept.authorEmail}>{p => <input {...p} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} />}</Field>
-        <Field label={t.dept.testMemory} hint={t.dept.testMemoryHint}>{p => <input {...p} type="number" min={1} max={512} step={1} value={memory} onChange={e => setMemory(e.target.value)} />}</Field>
-        <Field label={t.dept.fullCommand} hint={t.dept.fullCommandHint}>{p => <input {...p} value={fullCommand} onChange={e => setFullCommand(e.target.value)} maxLength={4000} />}</Field>
-        <div className="repo-actions">
-          <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
-          <button className="btn small ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
+        <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} {...NOT_A_LOGIN} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} autoComplete="off" />}</Field>
+        <Field label={t.dept.authorEmail}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
+        <Field label={t.dept.testMemory} hint={t.dept.testMemoryHint}>{p => <input {...p} {...NOT_A_LOGIN} type="number" min={1} max={512} step={1} value={memory} onChange={e => setMemory(e.target.value)} autoComplete="off" />}</Field>
+        <Field label={t.dept.fullCommand} hint={t.dept.fullCommandHint}>{p => <input {...p} {...NOT_A_LOGIN} value={fullCommand} onChange={e => setFullCommand(e.target.value)} maxLength={4000} autoComplete="off" />}</Field>
+        <div className="form-foot">
+          <button className="btn" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
+          <button className="btn ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
         </div>
         {alert}
       </form>
@@ -192,17 +193,17 @@ function AddRepository({ departmentId }: { departmentId: string }) {
   return (
     <form className="repo-form" aria-label={t.dept.addRepository} onSubmit={e => void add(e)}>
       <p className="muted">{t.dept.addRepositoryHow}</p>
-      <Field label={t.dept.address}>{p => <input {...p} value={url} onChange={e => setUrl(e.target.value)} maxLength={500} placeholder="https://github.com/acme/shop.git" required />}</Field>
-      <Field label={t.dept.repoName} hint={t.dept.repoNameHint}>{p => <input {...p} value={shownName} onChange={e => setName(e.target.value)} maxLength={60} />}</Field>
-      <Field label={t.dept.branch}>{p => <input {...p} value={branch} onChange={e => setBranch(e.target.value)} maxLength={200} />}</Field>
+      <Field label={t.dept.address}>{p => <input {...p} {...NOT_A_LOGIN} value={url} onChange={e => setUrl(e.target.value)} maxLength={500} placeholder="https://github.com/acme/shop.git" autoComplete="off" required />}</Field>
+      <Field label={t.dept.repoName} hint={t.dept.repoNameHint}>{p => <input {...p} {...NOT_A_LOGIN} value={shownName} onChange={e => setName(e.target.value)} maxLength={60} autoComplete="off" />}</Field>
+      <Field label={t.dept.branch}>{p => <input {...p} {...NOT_A_LOGIN} value={branch} onChange={e => setBranch(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
       <Field label={t.dept.token} hint={t.dept.tokenHint}>
-        {p => <input {...p} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
+        {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
       </Field>
-      <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} />}</Field>
-      <Field label={t.dept.authorEmail}>{p => <input {...p} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} />}</Field>
-      <div className="repo-actions">
-        <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.dept.addThis}</button>
-        <button className="btn small ghost" type="button" onClick={close}>{t.common.cancel}</button>
+      <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} {...NOT_A_LOGIN} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} autoComplete="off" />}</Field>
+      <Field label={t.dept.authorEmail}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
+      <div className="form-foot">
+        <button className="btn" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.dept.addThis}</button>
+        <button className="btn ghost" type="button" onClick={close}>{t.common.cancel}</button>
       </div>
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </form>

@@ -2,7 +2,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { agentState } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
 import { agentParty } from '../events/parties.js';
 import { cancelJob } from '../tasks/wake.js';
 import { logTurnFact } from '../tasks/turn-log.js';

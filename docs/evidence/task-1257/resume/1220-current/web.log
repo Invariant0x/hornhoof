@@ -1,9 +1,0 @@
-
- RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1220/apps/web
-
- ✓ test/AgentCard.test.tsx (65 tests) 2434ms
-
- Test Files  1 passed (1)
-      Tests  65 passed (65)
-   Start at  15:08:33
-   Duration  5.12s (tests 48%, transform 34%, environment 10%, setup 5%, import 2%)

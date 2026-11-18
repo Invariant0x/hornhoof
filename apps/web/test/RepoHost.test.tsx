@@ -67,7 +67,9 @@ describe("the company's key in Settings, under Integrations", () => {
     await user.click(within(part).getByRole('button', { name: 'Save a key' }));
     expect(within(part).getByLabelText('GitHub owner')).toHaveAccessibleDescription('The user or organization the repositories go to, as in github.com/acme.');
     expect(within(part).getByLabelText('Key')).toHaveAccessibleDescription(expect.stringContaining('Administration and Contents'));
-    expect(within(part).getByLabelText('Key')).toHaveAttribute('type', 'password');
+    /* A masked text field, so no browser fills the person's Hornhoof sign-in into it (#1320). */
+    expect(within(part).getByLabelText('Key')).toHaveAttribute('type', 'text');
+    expect(within(part).getByLabelText('Key')).toHaveClass('secret-masked');
     await user.type(within(part).getByLabelText('GitHub owner'), ' acme ');
     await user.type(within(part).getByLabelText('Key'), 'ghp_x1111');
     await user.click(within(part).getByRole('button', { name: 'Save' }));

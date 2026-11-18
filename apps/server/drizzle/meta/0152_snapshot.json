@@ -1,6 +1,6 @@
 {
-  "id": "8d55dd73-9dd5-4b69-9ef3-5c4dc337e610",
-  "prevId": "c5feaec3-0e34-4a4f-8f52-f04c8cd255b0",
+  "id": "3f23196e-abaa-4887-8b77-41674aa9d72f",
+  "prevId": "86805636-e41b-4d0b-9aa6-65cca80d72a4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -13642,6 +13642,33 @@
           "method": "btree",
           "with": {}
         },
+        "test_runs_release": {
+          "name": "test_runs_release",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(\"file_cache\"->>'release')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "test_runs_environment_request": {
           "name": "test_runs_environment_request",
           "columns": [
@@ -14514,6 +14541,12 @@
         "closed_at": {
           "name": "closed_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_because": {
+          "name": "closed_because",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }

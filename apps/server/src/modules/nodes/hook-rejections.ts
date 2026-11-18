@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { nodeOfAgent } from '../conversation/queue.js';
+import { nodeOfAgent } from '../conversation/placement.js';
 import { appendEvent } from '../events/store.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 

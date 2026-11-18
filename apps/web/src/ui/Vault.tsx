@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { Field } from './Field';
+import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
 
 /* The company's saved site sign-ins: any person adds, changes and removes one, and every employee and assistant of the
@@ -92,19 +93,19 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
   return (
     <form className="settings-form" onSubmit={e => void submit(e)} noValidate aria-label={entry ? v.changeTitle(entry.name) : v.addTitle}>
       <Field label={v.name} hint={v.nameHint} problem={problems.name}>
-        {p => <input {...p} ref={ref('name')} value={draft.name} onChange={e => set({ name: e.target.value })} maxLength={80} autoComplete="off" />}
+        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('name')} value={draft.name} onChange={e => set({ name: e.target.value })} maxLength={80} autoComplete="off" />}
       </Field>
       <Field label={v.site} hint={v.siteHint} problem={problems.site}>
-        {p => <input {...p} ref={ref('site')} value={draft.site} onChange={e => set({ site: e.target.value })} maxLength={2048} autoComplete="off" inputMode="url" spellCheck={false} />}
+        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('site')} value={draft.site} onChange={e => set({ site: e.target.value })} maxLength={2048} autoComplete="off" inputMode="url" spellCheck={false} />}
       </Field>
       <Field label={v.login} problem={problems.login}>
-        {p => <input {...p} ref={ref('login')} value={draft.login} onChange={e => set({ login: e.target.value })} maxLength={320} autoComplete="off" spellCheck={false} />}
+        {p => <input {...p} {...NOT_A_LOGIN} ref={ref('login')} value={draft.login} onChange={e => set({ login: e.target.value })} maxLength={320} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field label={v.password} hint={entry ? v.passwordKeep : v.passwordHint} problem={problems.password}>
-        {p => <input {...p} ref={ref('password')} type="password" value={draft.password} onChange={e => set({ password: e.target.value })} maxLength={1024} autoComplete="new-password" />}
+        {p => <SecretInput {...p} ref={ref('password')} value={draft.password} onChange={e => set({ password: e.target.value })} maxLength={1024} />}
       </Field>
       <Field label={v.code} hint={entry?.hasCode ? v.codeKeep : v.codeHint} problem={problems.code}>
-        {p => <input {...p} ref={ref('code')} type="password" value={draft.code} onChange={e => set({ code: e.target.value })} maxLength={2048} autoComplete="off" spellCheck={false} />}
+        {p => <SecretInput {...p} ref={ref('code')} value={draft.code} onChange={e => set({ code: e.target.value })} maxLength={2048} />}
       </Field>
       {entry?.hasCode && (
         <label className="check-card">

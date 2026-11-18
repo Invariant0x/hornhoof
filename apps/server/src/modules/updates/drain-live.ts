@@ -5,7 +5,8 @@ import { agentEvents, jobs, nodeConnections, nodes, tasks, testParts, testRuns }
 import { only } from '../../db/selections.js';
 import { jobCheckLastEnd, jobCheckQueued } from '../nodes/check-slots.js';
 import type { NodeIdentity } from '../nodes/hub.js';
-import { agentProgramState, signInTurn, SILENT_TURN_MS } from '../tasks/silent.js';
+import { agentProgramState, signInTurn } from '../tasks/program-state.js';
+import { SILENT_TURN_MS } from '../tasks/silent.js';
 import { notStep } from '../tools/steps.js';
 
 /* Same grace window checkTestTimes grants a running test part past its run timeout. */

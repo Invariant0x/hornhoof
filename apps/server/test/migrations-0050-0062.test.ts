@@ -222,17 +222,29 @@ describe('migration 0053', () => {
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Clara', 'clara@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
     const actor = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Author', 'author@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
-    const before = (await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows;
+    const people = async () => (await db.execute<{ data: Record<string, unknown> }>(sql`select to_jsonb(p) as data from people p order by id`)).rows;
+    const before = await people();
     const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
     onTestFinished(() => copy.close());
     db = drizzle(copy);
 
+    /* 0053 itself leaves every person as it was, field for field. */
+    const through0053 = await migrationsUpTo('0053_person_changes');
+    await migrate(db, { migrationsFolder: through0053 });
+    await migrate(db, { migrationsFolder: through0053 });
+    expect(await people()).toStrictEqual(before);
+
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    /* Migration 0098 gives every person an empty Telegram, 0100 makes every one a person and no assistant, and the deletion
-       of people deletes nobody. */
-    expect((await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows).toEqual(before.map(row => ({ data: { ...(row.data as object), telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null, removed_at: null } })));
+    /* The later migrations keep every field 0053 knew. Of the fields they add, 0098 gives every person an empty Telegram,
+       0100 makes every one a person and no assistant, and the deletion of people deletes nobody; the fields of later ones
+       are theirs to check. */
+    const known = Object.keys(before[0]!.data);
+    const after = await people();
+    expect(after.map(row => ({ data: Object.fromEntries(known.map(field => [field, row.data[field]])) }))).toStrictEqual(before);
+    expect(after.map(({ data }) => ({ telegram_username: data.telegram_username, telegram_user_id: data.telegram_user_id, is_agent: data.is_agent, assistant_of: data.assistant_of, removed_at: data.removed_at })))
+      .toStrictEqual(before.map(() => ({ telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null, removed_at: null })));
     await db.execute(sql`insert into person_changes (company_id, person_id, actor_id, field, before, after) values (${company}, ${person}, ${actor}, 'name', 'Clara', 'Clara Ray')`);
     await db.execute(sql`delete from people where id = ${actor}`);
     expect((await db.execute(sql`select actor_id, before, after from person_changes`)).rows).toEqual([{ actor_id: null, before: 'Clara', after: 'Clara Ray' }]);

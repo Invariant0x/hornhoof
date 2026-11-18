@@ -1,6 +1,6 @@
 import { isPersonWait, type TaskWaitFact } from '@hornhoof/protocol/waits';
 import type { Language, Messages } from '../i18n';
-import { taskWaits, type WaitTask } from '../task-board';
+import { isClosed, taskWaits, type WaitTask } from '../task-tree';
 import { doerOf, isWaitForPerson } from '../tracker';
 import type { TaskLine, TaskLogLine } from '../types';
 
@@ -19,15 +19,13 @@ export const sinceSeconds = (at: string, now = Date.now()) => Math.max(0, (now -
 
 export const momentText = (language: Language, at: string) => new Date(at).toLocaleString(localeOf(language), { dateStyle: 'short', timeStyle: 'short' });
 
-const closed = (task: Pick<TaskLine, 'status'>) => task.status === 'done' || task.status === 'cancelled';
-
 const DAY = 24 * 60 * 60 * 1000;
 
 /* By when it is due, and that it is late once the whole day is past and it is not over. A due date is a day of the
    calendar kept as its midnight in UTC, so it reads as that day wherever the person is. */
 export function dueText(t: Messages, language: Language, task: Pick<TaskLine, 'dueAt' | 'status'>, now = Date.now()): { text: string; late: boolean } | null {
   if (!task.dueAt) return null;
-  const late = !closed(task) && now >= new Date(task.dueAt).getTime() + DAY;
+  const late = !isClosed(task) && now >= new Date(task.dueAt).getTime() + DAY;
   const day = new Date(task.dueAt).toLocaleDateString(localeOf(language), { day: 'numeric', month: 'short', timeZone: 'UTC' });
   return { text: late ? t.tracker.late(day) : day, late };
 }
@@ -72,10 +70,13 @@ export function waitText(t: Messages, task: WaitTask, now = Date.now(), personId
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
+/* Whose history a line is in: a goal's or a task's. */
+export type TrackerWhole = 'goal' | 'task';
+
 /* What the tracker says of a history line of its own: a status change, an edit, or responsibility passed on, in the
-   person's language. states: the words of the statuses of a task or of a goal; names: a person's name by id. Null for any
-   other line. */
-export function trackerLine(t: Messages, e: TaskLogLine, by: string, states: Record<string, string>, names: (id: string) => string | undefined): string | null {
+   person's language. states: the words of the statuses of a task or of a goal; names: a person's name by id; whole: whose
+   history it is, for an edit of what has no words of its own. Null for any other line. */
+export function trackerLine(t: Messages, e: TaskLogLine, by: string, states: Record<string, string>, names: (id: string) => string | undefined, whole: TrackerWhole): string | null {
   const words = t.tracker.history;
   const [from, to] = [field(e.data, 'fromStatus'), field(e.data, 'toStatus')];
   if (e.kind === 'status' && typeof from === 'string' && typeof to === 'string') return words.status(by, states[from] ?? from, states[to] ?? to);
@@ -87,5 +88,12 @@ export function trackerLine(t: Messages, e: TaskLogLine, by: string, states: Rec
   }
   const fields = field(e.data, 'fields');
   if (!Array.isArray(fields)) return null;
-  return words.edited(by, words.and(...fields.map(f => (words.fields as Record<string, string>)[f] ?? String(f))));
+  return words.edited(by, words.and(...changedWords(words, fields, whole)));
+}
+
+/* What an edit changed, in words: each name by its own words, and every name without words of its own, or an edit that
+   names nothing, as the goal or the task itself, said once. Never the name the code keeps it under. */
+function changedWords(words: Messages['tracker']['history'], fields: unknown[], whole: TrackerWhole): string[] {
+  const label = (f: unknown) => (typeof f === 'string' && Object.hasOwn(words.fields, f) ? words.fields[f] : undefined) ?? words.whole[whole];
+  return fields.length ? [...new Set(fields.map(label))] : [words.whole[whole]];
 }

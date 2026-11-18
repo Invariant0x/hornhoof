@@ -1,9 +1,7 @@
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { isPersonWait } from '@hornhoof/protocol/waits';
-import { goals as trees, humanStatus, taskWaits, type Asks, type Goal as TaskTree, type HumanStatus } from './task-board';
+import { humanStatus, isClosed, taskTrees, taskWaits, type Asks, type HumanStatus, type TaskTree } from './task-tree';
 import type { Employee, GoalView, Org, Pipeline, PipelineStage, TaskLine } from './types';
-
-export type { TaskTree };
 
 /* Ways to look at the same work. */
 export const TRACKER_VIEWS = ['list', 'board', 'due', 'goals', 'graph'] as const;
@@ -12,8 +10,6 @@ export type TrackerView = (typeof TRACKER_VIEWS)[number];
 /* The state columns and the status filter use the same groups. */
 export const BOARD_STATUSES = ['notStarted', 'working', 'review', 'waits', 'failure', 'stopped', 'paused', 'done', 'cancelled'] as const;
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
-
-const closed = (task: TaskLine) => task.status === 'done' || task.status === 'cancelled';
 
 export function boardStatus(task: TaskLine, asksYou = false): BoardStatus {
   const status = humanStatus(task, asksYou);
@@ -33,19 +29,6 @@ const newestFirst = (a: TaskTree, b: TaskTree) => b.task.number - a.task.number;
 
 export type ListGroup = { status: ListStatus; trees: TaskTree[] };
 
-/* Each task's subtasks done of all of them, cancelled ones aside, counted over all the work: what a view leaves out of sight
-   still counts. */
-function counted(nodes: TaskTree[], all: TaskLine[]): TaskTree[] {
-  const counts = new Map<string, { done: number; total: number }>();
-  for (const t of all) {
-    if (!t.parentId || t.status === 'cancelled') continue;
-    const c = counts.get(t.parentId) ?? { done: 0, total: 0 };
-    counts.set(t.parentId, { done: c.done + (t.status === 'done' ? 1 : 0), total: c.total + 1 });
-  }
-  const walk = (node: TaskTree): TaskTree => ({ ...node, ...(counts.get(node.task.id) ?? { done: 0, total: 0 }), children: node.children.map(walk) });
-  return nodes.map(walk);
-}
-
 /* Failures stay visible even when the task containing them is folded. */
 function surfaced(nodes: TaskTree[], asksYou?: Asks): TaskTree[] {
   const failed = (tree: TaskTree) => boardStatus(tree.task, asksYou?.(tree.task.id)) === 'failure';
@@ -56,7 +39,7 @@ function surfaced(nodes: TaskTree[], asksYou?: Asks): TaskTree[] {
 /* The tasks at the top of those given, by their status in words, each with its subtasks under it. all: the work the
    subtasks are counted over, when those given are only part of it. */
 export function listGroups(tasks: TaskLine[], asksYou?: Asks, all: TaskLine[] = tasks): ListGroup[] {
-  const top = surfaced(counted(trees(tasks), all), asksYou);
+  const top = surfaced(taskTrees(tasks, all), asksYou);
   return LIST_ORDER.map(status => ({ status, trees: top.filter(tree => listStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(byPriority) })).filter(g => g.trees.length > 0);
 }
 
@@ -78,18 +61,18 @@ export function boardColumns(tasks: TaskLine[], pipeline: Pipeline | null, opts:
   const asks = (task: TaskLine) => asksYou?.(task.id) ?? false;
   const ends: BoardStatus[] = opts.cancelled ? ['done', 'cancelled'] : ['done'];
   if (!pipeline) {
-    const cards = surfaced(counted(trees(tasks), opts.all ?? tasks), asksYou);
+    const cards = surfaced(taskTrees(tasks, opts.all), asksYou);
     return BOARD_STATUSES.filter(s => s !== 'cancelled' || opts.cancelled)
       .map(status => ({ id: status, status, cards: cards.filter(c => boardStatus(c.task, asks(c.task)) === status).sort(newestFirst) }))
       .filter(({ status, cards }) => cards.length > 0 || !['failure', 'stopped', 'paused'].includes(status));
   }
   const under = new Map<string, TaskTree>();
   const index = (nodes: TaskTree[]) => nodes.forEach(n => { under.set(n.task.id, n); index(n.children); });
-  index(counted(trees(tasks), opts.all ?? tasks));
+  index(taskTrees(tasks, opts.all));
   const cards = tasks.filter(t => t.pipelineId === pipeline.id).map(t => under.get(t.id)!).sort(newestFirst);
   const stages = stagesInOrder(pipeline.stages);
   const known = new Set(stages.map(s => s.id));
-  const open = cards.filter(c => !closed(c.task));
+  const open = cards.filter(c => !isClosed(c.task));
   const failed = open.filter(c => boardStatus(c.task, asks(c.task)) === 'failure');
   const inStages = open.filter(c => !failed.includes(c));
   return [
@@ -132,7 +115,7 @@ export function filterTasks(tasks: TaskLine[], f: WorkFilter, goals: GoalView[],
 
 /* What a person answers for and is not over yet: their goals and their tasks. */
 export function mine(tasks: TaskLine[], goals: GoalView[], personId: string): { goals: GoalView[]; tasks: TaskLine[] } {
-  return { goals: goals.filter(g => g.status === 'active' && g.responsible.id === personId), tasks: tasks.filter(t => !closed(t) && t.responsible?.id === personId) };
+  return { goals: goals.filter(g => g.status === 'active' && g.responsible.id === personId), tasks: tasks.filter(t => !isClosed(t) && t.responsible?.id === personId) };
 }
 
 /* The tasks an employee works on at this moment. */
@@ -206,7 +189,7 @@ export function pruneGoals(forest: GraphNode[], keep: (goal: GoalView) => boolea
 
 /* A pipeline's stages as a tree under its name, each with the open tasks that stand on it. */
 export function pipelineTree(pipeline: Pipeline, tasks: TaskLine[]): GraphNode[] {
-  const on = tasks.filter(t => t.pipelineId === pipeline.id && !closed(t));
+  const on = tasks.filter(t => t.pipelineId === pipeline.id && !isClosed(t));
   const stageNode = (stage: PipelineStage): GraphNode => ({
     kind: 'stage', id: stage.id, stage, count: on.filter(t => t.pipelineStageId === stage.id).length,
     children: pipeline.stages.filter(s => s.parentId === stage.id).sort((a, b) => a.position - b.position).map(stageNode),

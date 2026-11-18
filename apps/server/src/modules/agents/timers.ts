@@ -4,7 +4,11 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
-import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
+import { insertTurn, pump, pumpWaiting } from '../conversation/queue.js';
+import { liveSubscription } from '../conversation/placement.js';
+import { onAgent } from '../conversation/line.js';
+import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { dropOldFiles } from '../tasks/attachments.js';
@@ -19,6 +23,7 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { releaseRound } from '../tasks/releases.js';
+import { closeIdleTurns } from '../tasks/turn-ends.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
@@ -113,7 +118,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 }
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
-   their agent is free, department turns their release tags close, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
+   their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
    to move. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
@@ -125,6 +130,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
+    closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).catch(failed('removing the files of old turns failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),

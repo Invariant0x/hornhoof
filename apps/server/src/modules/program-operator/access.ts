@@ -1,9 +1,9 @@
+import { ofOperations, type Agent } from './staff.js';
 import { randomUUID } from 'node:crypto';
-import { PROGRAM_OPERATOR_ROLE, ProgramKey, type OperatorQuestion, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
+import { ProgramKey, type OperatorQuestion, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { redactExact } from '@hornhoof/protocol/redaction';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
@@ -16,11 +16,6 @@ import { operatorNotification } from './notifications.js';
 import { pictureSecrets, renderPicture, storeCasePicture } from './pictures.js';
 import { requestProgramInput, requestProgramView, type ProgramAt } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
-
-/* Operations, by the role each holds in it: the head of Operations and the program operator. */
-export const OPERATIONS_ROLES: Record<string, 'head' | 'worker'> = { 'OPS-HEAD': 'head', [PROGRAM_OPERATOR_ROLE]: 'worker' };
-
-type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 type Program = ProgramAt & { job: Job; name: string };
 type ViewInput = { employee: string };
@@ -28,26 +23,6 @@ type KeysInput = { employee: string; snapshot: string; keys?: string[]; text?: s
 
 export const accessRefused = () => new ApiError(403, 'forbidden', "Only the orchestrator and Operations look at another employee's program and type into it.", 'agent_not_ready');
 const unavailable = (reason: string) => new ApiError(409, 'unavailable', `The program screen is unavailable: ${reason}.`, 'programs_unavailable');
-
-export async function inOperations(db: Db, department: typeof departments.$inferSelect | null): Promise<boolean> {
-  if (!department) return false;
-  if (department.templateKey === 'operations') return true;
-  const [parent] = department.parentId ? await db.select().from(departments).where(eq(departments.id, department.parentId)) : [];
-  return parent?.templateKey === 'operations';
-}
-
-/* Whether this employee holds a role of Operations in it, whatever it runs now. */
-export async function ofOperations(db: Db, agent: Agent, department: typeof departments.$inferSelect | null): Promise<boolean> {
-  return Boolean(agent.roleKey) && OPERATIONS_ROLES[agent.roleKey!] === agent.kind && await inOperations(db, department);
-}
-
-/* Operations on duty, the program operator before the head of Operations. */
-export async function operationsStaff(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
-  const below = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.parentId, ops)));
-  const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), or(inArray(agents.departmentId, ops), inArray(agents.departmentId, below)), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
-  return [PROGRAM_OPERATOR_ROLE, 'OPS-HEAD'].flatMap(role => staff.filter(agent => agent.roleKey === role && OPERATIONS_ROLES[role] === agent.kind));
-}
 
 /* The advertised role is no authority: the current employee, its department and its running turn are. The orchestrator answers
    for nothing standing still anywhere, and Operations keep the programs going, so they act on any employee's program. */
@@ -181,9 +156,13 @@ function actionOf({ me, caller, input, typed, reply, outcome }: Entry, secrets: 
   };
 }
 
+/* A program asks permission before it acts, and a protected question is such a request on sign-in, consent, payment or secrets:
+   both are answered allowed or denied. A work question is answered in words. */
+export const takesDecision = (kind: OperatorQuestion['kind']) => kind === 'permission' || kind === 'protected';
+
 /* An answer to a question of permission, given and taken. */
 function decided(input: KeysInput, question: OperatorQuestion | null, outcome: Outcome) {
-  return input.decision && question?.kind === 'permission' && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
+  return input.decision && question && takesDecision(question.kind) && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
 }
 
 function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { phase: 'requested' | 'finished' }): string {
@@ -200,3 +179,4 @@ export function masked(text: string, secrets: string[]): string {
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
   return question ? { ...question, tool: question.tool && masked(question.tool, secrets), text: masked(question.text, secrets), callId: question.callId && masked(question.callId, secrets) } : null;
 }
+export { operationsStaff, OPERATIONS_ROLES, ofOperations, inOperations } from './staff.js';

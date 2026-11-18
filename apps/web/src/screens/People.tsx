@@ -7,6 +7,7 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
+import { NOT_A_LOGIN } from '../ui/SecretInput';
 import { BusyLabel } from '../ui/BusyLabel';
 import { AgentIcon, DeputyIcon, EditIcon, PersonIcon } from '../ui/icons';
 import { AssistantCard, KindSwitch, looksAfter, NewAssistant } from './PeopleAssistant';
@@ -121,9 +122,9 @@ function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
       </div>
       <form onSubmit={e => void submit(e)} className="form-grid">
         <KindSwitch agent={false} switched={switched} onChange={switchTo} />
-        <Field label={t.common.name} hint={t.people.nameHint}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
-        <Field label={t.common.email} hint={t.people.emailHint}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
-        <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>
+        <Field label={t.common.name} hint={t.people.nameHint}>{p => <input {...p} {...NOT_A_LOGIN} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoComplete="off" autoFocus required />}</Field>
+        <Field label={t.common.email} hint={t.people.emailHint}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="off" required />}</Field>
+        <Field label={t.common.title}>{p => <input {...p} {...NOT_A_LOGIN} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} autoComplete="off" />}</Field>
         <AccessPicker org={org} value={access} onChange={setAccess} />
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="form-foot">

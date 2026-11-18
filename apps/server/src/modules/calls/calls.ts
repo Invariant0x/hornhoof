@@ -11,12 +11,12 @@ import { repoAt } from '../departments/repository.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
-import { CLOSED, note, published, refuse, type Task, type Wake } from '../tasks/engine.js';
+import { CLOSED, refuse, type Task, type Wake } from '../tasks/state.js';
+import { note, published } from '../tasks/events.js';
 import { keepWakes, wakeQueued } from '../tasks/outbox.js';
-import { cancelJob, wakeAll } from '../tasks/wake.js';
-import { taskFor } from '../testruns/runs.js';
+import { taskFor } from '../testruns/run-records.js';
 import type { ToolJob } from '../tools/job.js';
-import { onTask } from '../tasks/attachments.js';
+import { onTask } from '../tasks/file-policy.js';
 
 type Call = typeof oneShotCalls.$inferSelect;
 type Job = typeof jobs.$inferSelect;
@@ -323,7 +323,7 @@ async function batchEnded(ctx: Ctx, batch: string, task: Task): Promise<void> {
   if (waiting.get(batch)?.(text) === 'delivered') {
     if (outcome === 'wake saved') await wakeQueued(ctx.db, wake);
   } else if (outcome === 'wake saved') {
-    await wakeAll(ctx, [wake]);
+    await ctx.callEffects.wakeAll(ctx, [wake]);
   }
 }
 
@@ -373,7 +373,7 @@ async function stopUnstarted(ctx: Ctx, job: Job): Promise<void> {
   const [stopped] = await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued'))).returning({ id: jobs.id });
   /* One that started meanwhile is stopped as any running one is. */
   if (stopped) await callEnded(ctx, job.id);
-  else await cancelJob(ctx, job.id);
+  else await ctx.callEffects.cancelJob(ctx, job.id);
 }
 
 /* Stops every call of a batch that waits or runs. */
@@ -381,7 +381,7 @@ export async function stopCalls(ctx: Ctx, job: ToolJob, batch: string): Promise<
   const rows = await ctx.db.select({ call: oneShotCalls, job: jobs }).from(oneShotCalls).innerJoin(jobs, eq(jobs.id, oneShotCalls.jobId)).where(and(eq(oneShotCalls.batch, batch), eq(oneShotCalls.companyId, job.companyId)));
   if (!rows.length) throw refuse(404, 'task_unknown', `There is no batch ${batch}.`);
   const open = rows.filter(r => !ended(r.job));
-  for (const r of open) await (r.job.status === 'running' ? cancelJob(ctx, r.job.id) : stopUnstarted(ctx, r.job));
+  for (const r of open) await (r.job.status === 'running' ? ctx.callEffects.cancelJob(ctx, r.job.id) : stopUnstarted(ctx, r.job));
   return open.length ? `Stopping ${open.length} ${open.length === 1 ? 'call' : 'calls'} of batch ${batch}.` : `Every call of batch ${batch} has ended already.`;
 }
 

@@ -59,7 +59,7 @@ When the new build had already changed the database, the database goes back to t
 
 ## Take back a public link after an update went back
 
-A public link the company took on the new build is not in that saved copy, while its name stays taken at hornhoof.org. So the updater keeps the link's settings next to the copy, in `backups`, and its log names the file.
+A public link the company took on the new build is not in that saved copy, while its name stays taken at hornhoof.org. So the updater keeps the link's settings next to the copy, in `backups`, and its log names the file. The newest such file stays there even after its copy is deleted.
 
 To take the link back, on a build that has public links:
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { PhoneEndpoint, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
@@ -6,10 +6,14 @@ import type { MachineView, Me } from '../types';
 import { CardFrame, CardHead, EmptyBox, Facts, Part } from './Cards';
 import { Field } from './Field';
 import { PhoneScreen } from './PhoneScreen';
+import { NOT_A_LOGIN } from './SecretInput';
 
 export type PhoneView = {
   id: string; name: string; owner: { id: string; name: string }; machineId: string; lending: boolean; online: boolean;
-  state: 'owner' | 'busy' | 'available'; queued: number; stopping: boolean; endpoint?: string;
+  state: 'owner' | 'busy' | 'available' | 'offline'; queued: number; stopping: boolean; endpoint?: string;
+  /* not_connected: the computer is online, but its adb does not list the phone ready. */
+  connection?: 'ready' | 'not_connected' | 'computer_offline';
+  /* Settings that need attention, null while they are being checked. Only for a phone its computer lists. */
   readiness?: PhoneReadinessIssue[] | null;
 };
 export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
@@ -100,18 +104,26 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
   return <form ref={form} className="phone-form" onSubmit={event => void save(event)} noValidate aria-label={t.phones.add}>
     <fieldset disabled={busy !== null}>
       <legend>{t.phones.add}</legend>
-      <Field label={t.phones.name} problem={problems.name}>{props => <input {...props} name="name" autoComplete="off" maxLength={100} value={draft.name} onChange={e => edit('name', e.target.value)} />}</Field>
+      <Field label={t.phones.name} problem={problems.name}>{props => <input {...props} {...NOT_A_LOGIN} name="name" autoComplete="off" maxLength={100} value={draft.name} onChange={e => edit('name', e.target.value)} />}</Field>
       <Field label={t.phones.computer} problem={problems.machineId} hint={machines.length === 0 ? t.phones.noComputers : undefined}>{props => <select {...props} name="machineId" value={draft.machineId} onChange={e => edit('machineId', e.target.value)}><option value="">{t.phones.chooseComputer}</option>{machines.map(m => <option key={m.id} value={m.id} disabled={!m.online}>{m.hostname}</option>)}</select>}</Field>
-      <Field label={t.phones.address} problem={problems.endpoint} hint={t.phones.networkHint}>{props => <input {...props} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
-      <Field label={t.phones.pairingAddress} hint={t.phones.pairingAddressHint}>{props => <input {...props} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
-      <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} name="code" type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
-      <div className="entry-actions"><button type="button" className="btn" onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button></div>
+      <Field label={t.phones.address} problem={problems.endpoint} hint={t.phones.networkHint}>{props => <input {...props} {...NOT_A_LOGIN} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
+      <Field label={t.phones.pairingAddress} hint={t.phones.pairingAddressHint}>{props => <input {...props} {...NOT_A_LOGIN} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
+      <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} {...NOT_A_LOGIN} name="code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
       {devices && <div role="status">{devices.length === 0 ? <p>{t.phones.noDevices}</p> : devices.map(d => <p key={d.serial} className="phone-device">{t.phones.device(d.model, d.serial)}<small>{t.phones.devices[d.status]}</small></p>)}</div>}
     </fieldset>
     {failure !== null && <p role="alert" className="bad">{errorText(t, failure)}</p>}
-    <div className="form-foot"><button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>{devices && <button type="submit" className="btn" disabled={!ready || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}</div>
+    {/* Find phone, then Add phone once a phone is found, and Cancel, side by side at the end edge as in every form. */}
+    <div className="form-foot">
+      <button type="button" className="btn" disabled={busy !== null} onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button>
+      {devices && <button type="submit" className="btn" disabled={!ready || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}
+      <button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>
+    </div>
   </form>;
 }
+
+/* The states the style book draws as a status, each with its role: not connected waits for someone to act, available is
+   good, a computer offline is off. The others stay words of the state line. */
+const STATE_ROLES: Partial<Record<PhoneView['state'] | 'not_connected', string>> = { not_connected: 'not_connected', available: 'active', offline: 'offline' };
 
 function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine: boolean; machine: string; onChanged: (p: PhoneView) => void }) {
   const t = useT();
@@ -125,20 +137,35 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     catch (error) { setFailure(error); }
     finally { setBusy(false); }
   }
-  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={t.phones.states[phone.online ? phone.state : 'offline']} line={t.phones.owner(phone.owner.name)} />}>
+  const missing = phone.connection === 'not_connected';
+  /* Watching needs the phone on its computer and the computer online; noScreen names which of them is away. */
+  const noScreen = missing ? 'not_connected' : phone.online ? null : 'computer_offline';
+  const reason = useId();
+  /* A screen that closed because its phone left stays closed when the phone comes back, until its owner opens it. */
+  useEffect(() => { if (noScreen) setWatching(false); }, [noScreen]);
+  const open = watching && !noScreen;
+  const shown = phone.online ? phone.state : 'offline';
+  const words = missing ? t.phones.notConnected.state : t.phones.states[shown];
+  const role = STATE_ROLES[missing ? 'not_connected' : shown];
+  const state = role ? <span className={`status ${role}`}>{words}</span> : words;
+  /* Settings belong to a phone that is there: a missing phone or an offline computer says so above, and nothing else. */
+  const readiness = noScreen ? undefined : phone.readiness;
+  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={state} line={t.phones.owner(phone.owner.name)} />}>
     <Part title={t.phones.computer}>
       <Facts items={[[t.phones.computer, machine]]} />
+      {missing && <p>{t.phones.notConnected.hint}</p>}
       <p className="muted">{t.phones.waiting(phone.queued)}</p>
-      {phone.readiness === null && <p className="muted" role="status">{t.phones.readiness.checking}</p>}
-      {phone.readiness?.map(issue => <p key={issue} className="bad">{t.phones.readiness[issue]}</p>)}
+      {readiness === null && <p className="muted" role="status">{t.phones.readiness.checking}</p>}
+      {readiness?.map(issue => <p key={issue} className="bad">{t.phones.readiness[issue]}</p>)}
     </Part>
     {mine && <Part title={t.phones.control}>
-      <div className="entry-actions"><button type="button" className="act" aria-expanded={watching} onClick={() => setWatching(v => !v)}>{watching ? t.phones.hide : t.phones.watch}</button>
+      <div className="entry-actions"><button type="button" className="act" aria-expanded={open} disabled={noScreen !== null} aria-describedby={noScreen ? reason : undefined} onClick={() => setWatching(v => !v)}>{open ? t.phones.hide : t.phones.watch}</button>
         {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}
       </div>
+      {noScreen && <p id={reason} className="part-note">{t.phones.noScreen[noScreen]}</p>}
       {phone.stopping && <p role="status">{t.phones.stopping}</p>}
       {failure !== null && <p className="bad" role="alert">{errorText(t, failure)}</p>}
-      {watching && <PhoneScreen phone={phone} />}
+      {open && <PhoneScreen phone={phone} />}
     </Part>}
   </CardFrame>;
 }

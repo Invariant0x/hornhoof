@@ -5,6 +5,7 @@ import type { RepoHost, RepoKey } from '../types';
 import { Field } from './Field';
 import { Idents } from './Idents';
 import { IntegrationCard } from './IntegrationCard';
+import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 
 type Props = {
   /* Where this key is saved. */
@@ -62,13 +63,13 @@ function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
   if (mode === 'edit') {
     return (
       <form className="repo-form" onSubmit={save}>
-        <Field label={t.repoHost.owner} hint={t.repoHost.ownerHint}>{p => <input {...p} value={owner} onChange={e => setOwner(e.target.value)} maxLength={100} autoComplete="off" required />}</Field>
+        <Field label={t.repoHost.owner} hint={t.repoHost.ownerHint}>{p => <input {...p} {...NOT_A_LOGIN} value={owner} onChange={e => setOwner(e.target.value)} maxLength={100} autoComplete="off" required />}</Field>
         <Field label={t.repoHost.key} hint={saved ? t.repoHost.keyKeep : t.repoHost.keyHint}>
-          {p => <input {...p} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
+          {p => <SecretInput {...p} value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
         </Field>
-        <div className="repo-actions">
-          <button className="btn small" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
-          <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
+        <div className="form-foot">
+          <button className="btn" type="submit" disabled={busy || !owner.trim() || (!saved && !token.trim())}>{t.common.save}</button>
+          <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>
         </div>
         {alert}
       </form>

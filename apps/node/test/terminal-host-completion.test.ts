@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
-import { kimiProgram } from '../src/terminal/programs.js';
+import { kimiProgram } from '../src/providers/kimi-terminal.js';
 import { completionText } from '../src/terminal/program-state.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { untilOnClock } from './terminal-host-helpers.js';

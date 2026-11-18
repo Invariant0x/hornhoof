@@ -225,10 +225,12 @@ for (const { lang, skin, width } of LOOKS) {
     const key = form.getByLabel(t.subs.apiKey, { exact: true });
     await key.fill(KEY);
     /* The typed key shows while the person asks, and hides again; both the field and its button are targets of 44 px. */
+    await expect(key).toHaveCSS('-webkit-text-security', 'disc');
     await form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }).click();
-    await expect(key).toHaveAttribute('type', 'text');
+    await expect(key).toHaveCSS('-webkit-text-security', 'none');
     await form.getByRole('button', { name: t.subs.hideTypedKey.label, exact: true }).click();
-    await expect(key).toHaveAttribute('type', 'password');
+    await expect(key).toHaveCSS('-webkit-text-security', 'disc');
+    await expect(key).toHaveAttribute('type', 'text');
     expect(await tall(key)).toBeGreaterThanOrEqual(44);
     expect(await tall(form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }))).toBeGreaterThanOrEqual(44);
     await form.getByLabel(t.subs.apiName, { exact: true }).fill('Router 2');

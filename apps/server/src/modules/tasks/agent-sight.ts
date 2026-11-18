@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { agents } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { worksIn, type Reader } from '../departments/inside.js';
-import type { Task } from './engine.js';
+import type { Task } from './state.js';
 import { taskDetail, type TaskDetail } from './views.js';
 
 type Ctx = Parameters<typeof taskDetail>[0];

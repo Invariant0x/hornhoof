@@ -7,7 +7,7 @@ import type { Ctx } from '../../app.js';
 import { agentHidden, requireAgentView } from '../../auth/agent-view.js';
 import { namedAgent } from '../agents/find.js';
 import { enterPressed } from '../conversation/decision-context.js';
-import { windowNode } from '../conversation/queue.js';
+import { windowNode } from '../conversation/placement.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { mayTypeTo, programAccess } from './access.js';
 import { readKeys } from './keys.js';

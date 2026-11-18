@@ -6,8 +6,8 @@ import type { Db } from '../../db/client.js';
 import { agents, attachments, people, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { checkRoom, FILE_BYTES } from './attachments.js';
-import type { Actor, Tx } from './engine.js';
+import { checkRoom, FILE_BYTES } from './file-policy.js';
+import type { Actor, Tx } from './state.js';
 
 /* Prose is preserved in full; transport and attachment budgets bound its storage. */
 export const Text = z.string();

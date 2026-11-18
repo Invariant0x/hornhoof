@@ -8,6 +8,7 @@ import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
 import { Field } from '../ui/Field';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { LinkReady, type MadeLink } from '../ui/LinkReady';
+import { NOT_A_LOGIN, SecretInput } from '../ui/SecretInput';
 import { RestoreFromFile } from './RestoreFromFile';
 
 type Mode = 'api_key' | 'personal' | 'later';
@@ -236,7 +237,7 @@ function CompanyStep({ form, update, problems, askCode, linkDomain, onNameTyped,
         <PublicLinkChoice form={form} update={update} problems={problems} domain={linkDomain} onState={setLinkState} onNameTyped={onNameTyped} />
         {askCode && (
           <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
-            {p => <input {...p} value={form.code} onChange={e => update({ code: e.target.value })} maxLength={200} autoComplete="off" spellCheck={false} />}
+            {p => <input {...p} {...NOT_A_LOGIN} value={form.code} onChange={e => update({ code: e.target.value })} maxLength={200} autoComplete="off" spellCheck={false} />}
           </Field>
         )}
       </div>
@@ -264,7 +265,7 @@ function AccountStep({ form, update, problems, onBack, onNext }: AccountStepProp
         {p => <input {...p} value={form.title} onChange={e => update({ title: e.target.value })} maxLength={80} autoComplete="organization-title" />}
       </Field>
       <Field label={t.common.email} problem={problems.email}>
-        {p => <input {...p} type="email" value={form.email} onChange={e => update({ email: e.target.value })} autoComplete="email" />}
+        {p => <input {...p} type="email" value={form.email} onChange={e => update({ email: e.target.value })} autoComplete="username" />}
       </Field>
       <Field label={t.common.password} problem={problems.password} hint={t.common.atLeast10}>
         {p => <input {...p} type="password" value={form.password} onChange={e => update({ password: e.target.value })} autoComplete="new-password" />}
@@ -308,7 +309,7 @@ function KeyFields({ form, update, problems }: StepProps) {
         )}
       </Field>
       <Field label={t.setup.key} problem={problems.apiKey}>
-        {p => <input {...p} type="password" value={form.apiKey} onChange={e => update({ apiKey: e.target.value })} autoComplete="off" spellCheck={false} />}
+        {p => <SecretInput {...p} value={form.apiKey} onChange={e => update({ apiKey: e.target.value })} />}
       </Field>
     </>
   );

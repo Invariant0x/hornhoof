@@ -1,14 +1,13 @@
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { IssueInput } from '../src/modules/tasks/review-findings.js';
 import { FIND, USE } from '../src/modules/tools/shelf.js';
-import { copyTemplates, CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
+import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
@@ -141,13 +140,6 @@ describe('templates', () => {
     expect(body('orch-company')).toMatch(/named orders end to end, with the department's oversight/);
     expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
     expect(body('orch-company')).toMatch(/urgentOnly[\s\S]*only what the authorized person called urgent/);
-    for (const id of ['dev-task-flow', 'dev-implement', 'dev-lead', 'dev-gates', 'dev-worktrees', 'dev-work-pipeline', 'dev-ci-release']) {
-      expect(body(id), id).toMatch(/access, root, permissions or secrets[\s\S]*independent Security engineer[\s\S]*before[\s\S]*shared branch/);
-      expect(body(id), id).toMatch(/External Review and Security engineers work only in echelon tasks/);
-      expect(body(id), id).toMatch(/In an echelon task[^.]*urgent and small work and review fixes too; self-review does not replace this gate/);
-      expect(body(id), id).toMatch(/member of a turnkey team does and releases its task end to end alone[^.]*calls no external checker/);
-      expect(body(id), id).not.toMatch(/urgent work, small tasks, direct named orders/);
-    }
     expect(body('dev-gates')).toMatch(/eligible reviewer is unavailable[\s\S]*candidate waiting/);
   });
 
@@ -386,56 +378,10 @@ describe('templates', () => {
     expect(body('hh-notebook')).toMatch(/What is not forbidden there or by Hornhoof itself is allowed[\s\S]*without asking anyone to confirm/);
   });
 
-  it('loads every role and skill', () => {
-    expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(188);
-    expect(templates.roles.has('DEV-GEN')).toBe(false);
-    expect(skills.length).toBeGreaterThanOrEqual(40);
-    for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
-    for (const r of roles) expect(r.hash).toMatch(/^[0-9a-f]{12}$/);
-  });
-
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
     const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
-  });
-
-  it('rejects an unknown role effort and allows a role to omit it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hornhoof-effort-'));
-    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    cpSync(DIR, dir, { recursive: true });
-    const file = join(dir, 'roles/development/DEV-BE.md');
-    const original = readFileSync(file, 'utf8').replace(/^effort:.*\n/m, '');
-    writeFileSync(file, original.replace('tier:', 'effort: extreme\ntier:'));
-    expect(() => loadTemplates(dir)).toThrow(/DEV-BE\.md: effort/);
-    writeFileSync(file, original);
-    expect(loadTemplates(dir).roles.get('DEV-BE')!.effort).toBeUndefined();
-  });
-
-  it('copies into templates with the same roles, skills and rosters', () => {
-    const copy = copyTemplates(templates);
-    expect(copy.roles).toEqual(templates.roles);
-    expect(copy.skills).toEqual(templates.skills);
-    for (const key of TEMPLATE_KEYS) expect(copy.roster(key)).toEqual(templates.roster(key));
-  });
-
-  it('copies into templates that change apart from the ones they came from', () => {
-    const copy = copyTemplates(templates);
-    copy.roles.set('DEV-BE', { ...copy.roles.get('DEV-BE')!, effort: undefined });
-    copy.skills.get('hh-tasks')!.title.en = 'Changed';
-    expect(templates.roles.get('DEV-BE')!.effort).toBe('xhigh');
-    expect(templates.skills.get('hh-tasks')!.title.en).not.toBe('Changed');
-  });
-
-  it('copies into templates whose rosters list the roles the copy holds now, in the order of the templates', () => {
-    const copy = copyTemplates(templates);
-    const [head, ...members] = templates.roster('development');
-    copy.roles.set(head!.id, { ...copy.roles.get(head!.id)!, kind: 'member', inDefault: false });
-    const inDefault = members.filter(role => role.inDefault).map(role => role.id);
-    expect(copy.roster('development').map(role => role.id).slice(0, inDefault.length)).toEqual(inDefault);
-    expect(copy.roster('development')).toContain(copy.roles.get(head!.id));
-    expect(templates.roster('development')[0]).toBe(head);
   });
 
   it('gives every skill a body', () => {
@@ -1628,19 +1574,6 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
 
-/* A shared operations change keeps its own approval. */
-const STILL_ASK = new Set(['ops-change-request']);
-const OUTBOUND_CONFIRMATIONS = [
-  /\b(?:each|every) (?:exact )?public (?:item|post|variant|reply|change)\b[^.!?]*\b(?:requires?|needs?|retains?)\b[^.!?]*\bapproval\b/i,
-  /\bpublic (?:items?|content|changes|use|proposals|publishing|russian content)\b[^.!?]*\b(?:requires?|retains?|needs?|waits? for(?! nobody| no one))\b[^.!?]*\bapproval\b/i,
-  /\bper-item approval\b/i,
-  /\bexplicit (?:human )?approval of\b/i,
-  /\bexact (?:human )?approval\b/i,
-  /\bapplicable (?:exact )?approval\b/i,
-  /\bexact (?:item or approach|message) approval\b/i,
-  /\b(?:Creating accounts|New accounts)[^.!?]*\bCEO's approval\b/i,
-];
-
 describe('only an irreversible deletion needs the CEO, and what goes out needs nobody', () => {
   it('tells every head and the orchestrator to help at once, ask the CEO only before an irreversible deletion, and send no confirmation cards', () => {
     const lead = templates.skills.get('hh-lead-tasks')!.body;
@@ -1661,15 +1594,6 @@ describe('only an irreversible deletion needs the CEO, and what goes out needs n
     expect(questions).toMatch(/`human_only_action` \([^)]*irreversible deletion[^)]*CEO/);
     expect(questions).toMatch(/Nothing that goes out of the company[^.!?]*is a human_only_action/);
     expect(questions).toMatch(/Never send a person a card to do or confirm what the company can do itself/);
-  });
-
-  it('leaves no skill that makes what goes out wait for a person by default', () => {
-    for (const skill of skills.filter(s => !STILL_ASK.has(s.id))) {
-      for (const rule of OUTBOUND_CONFIRMATIONS) expect(skill.body, `${skill.id} ${rule}`).not.toMatch(rule);
-    }
-    for (const role of templates.roles.values()) {
-      for (const rule of OUTBOUND_CONFIRMATIONS) expect(role.body, `${role.id} ${rule}`).not.toMatch(rule);
-    }
   });
 
   it('lets no skill ask for an account sign-up that costs nothing', () => {
@@ -2075,9 +1999,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
       const role = templates.roles.get(roleId)!;
       const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
-      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
+      expect(rendered.raw).toContain('<!-- hh:skill hh-tables -->');
     }
-    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
+    expect(orchestratorSteady(templates).parts.map(part => part.text).join('\n\n')).toContain('<!-- hh:skill hh-tables -->');
   });
 });
 

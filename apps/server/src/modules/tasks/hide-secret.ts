@@ -10,7 +10,8 @@ import { runsDepartment } from '../../auth/departments.js';
 import { ApiError } from '../../errors.js';
 import { factsOf, type Facts, type Query, type TableFacts } from '../merge/facts.js';
 import { queryOf, quote } from '../merge/leader.js';
-import { loadTask, note, taskSpot, type Task } from './engine.js';
+import { loadTask, taskSpot, type Task } from './state.js';
+import { note } from './events.js';
 
 type Row = Record<string, unknown>;
 /* What a mask does to one text: the hidden value, wherever it stands, becomes HIDDEN. */

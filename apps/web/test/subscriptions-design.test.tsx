@@ -188,12 +188,15 @@ describe('the key of a new API', () => {
     const form = screen.getByRole('form', { name: 'Connect an API' });
     const key = within(form).getByLabelText('API key');
     await user.type(key, 'sk-or-v1-typed-0123456789');
-    expect(key).toHaveAttribute('type', 'password');
-    await user.click(within(form).getByRole('button', { name: 'Show the key' }));
+    /* Shown or not, a text field, so no browser fills the person's Hornhoof sign-in into it (#1320); only its mask changes. */
     expect(key).toHaveAttribute('type', 'text');
+    expect(key).toHaveClass('secret-masked');
+    await user.click(within(form).getByRole('button', { name: 'Show the key' }));
+    expect(key).not.toHaveClass('secret-masked');
     expect(key).toHaveValue('sk-or-v1-typed-0123456789');
     await user.click(within(form).getByRole('button', { name: 'Hide the key' }));
-    expect(key).toHaveAttribute('type', 'password');
+    expect(key).toHaveClass('secret-masked');
+    expect(key).toHaveAttribute('type', 'text');
     expect(key.closest('.keybox')).not.toBeNull();
     expect(decl('.keybox input', 'min-block-size')).toBe('44px');
     expect(decl('.keybox .show', 'min-block-size')).toBe('44px');

@@ -9,7 +9,7 @@ import { mapPeople, useOrg } from '../org';
 import { cutLine } from '../restarts';
 import { placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
-import { humanStatus, matchesExternalWait, taskWaits } from '../task-board';
+import { humanStatus, isClosed, matchesExternalWait, taskWaits } from '../task-tree';
 import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { TaskEdit } from './TrackerForms';
@@ -255,7 +255,7 @@ type Words = { states: Record<string, string>; names: (id: string) => string | u
    change, an edit or work passed on to someone else, say it all in their title. */
 export function LogEntry({ entry, when, words, task, onChanged }: { entry: TaskLogLine; when: (at: string) => string; words: Words; task?: TaskDetail; onChanged?: () => void }) {
   const t = useT();
-  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names);
+  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names, 'task');
   const said = own !== null || entry.kind === 'created' ? null : lineText(t, entry, when) || null;
   const evidence = evidenceOf(entry.data);
 
@@ -389,7 +389,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
   const { goals } = useGoals(!!task.goal);
   const [editing, setEditing] = useState(false);
   const when = (at: string) => momentText(language, at);
-  const closed = task.status === 'done' || task.status === 'cancelled';
+  const closed = isClosed(task);
   const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
   const people = mapPeople(org);
   const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };

@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module';
 import { Worker } from 'node:worker_threads';
 import type { ResvgRenderOptions } from '@resvg/resvg-js';
 
@@ -21,10 +20,11 @@ export const PAINTER_DEADLINE_MS = 120_000;
 
 /* resvg reads the SVG, lays out its glyphs and draws them all at once, for seconds on a dense pane: here, in a thread of its own,
    and never in the server's own, which answers everybody meanwhile. The PNG goes back as its own buffer, handed over rather than
-   copied. A string and not a file, as a file has another name under vitest, under tsx and in dist. */
+   copied. A string and not a file, as a file has another name under vitest, under tsx and in dist. The package goes by its name,
+   from where this file is, so what the worker loads can be read here. */
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
-const { Resvg } = require(workerData.resvg);
+const { Resvg } = require('node:module').createRequire(workerData.from)('@resvg/resvg-js');
 parentPort.on('message', svg => {
   let png;
   try {
@@ -40,7 +40,7 @@ parentPort.on('message', svg => {
 export function startPainterWorker(options: ResvgRenderOptions): Worker {
   return new Worker(WORKER_SOURCE, {
     eval: true,
-    workerData: { resvg: createRequire(import.meta.url).resolve('@resvg/resvg-js'), options },
+    workerData: { from: import.meta.url, options },
     /* Drawing needs neither the company's secrets nor the flags or the loaders of the process around it. */
     env: {},
     execArgv: [],

@@ -7,7 +7,8 @@ import { agentEvents, agents, jobs, programOperatorCases } from '../../db/schema
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { logTurnFact } from '../tasks/turn-log.js';
-import { authorizeOperator, operatorRefused, type OperatorCaller } from './authorization.js';
+import { takesDecision } from './access.js';
+import { authorizeOperator, type OperatorCaller } from './authorization.js';
 import { escalateCase, resolveCase, syncOperatorCases, takesLateDenial } from './cases.js';
 import { refreshCasePicture } from './pictures.js';
 import { operatorTransaction } from './transactions.js';
@@ -82,9 +83,13 @@ async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: 
 async function reportedResolution(ctx: Ctx, caller: OperatorCaller, input: ReportInput, current: Checked, seen: ProgramView | null) {
   if (input.outcome === 'cleared') refuseUnlessCleared(seen);
   const decision = input.outcome === 'denied' ? await deniedDecision(ctx, caller, current.row) : null;
-  if (input.outcome === 'denied' && !decision) throw operatorRefused();
+  if (input.outcome === 'denied' && !decision) throw noDenial();
   return { outcome: input.outcome, text: input.text, image: current.row.pictureId, actor: await agentParty(ctx, caller.companyId, current.me.id), ...(decision ? { question: decision.question } : {}) };
 }
+
+/* A denied report rests on the operator's own denial of the case's question, recorded as its Enter went in. The case is the
+   operator's: access is not what is missing. */
+const noDenial = () => new ApiError(409, 'conflict', 'No denial is recorded for this question. Answer it with program_keys and decision denied, then report denied; or report what the screen shows.', 'agent_not_ready');
 
 /* cleared closes the case and reaches no one; every other outcome escalates as before. */
 const closeAs = (ctx: Ctx, row: Case, outcome: ReportInput['outcome'], resolution: NonNullable<Case['resolution']>) =>
@@ -93,6 +98,6 @@ const closeAs = (ctx: Ctx, row: Case, outcome: ReportInput['outcome'], resolutio
 async function deniedDecision(ctx: Ctx, caller: OperatorCaller, row: typeof programOperatorCases.$inferSelect) {
   const [fact] = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.companyId, caller.companyId), eq(agentEvents.jobId, row.jobId), sql`${agentEvents.data}->'operatorAction'->>'case' = ${row.id}`, sql`${agentEvents.data}->'operatorAction'->>'operatorJobId' = ${caller.id}`, sql`${agentEvents.data}->'operatorAction'->'actor'->>'id' = ${caller.agentId}`, sql`${agentEvents.data}->'operatorAction'->>'decision' = 'denied'`, sql`${agentEvents.data}->'operatorAction'->>'result' = 'applied'`)).limit(1);
   const data = fact?.data as { operatorAction?: unknown } | undefined;
-  const parsed = z.object({ key: z.literal('Enter'), decision: z.literal('denied'), permissionDecision: z.literal(true), question: OperatorQuestion.refine(question => question.kind === 'permission') }).safeParse(data?.operatorAction);
+  const parsed = z.object({ key: z.literal('Enter'), decision: z.literal('denied'), permissionDecision: z.literal(true), question: OperatorQuestion.refine(question => takesDecision(question.kind)) }).safeParse(data?.operatorAction);
   return parsed.success && row.evidence.some(e => e.reason === 'question_waiting' && e.evidenceKey === parsed.data.question.id) ? parsed.data : null;
 }

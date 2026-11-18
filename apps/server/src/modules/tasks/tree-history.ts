@@ -2,7 +2,7 @@ import { PROGRAM_STATES } from '@hornhoof/protocol';
 import { and, asc, eq, gte, inArray, isNull, lte, or, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
-import type { Tx } from './engine.js';
+import type { Tx } from './state.js';
 import { agentEvents, jobs } from '../../db/schema.js';
 import type { FactTurn, ProgramPoint } from './tree-programs.js';
 

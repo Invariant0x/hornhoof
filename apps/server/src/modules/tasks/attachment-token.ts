@@ -5,9 +5,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { agentOnNode } from '../conversation/queue.js';
+import { agentOnNode } from '../conversation/placement.js';
 import type { NodeIdentity } from '../nodes/hub.js';
-import { jobsOf } from '../nodes/messages.js';
+import { jobsOf } from '../nodes/jobs.js';
 import { turnSign } from './turn-signs.js';
 import { jobOf, toolJobFields, type ToolJob } from '../tools/job.js';
 

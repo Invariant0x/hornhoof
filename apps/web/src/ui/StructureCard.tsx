@@ -1,6 +1,6 @@
+import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol/catalog';
 import { useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
-import { TEMPLATES } from '../templates';
 import type { DecidedBy, MaterialStampView, NewItem, Org, StructureItem, TemplateKey } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
@@ -31,7 +31,7 @@ function nameOf(t: Messages, item: StructureItem, departments: Org['departments'
 
 function defaultStructureItems(existing: TemplateKey[] | undefined): StructureItem[] {
   const taken = existing ?? [];
-  return TEMPLATES.filter(x => !taken.includes(x.key)).map(x => ({ template: x.key, checked: x.ticked, note: '' }));
+  return DEPARTMENT_TEMPLATES.filter(x => !taken.includes(x.key)).map(x => ({ template: x.key, checked: x.ticked, note: '' }));
 }
 
 function initialStructureItems(proposal: Props['proposal'], manual: Props['manual']): StructureItem[] {

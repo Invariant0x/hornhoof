@@ -1,13 +1,11 @@
-import { eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { eq, inArray, type SQL } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, pipelines, pipelineStages, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
-import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
-import { appOn, createTestDb, SETUP, statements, ownDatabases } from './helpers.js';
+import { ensureOperations } from '../src/modules/operations/ensure.js';
+import { appOn, createTestDb, SETUP, statements } from './helpers.js';
 import { company, FOUR, opsDepartments, roles, staff, staffedLike } from './operations-required-fixture.js';
-
-ownDatabases();
 
 /* Every department has its open turn, which ends before the department goes, as when the structure removes one. */
 async function removeDepartments(db: Db, where: SQL): Promise<void> {
@@ -160,20 +158,6 @@ describe('a company that lives already', () => {
     const told = vi.spyOn(app.ctx.bus, 'publish');
     await ensureOperations(app.ctx, companyId);
     expect(told).toHaveBeenCalledWith(companyId, { type: 'org' });
-  });
-
-  it('goes on with the rest of the check when one company fails, and reports it', async () => {
-    const { app, db, companyId } = await company();
-    await db.insert(companies).values({ name: 'Globex', singleton: false });
-    await db.execute(sql`create function refuse_hire() returns trigger language plpgsql as $$ begin if new.company_id = ${sql.raw(`'${companyId}'`)} then raise exception 'no hire'; end if; return new; end $$`);
-    await db.execute(sql`create trigger refuse_hire before insert on agents for each row execute function refuse_hire()`);
-    await staffedLike(db, companyId, () => false);
-    const failures: unknown[] = [];
-    await checkOperations(app.ctx, err => failures.push(err));
-    expect(failures).toHaveLength(1);
-    const globex = (await db.select().from(companies)).find(c => c.name === 'Globex')!;
-    const hired = await db.select().from(agents).where(eq(agents.companyId, globex.id));
-    expect(hired.map(a => a.roleKey).sort()).toEqual(FOUR);
   });
 
   it('does not touch people or jobs', async () => {

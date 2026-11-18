@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { identify } from '../nodes/socket.js';
 import { namedServerNodes, type ServerNode } from './drain-work.js';
-import { cancelNodeDrain, requestNodeDrain } from './node-drain.js';
+import { cancelNodeDrain, requestNodeDrain } from './drain-state.js';
 
 /* nodes: on the whole server, the ones this is about, for an updater that replaces each by itself: the ones that run another
    image, or those it replaced. Names the server does not know, as a node of another server on this computer, count for

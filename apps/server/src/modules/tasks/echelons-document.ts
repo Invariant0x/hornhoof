@@ -2,14 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DocumentCandidate } from '@hornhoof/protocol/echelons';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { filesOf } from './attachments.js';
+import { filesOf } from './file-views.js';
 import { requiredStagesComplete } from './echelons-accept.js';
 import { checkingIdentity, producerIdentity } from './echelons-assign.js';
 import { currentDocument } from './echelons-candidates.js';
 import type { Submission } from './echelons-operations.js';
-import { changeRoute, type Route } from './echelons-store.js';
+import { changeRoute, type Route } from './route-records.js';
 import { requireTaskHead } from './echelons-update.js';
-import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
+import { giver, refuse, type Moved, type Task, type Tx } from './state.js';
+import { move } from './transitions.js';
 
 /* A document goes through its stages as the words of the hand-in and the files on its task: the work of a department that
    keeps no repository, or a task made as a document where one does. Nothing here reads a commit, and Tests and Cleanup, which need one, are not among its stages. */

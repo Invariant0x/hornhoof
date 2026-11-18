@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { AgentCardView } from '../types';
 import { Ask } from './Ask';
+import { SecretInput } from './SecretInput';
 
 type Bot = NonNullable<AgentCardView['telegram']>;
 type Props = { agentId: string; telegram: Bot | null; editable: boolean; onChange(telegram: Bot | null): void };
@@ -60,7 +61,7 @@ export function TelegramBot({ agentId, telegram, editable, onChange }: Props) {
           <p className="muted">{t.agent.telegramHow}</p>
           <div className="field">
             <label htmlFor={`${id}-token`}>{t.agent.telegramToken}</label>
-            <input id={`${id}-token`} type="password" autoComplete="off" spellCheck={false} value={token} onChange={e => setToken(e.target.value)} />
+            <SecretInput id={`${id}-token`} value={token} onChange={e => setToken(e.target.value)} />
           </div>
           <button className="btn small" type="submit" disabled={busy || !token.trim()}>
             {t.agent.telegramConnect}

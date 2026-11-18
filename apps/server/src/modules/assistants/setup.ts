@@ -12,7 +12,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { afterPlanMove } from '../agents/routes.js';
-import { onAgent } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
 import { stopJobs } from '../tasks/wake.js';

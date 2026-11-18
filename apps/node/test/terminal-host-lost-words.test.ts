@@ -7,7 +7,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
-import { codexProgram } from '../src/terminal/programs.js';
+import { codexProgram } from '../src/providers/codex-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
 import { onClock, untilOnClock } from './terminal-host-helpers.js';
@@ -228,7 +228,7 @@ it('leaves the input to a person who started typing', async () => {
   const program: Program = empty();
   const c = await started({ ...program, get input() { return program.input; }, onPaste: text => { program.input = text; } });
   await untilOnClock(() => c.paste.mock.calls.length === 1);
-  c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data: 'x' });
+  c.host['ownerTyped'](c.agentKey, { type: 'term.input', termId: 'x', data: 'x' }, () => {});
   const before = c.enters();
   await vi.advanceTimersByTimeAsync(150);
   expect(c.enters()).toBe(before);
@@ -242,7 +242,7 @@ it('goes on typing lost words though the terminal of a person who opens the view
   await untilOnClock(() => c.paste.mock.calls.length === 1);
   const owner = vi.spyOn(c.host['operator']!, 'ownerInput');
   const written: string[] = [];
-  for (const data of TERMINAL_ANSWERS) c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write: (keys: string) => { written.push(keys); } } } } as never, { type: 'term.input', termId: 'x', data });
+  for (const data of TERMINAL_ANSWERS) c.host['ownerTyped'](c.agentKey, { type: 'term.input', termId: 'x', data }, keys => { written.push(keys); });
   await untilOnClock(() => c.paste.mock.calls.length > 1);
   await untilOnClock(() => written.length === TERMINAL_ANSWERS.length);
   expect(written).toEqual(TERMINAL_ANSWERS);
@@ -286,7 +286,7 @@ describe('a program a node types into without a receipt, as a plan with no opera
   it('goes on typing lost words though the terminal of a person who opens the view answers by itself', async () => {
     const c = await started(empty(), { plain: true });
     await untilOnClock(() => c.paste.mock.calls.length === 1);
-    for (const data of TERMINAL_ANSWERS) c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data });
+    for (const data of TERMINAL_ANSWERS) c.host['ownerTyped'](c.agentKey, { type: 'term.input', termId: 'x', data }, () => {});
     await untilOnClock(() => c.paste.mock.calls.length > 1);
     c.finish();
     expect(await onClock(c.running)).toMatchObject({ ok: true });
@@ -312,7 +312,7 @@ describe('a program a node types into without a receipt, as a plan with no opera
   it('leaves the input to a person who started typing', async () => {
     const c = await started(empty(), { plain: true });
     await untilOnClock(() => c.paste.mock.calls.length === 1);
-    c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data: 'x' });
+    c.host['ownerTyped'](c.agentKey, { type: 'term.input', termId: 'x', data: 'x' }, () => {});
     await vi.advanceTimersByTimeAsync(200);
     expect(c.paste).toHaveBeenCalledTimes(1);
     c.finish();

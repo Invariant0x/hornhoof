@@ -6,7 +6,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { modelForTier, tierIn } from '../agents/role-model.js';
 import { pump, pumpWaiting } from '../conversation/queue.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableForOrchestrator, placeableSubscriptions, runsTier, type Serving } from '../tools/staff.js';
 

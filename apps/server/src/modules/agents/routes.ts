@@ -1,5 +1,5 @@
 import { effortsOf, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { alias } from 'drizzle-orm/pg-core';
@@ -11,15 +11,20 @@ import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, 
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { unreadCount } from '../conversation/inbox.js';
-import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
+import { liveSubscription, programNode } from '../conversation/placement.js';
+import { planHeld, planHoldView } from '../conversation/state.js';
+import { pump, pumpWaiting } from '../conversation/queue.js';
+import { onAgent } from '../conversation/line.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
 import { endFallback, fallbackOf } from '../subscriptions/fallback.js';
-import { agentFailureState, type FailureState } from '../tasks/failures.js';
-import { CLOSED, leaveWork } from '../tasks/engine.js';
-import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
+import { agentFailureState, type FailureState } from '../tasks/failure-records.js';
+import { CLOSED } from '../tasks/state.js';
+import { leaveWork } from '../tasks/engine.js';
+import { agentProgramState } from '../tasks/program-state.js';
+import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import { modelOnPlan, tierIn } from './role-model.js';
@@ -553,13 +558,13 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
       await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
       /* Its bot goes with it, and with the bot what it still owed to chats. */
       await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id));
-      const failed = await tx
+      const ended = await tx
         .update(jobs)
-        .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
+        .set({ status: sql`case when ${jobs.status} = 'queued' then 'obsolete' else 'failed' end`, error: 'removed', finishedAt: new Date() })
         .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))))
         .returning({ id: jobs.id, kind: jobs.kind, subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine });
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'removed', before: null, after: null });
-      return failed;
+      return ended;
     });
     await stopSteps(ctx, ended.filter(job => job.kind === 'tools'));
     const left = await leaveWork(ctx, actorOf(me), agent);

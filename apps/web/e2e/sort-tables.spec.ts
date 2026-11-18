@@ -275,6 +275,9 @@ async function checkPeople(page: Page, info: TestInfo, t: Messages, tag: string,
 
   expect(await section.locator('.fit').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  /* The line of each name is as tall as the name: no browser adds room under it, so a stacked row is as high in each. */
+  const roomUnderNames = await section.locator('.pwho').evaluateAll(cells => cells.map(cell => Math.round(cell.getBoundingClientRect().height - cell.querySelector('.pname')!.getBoundingClientRect().height)));
+  expect(roomUnderNames).toEqual(PEOPLE.map(() => 0));
   const measured: Measured = { browser: browserName, look: tag, screen: 'people', sizes: await sizes(section, { head: '.people-head', table: '.fit' }) };
   await wholePage(page, info.outputPath(`people-list-${tag}-${browserName}.png`));
   if (dir === 'rtl') expect(await section.evaluate(el => getComputedStyle(el).direction)).toBe('rtl');

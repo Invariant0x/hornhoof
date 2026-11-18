@@ -250,15 +250,15 @@ async function expectSelectInsideViewport(select: Locator, viewportWidth: number
 }
 
 /* The choice of a department wraps a long name inside the page, as wide as the search box under it; on a phone both run
-   from gutter to gutter. */
+   from gutter to gutter, the tracker's 12 px from each edge of the screen. */
 async function expectChoiceInside(page: Page, phone: boolean) {
   const choice = await box(page.getByRole('combobox', { name: 'Department' }));
   const search = await box(page.getByLabel('Search tasks'));
   if (phone) {
-    /* On a phone each stays inside the screen's 16 px edges. */
+    /* On a phone each stays inside the tracker's 12 px edges. */
     for (const b of [choice, search]) {
-      expect(b.x).toBeGreaterThanOrEqual(16);
-      expect(b.x + b.width).toBeLessThanOrEqual(359);
+      expect(b.x).toBeGreaterThanOrEqual(12);
+      expect(b.x + b.width).toBeLessThanOrEqual(363);
     }
   } else {
     /* At a desk neither goes past the screen nor over the other. */
@@ -306,7 +306,12 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await page.getByRole('button', { name: new RegExp(`^${LONG_DEPT.name}`) }).click();
   await page.getByRole('button', { name: 'Department tasks' }).click();
   await page.getByRole('button', { name: 'New task', exact: true }).click();
-  await expectSelectInsideViewport(page.locator('.new-task select'), 375);
+  /* Its priority and its product. */
+  const newTaskSelects = page.locator('.new-task select');
+  await expect(newTaskSelects).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    await expectSelectInsideViewport(newTaskSelects.nth(i), 375);
+  }
 
   await page.goBack();
   await page.getByRole('button', { name: /Bruno/ }).click();

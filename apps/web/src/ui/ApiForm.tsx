@@ -6,6 +6,7 @@ import type { ModelOption, SubView } from '../types';
 import { subName } from './subscription';
 import { BusyLabel } from './BusyLabel';
 import { Field, type InputProps } from './Field';
+import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
 
 /* A company connects an API paid by the token, and changes its name, models and the place it serves: company scope
@@ -109,7 +110,7 @@ function ModelsField({ models, setModels, load }: { models: Model[]; setModels(m
         {listed && (
           <>
             <span className="hint">{t.subs.modelsFound(listed.length)}</span>
-            {listed.length > 12 && <input type="search" aria-label={t.subs.findModel} placeholder={t.subs.findModel} value={query} onChange={e => setQuery(e.target.value)} />}
+            {listed.length > 12 && <input {...NOT_A_LOGIN} type="search" autoComplete="off" aria-label={t.subs.findModel} placeholder={t.subs.findModel} value={query} onChange={e => setQuery(e.target.value)} />}
             <ul className="model-found">
               {found.map(m => (
                 <li key={m.id}>
@@ -122,7 +123,7 @@ function ModelsField({ models, setModels, load }: { models: Model[]; setModels(m
         <Field label={t.subs.modelId}>
           {p => (
             <div className="model-add">
-              <input {...p} className="mono" autoComplete="off" spellCheck={false} value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+              <input {...p} {...NOT_A_LOGIN} className="mono" autoComplete="off" spellCheck={false} value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
               <button className="btn ghost" type="button" disabled={!typed.trim()} onClick={add}>{t.subs.addModel}</button>
             </div>
           )}
@@ -138,7 +139,7 @@ function TypedKey({ field, value, change }: { field: InputProps; value: string; 
   const [shown, setShown] = useState(false);
   const button = shown ? t.subs.hideTypedKey : t.subs.showTypedKey;
   return <div className="keybox">
-    <input {...field} className="mono" type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={value} onChange={e => change(e.target.value)} />
+    <SecretInput {...field} className="mono" shown={shown} value={value} onChange={e => change(e.target.value)} />
     <button className="show" type="button" aria-label={button.label} onClick={() => setShown(!shown)}>{button.word}</button>
   </div>;
 }
@@ -159,7 +160,7 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
     </Field>
     {form.provider === 'custom_api' && (
       <Field label={t.subs.apiAddress} hint={t.subs.apiAddressHint}>
-        {p => <input {...p} type="url" inputMode="url" autoComplete="off" spellCheck={false} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} />}
+        {p => <input {...p} {...NOT_A_LOGIN} type="url" inputMode="url" autoComplete="off" spellCheck={false} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} />}
       </Field>
     )}
     {(form.provider === 'custom_api' || form.provider === 'openrouter') && (
@@ -230,7 +231,7 @@ export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubVi
     <form className="key-form form-grid api-form" aria-label={title} onSubmit={e => void save(e)}>
       {!editing && <NewFields form={fresh} set={set} />}
       <Field label={t.subs.apiName}>
-        {p => <input {...p} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
+        {p => <input {...p} {...NOT_A_LOGIN} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
       </Field>
       {(editing ? sub && isApi(sub.provider) : true) && <ModelsField models={models} setModels={setModels} load={load} />}
       <ScopeField value={scope} places={places} onChange={setScope} />

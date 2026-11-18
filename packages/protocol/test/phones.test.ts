@@ -9,6 +9,8 @@ describe('the company phone protocol', () => {
     expect(PhoneServerMessage.safeParse({ type: 'phone.baseline', requestId: id, binding, shell: 'id' }).success).toBe(false);
     expect(PhoneReply.safeParse({ type: 'phone.reply', requestId: id, status: 'ok', readiness: ['lock'] }).success).toBe(true);
     expect(PhoneReply.safeParse({ type: 'phone.reply', requestId: id, status: 'ok', readiness: ['raw adb output'] }).success).toBe(false);
+    /* Whether a phone is there is phone.list's to say: a settings reading has no connection issue. */
+    expect(PhoneReply.safeParse({ type: 'phone.reply', requestId: id, status: 'ok', readiness: ['connection'] }).success).toBe(false);
   });
   it('accepts a bounded tap and refuses extra commands at the network boundary', () => {
     expect(PhoneOperation.safeParse({ kind: 'tap', x: 120, y: 240 }).success).toBe(true);

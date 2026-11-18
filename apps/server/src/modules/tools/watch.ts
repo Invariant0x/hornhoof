@@ -9,7 +9,10 @@ import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
-import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, reconnecting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState } from '../conversation/state.js';
+import { carrierOf, enqueueTurn, reconnecting } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/turn-records.js';
+import { GONE_ALONG, STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { keepUndelivered, NOT_DELIVERED, UndeliveredRecord, undeliveredLine } from '../conversation/undelivered.js';
 import { deptName } from '../departments/templates.js';
 import type { WithEvent } from '../events/store.js';
@@ -21,7 +24,8 @@ import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { agentSeesTask } from '../tasks/views.js';
-import { authorizeAccess, OPERATIONS_ROLES } from '../program-operator/access.js';
+import { authorizeAccess } from '../program-operator/access.js';
+import { OPERATIONS_ROLES } from '../program-operator/staff.js';
 import { registerOperatorTools, registerProgramAccessTools, registerStopTool } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { nextSection } from './next-section.js';
@@ -308,7 +312,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine reported a shortage of memory, so its program does not start there now (memoryWait: its turns wait and start by themselves with the next report of the machine without one, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
           "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it. " +
           'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
