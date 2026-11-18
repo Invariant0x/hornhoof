@@ -370,7 +370,7 @@ export class NodeTestMessages {
         executionSignal = granted;
         const context = { cacheRoot: join(this.options.dir, 'cache'), deadline: Date.now() + 60_000, signal: granted, runtimes: this.options.capabilities.testRuntimes, log: () => {} };
         return this.options.describe && message.baseCommit === undefined ? { description: await this.options.describe(message.repo, message.repositoryScope, message.commitSha, context) } : describeTestEnvironment(message.repo, message.repositoryScope, message.commitSha, context, undefined, message.baseCommit);
-      }, { signal, label: 'Describe product test environment' });
+      }, { signal, label: `Describe product test environment ${message.requestId}` });
       result = { status: 'ready', ...described };
     } catch (error) { result = { status: 'error', problem: descriptionProblem(error, executionSignal) }; }
     const reply: TestsDescribed = { type: 'tests.described', requestId: message.requestId, commitSha: message.commitSha, result };

@@ -5,7 +5,7 @@ import { jobs, nodes, machines, testParts } from '../../db/schema.js';
 import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity, type NodeTransport } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
-import { CheckCoordinator, type CheckSnapshot } from './check-slots-queue.js';
+import { CheckCoordinator, type CheckClaim, type CheckSnapshot } from './check-slots-queue.js';
 
 const queues = new WeakMap<Ctx, CheckCoordinator>();
 
@@ -63,6 +63,7 @@ export function jobCheckQueued(ctx: Ctx, jobId: string, now?: number): boolean {
 export function jobCheckLastEnd(ctx: Ctx, jobId: string, now: number): number | null { return queues.get(ctx)?.lastEnd(jobId, now) ?? null; }
 export function closeCheckQueue(ctx: Ctx): void { queues.get(ctx)?.close(); queues.delete(ctx); }
 export function checkQueueSnapshot(ctx: Ctx, id: NodeIdentity): CheckSnapshot | null { return queues.get(ctx)?.inspect(keyOf(id)) ?? null; }
+export function waitingCheckClaims(ctx: Ctx, now: number): CheckClaim[] { return queues.get(ctx)?.queued(now) ?? []; }
 
 /* Assigned parts are running in the pool, but their execution clock begins only on tests.started. */
 export async function recordPartQueueWait(ctx: Ctx, id: NodeIdentity, frame: Extract<NodeMessage, { type: 'tests.waiting' }>): Promise<void> {

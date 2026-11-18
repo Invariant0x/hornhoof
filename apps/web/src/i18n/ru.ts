@@ -70,6 +70,7 @@ export const ru: Messages = {
     staffing: 'сотрудники наняты',
     improvement: 'улучшение выбрано',
     program_alarm: 'сигнал о тихой программе',
+    check_slot_wait: 'долгое ожидание места для проверки',
     program_operator: 'вызов оператора программ',
     machine: 'состояние машины изменилось',
     failure: 'программа завершилась с ошибкой',

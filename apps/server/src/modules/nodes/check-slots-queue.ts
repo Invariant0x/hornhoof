@@ -7,6 +7,7 @@ type Member = { host: string; sample: Sample; online: boolean; at: number };
 export type CheckClaim = { node: string; request: Acquire; position: number; queuedAt: number; startedAt: number | null; retired: boolean };
 export type CheckSnapshot = { capacity: number; holders: CheckClaim[]; queue: CheckClaim[] };
 type Entry = CheckClaim & { state: CheckQueueReply['state']; stop: AbortController; finish(): void };
+const copyClaim = ({ node, request, position, queuedAt, startedAt, retired }: Entry): CheckClaim => ({ node, request: { ...request }, position, queuedAt, startedAt, retired });
 /* heard: when the server last took in a frame from the node, whether or not it has handled it yet (#1060). */
 type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number; heard?(node: string): number | null };
 
@@ -94,6 +95,10 @@ export class CheckCoordinator {
     return [...this.entries.values()].some(entry => entry.request.jobId === jobId && entry.state === 'queued' && this.live(entry.node, now));
   }
 
+  queued(now: number): CheckClaim[] {
+    return [...this.entries.values()].filter(entry => entry.state === 'queued' && !entry.stop.signal.aborted && this.live(entry.node, now)).map(copyClaim);
+  }
+
   lastEnd(jobId: string, now = this.now()): number | null {
     const ended = this.queueEnds.get(jobId);
     return ended && this.live(ended.node, now) && now - ended.at < TOOL_QUIET_ALARM_MS ? ended.at : null;
@@ -104,11 +109,10 @@ export class CheckCoordinator {
     const member = this.nodes.get(node);
     if (!member) return null;
     const entries = [...this.entries.values()].filter(entry => this.nodes.get(entry.node)?.host === member.host);
-    const copy = ({ node, request, position, queuedAt, startedAt, retired }: Entry): CheckClaim => ({ node, request: { ...request }, position, queuedAt, startedAt, retired });
     return {
       capacity: this.capacity(member.host),
-      holders: entries.filter(entry => entry.state === 'running').map(copy),
-      queue: entries.filter(entry => entry.state === 'queued' && !entry.stop.signal.aborted).sort((a, b) => a.position - b.position).map(copy),
+      holders: entries.filter(entry => entry.state === 'running').map(copyClaim),
+      queue: entries.filter(entry => entry.state === 'queued' && !entry.stop.signal.aborted).sort((a, b) => a.position - b.position).map(copyClaim),
     };
   }
 

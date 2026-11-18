@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { createAgentCommandGuard } from '../src/check-runtime.js';
+import { CheckClient } from '../src/check-client.js';
+import { setCheckClient } from '../src/check-queue.js';
+import { NodeTestMessages } from '../src/test-environment.js';
+import { deferred } from '../../../test-support/deferred.mjs';
+import type { CheckQueueRequest } from '@hornhoof/protocol';
 
 function workspace() {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hh-command-context-'))), key = 'agent-550';
@@ -51,4 +56,20 @@ describe('node-owned command context', () => {
     symlinkSync(c.dir, join(c.root, 'escape'));
     expect(await c.guard(c.key, { command: ['git', 'status'], cwd: join(c.root, 'escape') })).toMatchObject({ allow: false, code: 'command_guard_unavailable' });
   });
+});
+
+it('identifies a queued environment description by its request ID', async () => {
+  const requestId = '55555555-5555-4555-8555-555555555555', asked = deferred();
+  let acquired: CheckQueueRequest | undefined;
+  const client = new CheckClient(frame => { if (frame.type === 'check.acquire') { acquired = frame; asked.resolve(); } return true; });
+  client.online(true); setCheckClient(client);
+  const messages = new NodeTestMessages({ dir: '/tmp', capabilities: { testEnvironmentVersion: 1 }, stopped: () => false,
+    testing: new Map(), unconfirmed: new Map(), run: async () => {}, emit: () => {} });
+  const pending = messages.handle({ type: 'tests.describe', requestId, commitSha: 'a'.repeat(40), repo: { url: 'https://example.test/repo', token: '' },
+    repositoryScope: { companyId: requestId, repositoryOwnerId: requestId, repoUrlHash: 'b'.repeat(64) } });
+  try { await asked.promise; expect(acquired).toMatchObject({ label: `Describe product test environment ${requestId}` }); }
+  finally {
+    client.stop(); setCheckClient(null);
+    await pending;
+  }
 });

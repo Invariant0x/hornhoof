@@ -66,6 +66,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
+- The Head of Operations and the run owner get an inbox message naming who holds a machine check slot when the wait lasts longer than the tests usually take.
 - Every new department starts with a ready pipeline, and the orchestrator can add a different one or make it the default.
 - The orchestrator offers to set up a ready pipeline for work such as video editing when someone first gets started.
 - The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.

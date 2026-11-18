@@ -10,6 +10,7 @@ export const NOTIFICATION_NAMES = {
   turn_review: 'turn review', reviewed: 'review verdicts recorded', review_passed: 'review passed', wait_ended: 'wait timer',
   timer: 'employee timer', first_turn: 'first window opened', computer_access: 'computer access changed', structure: 'company structure changed',
   staffing: 'employees hired', improvement: 'improvement selected', program_alarm: 'silent program alarm', program_operator: 'program operator call',
+  check_slot_wait: 'machine check slot wait',
   machine: 'machine state changed', failure: 'program failed', retry: 'program retry', limit: 'plan limit', turn_fact: 'turn status recorded',
   wait_requested: 'employee waiting for you', wait_unavailable: 'employee you wait for is unavailable', wait_cycle: 'waiting cycle', department_quiet: 'quiet department', wait_overdue: 'wait past its date', goal_risk: 'goal at risk', turn_summary: 'turn summary', release_tag: 'version tag without a recorded release', inbox_marked: 'letters marked by someone else', service: 'recorded service message',
 } as const;

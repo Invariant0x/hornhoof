@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks, testParts, testRuns } from '../../db/schema.js';
@@ -22,38 +22,73 @@ const partNode = (ctx: Ctx, part: Pick<Part, 'builtin' | 'builtinMachine' | 'nod
   ? part.builtinMachine ? builtinOf(part.builtinMachine) : ownBuiltin(ctx.config)
   : part.nodeId ? nodeIdentity(part.nodeId) : null;
 
-function onClaimNode(ctx: Ctx, claim: CheckClaim, part: Pick<Part, 'builtin' | 'builtinMachine' | 'nodeId'>): boolean {
+export function onClaimNode(ctx: Ctx, claim: CheckClaim, part: Pick<Part, 'builtin' | 'builtinMachine' | 'nodeId'>): boolean {
   const node = partNode(ctx, part);
   return node !== null && keyOf(node) === claim.node;
 }
 
 const canReadActor = (viewer: ToolJob, owner: string | null, task: Task | null): boolean => owner === viewer.agentId || (task !== null && onTask(viewer, task));
 
-async function runActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, partId: string): Promise<Actor | null> {
+async function runActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, partId: string, operations: boolean): Promise<Actor | null> {
   const [row] = await ctx.db.select({ part: testParts, run: testRuns, task: tasks }).from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId)).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(and(eq(testParts.companyId, viewer.companyId), eq(testRuns.companyId, viewer.companyId), eq(tasks.companyId, viewer.companyId), eq(testParts.id, partId)));
   if (!row || !onClaimNode(ctx, claim, row.part)) return null;
-  if (!canReadActor(viewer, row.run.agentId, row.task)) return null;
+  if (!operations && !canReadActor(viewer, row.run.agentId, row.task)) return null;
   return { kind: row.run.kind, run: row.run.number, task: row.task.number, part: row.part.part };
 }
 
-async function jobActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, jobId: string): Promise<Actor | null> {
+async function jobActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, jobId: string, operations: boolean): Promise<Actor | null> {
   const [row] = await ctx.db.select({ job: jobs, task: tasks, name: agents.name }).from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId)).leftJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.id, jobId)));
   if (!row || !onClaimNode(ctx, claim, { ...row.job, builtin: row.job.nodeId === null })) return null;
-  if (!canReadActor(viewer, row.job.agentId, row.task)) return null;
+  if (!operations && !canReadActor(viewer, row.job.agentId, row.task)) return null;
   return { kind: 'check', task: row.task?.number ?? null, agent: oneLine(row.name), label: oneLine(claim.request.label) };
 }
 
 /* An authenticated job takes precedence over a text label. Neither source grants the reader any extra access. */
-async function actorOf(ctx: Ctx, viewer: ToolJob, claim: CheckClaim): Promise<Actor> {
+async function actorOf(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, operations = false): Promise<Actor> {
   const hidden: Actor = { kind: 'unavailable' };
-  if (claim.request.jobId) return await jobActor(ctx, viewer, claim, claim.request.jobId) ?? hidden;
-  const partId = /^Run part (.+)$/.exec(claim.request.label)?.[1];
-  if (!partId || !z.uuid().safeParse(partId).success) return hidden;
-  return await runActor(ctx, viewer, claim, partId) ?? hidden;
+  if (claim.request.jobId) return await jobActor(ctx, viewer, claim, claim.request.jobId, operations) ?? hidden;
+  const partId = claimedPart(claim);
+  return partId ? await runActor(ctx, viewer, claim, partId, operations) ?? hidden : hidden;
+}
+
+function claimId(claim: CheckClaim, prefix: string): string | null {
+  const label = claim.request.label;
+  if (claim.request.jobId || !label.startsWith(prefix)) return null;
+  const id = z.uuid().safeParse(label.slice(prefix.length));
+  return id.success ? id.data : null;
+}
+
+export const claimedPart = (claim: CheckClaim) => claimId(claim, 'Run part ');
+
+export async function claimedDescription(ctx: Ctx, claim: CheckClaim, companyId?: string) {
+  const id = claimId(claim, 'Describe product test environment ');
+  if (!id) return null;
+  const [row] = await ctx.db.select({ run: testRuns, task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId))
+    .where(and(eq(testRuns.status, 'running'), sql`${testRuns.environmentSnapshot} is null`, sql`${testRuns.environmentRequest}->>'requestId' = ${id}`,
+      companyId ? eq(testRuns.companyId, companyId) : undefined));
+  return row?.run.environmentRequest && onClaimNode(ctx, claim, { ...row.run.environmentRequest, builtinMachine: row.run.environmentRequest.builtinMachine ?? null }) ? row : null;
+}
+
+/* Operations gets the holder's identity in a queue alarm. Other recipients retain the ordinary visibility checks. */
+export async function checkHolderName(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, operations: boolean): Promise<{ en: string; ru: string }> {
+  const actor = await actorOf(ctx, viewer, claim, operations);
+  if (actor.kind === 'check') return { en: actor.agent, ru: actor.agent };
+  if (actor.kind !== 'unavailable') return actor.kind === 'work'
+    ? { en: `Work run ${actor.run}, part ${actor.part}`, ru: `Запуск работы ${actor.run}, часть ${actor.part}` }
+    : { en: `Test run ${actor.run}, part ${actor.part}`, ru: `Запуск проверок ${actor.run}, часть ${actor.part}` };
+  const description = await claimedDescription(ctx, claim, viewer.companyId);
+  if (description && (operations || canReadActor(viewer, description.run.agentId, description.task))) {
+    return { en: `Environment description for test run ${description.run.number}`, ru: `Описание среды для запуска проверок ${description.run.number}` };
+  }
+  if (!claim.request.jobId) {
+    if (claim.request.label === 'Get a product test harness ready') return { en: 'Product test preparation', ru: 'Подготовка проверок продукта' };
+    if (claim.request.label === "Put a worktree's dependencies in place") return { en: 'Worktree dependency preparation', ru: 'Подготовка зависимостей рабочей копии' };
+  }
+  return { en: 'Check (details unavailable)', ru: 'Проверка (сведения недоступны)' };
 }
 
 async function claimView(ctx: Ctx, job: ToolJob, claim: CheckClaim): Promise<Claim> {

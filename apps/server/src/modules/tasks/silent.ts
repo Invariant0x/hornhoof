@@ -16,6 +16,7 @@ import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
 import { builtinOf, nodeIdentity } from '../nodes/hub.js';
 import { stopStaleProgram } from './stale-program.js';
 import { lastTurnSigns } from './turn-signs.js';
+import { checkWaitWords, slowCheckWaits } from '../nodes/check-slot-alerts.js';
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
 /* Every program shows a spinner or a clock while it thinks, so its screen moves. A thinking program whose screen stood still
    this long waits on something the screen shows, most often a window of its own that asks what no hook tells of. */
@@ -352,6 +353,27 @@ function quietCase(s: SilentTurn, now: Date): string {
   return doubled ? `${s.job.id}:quiet:${doubled}` : s.job.id;
 }
 
+async function sendCheckWaitAlarms(ctx: Ctx, now: Date): Promise<void> {
+  for await (const { claim, target, holders } of slowCheckWaits(ctx, +now)) {
+    const { run, task } = target;
+    const head = (await operationsStaff(ctx, run.companyId)).find(agent => agent.kind === 'head');
+    const [owner] = await ctx.db.select().from(agents).where(and(eq(agents.id, run.agentId), eq(agents.companyId, run.companyId), isNull(agents.removedAt)));
+    const recipients = [head, head?.id === owner?.id ? undefined : owner];
+    for (const agent of recipients) {
+      if (!agent || !(await liveSubscription(ctx, agent.id))) continue;
+      const caseId = `check-slot:${claim.request.id}:${agent.id}`;
+      if (await alreadyAlerted(ctx, caseId)) continue;
+      const detail = await checkWaitWords(ctx, target, holders, agent, agent.id === head?.id);
+      const spot = { id: task.id, number: task.number };
+      await enqueueTurn(ctx, {
+        companyId: run.companyId, agentId: agent.id, prompt: detail.en, createdBy: null,
+        message: { personId: null, text: detail.en, task: spot, silentJob: caseId, notification: { source: 'check_slot_wait', tasks: [spot], detail } },
+      });
+      alertedSet(ctx).add(caseId);
+    }
+  }
+}
+
 export function checkSilentTurns(ctx: Ctx, now = new Date()): Promise<void> {
   const prev = silentChains.get(ctx) ?? Promise.resolve();
   const run = prev.then(async () => {
@@ -359,6 +381,7 @@ export function checkSilentTurns(ctx: Ctx, now = new Date()): Promise<void> {
     const silent = await findSilentTurns(ctx, now);
     const unavailable = new Set([...busy, ...silent.map(s => s.agent.id)]);
     for (const s of silent) await sendTurnAlarm(ctx, s, unavailable, now);
+    await sendCheckWaitAlarms(ctx, now);
   });
   const settled = run.catch(() => undefined);
   silentChains.set(ctx, settled);
