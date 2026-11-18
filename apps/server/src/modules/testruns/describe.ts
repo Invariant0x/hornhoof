@@ -11,9 +11,9 @@ import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
 import { refuse } from '../tasks/state.js';
-import { TEST_MEMORY_GB } from '../departments/repository.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
+import { needOf, partBudget } from './part-budget.js';
 import { partSpread, planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
@@ -88,9 +88,9 @@ function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestE
 async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<string[]> {
   const sources = planningSources.get(ctx);
   if (!sources) return [];
-  const target = await sources.target(run), need = (run.memoryGb ?? target?.department?.repoTestMemoryGb ?? TEST_MEMORY_GB) * 1024 ** 3;
-  const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need);
-  const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
+  const target = await sources.target(run), need = partBudget(needOf(run, target?.department ?? null));
+  const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need.memoryBytes);
+  const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need, ctx.config.runsPerHost) !== null);
   return [...new Set(free.map(computerKey))].sort();
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {

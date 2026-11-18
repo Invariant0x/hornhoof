@@ -81,6 +81,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
 - Connected machines give the orchestrator standing computer access, including machines that already hold their owner's key.
+- A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
 - The orchestrator can give computer access to all company employees or to a named employee for a task and withdraw it when the work ends.
 - Each machine owner can close or reopen computer access from the machine card.
 - The update clears old computer access requests and removes the approval cards.

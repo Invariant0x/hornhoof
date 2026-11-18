@@ -6,6 +6,8 @@ import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from 
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator, checkPartId, type CheckSnapshot } from './check-slots-queue.js';
+import { hostResources, reportedHost } from './host-load.js';
+import { bookedBudget, bookedParts } from '../testruns/part-budget.js';
 
 const queues = new WeakMap<Ctx, CheckCoordinator>();
 
@@ -24,8 +26,9 @@ export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity): Promise<void> 
   if (!load) return;
   const fallback = await machineKey(ctx, id);
   if (!fallback) return;
-  const host = load.host && /^[0-9a-f]{64}$/.test(load.host) ? `host:${load.host}` : fallback;
-  queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at });
+  const host = reportedHost(load) ?? fallback;
+  const { cpus, load: hostLoad } = hostResources(load);
+  queueFor(ctx).node(keyOf(id), host, { cpus, load: hostLoad, at: load.at });
 }
 
 /* The computer a node's checks share their slots on. A built-in node of another machine than this server's is on that
@@ -49,16 +52,17 @@ export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: C
   }
   await checkQueueLoad(ctx, id);
   const partId = checkPartId(actor);
-  if (partId && !await hasRunningPart(ctx, id, partId)) {
+  const cores = partId ? await runningPartCores(ctx, id, partId) : 0;
+  if (cores === undefined) {
     ctx.hub.send(id, { type: 'check.state', id: request.id, state: 'ended', position: 0 });
     return;
   }
-  queue.acquire(key, actor);
+  queue.acquire(key, actor, cores);
 }
 
-async function hasRunningPart(ctx: Ctx, id: NodeIdentity, partId: string): Promise<boolean> {
-  const [part] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), partsOfNode(ctx, id)));
-  return Boolean(part);
+async function runningPartCores(ctx: Ctx, id: NodeIdentity, partId: string): Promise<number | undefined> {
+  const [part] = await bookedParts(ctx.db, and(eq(testParts.id, partId), partsOfNode(ctx, id)));
+  return part && bookedBudget(part).cores;
 }
 
 export function endPartChecks(ctx: Ctx, id: NodeIdentity, partId: string, cleaned: boolean): void {

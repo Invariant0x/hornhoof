@@ -52,7 +52,7 @@ async function fixture() {
     return transport;
   };
   const transport = connect();
-  const place: Place = { key: 'builtin', node: BUILTIN, name: 'Fixture', machineId: null, nodeId: null, builtin: true, builtinMachine: null, lent: true, busy: false, running: 0, load, access: null, works: true };
+  const place: Place = { key: 'builtin', node: BUILTIN, name: 'Fixture', machineId: null, nodeId: null, builtin: true, builtinMachine: null, lent: true, busy: false, usage: { parts: 0, cores: 0, memoryBytes: 0 }, load, access: null, works: true };
   const pump = () => pumpDescriptions(ctx, async () => [place], async () => ({ department: department!, repo: { url: department!.repoUrl!, branch: 'main', token: '' } }), async () => {});
   const stored = async () => (await db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]!;
   return { ctx, db, transport, connect, pump, stored, runtimes };

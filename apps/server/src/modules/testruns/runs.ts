@@ -1,6 +1,6 @@
 import { taskFor, logName, type Run } from './run-records.js';
 import { WORK_MEMORY_GB, TEST_MINUTES, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
-import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
+import type { KeptFiles, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
 import { and, asc, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, sql, type SQL } from 'drizzle-orm';
@@ -12,7 +12,7 @@ import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { agents, attachments, companies, departments, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type ExternalWait, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
-import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
+import { repoAt } from '../departments/repository.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { builtinMachine, liveNode, shownMachine } from '../nodes/nodes.js';
 import { onTask } from '../tasks/file-policy.js';
@@ -23,7 +23,8 @@ import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js
 import { keepWakes } from '../tasks/outbox.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
-import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
+import { computerKey, computerState, NO_PARTS, Reservations, type ComputerPlace, type RunRoom } from './capacity.js';
+import { bookedBudget, bookedParts, needOf, partBudget, type PartNeed } from './part-budget.js';
 import { markPromise, markRun, TESTS_CONTEXT, type RunMark } from './github-status.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
@@ -46,7 +47,6 @@ const TAIL_LINES = 20;
 const TAIL_CHARS = 2000;
 /* Failed parts whose ends the result shows; the others' are in their logs. */
 const SHOWN_FAILURES = 3;
-const GIB = 1024 ** 3;
 
 const isId = (s: string) => z.uuid().safeParse(s).success;
 
@@ -166,7 +166,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
 /* builtinMachine: the machine of a built-in node's place. */
-export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; builtinMachine: string | null; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
+export type Place = RunRoom & { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; builtinMachine: string | null; lent: boolean; access: Access | null; works: boolean };
 export type BrowserHeldPlace = { name: string; lent: boolean; access: Access | null; works: boolean; browserError: string };
 
 /* The key of a built-in node's place: the server's own by its bare word, as it always went, another machine's by its id. */
@@ -229,7 +229,7 @@ const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
 
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
-  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, builtinMachine: testParts.builtinMachine, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
+  const running = (await bookedParts(db)).map(part => ({ ...partPlace(ctx, part), ...bookedBudget(part) }));
   const { rows, live } = await companyComputers(ctx, companyId);
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
@@ -247,8 +247,8 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       builtinMachine: null,
       lent: machine.lendsTests,
       busy: false,
-      running: 0,
-      load: forRun(hub.loadOf(nodeIdentity(node)), ready.map(id => hub.loadOf(nodeIdentity(id)))),
+      usage: NO_PARTS,
+      load: forRun(hub.loadOf(nodeIdentity(node)), together(ready.map(id => hub.loadOf(nodeIdentity(id))))),
       access: await accessOf(db, owner),
       works: hub.runsWork(nodeIdentity(node)),
     });
@@ -261,11 +261,11 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     const { machineId, lent } = await builtinHost(ctx, companyId, machine);
     places.push({
       key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId, nodeId: null, builtin: true, builtinMachine: machine,
-      lent, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
+      lent, busy: false, usage: NO_PARTS, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
     });
   }
   const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), ...builtins.map(machine => hub.loadOf(builtinOf(machine)))];
-  return places.map(p => ({ ...p, ...computerState(p, running, reports, ctx.config.runsPerHost) }));
+  return places.map(p => ({ ...p, ...computerState(p, running, reports) }));
 }
 
 export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<BrowserHeldPlace[]> {
@@ -326,17 +326,16 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
 
 /* A part laid out for a computer by its pace waits for that computer while it is online and may take it; after a loss, or when it
    cannot, any computer does. Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
-function placeFor(open: Place[], run: Run, part: Part, department: Department | null, reserved: Reservations): Place | null {
-  const need = needOf(run, department) * GIB;
-  const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: mayTake(p, run, department), busy: reserved.busy(p), load: p.load }));
+function placeFor(open: Place[], part: Part, eligible: (place: Place) => boolean, reserved: Reservations, need: PartNeed, limit: number | undefined): Place | null {
+  const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: eligible(p), ...reserved.room(p) }));
   const laidOut = part.lost.length ? [] : spots.filter(s => s.computer === part.environmentSelection?.computer && s.lent && s.reaches);
-  if (laidOut.length) { const own = pickMachine(laidOut, need); return own ? open.find(p => p.key === own.key) ?? null : null; }
+  if (laidOut.length) { const own = pickMachine(laidOut, need, limit); return own ? open.find(p => p.key === own.key) ?? null : null; }
   const lostOn = new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
-  const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need) ?? pickMachine(spots, need);
+  const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need, limit) ?? pickMachine(spots, need, limit);
   return spot ? open.find(p => p.key === spot.key) ?? null : null;
 }
 
-const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => ({
+const partMessage = (run: Run, part: Part, repo: Repo | null, task: number, vitestWorkers: number) => ({
   type: 'tests.run' as const,
   ...productMessage(run, part, repo),
   partId: part.id,
@@ -349,6 +348,7 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => (
   part: part.part,
   parts: run.parts,
   timeoutMs: run.timeoutMs,
+  vitestWorkers,
   silenceMs: partSilenceMs(run.timeoutMs, part.environmentSelection?.estimatedMs),
 });
 
@@ -372,13 +372,10 @@ async function giveOut(ctx: Ctx): Promise<void> {
     .where(eq(testParts.status, 'queued'))
     .orderBy(asc(testRuns.createdAt), asc(testParts.part));
   const places = await queuePlaces(ctx, waiting.map(w => w.run.companyId));
-  const reserved = new Reservations(ctx.config.runsPerHost);
+  const reserved = new Reservations();
   const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
   for (const entry of waiting) await givePart(ctx, entry, places, reserved, targets);
 }
-
-/* The free memory, in GB, a part of the run needs: what its agent said for work, else what its repository says. */
-export const needOf = (run: Pick<Run, 'memoryGb'>, d: Department | null) => run.memoryGb ?? d?.repoTestMemoryGb ?? TEST_MEMORY_GB;
 
 const pumps = new WeakMap<Ctx, Promise<void>>();
 
@@ -679,8 +676,9 @@ async function prepareRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, ki
   return { department, pin };
 }
 
-function workRunValues(input: RunInput, kind: RunKind) {
-  return { memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null, repeatable: kind === 'work' && input.repeatable === true };
+function runResources(input: RunInput, kind: RunKind, department: Department | null) {
+  const memoryGb = kind === 'work' ? input.memory ?? WORK_MEMORY_GB : needOf({ memoryGb: null }, department);
+  return { memoryGb, repeatable: kind === 'work' && input.repeatable === true };
 }
 
 function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, minutes: number | undefined) {
@@ -713,7 +711,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
         command: input.command ?? '',
         environmentRequest: runEnvironment(job, mode, found, input.minutes),
         files,
-        ...workRunValues(input, kind),
+        ...runResources(input, kind, department),
         parts,
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
@@ -933,8 +931,9 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
     }
     if (!await productPartReady(ctx, part)) return;
     const kept = await keptFor(ctx, run, part);
-    const candidates = await productPlaces(ctx, places.get(run.companyId)!, run, needOf(run, found.department) * GIB);
-    const place = placeFor(candidates, run, part, found.department, reserved);
+    const need = partBudget(needOf(run, found.department), run.environmentSnapshot?.description.manifest, part.environmentSelection?.selection);
+    const candidates = await productPlaces(ctx, places.get(run.companyId)!, run, need.memoryBytes);
+    const place = placeFor(candidates, part, place => mayTake(place, run, found.department), reserved, need, ctx.config.runsPerHost);
     if (!place) {
       /* A machine that could take it has no room for it now; with none at all it stands in the queue as it did. */
       if (candidates.length) await runReached(ctx, run, 'host_slot');
@@ -952,7 +951,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       return claimed ?? null;
     });
     if (!taken) return;
-    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, withKept(partMessage(run, part, found.repo, task.number), kept));
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, withKept(partMessage(run, part, found.repo, task.number, need.vitestWorkers), kept));
     /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
     if (!sent) {
       await db
@@ -960,7 +959,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
         .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
     } else {
-      reserved.take(place);
+      reserved.take(place, need);
       await runReached(ctx, run, 'execution');
     }
 }

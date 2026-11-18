@@ -16,33 +16,43 @@ export type CheckQueueReply = z.infer<typeof CheckQueueReply>;
 /* Benchmarks passed two concurrent checks on nine CPUs and failed at four.
    Reserve five CPU equivalents per unbounded check, falling back to one while load is high.
    An active check is never killed when a newer load measurement reduces admission. */
+const CHECK_CORES = 5;
 export function checkCapacity(cpus: number, load: number): number {
-  return Math.max(1, Math.floor((cpus - load) / 5));
+  return Math.max(1, Math.floor((cpus - load) / CHECK_CORES));
 }
 
-export type CheckOptions = { signal?: AbortSignal; onPosition?(position: number): void };
+export const freeCores = (cpus: number, load: number): number => Math.max(0, Math.floor(cpus - load));
+
+/* Zero names an unbounded check. Its one-slot fallback is for hosts running only unbounded checks. */
+export function fitsCheck(cpus: number, load: number, held: Iterable<number>, next: number): boolean {
+  const active = [...held];
+  if (!next && active.every(cores => !cores)) return active.length < checkCapacity(cpus, load);
+  return active.reduce((used, cores) => used + (cores || CHECK_CORES), next || CHECK_CORES) <= freeCores(cpus, load);
+}
+
+export type CheckOptions = { signal?: AbortSignal; onPosition?(position: number): void; cores?: number };
 type Waiting = { start(): void; cancel(reason?: unknown): void; options: CheckOptions; position: number };
 
 export class CheckSlotQueue {
-  private running = 0;
+  private readonly running = new Map<Waiting, number>();
   private readonly waiting: Waiting[] = [];
-  constructor(readonly capacity: () => number) {}
+  constructor(readonly capacity: () => number, private readonly fits?: (held: Iterable<number>, cores: number) => boolean) {}
 
   async withSlot<T>(run: () => Promise<T>, options: CheckOptions = {}): Promise<T> {
     options.signal?.throwIfAborted();
-    await this.acquire(options);
+    const entry = await this.acquire(options);
     try { options.signal?.throwIfAborted(); return await run(); }
-    finally { this.running--; this.pump(); }
+    finally { this.running.delete(entry); this.pump(); }
   }
 
-  private acquire(options: CheckOptions): Promise<void> {
+  private acquire(options: CheckOptions): Promise<Waiting> {
     options.signal?.throwIfAborted();
     return new Promise((resolve, reject) => {
       const abort = () => entry.cancel(options.signal?.reason);
       const remove = () => options.signal?.removeEventListener('abort', abort);
       const entry: Waiting = {
         options, position: 0,
-        start: () => { remove(); resolve(); },
+        start: () => { remove(); this.running.set(entry, options.cores ?? 0); resolve(entry); },
         cancel: reason => {
           const index = this.waiting.indexOf(entry);
           if (index < 0) return;
@@ -61,9 +71,10 @@ export class CheckSlotQueue {
   refresh(): void { this.pump(); }
 
   private pump(): void {
-    while (this.waiting.length && this.running < this.capacity()) {
-      const entry = this.waiting.shift()!;
-      this.running++;
+    while (this.waiting.length && this.running.size < this.capacity()) {
+      const entry = this.waiting[0]!;
+      if (this.fits && !this.fits(this.running.values(), entry.options.cores ?? 0)) break;
+      this.waiting.shift();
       entry.start();
     }
     this.waiting.forEach((entry, index) => {

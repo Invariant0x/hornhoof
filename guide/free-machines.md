@@ -40,23 +40,25 @@ A machine takes a test run when all of these are true:
 - it is a computer;
 - it is online;
 - it is lent to test runs;
-- it runs no other test run;
-- its physical computer has a free slot for a run;
-- it is not loaded, which means its processors are busy less than 90% of the time;
-- it has enough free memory;
+- its node has a free test user;
+- its physical computer has enough free memory and cores after accounting for the parts it has already taken;
 - its owner reaches the department whose repository is tested.
 
 The built-in node takes test runs too. A run needs 4 GB of free memory, unless the repository's settings name another amount.
 
-Nodes and containers that report the same physical host share its slots, including the built-in node. By default one
-part runs on a physical computer at a time. To allow more, set `MAX_RUNS_PER_HOST` on the server to a whole number
-between 1 and 1000, then restart the server. With Docker Compose, put it in `.env`. An empty setting means 1.
-Each place still takes only one part at a time: the parts on its node share a system user.
+The ordinary and built-in nodes on the same physical computer share its memory and cores. The newest host report supplies
+its free memory and the cores left by its load. Each part reserves the memory its repository asks for and the cores its
+workers use. A part must also fit within its node's own memory limit, such as a container's limit. Parts on the same node
+take turns because they share one system user. An assigned part keeps its reservation through a lost connection or server
+restart until the part ends or is declared lost.
 
-The newest host report supplies its processor load and free memory when available. Otherwise Hornhoof uses the node's
-figures. A part must also fit within its node's own memory limit, such as a container's limit. An older node that reports
-no host remains a separate computer until it is updated. Each assigned part keeps its computer in the database, so its
-slot stays occupied through a lost connection or a server restart until the part ends or is declared lost.
+The pinned test environment can name a worker count, as Hornhoof's browser suites do. For Vitest without a pinned count,
+Hornhoof allows 2.5 GB per worker and 1 GB for Vitest itself within the part's memory budget, with at least one worker.
+The node runs Vitest with that limit.
+
+To set an upper limit on concurrent parts per physical computer, set `MAX_RUNS_PER_HOST` to a whole number from 1 to 1000
+and restart the server. With Docker Compose, put it in `.env`. An empty setting leaves admission to memory, cores and
+the available test users.
 
 ## Keep your machine out of test runs
 

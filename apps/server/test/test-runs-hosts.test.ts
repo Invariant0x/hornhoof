@@ -9,8 +9,33 @@ import { placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, until, type FakeNode } from './helpers.js';
 import { company, done, gets, GIB, idle, nextOf, reportHost } from './test-runs-company.js';
 
+const onePartMemory = { hostMemFree: 4 * GIB };
+
 describe('parts on physical computers', () => {
   afterEach(() => vi.useRealTimers());
+
+  it.each([
+    { memory: 94, load: 0, limit: '', admitted: 3, why: null },
+    { memory: 12, load: 0, limit: '', admitted: 3, why: null },
+    { memory: 4, load: 0, limit: '', admitted: 1, why: /Short of the 4 GB of free memory/ },
+    { memory: 94, load: 7, limit: '', admitted: 1, why: /free cores/ },
+    { memory: 94, load: 0, limit: '2', admitted: 2, why: /limit of 2 parts/ },
+  ])('admits $admitted parts on the shared 8-core host with $memory GB, load $load and cap "$limit"', async ({ memory, load, limit, admitted, why }) => {
+    const c = await company({ MAX_RUNS_PER_HOST: limit });
+    const sample = idle({ host: 'a'.repeat(64), hostCpus: 8, hostLoad: load, hostMemFree: memory * GIB, hostMemory: 94 * GIB });
+    await c.planless(c.ceo, 'home-api', sample);
+    await c.planless(c.ceo, 'home-api-worker', sample);
+    await c.builtin(sample);
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 3 });
+    const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
+    expect(parts.map(part => part.status)).toEqual([...Array(admitted).fill('running'), ...Array(3 - admitted).fill('queued')]);
+    if (admitted === 3) expect(parts.filter(part => part.builtin)).toHaveLength(1);
+    if (why) {
+      const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json();
+      expect(pool.waiting[0].why).toMatch(why);
+    }
+  });
 
   it.each(['run_tests', 'run_work'])('sends %s parts to a free machine while another waits for an update', async tool => {
     const c = await company({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-run-drain-')) });
@@ -68,20 +93,20 @@ describe('parts on physical computers', () => {
     await c.planless(c.ceo, 'container-two', load);
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'running' }]);
   });
 
   it('sends the next run to another host even when a sibling container looks idle', async () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
-    reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
+    reportHost(c, one.nodeId, 'linux', onePartMemory);
+    reportHost(c, two.nodeId, 'linux', onePartMemory);
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');
+    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
+    reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
     await call('run_tests', { branch: 'main', command: 'make test' });
     const state = JSON.parse((await call('test_run', { run: 2 })).text);
     expect(state.parts).toMatchObject([{ status: 'running', machine: 'laptop' }]);
@@ -92,8 +117,8 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
+    reportHost(c, one.nodeId, 'linux', onePartMemory);
+    reportHost(c, two.nodeId, 'linux', onePartMemory);
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test' });
     const first = await nextOf(one.node, 'tests.run');
@@ -102,40 +127,14 @@ describe('parts on physical computers', () => {
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
     expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
     const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json();
-    expect(pool.waiting[0].why).toMatch(/Running another part/);
+    expect(pool.waiting[0].why).toMatch(/Short of the 4 GB of free memory/);
     one.node.send(done(first));
     await nextOf(one.node, 'tests.run');
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts[0].status).toBe('running');
   });
 
-  it('counts the built-in node and containers on its host together', async () => {
+  it('keeps a node reserved when its host has room, since the node shares one test user', async () => {
     const c = await company();
-    const node = await c.builtin();
-    reportHost(c, null, 'linux');
-    const { call } = await c.turn(c.bruno);
-    await call('run_tests', { branch: 'main', command: 'make test' });
-    await nextOf(node, 'tests.run');
-    const container = await c.machine(c.ceo, 'container');
-    reportHost(c, container.nodeId, 'linux');
-    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(c.app.ctx, container.node, 'tests.run')).toBe(false);
-  });
-
-  it('allows two places on one host when configured and queues the third', async () => {
-    const c = await company({ MAX_RUNS_PER_HOST: '2' });
-    const one = await c.planless(c.ceo, 'container-one');
-    const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
-    const { call } = await c.turn(c.bruno);
-    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 3 });
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([
-      { status: 'running', machine: 'container-one' }, { status: 'running', machine: 'container-two' }, { status: 'queued', machine: null },
-    ]);
-  });
-
-  it('keeps a node reserved even when the host allows two parts, since its runs share a user', async () => {
-    const c = await company({ MAX_RUNS_PER_HOST: '2' });
     const box = await c.planless(c.ceo, 'container');
     reportHost(c, box.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
@@ -158,17 +157,6 @@ describe('parts on physical computers', () => {
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'laptop' }]);
-  });
-
-  it('reserves the shared host between parts of one run in one queue pass', async () => {
-    const c = await company();
-    const one = await c.planless(c.ceo, 'container-one');
-    const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
-    const { call } = await c.turn(c.bruno);
-    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
   });
 
   it('keeps old places without a host separate, including the built-in node', async () => {
@@ -196,8 +184,8 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
+    reportHost(c, one.nodeId, 'linux', onePartMemory);
+    reportHost(c, two.nodeId, 'linux', onePartMemory);
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');
@@ -223,12 +211,12 @@ describe('parts on physical computers', () => {
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running', machine: 'laptop' }]);
   });
 
-  it('does not give a shared host two parts when run requests arrive together', async () => {
+  it('reserves memory when run requests arrive together', async () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
+    reportHost(c, one.nodeId, 'linux', onePartMemory);
+    reportHost(c, two.nodeId, 'linux', onePartMemory);
     const { call } = await c.turn(c.bruno);
     await Promise.all([call('run_tests', { branch: 'main', command: 'make test' }), call('run_tests', { branch: 'main', command: 'make test' })]);
     const parts = await c.db.select().from(testParts).orderBy(asc(testParts.createdAt));
@@ -239,8 +227,8 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    reportHost(c, one.nodeId, 'linux');
-    reportHost(c, two.nodeId, 'linux');
+    reportHost(c, one.nodeId, 'linux', onePartMemory);
+    reportHost(c, two.nodeId, 'linux', onePartMemory);
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');

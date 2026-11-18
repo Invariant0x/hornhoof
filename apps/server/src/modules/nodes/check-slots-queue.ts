@@ -1,6 +1,7 @@
 import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
-import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, type CheckQueueReply, type CheckQueueRequest } from '@hornhoof/protocol';
+import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, fitsCheck, type CheckQueueReply, type CheckQueueRequest } from '@hornhoof/protocol';
 import { z } from 'zod';
+import { latestReport } from './host-load.js';
 
 type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
 type Sample = { cpus: number; load: number; at?: number };
@@ -38,11 +39,11 @@ export class CheckCoordinator {
     const at = sample.at ?? this.now();
     if (this.now() - this.heardSince(node, at) >= CHECK_LEASE_MS) { this.lost(node); return; }
     this.nodes.set(node, { host, sample, online: true, at });
-    if (!this.pools.has(host)) this.pools.set(host, new CheckSlotQueue(() => this.capacity(host)));
+    if (!this.pools.has(host)) this.pools.set(host, new CheckSlotQueue(() => Infinity, (held, cores) => this.fits(host, held, cores)));
     this.refresh();
   }
 
-  acquire(node: string, request: Acquire): void {
+  acquire(node: string, request: Acquire, cores = 0): void {
     const key = `${node}:${request.id}`, previous = this.entries.get(key);
     if (previous && !previous.retired) { this.tell(previous); return; }
     const member = this.nodes.get(node);
@@ -54,7 +55,7 @@ export class CheckCoordinator {
       entry.finish = resolve;
       entry.state = 'running'; entry.position = 0; entry.startedAt = this.now(); this.rememberEnd(entry);
       this.tell(entry);
-    }), { signal: entry.stop.signal, onPosition: position => { entry.position = position; this.tell(entry); } });
+    }), { cores, signal: entry.stop.signal, onPosition: position => { entry.position = position; this.tell(entry); } });
     void run.catch(() => {}).finally(() => {
       entry.state = 'ended'; entry.position = 0;
       this.entries.delete(key);
@@ -157,10 +158,18 @@ export class CheckCoordinator {
   }
 
   private capacity(host: string): number {
-    if (this.now() < this.readyAt) return 0;
-    const samples = [...this.nodes.values()].filter(node => node.host === host && node.online).map(node => node.sample);
-    if (!samples.length) return 0;
-    return checkCapacity(Math.min(...samples.map(s => s.cpus)), Math.max(...samples.map(s => s.load)));
+    const sample = this.hostSample(host);
+    return sample ? checkCapacity(sample.cpus, sample.load) : 0;
+  }
+
+  private fits(host: string, held: Iterable<number>, cores: number): boolean {
+    const sample = this.hostSample(host);
+    return sample !== undefined && fitsCheck(sample.cpus, sample.load, held, cores);
+  }
+
+  private hostSample(host: string): Sample | undefined {
+    if (this.now() < this.readyAt) return undefined;
+    return latestReport([...this.nodes.values()].filter(node => node.host === host && node.online))?.sample;
   }
 
   private retire(entry: Entry): void {

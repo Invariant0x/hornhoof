@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { parseNodeMessage, type CheckQueueRequest, type RunKind } from '@hornhoof/protocol';
+import { hashTestEnvironment, parseNodeMessage, type CheckQueueRequest, type RunKind } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, departments, machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
@@ -7,6 +7,7 @@ import { checkQueueLoad, checkQueueSnapshot, closeCheckQueue, receiveCheckReques
 import { nodeIdentity, ownBuiltin } from '../src/modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { testsHello } from '../src/modules/testruns/runs.js';
+import { planningEnvironment } from './fixtures/run-planning/environment.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { company, idle } from './test-runs-company.js';
 
@@ -43,6 +44,27 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
 }
 
 describe('reading a part that waits for a machine check slot', () => {
+  it('uses the pinned worker count of an assigned part for its lease', async () => {
+    const s = await stand();
+    const ctx = s.c.app.ctx;
+    await s.release(0); await s.release(1); await s.release(2);
+    const part = s.parts[1]!, { snapshot } = await planningEnvironment();
+    const browser = snapshot.description.manifest.suites[0]!;
+    browser.run = { program: 'npx', args: ['playwright', 'test', '--workers=2'], cwd: 'web' };
+    snapshot.description.manifestSource = JSON.stringify(snapshot.description.manifest);
+    snapshot.description.manifestHash = await hashTestEnvironment(snapshot.description.manifestSource);
+    await s.c.db.update(testRuns).set({ environmentSnapshot: snapshot, memoryGb: 4 }).where(eq(testRuns.id, part.runId));
+    const selection = { kind: 'suite' as const, suiteId: browser.id, files: ['web/test/a.test.ts'] };
+    await s.c.db.update(testParts).set({ environmentSelection: { selection, after: [] } }).where(eq(testParts.id, part.id));
+    const check = s.claims[1]!;
+    await receiveCheckRequest(ctx, s.id, check, sql`false`);
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [], queue: [{ request: { id: check.id } }] });
+    vi.mocked(ctx.hub.loadOf).mockImplementation(() => ({ ...idle({ cpus: 1, hostCpus: 8, hostLoad: 0 }), at: Date.now() }));
+    await checkQueueLoad(ctx, s.id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [{ request: { id: check.id } }], queue: [] });
+  });
+
   it.each(['built-in', 'ordinary'] as const)('releases old leases when a new %s node process greets the server', async kind => {
     const s = await stand();
     const ctx = s.c.app.ctx;

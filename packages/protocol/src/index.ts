@@ -21,7 +21,8 @@ export * from './phones.js';
 import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
-export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
+export { CHECK_LEASE_MS, checkCapacity, fitsCheck, freeCores, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
+export { TEST_WORKER_BYTES, vitestMemoryWorkers } from './test-workers.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
@@ -709,6 +710,7 @@ const ServerMessage = z.discriminatedUnion('type', [
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
     silenceMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
+    vitestWorkers: z.number().int().positive().max(4096).optional(),
   }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */

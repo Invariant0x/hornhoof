@@ -401,10 +401,18 @@ function partWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>
   return String(vitestWorkers(partShare({ cpus, load, memFree })));
 }
 
-function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: string): NodeJS.ProcessEnv {
+function workerEnv(msg: TestRun, options: Options): Record<string, string> {
+  if (msg.vitestWorkers !== undefined) {
+    const workers = String(msg.vitestWorkers);
+    return { VITEST_MAX_WORKERS: workers, HH_VITEST_MAX_WORKERS: workers };
+  }
+  return msg.kind === 'work' ? {} : { VITEST_MAX_WORKERS: partWorkers(options) };
+}
+
+function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: Record<string, string>): NodeJS.ProcessEnv {
   const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
-  if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox };
-  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', VITEST_MAX_WORKERS: workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+  if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox, ...workers };
+  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
 }
 
 /* One part of a run, which always ends with a tests.done: the commit Hornhoof pinned, or else the branch if there is one,
@@ -493,7 +501,8 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = { ...commandEnv(base, msg, inbox, outbox, partWorkers(options)), ...harnessEnv };
+      const workers = workerEnv(msg, options);
+      const env = { ...commandEnv(base, msg, inbox, outbox, workers), ...harnessEnv, ...(msg.vitestWorkers === undefined ? {} : workers) };
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);
@@ -950,7 +959,7 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     await productPhase(state, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await productPhase(state, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     services = await productPhase(state, 'servicesMs', () => openEnvironment(prepared, context));
-    await productPhase(state, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: partWorkers(state.options) }));
+    await productPhase(state, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', ...workerEnv(msg, state.options) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
     collectProductResults(execution, state, msg.kept ?? []);

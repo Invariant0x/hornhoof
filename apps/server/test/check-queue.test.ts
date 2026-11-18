@@ -8,6 +8,23 @@ const c = '10000000-0000-4000-8000-000000000003';
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('physical machine admission across subscription nodes', () => {
+  it('starts two weighted parts on one 8-core host and keeps a five-core check waiting', async () => {
+    const sent: CheckQueueReply[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, now: () => 0, send: (_node, reply) => { sent.push(reply); } });
+    onTestFinished(() => queue.close());
+    queue.node('normal', 'home-api', { cpus: 8, load: 0 });
+    queue.node('builtin', 'home-api', { cpus: 8, load: 0 });
+    queue.acquire('normal', { type: 'check.acquire', id: a, label: 'browser part' }, 2);
+    queue.acquire('builtin', { type: 'check.acquire', id: b, label: 'another browser part' }, 2);
+    queue.acquire('normal', { type: 'check.acquire', id: c, label: 'author check' });
+    await tick();
+    expect(queue.inspect('builtin')).toMatchObject({ holders: [{ request: { id: a } }, { request: { id: b } }], queue: [{ request: { id: c } }] });
+    expect(sent.filter(reply => reply.state === 'running').map(reply => reply.id)).toEqual([a, b]);
+    queue.release('builtin', b);
+    await tick();
+    expect(sent.filter(reply => reply.state === 'running').map(reply => reply.id)).toEqual([a, b, c]);
+  });
+
   it('reads holders and FIFO waiters without admitting, releasing or changing a claim', async () => {
     vi.useFakeTimers({ now: 1000 });
     onTestFinished(() => { vi.useRealTimers(); });
