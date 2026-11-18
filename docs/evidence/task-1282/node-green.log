@@ -1,9 +1,0 @@
-
- RUN  v5.0.5 /data/work/agents/7d919e6e-ce7b-4904-9d67-955a51532502/hornhoof-task-1282/apps/node
-
- ✓ test/redact.test.ts (2 tests) 2ms
-
- Test Files  1 passed (1)
-      Tests  2 passed (2)
-   Start at  15:15:37
-   Duration  95ms (transform 61%, import 25%, worker 7%, tests 7%)

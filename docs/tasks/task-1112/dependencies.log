@@ -1,8 +1,0 @@
-npm warn deprecated @esbuild-kit/esm-loader@2.6.5: Merged into tsx: https://tsx.hirok.io
-npm warn deprecated @esbuild-kit/core-utils@3.3.2: Merged into tsx: https://tsx.hirok.io
-
-> hornhoof@0.29.2 prepare
-> node -e "const fs=require('node:fs');if(fs.existsSync('node_modules/@vitest/coverage-v8'))for(const w of['packages/protocol','apps/node','apps/server','apps/web']){fs.mkdirSync(w+'/node_modules/@vitest',{recursive:true});fs.rmSync(w+'/node_modules/@vitest/coverage-v8',{recursive:true,force:true});fs.symlinkSync('../../../../node_modules/@vitest/coverage-v8',w+'/node_modules/@vitest/coverage-v8')}"
-
-
-added 451 packages in 1m

@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
 - Product test runs resend an unanswered environment description request after a minute or when its node reconnects, and a failed socket write stays retryable under the same request id.
 - Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
 - The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
@@ -49,6 +50,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
 - A part of a test run takes as many Vitest workers as the machine's free memory holds, at 2.5 GiB each, and the processors its load leaves free, so a machine short of memory no longer runs half its cores of workers into swap.
 - A test run of a release goes out in as many parts as keep each within three quarters of its time limit by what its files took before, at once on free machines and one after another on one, so a run whose tests pass no longer runs into the limit with everything in one part; a part stopped at its limit no longer makes its machine look faster to the next plan.
+- A department that keeps no repository gets no turn, and a turn whose department's work is all done or cancelled, with no result accepted into it and nothing in its branch that main lacks, closes by itself with no version and says why; a turn holding accepted work still closes only by its release.
+- The `turns` tool lists a result accepted into a turn whose parent task is in no turn, such as a member of a coordination task.
+- A program operator who answers No to a protected question, such as Claude Code's check before a removal, can report it as `denied`, as on a permission question; a `denied` report with no denial recorded says so plainly instead of refusing access to the case.
 - A company phone shows "Phone not connected" as soon as its computer's adb stops listing it, or lists it unauthorized or offline, with a line on what to do: plug it in by USB, or turn on Wireless debugging and add it again with its address; Watch screen is off until it is back, and while its computer is offline. Agents see the same in `phones`, `phone_acquire` lends no such phone, and the phone is available again by itself once adb lists it.
 
 ### Added

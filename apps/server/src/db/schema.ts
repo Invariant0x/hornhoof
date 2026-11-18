@@ -1078,6 +1078,9 @@ export const turns = pgTable(
     createdAt: createdAt(),
     openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    /* Who closed a turn with no version and why: Hornhoof, by itself, when it held nothing for a release. None for a turn its
+       release tag closed, or one closed by hand. */
+    closedBecause: text('closed_because'),
   },
   t => [
     unique('turns_company_number').on(t.companyId, t.number),
