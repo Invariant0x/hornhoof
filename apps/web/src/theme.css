@@ -1804,6 +1804,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
 .tr-side-caption { display: flex; align-items: center; gap: 8px; }
 .tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
+.tr-pipelines .tr-item-name > .ic { align-self: start; margin-block-start: max(0px, calc((1lh - 14px) / 2)); }
 .tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; }
 .tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-inline-size: 0; border-inline-start: 3px solid transparent; }
 .tr-dept-head > .tr-item { grid-template-columns: minmax(0, 1fr); align-self: stretch; padding-inline-end: 0; border: 0; background: none; color: inherit; font-weight: inherit; }
