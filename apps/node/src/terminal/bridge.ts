@@ -14,6 +14,9 @@ import { ToolsMemory } from './tools-memory.js';
 const MAX_BODY = 4 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
+/* A hook waits 3 s at least for its answer (hh-hook-send.cjs): an owner check that takes longer answers it a retry before
+   it gives up. */
+const HOOK_OWNER_MS = 2_000;
 /* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
    calls, and with Node's 5 seconds its next call on a connection the bridge was closing broke with ECONNRESET. */
 const KEEP_ALIVE_MS = 72_000;
@@ -69,7 +72,8 @@ export class Bridge {
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
-  /* What the check found for each open connection and agent: a connection's process does not change. */
+  /* What the check found for each open connection and agent: a connection's process does not change, so its owner stays
+     proven. A refusal is not kept: the pane may run that program again by the connection's next call. */
   private readonly checked = new WeakMap<Socket, Map<string, Promise<Verdict>>>();
 
   private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
@@ -96,7 +100,11 @@ export class Bridge {
   async start(): Promise<void> {
     const server = createServer({ keepAliveTimeout: KEEP_ALIVE_MS }, (req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
-      if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
+      if (!this.owns) return;
+      const captured = this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 });
+      /* A socket table that could not be read is read again by the connection's next call. */
+      captured.catch(() => { if (this.accepted.get(socket) === captured) this.accepted.delete(socket); });
+      this.accepted.set(socket, captured);
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     this.server = server;
@@ -197,9 +205,10 @@ export class Bridge {
     let found = known.get(hint);
     if (!found) {
       let why = '';
-      found = this.owns(key, peer, reason => { why = reason; })
-        .then((owner): Verdict => (owner ? { owner } : { owner, why }))
-        .catch(error => { known.delete(hint); throw error; });
+      found = this.owns(key, peer, reason => { why = reason; }).then(
+        (owner): Verdict => { if (!owner) known.delete(hint); return owner ? { owner } : { owner, why }; },
+        error => { known.delete(hint); throw error; },
+      );
       known.set(hint, found);
     }
     return found;
@@ -267,8 +276,8 @@ export class Bridge {
     const [, kind, inPath, event] = path!.split('/');
     const key = this.agentAt(req, kind, inPath, event);
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
-    const peer = await this.peer(req);
-    const owned = this.fromOwner(key, req.socket, peer);
+    const peer = this.peer(req);
+    const owned = peer.then(found => this.fromOwner(key, req.socket, found));
     /* A check nobody waits for, at an address with nothing under it, fails nothing. */
     void owned.catch(() => {});
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
@@ -278,12 +287,12 @@ export class Bridge {
        then, and goes on to Hornhoof as it comes. */
     const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
     void reading?.catch(() => {});
-    if (!(await this.ownCall(res, key, kind, event, owned))) return;
+    if (!(await this.ownCall(res, key, kind, event, kind === 'hook' ? beforeHookGivesUp(owned, asked) : owned))) return;
     const body = reading ? await reading : Buffer.alloc(0);
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
-    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, peer.pid);
+    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, (await peer).pid);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
@@ -526,6 +535,15 @@ function onlyReading(kind: string, method: string | undefined, body: Buffer): bo
 }
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/* The owner check of a hook asked at that moment, or no answer once the hook would give up waiting for one. */
+function beforeHookGivesUp<T>(check: Promise<T>, asked: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new OwnerUnknown('owner check timed out')), Math.max(0, asked + HOOK_OWNER_MS - Date.now()));
+  });
+  return Promise.race([check, late]).finally(() => clearTimeout(timer));
+}
 
 function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {

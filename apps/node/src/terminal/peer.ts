@@ -51,9 +51,10 @@ async function inPaneSession(proc: string, caller: TerminalSession | null, roots
   return leader?.session === caller.session && leader.tty === caller.tty;
 }
 
-/* The socket of the caller's end, from the kernel's table of TCP connections. */
+/* The socket of the caller's end, from the kernel's table of TCP connections. A table that cannot be read gives no answer,
+   never an empty table. */
 export async function socketOf(proc: string, { port, bridgePort }: Peer): Promise<string | null> {
-  const table = await readFile(join(proc, 'net', 'tcp'), 'utf8').catch(() => '');
+  const table = await readFile(join(proc, 'net', 'tcp'), 'utf8').catch(() => { throw new OwnerUnknown('socket table read failed'); });
   for (const line of table.split('\n').slice(1)) {
     const cols = line.trim().split(/\s+/);
     if (cols[1] === `${LOCAL}:${hex(port)}` && cols[2] === `${LOCAL}:${hex(bridgePort)}` && cols[9] && cols[9] !== '0') return cols[9];

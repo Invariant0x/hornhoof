@@ -5,16 +5,16 @@ import { agentRoots, OwnerUnknown, refuse, type OwnerFactory, type Peer } from '
 export type Command = (file: string, args: string[], options: { timeout: number }) => Promise<string>;
 const LOOKUP_MS = 2000;
 
-/* What a command printed, also when it ended with 1, as lsof does when it finds nothing it was asked about. A command
-   ended at its time limit, one that did not start and one that failed otherwise gave no answer. */
-export function answered(error: ExecFileException | null, output: string): string {
-  if (error && (error.code !== 1 || error.killed)) throw error;
+/* What a command printed, also what lsof printed when it ended with 1, as it does when it finds nothing it was asked
+   about. A command ended at its time limit, one that did not start and one that failed otherwise gave no answer. */
+export function answered(file: string, error: ExecFileException | null, output: string): string {
+  if (error && (error.code !== 1 || error.killed || basename(file) !== 'lsof')) throw error;
   return output;
 }
 
 const command: Command = (file, args, options) => new Promise((resolve, reject) => {
   execFile(file, args, options, (error, output) => {
-    try { resolve(answered(error, output)); } catch (failed) { reject(failed); }
+    try { resolve(answered(file, error, output)); } catch (failed) { reject(failed); }
   });
 });
 
@@ -57,8 +57,11 @@ async function socketOwner(peer: Peer, run: Command): Promise<number | null> {
    as the Linux inode check does. A caller gone by then has none, and a line that is no pair of numbers leads nowhere: the
    walk stops at anything that is not a process. */
 async function lineageOf(pid: number, run: Command): Promise<Set<number>> {
+  const table = await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
+  /* The table holds ps itself at least. */
+  if (!table.trim()) throw new OwnerUnknown('ps gave no process table');
   const parents = new Map<number, number>();
-  for (const line of (await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid='])).split('\n')) {
+  for (const line of table.split('\n')) {
     const [child, parent] = line.trim().split(/\s+/).map(Number);
     parents.set(child!, parent!);
   }
