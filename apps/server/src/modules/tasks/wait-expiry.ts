@@ -23,8 +23,8 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string, now
   const wake = waitEndedWake(task, task.assigneeAgentId, task.externalWait.reason, unavailable);
   const wakes: Wake[] = work ? [{ ...wake, why: 'work_check' }] : [wake];
   const failure = unavailable ? 'unavailable' : externalWaitFact(task.externalWait, now.getTime()).failure;
-  const fact = waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable, failure);
-  if (work) fact.text = `Check the progress of "${task.externalWait.reason}".`;
+  const ended = waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable, failure);
+  const fact = work ? { ...ended, text: unavailable ?? `Check the progress of "${task.externalWait.reason}".`, automatic: 'work_check' as const } : ended;
   try {
     await move(ctx, task, { externalWait: null, silent: 0 }, fact, markRecord(task.externalWait, 'check_back'), wakes);
   } catch (error) {

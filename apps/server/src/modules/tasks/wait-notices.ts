@@ -28,24 +28,25 @@ export async function recordWaitNotice(db: Writer, notice: NewWaitNotice): Promi
   await db.insert(waitNotices).values(notice).onConflictDoNothing({ target: [waitNotices.companyId, waitNotices.dedupKey] });
 }
 
-/* A task's waits on one employee are one episode until its work moves: the last work move names it. */
+/* Requests on one task for one employee are one episode until the work moves. */
 async function waitEpisode(db: Pick<Db, 'select'>, taskId: string): Promise<number> {
   const [last] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), inArray(taskEvents.kind, WORK_MOVES)))
     .orderBy(desc(taskEvents.id)).limit(1);
   return last?.id ?? 0;
 }
 
-/* One notice for the waits of one holder on one employee in one episode, whatever the holder says again, ends or lets run out
-   meanwhile. Nobody is told that they wait for themselves. */
+/* One notice for each holder and employee in an episode. Clearing the check or recording it again stays in that episode. */
 export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string): Promise<NewWaitNotice | null> {
   const wait = task.externalWait;
   if (wait?.on?.kind !== 'employee' || wait.on.employee === waiter) return null;
   const [employee] = await ctx.db.select().from(agents).where(eq(agents.id, waiter));
   const episode = await waitEpisode(ctx.db, task.id);
-  const text = `As of ${wait.since}, ${employee!.name} waits for you on #${task.number}: ${wait.reason}, until ${wait.until}. Check the task's current state and give the employee what they need.`;
+  const text = wait.work
+    ? `As of ${wait.since}, ${employee!.name} is tracking work that depends on you on #${task.number}: ${wait.reason}. Next check at ${wait.until}. Check the task and report your progress to ${employee!.name}.`
+    : `As of ${wait.since}, ${employee!.name} waits for you on #${task.number}: ${wait.reason}, until ${wait.until}. Check the task's current state and give the employee what they need.`;
   return {
     companyId: task.companyId, agentId: wait.on.employee, dedupKey: `request:${task.id}:${waiter}:${wait.on.employee}:${episode}`,
-    message: await notificationMessage(ctx, task.companyId, 'wait_requested', text, { actor: { agentId: waiter }, tasks: [{ id: task.id, number: task.number }] }),
+    message: await notificationMessage(ctx, task.companyId, wait.work ? 'work_requested' : 'wait_requested', text, { actor: { agentId: waiter }, tasks: [{ id: task.id, number: task.number }] }),
     guard: { tasks: [], waitOn: { taskId: task.id, employee: wait.on.employee, episode } },
   };
 }
@@ -63,7 +64,7 @@ export async function recordRequestedNotice(db: Writer, notice: NewWaitNotice): 
   });
 }
 
-/* A request holds while its task still waits on that employee in that episode. */
+/* A request holds while the task still depends on that employee in that episode. */
 async function waitOnStands(db: Pick<Db, 'select'>, companyId: string, guard: NonNullable<WaitNoticeGuard['waitOn']>, now: Date): Promise<boolean> {
   const [task] = await db.select(only(tasks, 'externalWait')).from(tasks).where(and(eq(tasks.id, guard.taskId), eq(tasks.companyId, companyId)));
   const wait = task?.externalWait;

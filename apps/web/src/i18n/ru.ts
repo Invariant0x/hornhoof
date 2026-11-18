@@ -77,6 +77,7 @@ export const ru: Messages = {
     retry: 'повторный запуск программы',
     limit: 'лимит тарифа',
     turn_fact: 'состояние хода записано',
+    work_requested: 'сотрудника попросили о работе',
     wait_requested: 'сотрудник ждет тебя',
     wait_unavailable: 'тот, кого ждут, недоступен',
     wait_cycle: 'круг ожиданий',

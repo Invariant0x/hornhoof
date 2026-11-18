@@ -71,7 +71,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     async ({ task: ref }) => answer(async () => {
       const task = await taskByRef(ctx, job.companyId, ref);
       if (!task) throw refuse(404, 'task_unknown', `There is no task ${ref} you can act on.`);
-      const { reason } = await endOwnWait(ctx, job.agentId, task.id);
+      const { reason, work } = await endOwnWait(ctx, job.agentId, task.id);
+      if (work) return `Cleared the progress check for "${reason}" on #${task.number}. Go on with the task.`;
       return `The wait for "${reason}" on #${task.number} is over. Go on with the task.`;
     }),
   );

@@ -405,13 +405,13 @@ class TaskTools {
     this.server.registerTool(
       'track_work',
       {
-        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. You will be woken to check its progress. Diagnose and repair a failed operation.',
-        inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }) },
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
+        inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional() },
       },
-      async ({ task: ref, work, nextCheck }) => this.run(async () => {
+      async ({ task: ref, work, nextCheck, employee }) => this.run(async () => {
         const { task } = await this.find(ref);
         this.plain(task, work);
-        const moved = await trackWork(this.ctx, this.job.agentId, task.id, work, nextCheck);
+        const moved = await trackWork(this.ctx, this.job.agentId, task.id, work, nextCheck, employee);
         return { text: `Work is in progress on #${task.number}. Next check at ${moved.task.externalWait!.until}.`, moved };
       }),
     );

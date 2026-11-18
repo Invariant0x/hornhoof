@@ -53,7 +53,7 @@ export const en = {
     explanation: 'This page may have moved, or you may not have access to it.',
     home: 'Go to the map',
   },
-  notificationSources: { ...NOTIFICATION_NAMES } as Record<keyof typeof NOTIFICATION_NAMES, string>,
+  notificationSources: { ...NOTIFICATION_NAMES, work_requested: 'work requested from an employee' } as Record<keyof typeof NOTIFICATION_NAMES, string>,
   firstContact: {
     title: 'Talk to the orchestrator', question: 'What would you like me to do?', message: 'Your message', send: 'Send', close: 'Close',
     working: 'The orchestrator is working on your message.', failed: 'The orchestrator could not finish this reply. You can send another message.',

@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Tracking work tells the employee it depends on once and brings the task holder back at the next check or when that employee can no longer do the work.
 - Routine company changes can go ahead directly, and agents can send a question to the person who can answer it.
 - The orchestrator handles reversible merge choices, and only proposed permanent deletions appear among the CEO's requests.
 - Agents ask for missing sign-ins through the vault, and one-shot workers and judges treat outside material as evidence.
