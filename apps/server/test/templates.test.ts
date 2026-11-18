@@ -380,7 +380,7 @@ describe('templates', () => {
 
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
-    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV', 'VID-HEAD', 'VID-WRITE', 'VID-BOARD', 'VID-KEEP', 'VID-GEN', 'VID-EDIT', 'VID-QA'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 
@@ -448,7 +448,7 @@ describe('templates', () => {
   });
 
   it('names each role after its department code', () => {
-    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD' };
+    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD', video_production: 'VID' };
     for (const r of roles) expect(r.id.startsWith(`${codes[r.department]}-`), r.id).toBe(true);
   });
 
@@ -531,7 +531,7 @@ describe('templates', () => {
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
-    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM']);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
   });
 
   it('tells the watchdog that a machine getting ready for an update waits and has not hung, while a silent program there is still silent', () => {
@@ -706,11 +706,11 @@ describe('templates', () => {
     for (const part of ['title', 'problem', 'facts', 'source', 'guesses', 'why', 'change', 'gain']) expect(review, part).toContain(`${part}:`);
   });
 
-  it('has a turnkey team for every department, of members of that department', () => {
+  it('has a team of its own members in every department and keeps the video team on the checked route', () => {
     const teams = [...templates.teams.values()];
     expect(teams.map(team => team.department).sort()).toEqual([...new Set(roles.map(r => r.department))].sort());
     for (const team of teams) {
-      expect(team.turnkey, team.id).toBe(true);
+      expect(team.turnkey, team.id).toBe(team.department !== 'video_production');
       expect(templates.teamsOf(team.department), team.id).toEqual([team]);
       expect(team.title.ru, team.id).toMatch(/[а-я]/i);
       expect(team.description.en.length, team.id).toBeGreaterThan(20);
@@ -741,8 +741,8 @@ describe('templates', () => {
        comes in a stream, and the middle one for everyone whose work is checked after. */
     const asked: Record<string, string[]> = {
       top: ['DEV-ARCH', 'DEV-SEC'],
-      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA'],
-      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1'],
+      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'VID-HEAD', 'VID-KEEP', 'VID-QA'],
+      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1', 'VID-PM'],
     };
     for (const role of templates.roles.values()) {
       const tier = Object.keys(asked).find(key => asked[key]!.includes(role.id)) ?? 'standard';

@@ -184,6 +184,30 @@ describe('Department view', () => {
     expect(route.getByRole('img', { name: judge })).toHaveAttribute('title', judge);
   });
 
+  it.each(checkedLocales)('shows the video draft calls and the keeper before editing in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const t = messages[language], [dev] = DEV_ORG.departments;
+    const draft = { id: 'draft', parentId: null, name: 'Generate draft shots', ownerRole: 'VID-GEN', owner: null,
+      ownerTitle: { en: 'Shot generation operator', ru: 'Оператор создания кадров' }, position: 0, oneShot: { fanOut: 2, judge: true } };
+    const keeper = { id: 'keeper', parentId: draft.id, name: 'Check shot continuity', ownerRole: 'VID-KEEP', owner: null,
+      ownerTitle: { en: 'Character and style keeper', ru: 'Хранитель внешнего вида' }, position: 1 };
+    const edit = { id: 'edit', parentId: keeper.id, name: 'Edit the draft cut', ownerRole: 'VID-EDIT', owner: null, position: 2 };
+    const pipeline = { id: 'video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-production', name: 'Video production',
+      why: '', archived: false, version: 1, isDefault: true, stages: [draft, keeper, edit] };
+    render(<LanguageProvider><DepartmentStructure department={{ ...dev!, employees: [], pipelines: [pipeline] }} onOpen={() => {}} /></LanguageProvider>);
+    const copy = {
+      en: ['Video production', 'Generate draft shots', 'Check shot continuity', 'Edit the draft cut'],
+      ru: ['Производство видео', 'Создать черновые кадры', 'Проверить согласованность кадров', 'Смонтировать черновик'],
+    }[language];
+    const route = within(screen.getByRole('region', { name: copy[0] }));
+    expect(route.getAllByRole('heading', { level: 5 }).map(heading => heading.textContent)).toEqual(copy.slice(1));
+    const [draftPlace, keeperPlace] = route.getAllByRole('listitem');
+    expect(within(draftPlace!).getAllByRole('img').filter(mark => mark.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]'))).toHaveLength(3);
+    expect(within(keeperPlace!).getByRole('img', { name: t.workers.permanent })).toHaveClass('cell', 'o');
+    expect(within(keeperPlace!).getByText(keeper.ownerTitle[language])).toBeVisible();
+    expect(within(keeperPlace!).getByText(t.dept.noModelYet)).toBeVisible();
+  });
+
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
   it('keeps the words of a department with no head and no employees in their own direction', () => {
     mockApi({});

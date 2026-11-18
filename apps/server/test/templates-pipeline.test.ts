@@ -14,12 +14,13 @@ const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
 
 /* Default selections are preserved; the selected ability plans checks for its assigned scope in any department. */
-const PIPELINES: Record<TemplateKey, string> = {
+const STANDALONE_PIPELINES = {
   operations: 'ops-work-pipeline', development: 'dev-work-pipeline', design: 'dsn-work-pipeline',
   marketing: 'mkt-work-pipeline', sales: 'sal-work-pipeline', business_development: 'biz-work-pipeline',
   support: 'sup-work-pipeline', finance: 'fin-work-pipeline', home_devices: 'home-work-pipeline', household: 'home-work-pipeline',
 };
-const SKILL_IDS = [...new Set(Object.values(PIPELINES))];
+const PIPELINES: Record<TemplateKey, string> = { ...STANDALONE_PIPELINES, video_production: 'vid-work-pipeline' };
+const SKILL_IDS = [...new Set(Object.values(STANDALONE_PIPELINES))];
 const bodyOf = (id: string) => templates.skills.get(id)!.body;
 const localIds = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
 

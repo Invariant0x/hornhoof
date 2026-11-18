@@ -62,6 +62,7 @@ describe('the route of every department template', () => {
       finance: [{ stage: 'review', fanOut: 3, judge: true }],
       home_devices: [],
       household: [],
+      video_production: [{ stage: 'development', fanOut: 2, judge: true }],
     });
   });
 

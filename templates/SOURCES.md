@@ -323,3 +323,18 @@ Development authors write a failing test before the change, run only affected te
 | `pipelines/operations.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/sales.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/support.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `roles/video_production/VID-BOARD.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-EDIT.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-GEN.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-HEAD.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-KEEP.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-PM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-QA.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-REF.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-WRITE.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `teams/video_production/VID-TEAM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `echelons/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `pipelines/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `skills/vid-continuity.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `skills/vid-laws.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
