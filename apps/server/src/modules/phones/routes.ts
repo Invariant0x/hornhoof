@@ -6,6 +6,7 @@ import { requirePerson } from '../../auth/session.js';
 import { companyPhones } from '../../db/schema.js';
 import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneOwner, phoneView, probePhone } from './store.js';
 import { reconcilePhone, stopPhone } from './queue.js';
+import { phoneConnections } from './presence.js';
 import { imageBytes, livePhone, recordingImage, taskRecordings } from './recording.js';
 
 const Id = z.strictObject({ id: z.uuid() });
@@ -21,7 +22,8 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, ctx.db);
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));
     await Promise.all(phones.map(p => reconcilePhone(ctx, p.id)));
-    return { phones: await Promise.all(phones.map(p => phoneView(ctx, p, me))) };
+    const connections = await phoneConnections(ctx, phones);
+    return { phones: await Promise.all(phones.map(p => phoneView(ctx, p, me, connections.get(p.id)))) };
   });
   app.get('/api/phones/:id', async req => {
     const me = await requirePerson(req, ctx.db);

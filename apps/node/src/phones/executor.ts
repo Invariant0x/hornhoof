@@ -72,6 +72,10 @@ export class PhoneExecutor {
       }));
       return reply('ok', { devices: verified });
     }
+    if (m.type === 'phone.list') {
+      const listed = await this.deps.adb.devices(new AbortController().signal);
+      return reply('ok', { devices: listed.filter(device => m.serials.includes(device.serial)) });
+    }
     if (m.type === 'phone.open') {
       const { grant } = m;
       this.#sessions.open(grant);

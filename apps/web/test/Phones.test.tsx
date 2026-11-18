@@ -1,12 +1,14 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { Phones, type PhoneView } from '../src/ui/Phones';
 import { ME, mockApi } from './api-mock';
 import { until } from './until';
 
 const MACHINE = { id: 'm1', hostname: 'Work computer', online: true };
-const PHONE: PhoneView = { id: 'ph1', name: 'My Pixel', owner: { id: ME.person.id, name: ME.person.name }, machineId: 'm1', online: true, lending: true, state: 'available', queued: 0, stopping: false, endpoint: '192.168.1.80:5555' };
+const PHONE: PhoneView = { id: 'ph1', name: 'My Pixel', owner: { id: ME.person.id, name: ME.person.name }, machineId: 'm1', online: true, lending: true, state: 'available', connection: 'ready', queued: 0, stopping: false, endpoint: '192.168.1.80:5555' };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
@@ -93,4 +95,29 @@ it('adds a network phone through labelled fields and returns control with Stop',
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await until(() => screen.queryByText('In your hands'));
   expect(screen.getByRole('button', { name: 'Lend to assistants' })).toBeInTheDocument();
+});
+
+it.each([
+  ['en', en, /USB/, /Wireless debugging/],
+  ['ru', ru, /USB/, /беспроводную отладку/],
+] as const)('says in %s what to do with a phone its computer does not see, and only on that phone', async (language, t, cable, wireless) => {
+  localStorage.setItem('hh-lang', language);
+  onTestFinished(() => { localStorage.removeItem('hh-lang'); });
+  const gone: PhoneView = { ...PHONE, online: false, state: 'offline', connection: 'not_connected' };
+  const away: PhoneView = { ...PHONE, id: 'ph2', name: 'Phone on a sleeping computer', online: false, state: 'offline', connection: 'computer_offline' };
+  const here: PhoneView = { ...PHONE, id: 'ph3', name: 'Phone in place' };
+  mockApi({ 'GET /api/phones': [200, { phones: [gone, away, here] }] });
+  render(<LanguageProvider><Phones me={ME} machines={[MACHINE]} /></LanguageProvider>);
+  const card = await until(() => screen.queryByRole('article', { name: gone.name }));
+  expect(t.phones.notConnected.hint).toMatch(cable);
+  expect(t.phones.notConnected.hint).toMatch(wireless);
+  expect(within(card).getByText(t.phones.notConnected.state)).toBeInTheDocument();
+  expect(within(card).getByText(t.phones.notConnected.hint)).toBeInTheDocument();
+  expect(t.phones.notConnected.state).not.toBe(t.phones.states.offline);
+  const elsewhere = screen.getByRole('article', { name: away.name });
+  expect(within(elsewhere).getByText(t.phones.states.offline)).toBeInTheDocument();
+  expect(within(elsewhere).queryByText(t.phones.notConnected.hint)).toBeNull();
+  const ready = screen.getByRole('article', { name: here.name });
+  expect(within(ready).getByText(t.phones.states.available)).toBeInTheDocument();
+  expect(within(ready).queryByText(t.phones.notConnected.hint)).toBeNull();
 });

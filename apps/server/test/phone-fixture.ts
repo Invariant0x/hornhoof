@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { parseServerMessage, type PhoneReply, type PhoneServerMessage } from '@hornhoof/protocol';
+import { parseServerMessage, type PhoneDevice, type PhoneReply, type PhoneServerMessage } from '@hornhoof/protocol';
 import { agents, companies, departments, jobs, machines, nodes, people, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -9,8 +9,9 @@ import { prepareSharedDatabase } from './helpers-db.js';
 await prepareSharedDatabase();
 
 /* A company with a phone's computer and its node answering adb from records, two employees in two departments, Clara who
-   adds the phone, Sam of the other department and Olaf of another company. */
-export async function phoneCompany() {
+   adds the phone, Sam of the other department and Olaf of another company. With lists, its node says it answers what its
+   adb lists, and answers from the devices a scenario gives it. */
+export async function phoneCompany(options: { lists?: boolean } = {}) {
   const { app, db } = await testApp({ NODE_KEY: 'v'.repeat(40) });
   /* Lease expiry moves only when a scenario moves this injected clock. */
   app.ctx.clock = () => 1_700_000_000_000;
@@ -48,6 +49,13 @@ export async function phoneCompany() {
   const calls: PhoneServerMessage[] = [];
   let holdRevoke = false;
   const revokes: string[] = [];
+  let listed: PhoneDevice[] | null = [];
+  let holdList = false;
+  const lists: Extract<PhoneServerMessage, { type: 'phone.list' }>[] = [];
+  const answerList = (m: Extract<PhoneServerMessage, { type: 'phone.list' }>) => {
+    const devices = listed?.filter(d => m.serials.includes(d.serial));
+    node.send(devices ? { type: 'phone.reply', requestId: m.requestId, status: 'ok', devices } : { type: 'phone.reply', requestId: m.requestId, status: 'failed' });
+  };
   node.ws.on('message', data => {
     const m = parseServerMessage(data.toString());
     if (!m || !m.type.startsWith('phone.')) return;
@@ -58,14 +66,23 @@ export async function phoneCompany() {
       if (m.type === 'phone.probe') answer.devices = [{ serial: m.endpoint, status: 'device', model: 'Pixel_8', hardwareKey: 'a'.repeat(64) }];
       node.send(answer);
     }
+    if (m.type === 'phone.list') {
+      calls.push(m);
+      if (holdList) lists.push(m);
+      else answerList(m);
+    }
   });
-  node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true });
+  node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true, ...(options.lists ? { phoneList: true } : {}) });
   await until(async () => Boolean((await db.select().from(nodes).where(eq(nodes.id, executor!.id)))[0]?.lastSeenAt));
   const addPhone = (session = claraSession) => app.inject({ method: 'POST', url: '/api/phones', ...as(session), payload: { machineId: machine!.id, endpoint: '192.168.1.80:5555', name: 'Clara phone' } });
   return {
     app, db, companyId, ceoSession, clara: clara!, claraSession, samSession, olafSession, other: other!, otherAgent: otherAgent!, mkt: mkt!, nora: nora!, sammy: sammy!, task, startTurn,
     machine: machine!, executor: executor!, node, calls, addPhone,
     holdRevokes: () => { holdRevoke = true; },
+    /* What the node's adb lists from now on; null when adb itself fails. */
+    adbLists: (devices: PhoneDevice[] | null) => { listed = devices; },
+    holdLists: () => { holdList = true; },
+    answerLists: () => { holdList = false; for (const m of lists.splice(0)) answerList(m); },
     acknowledgeRevokes: () => { for (const id of revokes.splice(0)) node.send({ type: 'phone.reply', requestId: id, status: 'ok' }); holdRevoke = false; },
   };
 }

@@ -165,6 +165,7 @@ export type ErrorReason =
   | 'phone_unknown'
   | 'phone_not_allowed'
   | 'phone_unavailable'
+  | 'phone_not_connected'
   | 'phone_busy'
   | 'phone_session_gone'
   | 'attachment_invalid'

@@ -7,6 +7,7 @@ import { companyPhones } from '../../db/schema.js';
 import { refusal } from '../../errors.js';
 import { acquirePhone, finishPhoneSession, phoneAction, reconcilePhone, sessionFor, sessionView, type PhoneAgent } from './queue.js';
 import { phoneView } from './store.js';
+import { phoneConnections } from './presence.js';
 
 type ToolAnswer = { value: unknown; jpeg?: string | null };
 async function answer(work: () => Promise<ToolAnswer>) {
@@ -24,9 +25,10 @@ async function answer(work: () => Promise<ToolAnswer>) {
 }
 
 export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent): void {
-  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait.' }, () => answer(async () => {
+  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait. state offline: its computer is offline, or the computer does not see the phone (connection not_connected) and it cannot be borrowed until its owner connects it again.' }, () => answer(async () => {
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));
-    return { value: { phones: await Promise.all(phones.map(p => phoneView(ctx, p))) } };
+    const connections = await phoneConnections(ctx, phones);
+    return { value: { phones: await Promise.all(phones.map(p => phoneView(ctx, p, undefined, connections.get(p.id)))) } };
   }));
   server.registerTool('phone_acquire', {
     description: 'Borrow one company phone for this turn and task. Returns an active session or a FIFO queue receipt immediately. A phone serves one agent at a time. Poll phone_session while queued; release when finished. The owner may stop it at any time.',

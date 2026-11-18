@@ -8,13 +8,14 @@ import type { PhoneView } from '../src/ui/Phones';
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const machine: MachineView = { id: 'm1', hostname: 'Company computer', os: 'linux', arch: 'arm64', owner: { id: ME.person.id, name: ME.person.name }, online: true, lastSeenAt: null, plans: [], load: null, lendsTests: false, running: { agents: [], parts: [] } };
 const phone: PhoneView = { id: 'ph1', name: 'Android компании с длинным названием телефона', machineId: machine.id, owner: { id: ME.person.id, name: ME.person.name }, lending: true, online: true, stopping: false, state: 'available', queued: 2 };
+const missing: PhoneView = { ...phone, online: false, state: 'offline', connection: 'not_connected' };
 
 async function words(language: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
   return dictionary[language]!;
 }
 
-async function setup(page: Page, language: Language, skin: string) {
+async function setup(page: Page, language: Language, skin: string, listed: PhoneView | null = null) {
   const t = await words(language);
   /* The page's clock runs from the moment it is installed until it is paused, however briefly on a busy machine, and a
      pause cannot go back: it starts a minute before NOW, longer than a test may take, and stands still at NOW. */
@@ -23,7 +24,7 @@ async function setup(page: Page, language: Language, skin: string) {
   await serveApi(page);
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: [machine], builtin: null, priority: false, move: null, canMove: false, copies: null } }));
-  let registered: PhoneView | null = null;
+  let registered: PhoneView | null = listed;
   await page.route('**/api/phones', route => {
     if (route.request().method() === 'POST') { registered = phone; return route.fulfill({ status: 201, json: registered }); }
     return route.fulfill({ json: { phones: registered ? [registered] : [] } });
@@ -84,6 +85,29 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
     await fits(card);
     expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     if (info.project.name === 'phones-chromium' && skin.id === 'light' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`stopped-${width}.png`), fullPage: true });
+  });
+}
+
+/* The card of a phone its computer's adb does not list: its state, the line on what to do, and both inside the card. */
+for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const language of LANGUAGES) {
+  test(`a phone its computer does not see at ${width}px in the ${skin.id} theme, ${language.name}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const t = await setup(page, language.id, skin.id, missing);
+    const section = page.getByRole('region', { name: t.phones.heading });
+    const card = section.getByRole('article', { name: missing.name });
+    await expect(card.locator('.stline')).toContainText(t.phones.notConnected.state);
+    const hint = card.getByText(t.phones.notConnected.hint, { exact: true });
+    await expect(hint).toBeVisible();
+    for (const direction of ['ltr', 'rtl']) {
+      await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
+      await fits(card);
+      const [inner, outer] = [await hint.boundingBox(), await card.boundingBox()];
+      expect(inner!.x).toBeGreaterThanOrEqual(outer!.x - 1);
+      expect(inner!.x + inner!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
+      expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
+    await page.evaluate(() => { document.documentElement.dir = 'ltr'; });
+    if (info.project.name === 'phones-chromium' && ['light', 'cyberpunk'].includes(skin.id)) await card.screenshot({ path: info.outputPath(`not-connected-${skin.id}-${language.id}-${width}.png`) });
   });
 }
 
