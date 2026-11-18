@@ -50,13 +50,14 @@ function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept;
   const name = deptLabel(t, d);
   const { shown, more } = shownEmployees(known?.employees ?? [], EMPLOYEES_SHOWN);
   const here = place.department === d.id;
+  const current = here && !place.goal && !place.pipeline && !place.product && place.view !== 'goals';
   const open = expanded ?? here;
   const ownPipelines = pipelines.filter(p => p.department.id === d.id && !p.archived);
   const at = (next: TrackerPlace) => go({ department: d.id, personId: place.personId, ...next });
   return (
     <li className="tr-dept">
-      <div className="tr-dept-head">
-        <Item icon={<DepartmentMark id={d.id} name={name} template={d.templateKey} />} on={here && !place.goal && !place.pipeline && !place.product && place.view !== 'goals'} onClick={() => { setExpanded(true); at({ view: 'list' }); }}>{name}</Item>
+      <div className={`tr-dept-head${current ? ' on' : ''}`}>
+        <Item icon={<DepartmentMark id={d.id} name={name} template={d.templateKey} />} on={current} onClick={() => { setExpanded(true); at({ view: 'list' }); }}>{name}</Item>
         <button className="zbtn tr-unfold" type="button" aria-expanded={open} aria-label={words.unfold(name)} title={words.unfold(name)} onClick={() => setExpanded(!open)}>
           <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>
         </button>

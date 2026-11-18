@@ -1750,28 +1750,31 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
 }
-.tr-side { position: sticky; inset-block-start: 0; display: grid; gap: 8px; align-content: start; min-inline-size: 0; block-size: 100cqb; overflow: auto; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); }
-.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; font: 600 18px var(--f-display); overflow-wrap: anywhere; }
+.tr-side { position: sticky; inset-block-start: 0; display: grid; gap: 8px; align-content: start; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); }
+.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; font: 600 18px var(--f-display); }
 .tr-new { margin-inline-start: auto; border: 1px solid var(--line2); background: var(--surface2); }
 .tr-new:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+.tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .tr-side .tr-side-close { display: none; margin-inline-start: auto; }
 .tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-.tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; width: 100%; min-height: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
-.tr-item:hover { background: var(--surface2); }
-.tr-item.on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
+.tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; inline-size: 100%; min-block-size: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; overflow-wrap: inherit; cursor: pointer; }
+:is(.tr-item, .tr-dept-head):hover { background: var(--surface2); }
+:is(.tr-item, .tr-dept-head).on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
 .tr-item:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-item-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; overflow-wrap: anywhere; }
+.tr-item-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; }
+.tr-item-name > span:last-child { min-inline-size: 0; }
 .tr-item-name > .ic, .tr-side-caption > .ic { color: var(--muted); }
 .tr-item.on .tr-item-name > .ic { color: currentColor; }
 .tr-count { font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tr-badge { min-inline-size: 20px; padding-inline: 4px; border: 1px solid var(--line2); border-radius: 1em; text-align: center; }
 .tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
-.tr-side-caption { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.tr-side-caption { display: flex; align-items: center; gap: 8px; }
 .tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
-.tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
-.tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; }
-.tr-unfold .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
+.tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; }
+.tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-inline-size: 0; border-inline-start: 3px solid transparent; }
+.tr-dept-head > .tr-item { grid-template-columns: minmax(0, 1fr); align-self: stretch; padding-inline-end: 0; border: 0; background: none; color: inherit; font-weight: inherit; }
+.tr-unfold { margin: 0; color: inherit; }
+.tr-unfold .chev { inline-size: 12px; block-size: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
 .tr-unfold[aria-expanded="true"] .chev { transform: rotate(90deg); }
 [dir="rtl"] .tr-unfold .chev { transform: scaleX(-1); }
 [dir="rtl"] .tr-unfold[aria-expanded="true"] .chev { transform: scaleX(-1) rotate(90deg); }
@@ -1782,8 +1785,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-dept-body > .goal-fold { margin-inline-start: 10px; }
 .tr-people li { display: grid; gap: 2px; min-width: 0; padding: 6px 10px; font-size: 13px; }
 .tr-person { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
-.tr-person b { font-weight: 600; overflow-wrap: anywhere; }
-.tr-people .linkish { justify-self: start; font-size: 12.5px; overflow-wrap: anywhere; }
+.tr-person b { min-inline-size: 0; font-weight: 600; }
+.tr-people .linkish { justify-self: start; min-inline-size: 0; font-size: 12.5px; overflow-wrap: inherit; }
+.tr-side .goal-fold > span { overflow-wrap: inherit; }
 .tr-turns { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; min-inline-size: 0; padding-block: 8px 48px; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding-block-end: 10px; border-block-end: 1px solid var(--line); }

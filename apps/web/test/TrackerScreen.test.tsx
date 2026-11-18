@@ -63,6 +63,32 @@ const main = () => screen.findByRole('region', { name: /^(List|Board|Graph)$/ })
 const rowOf = (list: HTMLElement, name: string) => within(list).getByRole('listitem', { name });
 const card = (name: string) => screen.findByRole('complementary', { name });
 
+it('marks the whole department row and keeps its pipeline disclosure independent', async () => {
+  const user = userEvent.setup();
+  const name = 'Development and Product Engineering';
+  const pipeline = 'Beta build way';
+  shell('/tasks?department=d2', {
+    'GET /api/pipelines': [200, { pipelines: [{ ...PIPELINE, name: pipeline }] }],
+    'GET /api/task-departments': [200, { whole: true, departments: [{ ...DEV, name, templateKey: null, mine: true, mayPlan: true }] }],
+  });
+  const side = within(screen.getByRole('navigation', { name: 'Task lists' }));
+  const department = await side.findByRole('button', { name });
+  const toggle = side.getByRole('button', { name: `Show what is in ${name}` });
+  expect(department).toHaveAttribute('aria-current', 'page');
+  expect(department.parentElement).toHaveClass('on');
+  expect(department.parentElement).toContainElement(toggle);
+  expect(department.querySelector('.tr-dept-mark')).toBeInTheDocument();
+  expect(await side.findByRole('button', { name: pipeline })).toBeInTheDocument();
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(side.queryByRole('button', { name: pipeline })).toBeNull();
+  expect(department).toHaveAttribute('aria-current', 'page');
+  await user.click(department);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(side.getByRole('button', { name: pipeline })).toBeInTheDocument();
+});
+
 describe('My tasks and View as', () => {
   it("lands on the person's own open tasks and goals, and shows another person's with View as", async () => {
     const user = userEvent.setup();
