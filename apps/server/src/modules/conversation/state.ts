@@ -1,6 +1,6 @@
 import { orchestratorOf } from './turn-records.js';
 import { limitUntil, budgetUntil } from './limits.js';
-import { placement, CONVERSATION_NODE, outdated, holdsWork, liveSubscription, programNode, conversationOf, lookRoom, type Placement } from './placement.js';
+import { placement, outdated, holdsWork, liveSubscription, programNode, conversationOf, lookRoom, type Placement } from './placement.js';
 import { countOnly, idOnly } from '../../db/selections.js';
 import type { MachineDrain } from '@hornhoof/protocol';
 import { type Limits } from '@hornhoof/protocol';
@@ -11,7 +11,6 @@ import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld } from '../updates/drain.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
-import { repoFor } from '../departments/repository.js';
 import { agentProgramState } from '../tasks/program-state.js';
 import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { agentFailureState, type FailureState } from '../tasks/failure-records.js';
@@ -20,8 +19,8 @@ export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: strin
 export type AgentState = FailureState & {
   ready: boolean;
   machineDrain: MachineDrain | null;
-  /* Its turns would start its program on a machine short of free memory, so they wait and go on by themselves once the
-     memory frees up. */
+  /* Its turns would start its program on a machine whose kernel killed a process for want of memory since its node's
+     report before, so they wait and go on by themselves with a report that finds no new kill. */
   memoryWait: boolean;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
@@ -41,7 +40,6 @@ export type AgentState = FailureState & {
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
 };
-export const REPOSITORY_NODE = [0, 5, 0];
 
 export type PlanAgent = { id: string; kind: string };
 export type Plan = { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null };
@@ -75,12 +73,11 @@ export const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isRead
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
-export async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
+export async function waitsFor(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
   if (sub.kind === 'api_key') return ctx.hub.builtins().length > 0 || notAway(ctx, ownBuiltin(ctx.config)) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
-  const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
@@ -123,14 +120,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
-  const place = sub && agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
+  const place = sub && agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   const shown = await shownNode(ctx, agentId, place);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
+    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, () => true))),
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

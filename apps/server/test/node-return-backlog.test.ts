@@ -49,7 +49,6 @@ async function company() {
   let connected = false;
   vi.spyOn(ctx.hub, 'isReady').mockImplementation(id => id.kind === 'builtin' || connected);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
-  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
 
   /* The node's connections, as the hub records them. */

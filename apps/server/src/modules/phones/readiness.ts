@@ -15,10 +15,11 @@ const checks = new WeakMap<Ctx, Map<string, Check>>();
 const sameBinding = <T extends Pick<CompanyPhone, 'nodeId' | 'serial' | 'hardwareKey'>>(check: T | undefined, phone: CompanyPhone): check is T =>
   check?.nodeId === phone.nodeId && check.serial === phone.serial && check.hardwareKey === phone.hardwareKey;
 
-/* A live reading, which is obtained again when the server or the node comes back. */
+/* A live reading of a phone's settings, which is obtained again when the server or the node comes back. Whether the phone is
+   there at all is for phone.list alone to say (presence.ts): a node that is away has no reading here. */
 export function phoneReadiness(ctx: Ctx, phone: CompanyPhone): PhoneReadinessIssue[] | null {
   const node = nodeIdentity(phone.nodeId);
-  if (!phoneCapable(ctx, node)) return ['connection'];
+  if (!phoneCapable(ctx, node)) return null;
   if (!phoneBaselineCapable(ctx, node)) return ['nodeUpdate'];
   const check = checks.get(ctx)?.get(phone.id);
   return sameBinding(check, phone) ? check.issues : null;
@@ -34,7 +35,8 @@ function startCheck(ctx: Ctx, phone: CompanyPhone, node: NodeIdentity): Check {
   found.set(phone.id, check);
   check.pending = phoneRequest(ctx, node, { type: 'phone.baseline', requestId: randomUUID(), binding: phoneBinding(phone) }).then(result => {
     if (result.status === 'busy') return;
-    check.issues = result.status === 'needs_person' ? ['connection'] : (result.status === 'ok' ? result.readiness : undefined) ?? ['check'];
+    /* A phone the check could not reach or recognise has unread settings; phone.list says whether it is there. */
+    check.issues = (result.status === 'ok' ? result.readiness : undefined) ?? ['check'];
   }).finally(() => { delete check.pending; });
   return check;
 }

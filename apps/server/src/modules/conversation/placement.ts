@@ -97,7 +97,7 @@ export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentit
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
+  const place = agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   return place !== null && !sameNode(place.node, from);
 }
 export type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>> };
@@ -108,17 +108,13 @@ export async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string)
   const at = sub ? await nodeOfAgent(ctx, agentId) : null;
   return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
 }
-
-/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live.
-   Turns with a repository need 0.5.0, which clones it. The built-in node always matches the server. */
-export const CONVERSATION_NODE = [0, 3, 0];
-export function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
+export function outdated(version: string | null): boolean {
   const have = (version ?? '0').split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < need.length; i++) if ((have[i] ?? 0) !== need[i]) return (have[i] ?? 0) < need[i]!;
+  for (let i = 0; i < NODE_FLOOR.length; i++) if ((have[i] ?? 0) !== NODE_FLOOR[i]) return (have[i] ?? 0) < NODE_FLOOR[i]!;
   return false;
 }
 
-export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_NODE): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
+export const takesTurns = (ctx: Ctx, n: NodeRow): boolean => n.status === 'ready' && !outdated(n.version) && ctx.hub.isReady(nodeIdentity(n.id));
 
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 /* builtinMachine: the machine of the built-in node, for an API key's turn. moves: the agent's program is not there yet. */
@@ -131,17 +127,17 @@ export type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; 
 export const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
 /* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
-export const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent), true);
+export const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, true);
 
 /* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
    else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
    the one picked waits for an update or has no room. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. A turn that would start a new program goes only to a machine with free memory for it, and an
-   employee's turn goes to none that works past what it carries; roomy: whether a node has room, which the agent's state
-   also asks as if every node had. */
-export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent))): Promise<Placement | null> {
+   node can take it. A turn that would start a new program goes to no machine whose kernel killed a process for want of
+   memory since its node's report before; roomy: whether a node has room, which the agent's state also asks as if every
+   node had. */
+export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
   if (sub.kind === 'api_key') {
     const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
     if (!machine) return null;
@@ -152,8 +148,8 @@ export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string;
   /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
   const onHold = await nodesOnHold(ctx, all.map(n => n.id));
   const open = all.filter(n => !onHold.has(n.id));
-  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, need, roomy)));
+  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
@@ -167,9 +163,9 @@ export async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow
 
 /* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
    is one of those. */
-export async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
+export async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
   if (!isLeader(agent)) return null;
-  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
   return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
@@ -202,3 +198,9 @@ export async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null>
   };
   return able.reduce((best, n) => (better(n, best) ? n : best));
 }
+
+
+
+/* Turns need a node from 0.5.0 on, which clones a repository and writes an agent's skills as files; an older one waits for
+   its update. Nodes go to the server's version by themselves from 0.8.4 on. The built-in node always matches the server. */
+const NODE_FLOOR = [0, 5, 0];

@@ -6,7 +6,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, turnTokens, type NodeStatus } from '../../db/schema.js';
-import { countOnly, idOnly, only } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { keepLeftInput } from '../conversation/left-input.js';
@@ -62,12 +62,6 @@ function seenLately(ctx: Ctx, nodeId: string, at: number): boolean {
 async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<void> {
   if (id.kind !== 'node' || seenLately(ctx, id.nodeId, now.getTime())) return;
   await ctx.db.update(nodes).set({ lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode));
-}
-
-/* The turns that run on the node now, as Hornhoof has them. */
-async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
-  const [row] = await ctx.db.select(countOnly()).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
-  return Number(row?.n ?? 0);
 }
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
@@ -368,10 +362,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         await settleAndPlace(ctx, plan);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
-      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
+      ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
       /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
-      programsLive(ctx, id, msg.live, await workingOn(ctx, id));
+      programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
       await settleListed(ctx, id, msg.running, now);
@@ -401,9 +395,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       ctx.hub.report(id, load);
       await touchNodeSeen(ctx, id, now);
       await checkQueueLoad(ctx, id);
-      /* A machine that freed up takes a part that waits, and starts the programs that waited for its memory. */
+      /* A machine that freed up takes a part that waits, and one whose kernel killed nothing more for want of memory starts
+         the programs that waited. */
       await pumpTests(ctx);
-      for (const agentId of programsLive(ctx, id, live, await workingOn(ctx, id))) await pump(ctx, agentId);
+      for (const agentId of programsLive(ctx, id, live)) await pump(ctx, agentId);
       return;
     }
 

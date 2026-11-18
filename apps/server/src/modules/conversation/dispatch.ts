@@ -1,9 +1,8 @@
 import type { DispatchQueue } from './queue.js';
 import { turnOperatorDeliveries, failedTurnDelivery, heldByOperator } from './deliveries.js';
 import { queuedSession, withOriginal, freshConversation, forgetFresh } from './sessions.js';
-import { REPOSITORY_NODE } from './state.js';
 import { type Along } from './turn-types.js';
-import { placement, CONVERSATION_NODE, isLeader, liveSubscription, conversationOf } from './placement.js';
+import { placement, isLeader, liveSubscription, conversationOf } from './placement.js';
 import { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, NOTHING_UNREAD } from './constants.js';
 import { idOnly } from '../../db/selections.js';
 import { effortsOf, modelsFor } from '@hornhoof/protocol';
@@ -55,7 +54,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
-  const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
+  const place = await placement(ctx, agent, sub);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
      Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
@@ -69,9 +68,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   if (!mail.length && going.some(j => j.inboxWake)) mail = await unreadMail(db, agentId);
   const along = going.flatMap(j => (!j.inboxWake ? [j] : mail.length ? [{ ...j, prompt: mailSummary(mail) }] : []));
 
-  /* A node from before skill files gets every skill in the instructions. */
-  const files = ctx.hub.takesSkillFiles(place.node);
-  const instructions = await instructionsOf(ctx, agent, files);
+  const instructions = await instructionsOf(ctx, agent);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
@@ -130,7 +127,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
          company's machines built for its commit. Which tasks are still open lets the node take away its worktrees of the
          closed ones. */
       workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}), ...(tasksNow ? { tasks: tasksNow } : {}) },
-      ...(files ? { skills: instructions.skills } : {}),
+      skills: instructions.skills,
     });
   } catch (err) {
     await failedTurnDelivery(ctx, job, err);

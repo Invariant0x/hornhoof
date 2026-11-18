@@ -15,10 +15,11 @@ import { QuestionButton, STATE_CLASS, StateWord, WaitLine } from './TaskActivity
 export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; questionAt?: (id: string) => string | undefined; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined };
 
 /* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
-   value keeps its own direction, so the parts of a date and the dot of a name stay in place right to left. */
+   pair keeps its own direction, so "Executor: Hana" reads in that order right to left, and so does the value alone, so the
+   parts of a date and the dot of a name stay in place. */
 function Cell({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <span className="tr-cell">
+    <span className="tr-cell" dir="auto">
       <span className="tr-k">{name}</span>
       <span className="tr-v" dir="auto">{children}</span>
     </span>
