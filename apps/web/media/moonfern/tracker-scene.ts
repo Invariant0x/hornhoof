@@ -1,8 +1,10 @@
 import { expect, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 import { LANGUAGES, type Language, type Messages } from '../../src/i18n';
+import { BASE_ISO } from './clock';
 import { serveMoonfern } from './serve';
 import { prepareScenePage } from './stream';
+import { MOONFERN_TASKS } from './tasks';
 
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
@@ -50,12 +52,14 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
   if (view === 'turns') {
     const words = t.tasks.board;
     return [...common, where.turns, t.tasks.department, words.show, words.showReleases, words.showOutside, words.relsWhy, words.nextWhy,
-      words.preparing(1, ''), words.goalsDone(1, 1), words.closedReleases, words.released(1, ''), words.relCount(1), t.tracker.wait.question];
+      words.preparing(1, ''), words.goalsDone(1, 1), words.closedReleases, words.released(1, ''), words.relCount(1), t.tracker.wait.question,
+      t.tracker.groups.waitingYou, t.tracker.wait.person('', t.tracker.time.minutes(40)), t.tracker.time.minutes(49)];
   }
   const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, filters.goal, ...Object.values(statuses)];
   return view === 'tasks'
     ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, t.tracker.priority.label, list.goal, list.due, list.addTask]
-    : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question];
+    : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
+      t.tracker.groups.waitingYou, t.tracker.time.minutes(49), t.tracker.wait.failedRun('17', false)];
 }
 
 const RTL = new Set(['ar', 'fa', 'he', 'ur']);
@@ -80,7 +84,8 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
         try {
           const frame = await context.newPage();
           const watcher = await prepareScenePage(frame, undefined, id, theme);
-          await serveMoonfern(frame);
+          await frame.clock.setFixedTime(new Date(BASE_ISO));
+          const fixture = await serveMoonfern(frame);
           await frame.goto(paths[view]);
           const region = frame.getByRole('region', { name: view === 'turns' ? t.tracker.side.turns : t.tracker.views[view === 'board' ? 'board' : 'list'], exact: true });
           await expect(region).toBeVisible();
@@ -91,9 +96,12 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
           const wide = size.width === 1440;
           if (view === 'board') {
             const person = region.getByRole('region', { name: t.tracker.statuses.waits });
-            await expect(person.locator('.tr-card .tr-wait.person').first()).toBeVisible();
+            await expect(person.locator('.tr-card .tr-wait.person').first()).toHaveText(t.tracker.time.minutes(49));
+            await expect(region.getByRole('region', { name: t.tracker.statuses.failure })).toHaveCount(0);
             await assertBoard(region, wide);
+            await expectOneLine(region.locator('bdi').filter({ hasText: /^Sam Rivera$/ }).first());
           }
+          if (view === 'turns') await assertTurnQuestion(region, t);
           const sidebar = frame.getByRole('navigation', { name: t.tracker.side.label });
           if (wide) {
             const box = (await sidebar.boundingBox())!;
@@ -108,6 +116,13 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
           }
           await assertTrackerFit(frame);
           await frame.screenshot({ path: info.outputPath(`${view}-${id}-${theme}-${size.width}.png`) });
+          if (view !== 'turns') {
+            if (!wide) await frame.getByRole('button', { name: t.tracker.side.open }).click();
+            await assertSelectedDepartment(sidebar);
+            if (view === 'board') await expect(sidebar.getByRole('button', { name: `${t.tracker.side.failures} 0` })).toBeVisible();
+            await assertTrackerFit(frame);
+            if (!wide) await sidebar.getByRole('button', { name: t.tracker.side.close }).click();
+          }
           if (view === 'board') {
             if (!wide) {
               await region.getByRole('region', { name: t.tracker.statuses.waits }).locator('.tr-card').first().scrollIntoViewIfNeeded();
@@ -119,6 +134,17 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             await assertBoard(region, wide);
             await assertTrackerFit(frame);
             await frame.screenshot({ path: info.outputPath(`pipeline-${id}-${theme}-${size.width}.png`) });
+
+            fixture.setTasks(MOONFERN_TASKS.map(task => task.number === 224 ? {
+              ...task, time: { ...task.time!, waitsOn: [{ kind: 'run', who: null, since: BASE_ISO, reason: '17', failure: 'run' }] },
+            } : task));
+            await frame.goto(paths.board);
+            const failures = region.getByRole('region', { name: t.tracker.statuses.failure });
+            await expect(failures.getByRole('article', { name: '#224 Sunlight meter calibration on iPhone' })).toBeVisible();
+            await assertBoard(region, wide);
+            await assertTrackerFit(frame);
+            if (!wide) await failures.scrollIntoViewIfNeeded();
+            await frame.screenshot({ path: info.outputPath(`board-failure-${id}-${theme}-${size.width}.png`) });
           }
           reportUnmocked(watcher.errors);
         } finally {
@@ -127,6 +153,43 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
       }
     }
   }
+}
+
+async function expectOneLine(label: Locator): Promise<void> {
+  await expect(label).toBeVisible();
+  const lines = await label.evaluate(element => {
+    const text = document.createRange();
+    text.selectNodeContents(element);
+    return new Set(Array.from(text.getClientRects(), rect => rect.top)).size;
+  });
+  expect(lines).toBe(1);
+}
+
+async function assertSelectedDepartment(sidebar: Locator): Promise<void> {
+  const head = sidebar.locator('.tr-dept-head.on');
+  await expect(head.getByRole('button', { name: 'Development', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(head.getByRole('button', { expanded: true })).toBeVisible();
+  await expectOneLine(head.getByText('Development', { exact: true }));
+  const pipeline = sidebar.getByText('Beta build way', { exact: true });
+  await expect(pipeline).toHaveCSS('overflow-wrap', 'break-word');
+  const widths = await head.evaluate(row => [row.getBoundingClientRect().width, row.parentElement!.getBoundingClientRect().width]);
+  expect(Math.abs(widths[0]! - widths[1]!)).toBeLessThanOrEqual(1);
+}
+
+async function assertTurnQuestion(region: Locator, t: Messages): Promise<void> {
+  const record = region.getByRole('listitem', { name: '#225 Import plants from CSV and Apple Notes' });
+  const title = record.getByRole('button', { name: 'Import plants from CSV and Apple Notes' });
+  const wait = record.locator('.tr-wait');
+  const question = record.getByRole('button', { name: t.tracker.wait.question });
+  await expect(wait).toHaveText(t.tracker.time.minutes(49));
+  await expect(question).toBeVisible();
+  const [label, duration, button] = await Promise.all([title.boundingBox(), wait.boundingBox(), question.boundingBox()]);
+  const rtl = await region.evaluate(element => getComputedStyle(element).direction === 'rtl');
+  const start = (box: NonNullable<typeof label>) => rtl ? box.x + box.width : box.x;
+  expect(Math.abs(start(label!) - start(button!))).toBeLessThanOrEqual(1);
+  expect(button!.y).toBeGreaterThanOrEqual(duration!.y + duration!.height - 1);
+  const other = region.getByRole('listitem', { name: '#230 Onboarding plant card layout' });
+  await expect(other.locator('.tr-wait')).toHaveText(t.tracker.wait.person('Leo Park', t.tracker.time.minutes(40)));
 }
 
 async function assertBoard(board: Locator, wide: boolean): Promise<void> {
