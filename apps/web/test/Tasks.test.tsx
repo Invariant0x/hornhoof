@@ -177,7 +177,7 @@ describe('the tracker', () => {
     await goTo(user, /^Development/);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ })).toHaveTextContent('Rita'));
+    await waitFor(() => expect(within(within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ })).getByRole('img', { name: 'Rita' })).toBeInTheDocument());
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -201,13 +201,13 @@ describe('the tracker', () => {
     moved = true;
     stream.send({ type: 'task', id: 't11' });
     const reviewed = () => within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ });
-    await waitFor(() => expect(reviewed()).toHaveTextContent('Rita'));
+    await waitFor(() => expect(within(reviewed()).getByRole('img', { name: 'Rita' })).toBeInTheDocument());
     await act(async () => {
       late();
       /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(reviewed()).toHaveTextContent('Rita');
+    expect(within(reviewed()).getByRole('img', { name: 'Rita' })).toBeInTheDocument();
   });
 });
 
@@ -467,8 +467,8 @@ describe('decisions read failure', () => {
 describe('turns as releases', () => {
   const DONE_IN_TURN = { ...TASKS[1]!, id: 't16', number: 16, title: 'Price list', brief: '', status: 'done' as const, turn: 3, parentId: null };
   it.each([
-    ['en', 'Tasks', 'Turns and releases', 'A turn is everything that goes into one release of the program.', 'Getting ready: turn 3, the release after v1.2.0', '1 of 5 goals done', 'Closed releases', 'Turn 2: release v1.2.0', 'tasks: 1', 'Open task'],
-    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход: все, что войдет в один выпуск программы.', 'Готовится: ход 3, выпуск после v1.2.0', 'Готово 1 из 5 целей', 'Закрытые выпуски', 'Ход 2: выпуск v1.2.0', 'задач: 1', 'Открыть задачу'],
+    ['en', 'Tasks', 'Turns and releases', 'A turn is everything that goes into one release of the program.', 'Getting ready: turn 3, the release after v1.2.0', '1 of 5 goals done', 'Closed releases', 'Turn 2: release v1.2.0', 'tasks: 1', 'Open question'],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход: все, что войдет в один выпуск программы.', 'Готовится: ход 3, выпуск после v1.2.0', 'Готово 1 из 5 целей', 'Закрытые выпуски', 'Ход 2: выпуск v1.2.0', 'задач: 1', 'Открыть вопрос'],
   ])('gets the next release ready, counted in goals, and folds the closed releases with their tasks (%s)', async (lang, tasks, releases, why, preparing, goalsDone, closedHeading, released, count, open) => {
     localStorage.setItem('hh-lang', lang);
     try {
@@ -527,8 +527,8 @@ describe('turns as releases', () => {
   });
 
   it.each([
-    ['en', 'Tasks', 'Development', 'Waits for your answer: 1', 'Not started: 1'],
-    ['ru', 'Задачи', 'Разработка', 'Ждет вашего ответа: 1', 'Не начата: 1'],
+    ['en', 'Tasks', 'Development', 'Waits for a person: 1', 'Not started: 1'],
+    ['ru', 'Задачи', 'Разработка', 'Ждет человека: 1', 'Не начата: 1'],
   ])('says in plain words that a task waits for the answer of the person and that one has not started (%s)', async (lang, tasks, development, yours, notStarted) => {
     localStorage.setItem('hh-lang', lang);
     try {

@@ -33,7 +33,7 @@ const TaskRef = (what: string) =>
 const Parts = z.number().int().min(1).max(MAX_TEST_PARTS).optional().describe('How many parts to split it into; 1 by default.');
 const Minutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each part, ${TEST_MINUTES} minutes by default.`);
 const TestMinutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional()
-  .describe(`The time limit of each part, ${TEST_MINUTES} minutes by default and ${FULL_RUN_MINUTES} for the first run of a release, which goes out in 2 to 4 parts that each fit in it.`);
+  .describe(`The time limit of each part, ${TEST_MINUTES} minutes by default and ${FULL_RUN_MINUTES} for the first run of a release. A run goes out in as many parts as keep each within three quarters of it by what its files took before, the first run of a release in 2 at least: at once on free machines, one after another on one.`);
 
 /* Whole suites and assigned non-check work use the free machines. Checks of a change stay in its owner's workspace. */
 export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): void {

@@ -8,6 +8,7 @@ import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneOwner, ph
 import { reconcilePhone, stopPhone } from './queue.js';
 import { phoneConnections } from './presence.js';
 import { imageBytes, livePhone, recordingImage, taskRecordings } from './recording.js';
+import { refreshPhoneReadiness } from './readiness.js';
 
 const Id = z.strictObject({ id: z.uuid() });
 
@@ -36,6 +37,7 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/phones', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
     const phone = await addPhone(ctx, me, body(NewPhone, req.body));
+    await refreshPhoneReadiness(ctx, phone);
     return reply.code(201).send(await phoneView(ctx, phone, me));
   });
   app.post('/api/phones/:id/stop', async req => {

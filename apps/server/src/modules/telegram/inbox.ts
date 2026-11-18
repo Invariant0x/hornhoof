@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { canViewAgent } from '../../auth/agent-view.js';
+import { canContactAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentEvents, agents, people, telegramBots, telegramReplies } from '../../db/schema.js';
@@ -150,10 +150,10 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
     await say(chatId, words.inactive);
     return false;
   }
-  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, bot.agentId), isNull(agents.removedAt)));
+  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, bot.agentId), eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
   if (!agent) return false;
   const name = agentName(agent, lang);
-  if (!(await canViewAgent(ctx.db, me, agent))) {
+  if (!(await canContactAgent(ctx.db, me, agent))) {
     await say(chatId, words.notYours(name));
     return false;
   }

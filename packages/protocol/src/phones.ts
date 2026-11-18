@@ -59,13 +59,18 @@ export const PhoneProbe = z.strictObject({ type: z.literal('phone.probe'), reque
 /* Which of these phones the node's adb lists now, and in what state. It only reads adb's list: it connects nowhere and asks
    no phone anything, and it names no phone the server did not ask about. */
 export const PhoneList = z.strictObject({ type: z.literal('phone.list'), requestId: z.uuid(), serials: z.array(PhoneEndpoint).min(1).max(100) });
+export const PhoneBaseline = z.strictObject({ type: z.literal('phone.baseline'), requestId: z.uuid(), binding: PhoneBinding });
+/* Settings of a phone its computer lists. Whether the phone is there at all comes from phone.list alone, never from here. */
+export const PhoneReadinessIssue = z.enum(['nodeUpdate', 'check', 'lock', 'awake', 'brightness', 'batterySaver', 'appSleep', 'deviceIdle', 'appBattery', 'debugTrust', 'prompt']);
+export type PhoneReadinessIssue = z.infer<typeof PhoneReadinessIssue>;
+const PhoneReadiness = z.array(PhoneReadinessIssue).max(PhoneReadinessIssue.options.length);
 export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), requestId: z.uuid(), grant: PhoneGrant });
 export const PhoneAction = z.strictObject({ type: z.literal('phone.action'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), operation: PhoneOperation });
 export const PhoneRenew = z.strictObject({ type: z.literal('phone.renew'), sessionId: z.uuid(), generation: z.number().int().nonnegative(), expiresAt: z.iso.datetime() });
 export const PhoneRevoke = z.strictObject({ type: z.literal('phone.revoke'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), binding: PhoneBinding });
 export const PhoneReply = z.strictObject({
   type: z.literal('phone.reply'), requestId: z.uuid(), status: z.enum(['ok', 'failed', 'needs_person', 'session_gone', 'busy']),
-  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(),
+  devices: z.array(PhoneDevice).max(100).optional(), capture: PhoneCapture.optional(), readiness: PhoneReadiness.optional(),
 });
 export type PhoneReply = z.infer<typeof PhoneReply>;
 export const PhoneFrame = z.strictObject({
@@ -73,5 +78,5 @@ export const PhoneFrame = z.strictObject({
   at: z.iso.datetime(), capture: PhoneCapture,
 });
 export type PhoneFrame = z.infer<typeof PhoneFrame>;
-export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneList, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
+export const PhoneServerMessage = z.discriminatedUnion('type', [PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke]);
 export type PhoneServerMessage = z.infer<typeof PhoneServerMessage>;

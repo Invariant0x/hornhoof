@@ -1,7 +1,8 @@
-import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
+import type { ApiProtocol, TaskPriority } from '@hornhoof/protocol';
+import type { EchelonFindingsView, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
-import type { ExternalWait, WaitSourceKind } from '@hornhoof/protocol/waits';
+import type { ExternalWait, TaskWaitFact, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -152,11 +153,13 @@ export type Employee = {
   name: string;
   roleId: string | null;
   teamId?: string | null;
+  turnkey?: boolean;
   title: Lang | null;
   kind: 'head' | 'worker';
   model: string;
   modelName: string | null;
   provider: ProviderId | null;
+  apiProtocol?: ApiProtocol;
   /* The level its model thinks at, when Hornhoof knows it. */
   effort: string | null;
   state: AgentState;
@@ -215,10 +218,12 @@ export type Department = {
   /* The results accepted into its open turn, the next release, as far as this person sees them; none while it runs no turn
      or out of reach. */
   turnProgress?: DepartmentTurnProgress | null;
+  oneShotStages?: OneShotStage[];
   /* Its one-shot calls that wait or run now; startedAt: none while one waits for its turn on the machine. */
   calls?: CallMark[];
 };
 
+export type OneShotStage = { stage: EchelonStage; fanOut: number; judge: boolean };
 export type CallMark = { id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null };
 
 export type { ApprovalChannel, ApprovalMode };
@@ -337,6 +342,7 @@ export type AgentCardView = {
   product: { id: string; name: string } | null;
   team?: { id: string; name: string } | null;
   teams?: { id: string; name: string }[];
+  turnkey?: boolean;
   model: string;
   /* The level a person picked, or null for the Default. */
   effort: string | null;
@@ -359,7 +365,6 @@ export type AgentCardView = {
   parts: Part[];
   raw: string;
   /* How long the text every turn sends is, and the most it may be. */
-  instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string }[];
   /* Its latest turns a node restart cut off, the latest first; node: none for the built-in node. */
@@ -461,7 +466,7 @@ export type TaskPlace = { id: string; name: string } | null;
 export type PersonRef = { id: string; name: string };
 /* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
    waits for since when. */
-export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: { who: { kind: 'person' | 'agent'; id: string; name: string } | null; since: string }[] };
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: TaskWaitFact[] };
 /* A task another one comes after, or that comes after it, and where it stands. */
 export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 
@@ -473,6 +478,7 @@ export type TaskLine = {
   title: string;
   brief: string;
   status: TaskStatus;
+  priority?: TaskPriority;
   externalWait?: ExternalWait | null;
   /* Paused work wakes nobody until it is resumed; root is the task the pause was placed on. */
   paused?: { at: string; reason: string; root: string } | null;
@@ -757,9 +763,9 @@ export type GoalView = {
 
 /* A department's pipeline: who hands work to whom, as a tree of stages in tree order. A stage's owner is a role of the
    department, or one of its employees. */
-export type PipelineStage = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: PersonRef | null; position: number };
+export type PipelineStage = { id: string; parentId: string | null; name: string; stockName?: string; ownerRole: string | null; owner: PersonRef | null; position: number };
 /* mayEdit: the reader may change it, as the server decides; none said is no. */
-export type Pipeline = { id: string; department: PersonRef; name: string; why: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
+export type Pipeline = { id: string; department: PersonRef; name: string; why: string; catalogKey?: string | null; isDefault?: boolean; stockName?: string; stockWhy?: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
 
 /* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
 export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };

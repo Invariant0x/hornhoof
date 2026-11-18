@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { PhoneDevice } from '@hornhoof/protocol';
+import type { PhoneDevice, PhoneReadinessIssue } from '@hornhoof/protocol';
 import { expect, it } from 'vitest';
 import { companyPhones, phoneSessions } from '../src/db/schema.js';
 import { phoneConnection, phoneConnections } from '../src/modules/phones/presence.js';
@@ -100,6 +100,29 @@ it('says the computer is offline, not the phone, when the node is gone', async (
   await c.node.closed;
   await until(async () => ((await c.listed()) as { online: boolean }).online === false);
   expect(await c.listed()).toMatchObject({ online: false, state: 'offline', connection: 'computer_offline' });
+  expect(await c.listed()).not.toHaveProperty('readiness');
+});
+
+/* phone.list alone says whether a phone is there; its settings check reports settings only, of a phone that is there. */
+it('shows phone settings only while adb lists the phone, and a check that could not reach it as unread settings', async () => {
+  let issues: PhoneReadinessIssue[] | null = ['lock'];
+  const c = await phoneCompany({ lists: true, readiness: () => issues });
+  c.adbLists([ready]);
+  const made = (await c.addPhone()).json();
+  expect(made).toMatchObject({ ...available, readiness: ['lock'] });
+  const listed = async () => (await c.app.inject({ url: '/api/phones', ...as(c.claraSession) })).json().phones[0] as Record<string, unknown>;
+  c.adbLists([]);
+  const away = await listed();
+  expect(away).toMatchObject(missing);
+  expect(away).not.toHaveProperty('readiness');
+  issues = null;
+  const checks = () => c.calls.filter(m => m.type === 'phone.baseline').length;
+  const before = checks();
+  c.hello();
+  await until(() => checks() > before);
+  c.adbLists([ready]);
+  await until(async () => JSON.stringify((await listed()).readiness) === JSON.stringify(['check']));
+  expect(await listed()).toMatchObject({ ...available, readiness: ['check'] });
 });
 
 it('keeps a node that cannot list phones as before: its phones follow its computer and it is asked nothing new', async () => {

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { modelsFor, repoFolder, type Workspace } from '@hornhoof/protocol';
 import type { EchelonOneShot, EchelonStage, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
-import { and, asc, eq, inArray, TransactionRollbackError } from 'drizzle-orm';
+import { and, asc, eq, inArray, notExists, TransactionRollbackError } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, oneShotCalls, subscriptions, taskRoutes, tasks, type CallVerdict } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
@@ -10,10 +11,10 @@ import { repoAt } from '../departments/repository.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
-import { CLOSED, note, published, refuse, type Task } from '../tasks/engine.js';
-import { keepWakes } from '../tasks/outbox.js';
+import { CLOSED, note, published, refuse, type Task, type Wake } from '../tasks/engine.js';
+import { keepWakes, wakeQueued } from '../tasks/outbox.js';
 import { cancelJob, wakeAll } from '../tasks/wake.js';
-import { taskFor, TEST_MINUTES } from '../testruns/runs.js';
+import { taskFor } from '../testruns/runs.js';
 import type { ToolJob } from '../tools/job.js';
 import { onTask } from '../tasks/attachments.js';
 
@@ -27,7 +28,7 @@ const SHOWN_CHARS = 6000;
 export type CallsInput = { task?: number | string; brief: string; inputs?: string[]; count?: number; branch?: string; verdict?: boolean; judge?: string; minutes?: number; wait?: boolean };
 
 /* Callers that wait in their tool call for their batch to end, by batch. One whose call goes away is woken instead. */
-const waiting = new Map<string, (account: string) => void>();
+const waiting = new Map<string, (account: string) => 'delivered' | 'gone'>();
 
 /* Where the calls of a turn run: the caller's own plan, on the machine its turn runs on, or another of that plan's machines
    that is online. */
@@ -158,7 +159,7 @@ export async function startCalls(ctx: Ctx, job: ToolJob, input: CallsInput, sign
   const judgeBrief = input.judge ?? oneShot?.judge ?? null;
   const inputs: (string | null)[] = input.inputs?.length ? input.inputs : Array.from({ length: input.count ?? oneShot?.fanOut ?? 1 }, () => null);
   const batch = randomUUID();
-  const timeoutMs = (input.minutes ?? TEST_MINUTES) * 60_000;
+  const timeoutMs = (input.minutes ?? 0) * 60_000;
   const made = await ctx.db.transaction(async tx => {
     const out: Sending[] = [];
     for (const [i, text] of inputs.entries()) {
@@ -193,7 +194,11 @@ function waitFor(batch: string, signal: AbortSignal | undefined): Promise<string
       resolve(text);
     };
     const gone = () => done(`You stopped waiting for batch ${batch}; you are woken on the task with every answer once it has ended.`);
-    waiting.set(batch, done);
+    waiting.set(batch, text => {
+      if (signal?.aborted) return 'gone';
+      done(text);
+      return 'delivered';
+    });
     if (signal?.aborted) gone();
     else signal?.addEventListener('abort', gone, { once: true });
   });
@@ -301,17 +306,41 @@ export async function callEnded(ctx: Ctx, jobId: string): Promise<void> {
 
 async function batchEnded(ctx: Ctx, batch: string, task: Task): Promise<void> {
   const calls = await batchOf(ctx, batch);
-  if (calls.some(c => !ended(c.job))) return;
-  if (!calls.some(c => c.call.judge) && (await startJudge(ctx, calls))) return;
-  const claimed = await ctx.db.update(oneShotCalls).set({ told: true }).where(and(eq(oneShotCalls.batch, batch), eq(oneShotCalls.told, false))).returning({ id: oneShotCalls.id });
-  if (!claimed.length) return;
-  const caller = calls[0]!.call.callerAgentId;
-  const waiter = waiting.get(batch);
-  if (waiter) return waiter(account(calls));
-  if (CLOSED.includes(task.status)) return;
-  const wakes = [{ agentId: caller, taskId: task.id, why: 'calls' as const, text: account(calls) }];
-  await keepWakes(ctx.db, task.companyId, wakes);
-  await wakeAll(ctx, wakes);
+  if (!calls.length || calls.every(c => c.call.told) || calls.some(c => !ended(c.job))) return;
+  if (!calls.some(c => c.call.judge || c.job.error === 'cancelled') && (await startJudge(ctx, calls))) return;
+  const text = account(calls);
+  const wake: Wake = { agentId: calls[0]!.call.callerAgentId, taskId: task.id, why: 'calls', text, cause: { callBatch: batch } };
+  const outcome = await ctx.db.transaction(async tx => {
+    const claimed = await tx.update(oneShotCalls).set({ told: true }).where(and(eq(oneShotCalls.batch, batch), eq(oneShotCalls.told, false))).returning({ id: oneShotCalls.id });
+    if (!claimed.length) return 'already delivered';
+    const [current] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, task.id)).for('no key update');
+    if (!current || CLOSED.includes(current.status)) return 'task closed';
+    await keepWakes(tx, task.companyId, [wake]);
+    return 'wake saved';
+  });
+  if (outcome === 'already delivered') return;
+  /* Keep the committed wake as a fallback until the caller accepts the answer. */
+  if (waiting.get(batch)?.(text) === 'delivered') {
+    if (outcome === 'wake saved') await wakeQueued(ctx.db, wake);
+  } else if (outcome === 'wake saved') {
+    await wakeAll(ctx, [wake]);
+  }
+}
+
+/* A call job can end before its batch is delivered, including across a server restart. */
+export async function retryCallBatches(ctx: Ctx): Promise<void> {
+  const peer = alias(oneShotCalls, 'batch_peer');
+  const active = ctx.db.select({ id: peer.id }).from(peer).innerJoin(jobs, eq(jobs.id, peer.jobId))
+    .where(and(eq(peer.batch, oneShotCalls.batch), inArray(jobs.status, ['queued', 'running'])));
+  const batches = await ctx.db.selectDistinct({ batch: oneShotCalls.batch, task: tasks }).from(oneShotCalls)
+    .innerJoin(tasks, eq(tasks.id, oneShotCalls.taskId)).where(and(eq(oneShotCalls.told, false), notExists(active)));
+  for (const { batch, task } of batches) {
+    try {
+      await batchEnded(ctx, batch, task);
+    } catch (err) {
+      ctx.log.error({ error: loggable(err), batch }, 'A one-shot batch could not be delivered.');
+    }
+  }
 }
 
 /* How a batch goes, or every batch on a task, for the agent who started it or anyone on the task. */

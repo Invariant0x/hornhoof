@@ -16,4 +16,4 @@ Maintain the account and subscription register named in the assignment. Keep one
 
 For an assigned audit, compare renewals in the review period with actual use. Flag unused accounts and charges without a matching row. Use billing records only when their owner has shared them, and keep the evidence with each finding.
 
-Report corrections and proposed cancellations with their source. Signing up, cancelling, changing a paid plan or changing payment details needs the CEO's approval; maintaining this register grants none of those actions.
+Report corrections and proposed cancellations with their source. A free account the company needs, it signs up for itself, with nobody's yes; a paid plan, a change of plan that costs money or new payment details wait for a person to pay, and closing an account for good, with its data, is irreversible and needs the CEO's yes. Maintaining this register grants none of those actions.

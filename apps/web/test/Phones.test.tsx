@@ -203,3 +203,22 @@ it.each([['en', en], ['ru', ru]] as const)('in %s shows available as a good stat
   fireEvent.click(stop);
   await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph2/stop'));
 });
+
+/* Settings belong to a phone that is there: a missing phone or an offline computer shows its own state and no settings. */
+it.each([['en', en], ['ru', ru]] as const)('in %s shows phone settings only for a phone its computer sees', async (language, t) => {
+  localStorage.setItem('hh-lang', language);
+  onTestFinished(() => { localStorage.removeItem('hh-lang'); });
+  const here: PhoneView = { ...PHONE, id: 'ph3', name: 'Phone in place', readiness: ['lock'] };
+  const gone: PhoneView = { ...PHONE, id: 'ph1', online: false, state: 'offline', connection: 'not_connected', readiness: ['brightness'] };
+  const away: PhoneView = { ...PHONE, id: 'ph2', name: 'Phone on a sleeping computer', online: false, state: 'offline', connection: 'computer_offline', readiness: null };
+  mockApi({ 'GET /api/phones': [200, { phones: [here, gone, away] }] });
+  render(<LanguageProvider><Phones me={ME} machines={[MACHINE]} /></LanguageProvider>);
+  const ready = await until(() => screen.queryByRole('article', { name: here.name }));
+  expect(within(ready).getByText(t.phones.readiness.lock)).toBeInTheDocument();
+  const missing = screen.getByRole('article', { name: gone.name });
+  expect(within(missing).getByText(t.phones.notConnected.hint)).toBeInTheDocument();
+  expect(within(missing).queryByText(t.phones.readiness.brightness)).toBeNull();
+  const off = screen.getByRole('article', { name: away.name });
+  expect(within(off).getByText(t.phones.states.offline)).toBeInTheDocument();
+  expect(within(off).queryByText(t.phones.readiness.checking)).toBeNull();
+});

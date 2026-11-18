@@ -30,6 +30,12 @@ const assignmentCard = (assignment = '', skill = 'Write the test first.') => {
 };
 
 describe('AgentCard', () => {
+  it('identifies a turnkey member on the employee card', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, team: { id: 'u1', name: 'Whole tasks' }, turnkey: true }] });
+    await screen.findByRole('heading', { name: 'Bruno', level: 3 });
+    expect(screen.getByRole('img', { name: 'Generalist: does a task whole' })).toHaveAttribute('data-worker-kind', 'generalist');
+  });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
@@ -297,9 +303,11 @@ describe('AgentCard', () => {
     expect(calls.some(c => c.method === 'PATCH')).toBe(false);
   });
 
-  it('says how long the instructions are, as every turn sends them all', async () => {
-    open();
-    expect(await screen.findByText('Instructions: 12,345 characters of 200,000. Every turn sends all of them to the program.')).toBeInTheDocument();
+  it('opens the prompt without an instruction budget', async () => {
+    const olderCard = { ...CARD, instructions: { length: 12_345, max: 200_000 } };
+    open({ 'GET /api/agents/b1': [200, olderCard] });
+    expect(await screen.findByRole('region', { name: 'Prompt' })).toBeInTheDocument();
+    expect(screen.queryByText(/Instructions:.*characters of/)).not.toBeInTheDocument();
   });
 
   it('saves a changed model and shows it applies from the next turn', async () => {

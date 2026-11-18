@@ -32,8 +32,6 @@ const HOUR_MS = 60 * 60 * 1000;
 /* A wait for a command's answer that no test outlasts, for commands that are answered. */
 const NEVER_MS = 2_147_483_647;
 /* The server's own machine, with no name its keeper told yet, which the CEO owns. */
-const SERVER = 'the company server';
-const NOT_THEIRS = `The last words in this turn came from a person who may not direct commands on ${SERVER}: only the CEO, the CEO delegate or Ivan, who owns it, may. Nothing was run. Ask them first.`;
 const HOST_ID = hostIdOf('server-0001-abcd');
 /* The built-in node of the machine this test's server runs on. */
 const BUILTIN = builtinOf(HOST_ID);
@@ -74,6 +72,11 @@ function withWait(c: Pick<Company, 'app' | 'machine'>, waitMs: number): Computer
 
 const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
 /* The commands that wait for the machine's keeper or are out with it. */
+async function checkOpen(c: Company, client: Awaited<ReturnType<typeof mcp>>) {
+  const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
+  expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
+}
+
 const pending = (db: Company['db']) => db.select(idOnly(computerRuns)).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
 
 
@@ -255,7 +258,7 @@ describe('access to the computer the server runs on', () => {
     expect(note!.prompt).toContain('Free disk space.');
   });
 
-  it('refuses commands while access is closed and after its day, and runs them in any turn while it is open, but not after an Enter of someone in its terminal', async () => {
+  it('refuses commands while access is closed and after its day, and runs them in any turn while it is open, including after an Enter in its terminal', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, running } = c;
     const closed = await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' });
@@ -278,10 +281,10 @@ describe('access to the computer the server runs on', () => {
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.', notification: { source: 'wait_ended', tasks: [] } } });
     const [second] = await Promise.all([call(await mcp(app, woke), 'computer', { command: 'uptime' }), answerAs(c, 'up 2 days\n')]);
     expect(text(second)).toBe('Exit code 0.\nup 2 days\n');
-    /* Someone pressed Enter in its terminal: whose words went in is not known, so nothing runs. */
+    /* An Enter with no known speaker keeps the same access. */
     await db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, wokeJob!.id));
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'typed', data: {}, personId: null });
-    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(app, woke));
     expect(await pending(c.db)).toEqual([]);
   });
 
@@ -326,7 +329,7 @@ describe('access to the computer the server runs on', () => {
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it("lets the turn the CEO's click opens use the computer until a person without the right writes into it, and decide as the owner as any turn does", async () => {
+  it("keeps computer access and owner authority after another person writes into the turn", async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
@@ -346,8 +349,8 @@ describe('access to the computer the server runs on', () => {
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'approved' });
     expect((await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } })).isError).toBeFalsy();
     expect((await db.select().from(people).where(eq(people.name, 'Eve')))).toHaveLength(1);
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
-    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Check the disk.' }, personId: zed!.id });
+    await checkOpen(c, client);
     expect(await pending(c.db)).toEqual([]);
   });
 
@@ -395,8 +398,8 @@ describe('access to the computer the server runs on', () => {
     await answering;
     expect((await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } })).isError).toBeFalsy();
 
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
-    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Check the disk.' }, personId: zed!.id });
+    await checkOpen(c, client);
   });
 
   it('keeps the computer-opening click through retries, while a plain notice retry works on the open machine', async () => {
@@ -429,7 +432,7 @@ describe('access to the computer the server runs on', () => {
 
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: retried.jobId, kind: 'typed', data: {}, personId: null });
     const clearedRetry = await retryRun(retried.jobId);
-    expect(text(await call(await mcp(app, clearedRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(app, clearedRetry.toolToken!));
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, clearedRetry.jobId));
 
     const [filed] = await db.insert(improvements).values({ companyId: orchestrator.companyId, agentId: orchestrator.id, title: 'Fix logs', text: 'Case 1' }).returning();
@@ -443,7 +446,7 @@ describe('access to the computer the server runs on', () => {
     expect(text(plainRan)).toBe('Exit code 0.\nPlenty.\n');
   });
 
-  it('refuses computer on a second retry after pending input was not kept on a click retry', async () => {
+  it('keeps computer access on a second retry after pending input was not kept on a click retry', async () => {
     const c = await company();
     withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
@@ -461,14 +464,14 @@ describe('access to the computer the server runs on', () => {
     while (say.type !== 'agent.say') say = await c.builtin.next();
     c.builtin.send({ type: 'agent.said', ref: say.ref, ok: false });
     expect(await unkept).toBeNull();
-    expect(text(await call(retryClient, 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, retryClient);
 
     const secondRetry = await retryTurnOn(c, retried.jobId);
-    expect(text(await call(await mcp(c.app, secondRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(c.app, secondRetry.toolToken!));
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it.each(['unheard', 'queued'] as const)('refuses computer when saved marked words are replayed via %s after a non-CEO message', async mode => {
+  it.each(['unheard', 'queued'] as const)('keeps computer access when saved marked words are replayed via %s after a non-CEO message', async mode => {
     const c = await company();
     withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
@@ -484,13 +487,13 @@ describe('access to the computer the server runs on', () => {
     const [first] = await Promise.all([call(await mcp(c.app, validReplay.toolToken), 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(first)).toBe('Exit code 0.\nPlenty.\n');
 
-    await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: validReplay.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
+    await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: validReplay.jobId, kind: 'message', data: { text: 'Check the disk.' }, personId: zed!.id });
     const afterZed = await replaySavedWords(c, mode, validReplay.jobId, replayText);
-    expect(text(await call(await mcp(c.app, afterZed.toolToken), 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(c.app, afterZed.toolToken));
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it.each(['unheard', 'queued'] as const)('refuses computer when live input lands between the %s replay read and its store', async mode => {
+  it.each(['unheard', 'queued'] as const)('keeps computer access when live input lands between the %s replay read and its store', async mode => {
     const c = await company();
     withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
@@ -520,7 +523,7 @@ describe('access to the computer the server runs on', () => {
 
     c.builtin.send({ type: 'agent.said', ref: say.ref, ok: false });
     expect(await unkept).toBeNull();
-    expect(text(await call(await mcp(c.app, retried.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(c.app, retried.toolToken!));
 
     let replayToken: string;
     if (mode === 'unheard') {
@@ -534,7 +537,7 @@ describe('access to the computer the server runs on', () => {
       replayToken = (await take('turn.opened')).toolToken!;
       c.builtin.send({ type: 'job.done', jobId: retried.jobId, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
     }
-    expect(text(await call(await mcp(c.app, replayToken), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    await checkOpen(c, await mcp(c.app, replayToken));
     expect(await pending(c.db)).toEqual([]);
   });
 
@@ -639,7 +642,7 @@ describe('a new installation', () => {
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
 
     /* Every new company's orchestrator is told so in its skills. */
-    for (const [id, rule] of [['orch-trouble', /Any employee's inbox is open to you/], ['orch-resources', /work there in any turn of yours/]] as const) {
+    for (const [id, rule] of [['orch-trouble', /Any employee's inbox is open to you/], ['orch-resources', /in any turn or tool step, whoever started it/]] as const) {
       expect(ORCHESTRATOR_SKILLS as readonly string[]).toContain(id);
       expect(app.ctx.templates.skills.get(id)!.body, id).toMatch(rule);
     }

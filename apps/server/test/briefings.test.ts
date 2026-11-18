@@ -65,6 +65,8 @@ describe('what a department and its products keep for their agents', () => {
     });
     expect(bruno.read().repositoryRules).toContain('read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md)');
     expect(bruno.read().repositoryRules).toContain('never rank above your skills');
+    /* The orchestrator may approve a commit for the owner, as the person responsible for the release may. */
+    expect(bruno.read().repositoryRules).toContain('on the main branch only after the person responsible for the release or the orchestrator acting for the owner approves the exact commit');
     for (const other of ['Billing keeps its own plan', 'billing.git', 'Marketing speaks plainly', 'ghp_']) expect(bruno.text).not.toContain(other);
 
     /* An agent of the department outside a product gets the department's record, and where each task's code goes: it may

@@ -16,12 +16,13 @@ export type TaskEdit = {
   goalId?: string | null;
   responsiblePersonId?: string;
   dueAt?: Date | null;
+  priority?: Task['priority'];
   pipelineId?: string | null;
   pipelineStageId?: string | null;
 };
 
 /* The names the history and the screens use for what changed, in the order the card shows them. */
-const FIELDS = [['title', 'title'], ['brief', 'brief'], ['why', 'why'], ['goalId', 'goal'], ['responsiblePersonId', 'responsible'], ['dueAt', 'due'], ['pipelineId', 'pipeline'], ['pipelineStageId', 'stage']] as const;
+const FIELDS = [['title', 'title'], ['brief', 'brief'], ['why', 'why'], ['goalId', 'goal'], ['responsiblePersonId', 'responsible'], ['dueAt', 'due'], ['priority', 'priority'], ['pipelineId', 'pipeline'], ['pipelineStageId', 'stage']] as const;
 
 const same = (a: unknown, b: unknown) => (a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b);
 
@@ -34,6 +35,7 @@ export async function trackerSet(ctx: Pick<Ctx, 'db'>, task: Task, edit: TaskEdi
   if (edit.title !== undefined) set.title = edit.title.trim();
   if (edit.brief !== undefined) set.brief = edit.brief.trim();
   if (edit.why !== undefined) set.why = edit.why.trim();
+  if (edit.priority !== undefined) set.priority = edit.priority;
   if (edit.dueAt !== undefined) set.dueAt = edit.dueAt;
   if (edit.goalId !== undefined && edit.goalId !== task.goalId) {
     if (edit.goalId && task.parentId) throw refuse(400, 'goal_invalid', 'Work under a task serves the goal of the task above it, so it names none of its own.');

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createSceneRecorder } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
-import { pickView, reportUnmocked } from '../moonfern/tracker-scene';
+import { pickView, reportUnmocked, trackerFrames } from '../moonfern/tracker-scene';
 
 /* The tracker as Maya meets Development's work: the list grouped by what each task needs now, with who does it, who answers
    for it, its goal and its date; a task's card with its why, its time and its parts; then the same work as a board. */
@@ -36,4 +36,8 @@ test('tasks.gif: the tracker shows a department as a list, a card and a board', 
 
   reportUnmocked(watcher.errors);
   await recorder.finishGif('tasks');
+});
+
+test('tracker screenshots: tasks at desktop and phone widths', async ({ browser }, info) => {
+  await trackerFrames(browser, info, 'tasks');
 });

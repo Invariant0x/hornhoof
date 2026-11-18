@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { PhoneEndpoint, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
@@ -12,6 +12,8 @@ export type PhoneView = {
   state: 'owner' | 'busy' | 'available' | 'offline'; queued: number; stopping: boolean; endpoint?: string;
   /* not_connected: the computer is online, but its adb does not list the phone ready. */
   connection?: 'ready' | 'not_connected' | 'computer_offline';
+  /* Settings that need attention, null while they are being checked. Only for a phone its computer lists. */
+  readiness?: PhoneReadinessIssue[] | null;
 };
 export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
 
@@ -141,8 +143,16 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
   const words = missing ? t.phones.notConnected.state : t.phones.states[shown];
   const role = STATE_ROLES[missing ? 'not_connected' : shown];
   const state = role ? <span className={`status ${role}`}>{words}</span> : words;
+  /* Settings belong to a phone that is there: a missing phone or an offline computer says so above, and nothing else. */
+  const readiness = noScreen ? undefined : phone.readiness;
   return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={state} line={t.phones.owner(phone.owner.name)} />}>
-    <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} />{missing && <p>{t.phones.notConnected.hint}</p>}<p className="muted">{t.phones.waiting(phone.queued)}</p></Part>
+    <Part title={t.phones.computer}>
+      <Facts items={[[t.phones.computer, machine]]} />
+      {missing && <p>{t.phones.notConnected.hint}</p>}
+      <p className="muted">{t.phones.waiting(phone.queued)}</p>
+      {readiness === null && <p className="muted" role="status">{t.phones.readiness.checking}</p>}
+      {readiness?.map(issue => <p key={issue} className="bad">{t.phones.readiness[issue]}</p>)}
+    </Part>
     {mine && <Part title={t.phones.control}>
       <div className="entry-actions"><button type="button" className="act" aria-expanded={open} disabled={noScreen !== null} aria-describedby={noScreen ? reason : undefined} onClick={() => setWatching(v => !v)}>{open ? t.phones.hide : t.phones.watch}</button>
         {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}

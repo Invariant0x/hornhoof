@@ -1,10 +1,8 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
-import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requests } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
 import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
+import { commitApprovalRequired, exactCommitApproval } from './commit-approval.js';
 import { NO_DEPARTMENT_CHECKER } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
@@ -33,14 +31,7 @@ function requireReady(route: Route, input: AcceptanceInput): void {
   if (input.candidateId !== route.state.candidateId || input.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact ready candidate and route revision.');
 }
 
-
-async function humanMainApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
-  const [approval] = await db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id),
-    eq(requests.kind, 'approval'), eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).limit(1);
-  return approval?.id ?? null;
-}
-
-const noMainApproval = () => refuse(403, 'decision_not_allowed', 'Main acceptance needs the authorized human approval of this exact integration commit.');
+const noMainApproval = () => refuse(403, 'decision_not_allowed', 'The department requires approval of this exact integration commit.');
 
 type ObservedHead = Awaited<ReturnType<Ctx['readCommit']>>;
 type Repository = Parameters<Ctx['readCommit']>[0];
@@ -71,32 +62,31 @@ async function intoTurn(ctx: Reader, target: IntegrationTarget & { turn: NonNull
 
 type AutoProof = Awaited<ReturnType<typeof verifyAutonomousMainAcceptance>>;
 
-/* A main line of its own takes a result on a person's approval of the exact commit, or, where the CEO turned autonomous
-   release on, on its record made before main moved (#858). */
-async function verifyMainIntegrationApproval(ctx: Reader, task: Task, commit: string): Promise<{ humanApproval: string | null; autoProof: AutoProof }> {
-  const humanApproval = await humanMainApproval(ctx.db, task, commit);
-  if (humanApproval) return { humanApproval, autoProof: null };
+/* A recorded approval or autonomous proof, where the department's commit rule requires one. */
+async function verifyMainIntegrationApproval(ctx: Reader, task: Task, commit: string): Promise<{ approval: string | null; autoProof: AutoProof }> {
+  const approval = await exactCommitApproval(ctx.db, task.companyId, task.id, commit);
+  if (approval || !(await commitApprovalRequired(ctx.db, task.companyId, task.departmentId))) return { approval, autoProof: null };
   const autoProof = await verifyAutonomousMainAcceptance(ctx, task, commit);
   if (!autoProof) throw noMainApproval();
-  return { humanApproval: null, autoProof };
+  return { approval: null, autoProof };
 }
 
-async function confirmMainApprovalInTx(tx: Tx, task: Task, commit: string, autoProof: AutoProof): Promise<void> {
-  if (await humanMainApproval(tx, task, commit)) return;
-  const confirmed = autoProof ? await confirmAutonomousMainAcceptance(tx, task, commit, autoProof) : null;
-  if (!confirmed) throw noMainApproval();
+async function confirmMainApprovalInTx(tx: Tx, task: Task, commit: string, approval: string | null, autoProof: AutoProof): Promise<void> {
+  if (approval && await exactCommitApproval(tx, task.companyId, task.id, commit, approval)) return;
+  if (autoProof && await confirmAutonomousMainAcceptance(tx, task, commit, autoProof)) return;
+  if (approval || autoProof || await commitApprovalRequired(tx, task.companyId, task.departmentId, true)) throw noMainApproval();
 }
 
 /* Read-only proof of an integration into a main line of its own, already performed through the authorized Git route. */
 async function intoMain(ctx: Reader, task: Task, target: IntegrationTarget, candidate: EchelonCandidate, input: AcceptanceInput) {
-  const { humanApproval, autoProof } = await verifyMainIntegrationApproval(ctx, task, input.integrationCommit);
+  const { approval, autoProof } = await verifyMainIntegrationApproval(ctx, task, input.integrationCommit);
   try {
     const source = await ctx.readCommit!(target.repo, { branch: candidate.branch }, 5_000);
     const main = await ctx.readCommit!(target.repo, { branch: target.branch }, 5_000);
     if (!matchesObservedHead(source, candidate.branch, candidate.commit) || !matchesObservedHead(main, target.branch, input.integrationCommit)) throw new Error('stale integration');
     await requireInclusion(ctx, target.repo, candidate.commit, input.integrationCommit);
   } catch { throw refuse(409, 'task_changed', 'The source or integration changed, or candidate inclusion cannot be verified.'); }
-  return { branch: target.branch, commit: input.integrationCommit, approval: humanApproval, autoProof, observedAt: new Date().toISOString() };
+  return { branch: target.branch, commit: input.integrationCommit, approval, autoProof, observedAt: new Date().toISOString() };
 }
 
 async function observedIntegration(ctx: Reader, task: Task, candidate: EchelonCandidate, input: AcceptanceInput) {
@@ -123,7 +113,7 @@ export async function acceptCandidate(ctx: Reader, task: Task, route: Route, age
     if (turn) await requireSameTurn(tx, task, turn, candidate.commit);
     await requireTaskHead({ db: tx }, task, agentId);
     await requireTestsReport(tx, task, route, candidate);
-    if (!turn) await confirmMainApprovalInTx(tx, task, integration.commit, autoProof);
+    if (!turn) await confirmMainApprovalInTx(tx, task, integration.commit, integration.approval, autoProof);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
   }, wakes);
   return { task: row, wakes };

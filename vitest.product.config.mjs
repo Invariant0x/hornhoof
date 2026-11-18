@@ -1,7 +1,8 @@
+import { availableParallelism, freemem, loadavg } from 'node:os';
 import { fileURLToPath, URL } from 'node:url';
-import base from './vitest.config.mjs';
+import { namedWorkers, partShare, vitestWorkers } from './apps/node/src/vitest-workers.ts';
 import PlannedVitestSequencer from './apps/server/test/planned-vitest-sequencer.ts';
-import { vitestWorkers } from './scripts/test/vitest-workers.mjs';
+import base from './vitest.config.mjs';
 
 const serverRoot = fileURLToPath(new URL('./apps/server/', import.meta.url));
 const serverAlias = base.test.projects.find(project => project.test.name === '@hornhoof/server').test.alias;
@@ -12,8 +13,9 @@ export default {
   ...base,
   test: {
     ...base.test,
-    /* As many workers as the machine's free memory holds, so a part does not run one per core into swap. */
-    maxWorkers: vitestWorkers(),
+    /* The count the machine or the node that runs the part names, else as many workers as a part's share of this machine takes,
+       so a part does not run one per core into swap. */
+    maxWorkers: namedWorkers(process.env) ?? vitestWorkers(partShare({ cpus: availableParallelism(), load: loadavg()[0], memFree: process.availableMemory?.() ?? freemem() })),
     sequence: { sequencer: PlannedVitestSequencer },
     projects: [
       ...base.test.projects,

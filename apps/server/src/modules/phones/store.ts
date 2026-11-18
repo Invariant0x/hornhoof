@@ -10,6 +10,7 @@ import { nodeIdentity } from '../nodes/hub.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneConnection, type PhoneConnection } from './presence.js';
 import { idOnly } from '../../db/selections.js';
+import { phoneReadiness } from './readiness.js';
 
 export type CompanyPhone = typeof companyPhones.$inferSelect;
 export type PhoneSession = typeof phoneSessions.$inferSelect;
@@ -64,6 +65,8 @@ export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person, know
     id: phone.id, name: phone.name, owner: owner!, machineId: phone.machineId, lending: phone.lending, stopping: active?.state === 'revoking',
     online: connection === 'ready', state: connection !== 'ready' ? 'offline' : !phone.lending ? 'owner' : active ? 'busy' : 'available', connection,
     queued: sessions.filter(s => s.state === 'queued').length,
+    /* Settings are read only on a phone its computer lists now; one that is away has no reading to show. */
+    ...(connection === 'ready' ? { readiness: phoneReadiness(ctx, phone) } : {}),
     ...(me?.id === phone.personId ? { endpoint: phone.serial } : {}),
   };
 }

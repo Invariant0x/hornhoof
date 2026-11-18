@@ -2,7 +2,8 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
+import { readReadiness, readinessScript } from './readiness.js';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
@@ -116,6 +117,10 @@ export class PhoneAdb {
     const output = await this.call(serial, ['exec-out', 'uiautomator', 'dump', '/dev/tty'], signal);
     if (output.length > 2 * 1024 * 1024) throw new Error('phone_tree_too_large');
     return output.toString();
+  }
+
+  async readiness(serial: string, signal: AbortSignal): Promise<PhoneReadinessIssue[]> {
+    return readReadiness(await this.call(serial, ['shell', 'sh'], signal, readinessScript));
   }
 
   screenshot(serial: string, signal: AbortSignal): Promise<Buffer> {

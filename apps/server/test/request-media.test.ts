@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, attachments, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
+import { agents, approvalPolicies, attachments, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
@@ -165,7 +165,8 @@ describe('pictures, links and choices in requests', () => {
   });
 
   it('links an approval to its commit on GitHub, and keeps a link the agent gives', async () => {
-    const { app, turn, fran, task, ceoSession } = await company();
+    const { app, db, turn, fran, task, ceoSession } = await company();
+    await db.insert(approvalPolicies).values({ companyId: task.companyId, departmentId: task.departmentId!, channel: 'commit', mode: 'every' });
     const { tools } = await turn(fran);
     await call(tools, 'ask_person', { task: task.number, question: 'Release the icons?', commit: COMMIT, link: 'https://github.com/acme/app/compare/main...task-4-icons' });
     const [waiting] = (await app.inject({ method: 'GET', url: '/api/requests', ...as(ceoSession) })).json().requests;

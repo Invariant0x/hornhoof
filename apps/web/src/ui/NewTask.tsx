@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
@@ -6,6 +7,8 @@ import { Field } from './Field';
 
 type Props = {
   department: Department;
+  pipelineId?: string | null;
+  showPriority?: boolean;
   /* The head's name, or null when it is called after its role. */
   head: string | null;
   onCreated: (task: TaskDetail) => void;
@@ -13,11 +16,12 @@ type Props = {
 };
 
 /* A task for a department from a person: it goes to the department's head, for one of its products or the whole department. */
-export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
+export function NewTask({ department: d, pipelineId, showPriority = false, head, onCreated, onCancel }: Props) {
   const t = useT();
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
   const [body, setBody] = useState('');
+  const [priority, setPriority] = useState<TaskPriority>('normal');
   const [product, setProduct] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -33,6 +37,8 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
         brief: brief.trim(),
         body: body.trim(),
         department: d.id,
+        ...(pipelineId !== undefined ? { pipeline: pipelineId } : {}),
+        ...(priority === 'normal' ? {} : { priority }),
         ...(product ? { product } : {}),
       });
       onCreated(task);
@@ -50,6 +56,11 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
       <Field label={t.dept.details}>
         {p => <textarea {...p} rows={5} value={body} onChange={e => setBody(e.target.value)} maxLength={20000} placeholder={t.dept.detailsPlaceholder} />}
       </Field>
+      {showPriority && <Field label={t.tracker.priority.label}>{p => (
+        <select {...p} value={priority} onChange={e => setPriority(e.target.value as TaskPriority)}>
+          {TASK_PRIORITIES.map(level => <option key={level} value={level}>{t.tracker.priority[level]}</option>)}
+        </select>
+      )}</Field>}
       {d.products.length > 0 && (
         <Field label={t.dept.product}>
           {p => (

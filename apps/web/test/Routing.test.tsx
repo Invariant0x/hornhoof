@@ -77,7 +77,7 @@ describe('shareable workspace', () => {
     await screen.findByRole('heading', { level: 2, name: 'Development' });
     await user.click(screen.getByRole('button', { name: 'Department tasks' }));
     expect(location.pathname + location.search).toBe('/tasks?department=d2');
-    const department = await screen.findByRole('heading', { level: 1, name: 'Development' });
+    const department = await screen.findByRole('heading', { level: 1, name: 'Development / List' });
     const row = await within(await screen.findByRole('region', { name: 'List' })).findByRole('listitem', { name: '#12 Checkout API' });
     await user.click(within(row).getByRole('button', { name: 'Checkout API' }));
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
@@ -201,7 +201,9 @@ describe('shareable workspace', () => {
       'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
-    render(<Shell me={ME} welcome onSignOut={() => {}} />);
+    history.replaceState(null, '', '/');
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Open the orchestrator' }));
     const window = await screen.findByRole('complementary', { name: 'Orchestrator' });
     await act(async () => {
       history.replaceState(null, '', '/tasks/t12');

@@ -69,6 +69,8 @@ describe('persisted versioned product batches', () => {
   });
   it('keeps a V2 batch queued until a node advertises the native executor capability', async () => {
     const f = await fixture(false, false);
+    /* A limit its files fit in at the estimate of a file no part measured, so they go out in one batch. */
+    await f.db.update(testRuns).set({ timeoutMs: 30 * 60_000 }).where(eq(testRuns.id, f.run.id));
     await acceptDescription(f.app.ctx, BUILTIN, f.reply); await pumpTests(f.app.ctx);
     const parts = await f.parts();
     expect(parts.map(part => part.environmentSelection!.selection.kind)).toEqual(['batch', 'final']);

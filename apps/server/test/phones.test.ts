@@ -1,9 +1,23 @@
 import { eq } from 'drizzle-orm';
+import type { PhoneReadinessIssue } from '@hornhoof/protocol';
 import { expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { as } from './helpers.js';
+import { as, until } from './helpers.js';
 import { phoneCompany } from './phone-fixture.js';
 import { agents, companyPhones } from '../src/db/schema.js';
+
+it('reports readiness for a registered phone and checks again when the node comes back', async () => {
+  let issues: PhoneReadinessIssue[] = ['lock'];
+  const c = await phoneCompany({ readiness: () => issues });
+  const made = await c.addPhone();
+  expect(made.statusCode).toBe(201);
+  expect(made.json().readiness).toEqual(['lock']);
+  expect(c.calls[1]).toMatchObject({ type: 'phone.baseline', binding: { phoneId: made.json().id, hardwareKey: 'a'.repeat(64) } });
+  const list = () => c.app.inject({ url: '/api/phones', ...as(c.claraSession) });
+  issues = [];
+  c.hello();
+  await until(async () => (await list()).json().phones[0].readiness?.length === 0);
+});
 
 it('lets any person register their network phone on a company machine, with an owner', async () => {
   const c = await phoneCompany();

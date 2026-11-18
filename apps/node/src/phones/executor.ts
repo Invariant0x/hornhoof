@@ -3,7 +3,7 @@ import type { PhoneAdb } from './adb.js';
 import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
 
-export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act'>;
+export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'readiness'>;
 export type PhoneExecutorDeps = { adb: PhoneDriver; send(message: PhoneReply | PhoneFrame): void };
 const noFrame = (): PhoneCapture => ({ jpeg: null, width: 0, height: 0, elements: [] });
 const FRAME_MS = 1500;
@@ -23,6 +23,8 @@ export class PhoneExecutor {
   /* How many of each phone's pixels make one pixel of the picture its agent sees. */
   readonly #scales = new Map<string, number>();
   readonly #seen = new Map<string, { at: number; done: Promise<PhoneReply> }>();
+  readonly #checks = new Map<string, Promise<PhoneReply>>();
+  #readiness = new AbortController();
 
   constructor(private readonly deps: PhoneExecutorDeps) {}
 
@@ -49,10 +51,12 @@ export class PhoneExecutor {
     const result = await seen.done;
     this.deps.send(result);
     // Remember the outcome, not megabytes of screenshots for every action of the last ten minutes.
-    if (this.#seen.get(m.requestId) === seen) this.#seen.set(m.requestId, { at: seen.at, done: Promise.resolve({ type: 'phone.reply', requestId: m.requestId, status: result.status }) });
+    if (this.#seen.get(m.requestId) === seen) this.#seen.set(m.requestId, { at: seen.at, done: Promise.resolve({ type: 'phone.reply', requestId: m.requestId, status: result.status, ...(result.readiness ? { readiness: result.readiness } : {}) }) });
   }
 
   close(): void {
+    this.#readiness.abort();
+    this.#readiness = new AbortController();
     this.#sessions.close();
     for (const id of this.#timers.keys()) this.clearTimer(id);
   }
@@ -76,8 +80,20 @@ export class PhoneExecutor {
       const listed = await this.deps.adb.devices(new AbortController().signal);
       return reply('ok', { devices: listed.filter(device => m.serials.includes(device.serial)) });
     }
+    if (m.type === 'phone.baseline') {
+      const { serial, hardwareKey } = m.binding;
+      if (this.#sessions.holds(serial, hardwareKey) || this.#checks.has(hardwareKey)) return reply('busy');
+      const check = this.checkBaseline(m);
+      this.#checks.set(hardwareKey, check);
+      try { return await check; }
+      finally { this.#checks.delete(hardwareKey); }
+    }
     if (m.type === 'phone.open') {
       const { grant } = m;
+      const signal = this.#readiness.signal;
+      const check = this.#checks.get(grant.binding.hardwareKey);
+      if (check) await check.catch(() => {});
+      if (signal.aborted) return reply('failed');
       this.#sessions.open(grant);
       try {
         await this.#sessions.use(grant.sessionId, grant.generation, async state => {
@@ -107,6 +123,20 @@ export class PhoneExecutor {
       this.emitFrame(state.grant, capture);
       return reply('ok', { capture });
     } catch { return reply('session_gone'); }
+  }
+
+  private async checkBaseline(m: Extract<PhoneServerMessage, { type: 'phone.baseline' }>): Promise<PhoneReply> {
+    const { adb } = this.deps;
+    const { serial, hardwareKey } = m.binding;
+    const signal = this.#readiness.signal;
+    const reply = { type: 'phone.reply', requestId: m.requestId } as const;
+    const missing = () => ({ ...reply, status: 'needs_person' as const });
+    try {
+      if (networkEndpoint(serial) && await adb.connect(serial, signal) !== 'connected') return missing();
+      if (!(await adb.devices(signal)).some(device => device.serial === serial && device.status === 'device')) return missing();
+      if (await adb.identity(serial, signal) !== hardwareKey) return missing();
+    } catch { return missing(); }
+    return { ...reply, status: 'ok', readiness: await adb.readiness(serial, signal) };
   }
 
   private async capture(state: PhoneSessionView): Promise<PhoneCapture> {
