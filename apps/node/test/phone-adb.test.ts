@@ -145,6 +145,12 @@ describe('the phone adb boundary', () => {
     calls.length = 0;
     expect(await adb.type('R58M123', 'a\nb\n', new AbortController().signal)).toEqual({ next: 4 });
     expect(calls).toHaveLength(1);
+    // A later call starts when exactly its full limit is left.
+    batchMs = 4_000;
+    vi.setSystemTime(0);
+    calls.length = 0;
+    expect(await adb.type('R58M123', text, new AbortController().signal, 14_000)).toEqual({ next: 11 });
+    expect(calls.map(call => call.timeoutMs)).toEqual([6000, 6000, 6000]);
   });
 
   it('gives every step of the first call 1.5 seconds and types nothing when not one step fits', async () => {
