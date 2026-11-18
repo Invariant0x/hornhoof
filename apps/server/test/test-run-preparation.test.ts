@@ -31,13 +31,13 @@ async function described(request: Extract<ServerMessage, { type: 'tests.describe
 }
 
 /* A run of the whole product on two computers, given out: the preparation on one, a batch on the other. */
-async function started() {
+async function started(minutes?: number) {
   const c = await company();
   const machines = [await c.planless(c.ceo, 'one-pc', idle({ load: 0.1, host: '1'.repeat(64) })), await c.planless(c.ceo, 'two-pc', idle({ load: 0.1, host: '2'.repeat(64) }))];
   for (const machine of machines) machine.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: RUNTIMES });
   await until(() => machines.every(machine => testCapabilities(c.app.ctx, nodeIdentity(machine.nodeId)).testEnvironmentVersion === 1));
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main', minutes })).error).toBe(false);
   const [run] = await c.db.select().from(testRuns);
   const describer = machines.find(machine => machine.nodeId === run!.environmentRequest!.nodeId)!;
   describer.node.send(await described(await nextOf(describer.node, 'tests.describe')));
@@ -66,7 +66,7 @@ it('starts a batch at once beside the preparation, on the computer the preparati
 /* A failed preparation fails the run whatever the batches come to, so none of them keeps a machine busy for it: those running stop on
    their machines, and those waiting never start. */
 it.each(['reported', 'timed out'])('stops every batch of the run when its preparation fails, as %s', async how => {
-  const { c, run, parts, preparation, running, on } = await started();
+  const { c, run, parts, preparation, running, on } = await started(how === 'timed out' ? 5 : undefined);
   expect(running).toHaveLength(1);
   const batchNode = on(running[0]!).node, given = await nextOf(batchNode, 'tests.run');
   if (how === 'reported') {
@@ -79,7 +79,7 @@ it.each(['reported', 'timed out'])('stops every batch of the run when its prepar
     await checkTestTimes(c.app.ctx);
   }
   const ended = await parts();
-  expect(ended[0]).toMatchObject({ status: 'failed', error: how === 'reported' ? 'failed' : 'timeout' });
+  expect(ended[0]).toMatchObject({ status: 'failed', error: how === 'reported' ? 'failed' : 'upper_limit' });
   expect(ended.slice(1).map(part => ({ status: part.status, error: part.error }))).toEqual(ended.slice(1).map(() => ({ status: 'failed', error: 'prerequisite_failed' })));
   expect((await c.db.select().from(testRuns).where(eq(testRuns.id, run.id)))[0]!.status).toBe('failed');
   expect(await nextOf(batchNode, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: given.partId });

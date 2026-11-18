@@ -1,5 +1,5 @@
 import { taskFor, logName, type Run } from './run-records.js';
-import { WORK_MEMORY_GB, TEST_MINUTES, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
+import { WORK_MEMORY_GB, TEST_MINUTES, UNMEASURED_QUIET_MS, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
 import type { KeptFiles, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
@@ -33,6 +33,7 @@ import { pickMachine } from './pick.js';
 import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
+import { alertSilentPart } from './part-silence.js';
 import { heldMachines, holdsBuiltin, holdsMachine } from '../network/follow.js';
 import { builtinName } from '../nodes/builtin.js';
 import { endPartChecks, partsOfNode as ofNode, reconcilePartChecks } from '../nodes/check-slots.js';
@@ -87,7 +88,9 @@ const COMMIT_MISMATCH = 'commit_mismatch';
 
 /* Why a part ended, after its number in the result. */
 const ENDED_HOW: Record<string, (run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: Part) => string> = {
-  timeout: run => `it did not end within ${took(run.timeoutMs)}`,
+  timeout: run => run.timeoutMs ? `it did not end within ${took(run.timeoutMs)}` : 'an operation took too long',
+  silent: () => 'it was stopped after too long without output or results',
+  upper_limit: run => `it reached the upper time limit of ${took(run.timeoutMs)}`,
   clone_failed: run => (run.commitSha ? 'the pinned commit could not be fetched' : 'the branch could not be cloned'),
   files_failed: () => "the task's files could not be fetched onto its machine",
   cancelled: () => 'it was stopped on its machine',
@@ -347,14 +350,14 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number, vite
   command: commandFor(run, part.part),
   part: part.part,
   parts: run.parts,
-  timeoutMs: run.timeoutMs,
+  ...(run.timeoutMs ? { timeoutMs: run.timeoutMs } : {}),
   vitestWorkers,
-  silenceMs: partSilenceMs(run.timeoutMs, part.environmentSelection?.estimatedMs),
+  silenceMs: partSilenceMs(run, part.environmentSelection?.estimatedMs),
 });
 
-/* A part with no estimate (an ad hoc command or a final check) gets most of its allotted time. */
-function partSilenceMs(timeoutMs: number, estimatedMs: number | undefined): number {
-  const quiet = estimatedMs === undefined ? timeoutMs * 0.75 : estimatedMs * 1.5 + 60_000;
+function partSilenceMs(run: Run, estimatedMs: number | undefined): number {
+  const fallback = run.kind === 'work' ? run.timeoutMs * 0.75 : UNMEASURED_QUIET_MS;
+  const quiet = estimatedMs === undefined ? fallback : estimatedMs * 1.5 + 60_000;
   return Math.max(1, Math.min(2 ** 31 - 1, Math.ceil(quiet)));
 }
 
@@ -550,6 +553,9 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
   if (isId(msg.partId)) {
     const [found] = await db.select({ part: testParts, run: testRuns }).from(testParts).innerJoin(testRuns, eq(testRuns.id, testParts.runId)).where(and(eq(testParts.id, msg.partId), ofNode(ctx, id)));
     if (found && found.part.status !== 'queued') {
+      /* The node may have lost its connection before sending the live alert. Its final result survives reconnect. */
+      if (!msg.ok && msg.error === 'silent') await alertSilentPart(ctx, id, msg.partId)
+        .catch((err: unknown) => ctx.log.error({ error: loggable(err), partId: msg.partId }, 'The silent part alarm could not be sent.'));
       const [ended] = await db
         .update(testParts)
         .set({ ...productPartEnd(ctx, id, found.run, found.part, msg), commit: msg.commit, exitCode: msg.exitCode, tail: tailOf(msg.log), finishedAt: new Date() })
@@ -593,6 +599,10 @@ async function settleLeftOpen(ctx: Ctx): Promise<void> {
   for (const { id } of left) await settleRun(ctx, id).catch((err: unknown) => ctx.log.error({ error: loggable(err), runId: id }, 'A test run whose parts all ended could not end.'));
 }
 
+const upperLimitPassed = (run: Run, part: Part, now: Date): boolean =>
+  run.timeoutMs > 0 && part.status === 'running' && part.startedAt !== null &&
+  part.startedAt.getTime() + run.timeoutMs + LATE_MS < now.getTime();
+
 /* Parts past their time limit whose node never said they ended, parts whose machine is away too long, parts that waited too
    long for a machine, and runs whose parts all ended. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
@@ -604,8 +614,10 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
     .where(inArray(testParts.status, ['queued', 'running']));
   for (const { part, run } of open) {
-    if (part.status === 'running' && part.startedAt && part.startedAt.getTime() + run.timeoutMs + LATE_MS < now.getTime()) {
-      await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, 'timeout');
+    if (upperLimitPassed(run, part, now)) {
+      const why = run.kind === 'tests' ? 'upper_limit' : 'timeout';
+      const tail = why === 'upper_limit' ? `The part reached the upper time limit of ${took(run.timeoutMs)}.` : '';
+      await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, why, tail);
       continue;
     }
     const node = part.status === 'running' ? nodeOf(ctx, part) : null;
@@ -713,7 +725,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
         files,
         ...runResources(input, kind, department),
         parts,
-        timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
+        timeoutMs: (input.minutes ?? (kind === 'work' ? TEST_MINUTES : 0)) * 60_000,
       })
       .returning();
     if (parts) await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
@@ -779,7 +791,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     ...productRunView(run),
     ...reuseView(run.fileCache, parts),
     ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : { commitSha: run.commitSha }),
-    minutes: run.timeoutMs / 60_000,
+    minutes: run.timeoutMs ? run.timeoutMs / 60_000 : null,
     status: stateOf(run, run.status),
     ...(stopper ? { stoppedBy: stopper.name } : {}),
     startedAt: run.createdAt.toISOString(),

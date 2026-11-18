@@ -4,6 +4,7 @@ import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
+import { deadlineSignal } from './test-context.js';
 import { GitCredentialMask, gitEnv, gitPreparationFailure, type GitPreparationError } from './workspace.js';
 import type { MutationDelta } from './test-impact-mutation.js';
 import { signalProcessGroup } from './process-group.js';
@@ -38,7 +39,7 @@ const TOO_MUCH = 'Git output exceeds the configured limit.';
 function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) => void, { auth = {}, network = false, input }: GitOutput = {}): Promise<void> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
-    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
+    const signal = deadlineSignal(context.signal, context.deadline);
     const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     let failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
     const secret = auth.HH_GIT_PASSWORD ?? '', mask = new GitCredentialMask([secret]);

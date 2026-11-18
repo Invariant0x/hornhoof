@@ -184,6 +184,13 @@ describe('test runs', () => {
   const RUN = { type: 'tests.run', partId: 'p-1', repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_x' }, branch: 'task-12-checkout', task: 12, command: 'npm test', part: 1, parts: 2, timeoutMs: 1_800_000 };
   const parse = (m: object) => parseServerMessage(JSON.stringify(m));
 
+  it('takes a quiet budget alone for tests and requires a wall limit for work', () => {
+    const quiet = { ...RUN, timeoutMs: undefined, silenceMs: 60_000 };
+    expect(parse(quiet)).toMatchObject({ silenceMs: 60_000 });
+    expect(parse({ ...quiet, silenceMs: undefined })).toBeNull();
+    expect(parse({ ...quiet, kind: 'work' })).toBeNull();
+  });
+
   it("carry a node's load in its hello and on their own, with the parts it runs", () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: LOAD, tests: ['p-1'] }))).toMatchObject({ load: LOAD, tests: ['p-1'] });
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD }))).toEqual({ type: 'load', ...LOAD });

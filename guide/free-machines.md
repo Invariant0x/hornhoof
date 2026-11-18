@@ -68,6 +68,11 @@ Every machine is lent at first. Its owner, or someone who sees the whole company
 
 The run waits, and starts on the first machine that frees up. A part that finds none within 2 hours ends.
 
+Once a test part starts, new output or progress restarts its quiet timer. Hornhoof allows one and a half times the
+estimated duration of the part plus one minute, or one hour when it has no recorded times. At the end of that quiet
+period, the node alerts Operations and stops the part. Set `minutes` in `run_tests` to impose an upper time limit on
+each part, including parts still making progress.
+
 ## What happens on the machine during a run?
 
 1. The branch is cloned into a fresh folder.

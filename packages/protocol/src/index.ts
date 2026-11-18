@@ -63,7 +63,7 @@ export const isProgramOwnPrompt = (text: string): boolean => /^\s*<(?:task-notif
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
-export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed', 'files_failed'] as const;
+export const TEST_ERRORS = ['failed', 'timeout', 'silent', 'upper_limit', 'cancelled', 'clone_failed', 'files_failed'] as const;
 export type TestError = (typeof TEST_ERRORS)[number];
 /* The most parts a run splits into, and the most of each part's log a node sends: its start and its end. */
 export const MAX_TEST_PARTS = 10;
@@ -708,10 +708,12 @@ const ServerMessage = z.discriminatedUnion('type', [
     kept: KeptFiles.optional(),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
-    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    /* A wall-clock limit, if requested. A test's quiet budget renews whenever the node sees progress. */
+    timeoutMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
     silenceMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
     vitestWorkers: z.number().int().positive().max(4096).optional(),
-  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
+  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.')
+    .refine(message => message.timeoutMs !== undefined || (message.kind !== 'work' && message.silenceMs !== undefined), 'A run part needs a wall or quiet time limit.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('tests.ack'), partId: Id }),

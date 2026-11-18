@@ -4,20 +4,20 @@ import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, repositoryScope, setProductPlanningPorts, testCapabilities } from '../src/modules/testruns/describe.js';
-import { partDone, pumpTests } from '../src/modules/testruns/runs.js';
-import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
+import { checkTestTimes, partDone, pumpTests } from '../src/modules/testruns/runs.js';
+import { connectNode, listen, nextOf, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 import { planningEnvironment } from './fixtures/run-planning/environment.js';
 
 const NODE_KEY = 'batch-integration-node-0123456789abcdef';
 const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'python', version: '3.12.0', fingerprint: 'c'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'd'.repeat(64) }];
-async function fixture(once = true, native = true) {
+async function fixture(once = true, native = true, timeoutMs = 10_000) {
   const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://example.test/fixture.git' }).returning();
   const [task] = await db.insert(tasks).values({ companyId, departmentId: department!.id, number: 1, title: 'Batch fixture', status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id }).returning();
   const [job] = await db.insert(jobs).values({ companyId, subscriptionId: agent!.subscriptionId!, agentId: agent!.id, taskId: task!.id, prompt: 'Fixture', timeoutMs: 10_000, status: 'running' }).returning();
-  const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number: 1, command: '', commitSha: TEST_COMMIT, timeoutMs: 10_000,
+  const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number: 1, command: '', commitSha: TEST_COMMIT, timeoutMs,
     environmentRequest: newEnvironmentRequest(repositoryScope(companyId, department!.id, department!.repoUrl!), { mode: 'product' }) }).returning();
   const node = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], tests: [], load: { cpus: 8, load: 0.1, memFree: 16 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 0, jobs: 0 }, testEnvironmentVersion: 1, testRuntimes: native ? runtimes : runtimes.slice(0, 2) });
@@ -41,10 +41,28 @@ async function fixture(once = true, native = true) {
         dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } } };
     await partDone(app.ctx, BUILTIN, message);
   };
-  return { app, db, run: run!, reply, parts, complete };
+  return { app, db, run: run!, reply, parts, complete, node };
 }
 
 describe('persisted versioned product batches', () => {
+  it('dispatches a budget from a recorded hour-long file without an automatic wall limit', async () => {
+    const f = await fixture(false, true, 0);
+    const hour = 60 * 60_000;
+    if (f.reply.result.status !== 'ready') throw new Error('Fixture description is absent.');
+    const units = f.reply.result.description.inventory;
+    setProductPlanningPorts(f.app.ctx, {
+      history: async () => ({ durations: units.map(unit => ({ ...unit, ms: hour })), costs: { setupMs: 1, collectMs: 1 } }),
+    });
+    await acceptDescription(f.app.ctx, BUILTIN, f.reply);
+    await pumpTests(f.app.ctx);
+    const sent = await nextOf(f.node, 'tests.run');
+    expect(sent.silenceMs).toBeGreaterThanOrEqual(hour);
+    expect(sent.timeoutMs).toBeUndefined();
+    const running = (await f.parts()).find(part => part.id === sent.partId)!;
+    await checkTestTimes(f.app.ctx, new Date(running.startedAt!.getTime() + 2 * hour));
+    expect((await f.parts()).find(part => part.id === sent.partId)?.status).toBe('running');
+  });
+
   /* The batch waits for no preparation, only for the one machine here; the final checks of the prepared suite wait for it. */
   it.each([true, false])('persists preparation once and decides every remaining part by it on outcome=%s', async ok => {
     const f = await fixture();
