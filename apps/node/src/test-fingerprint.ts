@@ -31,7 +31,7 @@ const REGULAR = new Set(['100644', '100755']);
 const DOCUMENT = /^(?!templates\/|(?:AGENTS|CONTRIBUTING|CHANGELOG)\.md$)(?!.*(?:^|\/)(?:test|tests|__tests__)\/).*\.md$/;
 /* What holds data leads nowhere, as a file with no extension does unless it may run. Anything else this cannot read may be a program,
    and a program may load anything. */
-const DATA = /\.(?:json|jsonl|md|txt|csv|sql|ya?ml|toml|ini|css|svg|png|jpe?g|gif|webp|ico|ttf|otf|woff2?|pdf|ansi|patch|snap|lock)$/;
+const DATA = /\.(?:json|jsonl|md|txt|log|csv|sql|ya?ml|toml|ini|css|svg|png|jpe?g|gif|webp|ico|ttf|otf|woff2?|pdf|ansi|patch|snap|lock)$/;
 const TEST_FOLDER = /(?:^|\/)(?:test|tests|__tests__)\//;
 const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json'];
 const SOURCE_OF_BUILT: Record<string, string[]> = { '.js': ['.ts', '.tsx'], '.jsx': ['.tsx'], '.mjs': ['.mts'], '.cjs': ['.cts'] };
@@ -123,6 +123,9 @@ class Tree {
   packageCode(root: string): string[] { return this.under(root).filter(path => !TEST_FOLDER.test(path)); }
   matching(patterns: string[]): string[] { return this.paths.filter(path => patterns.some(pattern => matchesPattern(path, pattern))); }
   rootOf(path: string): string { return this.roots.find(root => isInside(path, root)) ?? '.'; }
+  /* Where a file this cannot follow may lead: its package, or the folder of its own of a file no package holds, as the updater's
+     script, which would otherwise tie whatever reaches it to every file of the repository. A file at the top may lead anywhere. */
+  reachableFrom(path: string): string { return this.roots.find(root => isInside(path, root)) ?? posix.dirname(path); }
   isRoot(folder: string): boolean { return this.roots.includes(folder); }
   /* What a path that may lack its extension names: a file, the source of a built one, or a folder's index. */
   resolve(path: string): string | undefined {
@@ -302,7 +305,7 @@ class Graph {
     const members = new Set(group), imported = new Set<string>(), opaque = new Set<string>();
     for (const member of group) {
       const scan = this.scan(member);
-      if (scan.opaque) opaque.add(this.tree.rootOf(member));
+      if (scan.opaque) opaque.add(this.tree.reachableFrom(member));
       for (const edge of scan.edges) {
         if (members.has(edge)) continue;
         const reach = this.reaches.get(edge)!;
