@@ -1011,7 +1011,7 @@ describe("working in the product's repository", () => {
     expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: null });
   });
 
-  it('keeps a turn with a repository waiting for a machine whose Hornhoof is too old to clone it', async () => {
+  it('keeps every turn waiting on a machine whose Hornhoof is older than 0.5.0, with a repository or without one', async () => {
     const { app, db, url, ceo, ctx, dev, hire, repository, task } = await withRepositories();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
@@ -1021,14 +1021,16 @@ describe("working in the product's repository", () => {
     mac.send({ type: 'hello', version: '0.4.0', loggedIn: true, running: [] });
     await until(async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, node.subscriptionId)))[0]!.status === 'ready');
     const olga = await hire('Olga', null, node.subscriptionId);
-    await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
-    expect((await nextRun(mac)).workspace).toEqual({ key: olga.id, repo: null });
-    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
-    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, olga.id));
+    const reason = async () => (await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason;
     await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
     await marked(mac);
     expect(mac.queued()).toBe(0);
-    expect((await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason).toBe('node_outdated');
+    expect(await reason()).toBe('node_outdated');
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
+    await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
+    await marked(mac);
+    expect(mac.queued()).toBe(0);
+    expect(await reason()).toBe('node_outdated');
   });
 });
 
