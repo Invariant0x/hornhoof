@@ -1,7 +1,8 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, goalEvents, goals, people, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, goalEvents, goals, people, taskEvents, tasks } from '../src/db/schema.js';
+import { passResponsibility } from '../src/modules/tracker/handoff.js';
 import { upgradeCompany } from '../src/modules/tracker/upgrade.js';
 import { as, invitePerson, ownDatabases, setUpCompany, testApp } from './helpers.js';
 
@@ -30,7 +31,7 @@ async function company() {
 
 /* From here on the database refuses the change of the table's rows that the condition names, as a server that fails right
    there writes nothing more. What it gives back takes the refusal away again. */
-async function failAt(db: Db, change: 'update' | 'insert', table: 'tasks' | 'agents', when = 'true'): Promise<() => Promise<unknown>> {
+async function failAt(db: Db, change: 'update' | 'insert', table: 'tasks' | 'agents' | 'agent_events', when = 'true'): Promise<() => Promise<unknown>> {
   await db.execute(sql.raw(`create or replace function hh_fail() returns trigger language plpgsql as $$ begin raise exception 'The upgrade failed here.'; end $$`));
   await db.execute(sql.raw(`create trigger hh_fail before ${change} on ${table} for each row when (${when}) execute function hh_fail()`));
   return () => db.execute(sql.raw(`drop trigger hh_fail on ${table}`));
@@ -66,6 +67,36 @@ describe('a responsible person who leaves', () => {
     expect((await patch(`/api/people/${olegId}`, { access: { departments: [sales.id], teams: [] } })).statusCode).toBe(200);
     const now = new Map((await db.select().from(tasks)).map(t => [t.id, t.responsiblePersonId]));
     expect([now.get(inDev.id), now.get(inSales.id)]).toEqual([ivanId, olegId]);
+  });
+
+  it('keeps the responsible people of a task and goal closed after selection', async () => {
+    const { ctx, db, companyId, dev, task, olegId } = await company();
+    const open = await task(dev.id, { responsiblePersonId: olegId });
+    const [goal] = await db.insert(goals).values({ companyId, number: 1, departmentId: dev.id, title: 'Ship the work', responsiblePersonId: olegId }).returning();
+    await db.update(people).set({ status: 'disabled' }).where(eq(people.id, olegId));
+
+    /* Commit each close after its candidate read and before the handoff transaction starts. */
+    const transaction = db.transaction.bind(db);
+    const between = vi.spyOn(db, 'transaction')
+      .mockImplementationOnce(async (work, config) => {
+        await db.update(tasks).set({ status: 'done', closedAt: new Date(ctx.clock()) }).where(eq(tasks.id, open.id));
+        return transaction(work, config);
+      })
+      .mockImplementationOnce(async (work, config) => {
+        await db.update(goals).set({ status: 'reached' }).where(eq(goals.id, goal!.id));
+        return transaction(work, config);
+      });
+    try {
+      await passResponsibility(ctx, companyId, olegId);
+    } finally {
+      between.mockRestore();
+    }
+
+    const [closed] = await db.select().from(tasks).where(eq(tasks.id, open.id));
+    const [reached] = await db.select().from(goals).where(eq(goals.id, goal!.id));
+    expect([closed, reached]).toMatchObject([{ status: 'done', responsiblePersonId: olegId }, { status: 'reached', responsiblePersonId: olegId }]);
+    expect(await lines(db, open.id)).toEqual([]);
+    expect(await db.select().from(goalEvents).where(eq(goalEvents.goalId, goal!.id))).toEqual([]);
   });
 });
 
@@ -129,5 +160,26 @@ describe('the one-time upgrade of a company from before the tracker', () => {
     await back();
     await upgradeCompany(ctx, companyId);
     expect(await state()).toEqual({ responsible: [ivanId, ivanId, olegId], managers: ['DEV-PM', 'SAL-PM'], due: false });
+  });
+
+  it.each(['the live update', 'a hiring notice'])('keeps the upgrade and sends the remaining notices when %s fails', async failure => {
+    const { ctx, db, companyId, dev, sales, state, olegId, ivanId } = await due();
+    const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(eq(agents.kind, 'orchestrator'));
+    await db.insert(agentEvents).values({ companyId, agentId: orchestrator!.id, kind: 'message', data: { text: 'Hello' } });
+    const stop = failure === 'the live update'
+      ? ctx.bus.subscribe(companyId, m => { if (m.type === 'org') throw new Error('The live update failed.'); })
+      : await failAt(db, 'insert', 'agent_events', `new.data->>'department' = '${dev.id}'`);
+
+    try {
+      await upgradeCompany(ctx, companyId);
+    } finally {
+      await Promise.resolve(stop());
+    }
+    await upgradeCompany(ctx, companyId);
+
+    expect(await state()).toEqual({ responsible: [ivanId, ivanId, olegId], managers: ['DEV-PM', 'SAL-PM'], due: false });
+    const notices = await db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.kind, 'applied')).orderBy(asc(agentEvents.seq));
+    const sent = failure === 'the live update' ? [dev.id, sales.id] : [sales.id];
+    expect(notices).toMatchObject(sent.map(department => ({ data: { kind: 'staff', department } })));
   });
 });

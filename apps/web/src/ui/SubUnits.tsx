@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { Department, Employee, Team } from '../types';
+import { employeeKind, WorkerMark } from './WorkerMark';
 
 type EmployeeGroup = { key: string; title: string; members: Employee[] };
 
@@ -47,7 +48,7 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
           <ul className="dv-list">
             {g.members.map(e => (
               <li key={e.id}>
-                <b>{e.name}</b>
+                <span className="worker-name"><WorkerMark kind={employeeKind(e.turnkey)} /><b dir="auto">{e.name}</b></span>
                 {canMove && (
                   <select
                     aria-label={t.dept.subUnitOf(e.name)}

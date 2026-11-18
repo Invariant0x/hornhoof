@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { NEXT_TURN_WORDS } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
+import { agentEvents, agents, jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
-import { addressed } from './prompt.js';
+import { addressed, FIRST_CONTACT_ACTION } from './prompt.js';
 import { cancelUnattemptedLive, cancelUnsentDelivery, reserveDelivery, wordsDigest } from '../program-operator/deliveries.js';
 import { liveInputOf, rememberLiveInput } from '../program-operator/input.js';
 
@@ -47,10 +47,21 @@ export async function sayLive(
   const node = running && identityOf(running.sub, running.nodeId, running.builtinMachine, ownBuiltin(ctx.config));
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
   if (!takesLiveWords(ctx, node, running.sub.provider)) return null;
+  if (running.agentKind === 'orchestrator' && await repliesToOnePerson(ctx, running.id, source)) return null;
   if (await answersSomeoneElse(ctx, running, source)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
   return (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) ? running.id : null;
+}
+
+/* First contact and personal assistant replies have one recipient. Keep other words in the queue. */
+async function repliesToOnePerson(ctx: Pick<Ctx, 'db'>, jobId: string, source?: MessageSource): Promise<boolean> {
+  if (source?.data && typeof source.data === 'object' && 'channel' in source.data && source.data.channel === 'assistant') return true;
+  const [privateMessage] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(and(
+    eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'),
+    or(sql`${agentEvents.data}->>'action' = ${FIRST_CONTACT_ACTION}`, sql`${agentEvents.data}->>'channel' = 'assistant'`),
+  )).limit(1);
+  return Boolean(privateMessage);
 }
 
 /* Whether a person's words would go into a turn that answers someone else in Telegram. Every word of a turn goes back to

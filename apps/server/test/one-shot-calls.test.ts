@@ -1,13 +1,18 @@
 import type { ServerMessage } from '@hornhoof/protocol';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { jobs, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { jobs, oneShotCalls, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { callEnded, retryCallBatches, startCalls } from '../src/modules/calls/calls.js';
 import { keepWakes } from '../src/modules/tasks/outbox.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, mcp, nextOf, until, type FakeNode } from './helpers.js';
+import { ownDatabases } from './helpers-db.js';
 import { company } from './test-runs-company.js';
+
+/* One test adds a constraint to see a failed wake kept; a truncate does not undo that, so this file has its own databases. */
+ownDatabases();
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type Company = Awaited<ReturnType<typeof company>>;
@@ -59,6 +64,58 @@ describe('one-shot calls', () => {
       expect.objectContaining({ number: 1, brief: 'Look for unsafe SQL in this file.', input: 'src/orders.ts', status: 'done', result: 'No unsafe SQL.', startedAt: expect.any(String), finishedAt: expect.any(String) }),
       expect.objectContaining({ number: 2, input: 'src/users.ts', status: 'done', result: 'Line 12 builds SQL from a string.' }),
     ]);
+  });
+
+  it('leaves a batch unclaimed if its durable wake fails and delivers it on retry', async () => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    const call = await callerOn(c, c.bruno, mac);
+    await call('start_calls', { brief: 'Check the status.' });
+    const { jobId } = await nextOf(mac.node, 'job.run');
+    await c.db.update(jobs).set({ status: 'done', result: 'All clear.' }).where(eq(jobs.id, jobId));
+    await c.db.execute(sql.raw("ALTER TABLE pending_wakes ADD CONSTRAINT reject_calls_wake CHECK (why <> 'calls')"));
+    try {
+      await callEnded(c.app.ctx, jobId);
+      expect((await c.db.select().from(oneShotCalls).where(eq(oneShotCalls.jobId, jobId)))[0]!.told).toBe(false);
+      expect(await c.wokeWith(c.bruno.id)).toBeNull();
+    } finally {
+      await c.db.execute(sql.raw('ALTER TABLE pending_wakes DROP CONSTRAINT reject_calls_wake'));
+    }
+    await retryCallBatches(c.app.ctx);
+    expect(await c.wokeWith(c.bruno.id)).toContain('All clear.');
+  });
+
+  it.each([false, true])('delivers to the waiting caller or its task if it stopped waiting (%s)', async stopped => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    await callerOn(c, c.bruno, mac);
+    const [caller] = await c.db.select().from(jobs).where(eq(jobs.agentId, c.bruno.id));
+    const stop = new AbortController();
+    const waiting = startCalls(c.app.ctx, {
+      id: caller!.id, companyId: c.bruno.companyId, agentId: c.bruno.id, agentKind: c.bruno.kind,
+      roleKey: c.bruno.roleKey, departmentId: c.bruno.departmentId, skills: c.bruno.skills,
+    }, { brief: 'Check the links.', wait: true }, stop.signal);
+    const { jobId } = await nextOf(mac.node, 'job.run');
+    if (stopped) stop.abort();
+    await c.db.update(jobs).set({ status: 'done', result: 'The links work.' }).where(eq(jobs.id, jobId));
+    await callEnded(c.app.ctx, jobId);
+    expect(await waiting).toContain(stopped ? 'You stopped waiting' : 'The links work.');
+    const woke = await c.wokeWith(c.bruno.id);
+    if (stopped) expect(woke).toContain('The links work.');
+    else expect(woke).toBeNull();
+  });
+
+  it('runs calls and their judge untimed by default and carries an explicit caller deadline', async () => {
+    const c = await company();
+    const mac = await c.machine(c.ceo, 'dev-mac');
+    const call = await callerOn(c, c.bruno, mac);
+    await call('start_calls', { brief: 'Check one link.', judge: 'Read its answer.' });
+    const run = await nextOf(mac.node, 'job.run');
+    expect(run.timeoutMs).toBe(0);
+    answer(mac.node, run, 'It works.');
+    expect((await nextOf(mac.node, 'job.run')).timeoutMs).toBe(0);
+    expect((await call('start_calls', { brief: 'Check another link.', minutes: 121 })).error).toBe(false);
+    expect((await nextOf(mac.node, 'job.run')).timeoutMs).toBe(121 * 60_000);
   });
 
   it('take any count in one start_calls, each going to the machine at once', async () => {

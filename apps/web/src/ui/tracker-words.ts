@@ -1,4 +1,7 @@
+import { isPersonWait, type TaskWaitFact } from '@hornhoof/protocol/waits';
 import type { Language, Messages } from '../i18n';
+import { taskWaits, type WaitTask } from '../task-board';
+import { doerOf, isWaitForPerson } from '../tracker';
 import type { TaskLine, TaskLogLine } from '../types';
 
 export const localeOf = (language: Language) => (language === 'ru' ? 'ru-RU' : 'en-GB');
@@ -29,13 +32,42 @@ export function dueText(t: Messages, language: Language, task: Pick<TaskLine, 'd
   return { text: late ? t.tracker.late(day) : day, late };
 }
 
-/* Whom an open task waits for and how long already, by its oldest wait. */
-export function waitText(t: Messages, task: Pick<TaskLine, 'time' | 'status'>, now = Date.now()): string | null {
-  if (closed(task)) return null;
-  const wait = [...(task.time?.waitsOn ?? [])].sort((a, b) => a.since.localeCompare(b.since))[0];
-  if (!wait) return null;
-  const span = spanText(t, sinceSeconds(wait.since, now));
-  return wait.who ? t.tracker.waitsFor(wait.who.name, span) : t.tracker.waitsSomething(span);
+export const waitClass = (wait: TaskWaitFact) => wait.failure ? 'failure' : isPersonWait(wait) ? 'person' : wait.event === 'time' ? 'scheduled' : 'working';
+
+export function waitLabel(t: Messages, task: WaitTask, wait: TaskWaitFact, now = Date.now(), language: Language = 'en', asksYou = false): string {
+  const words = t.tracker.wait;
+  const described = (label: string) => wait.reason ? words.detail(label, wait.reason) : label;
+  if (wait.failure === 'run') {
+    const label = words.failedRun(wait.reason, wait.kind === 'work');
+    return wait.runError ? words.detail(label, words.runErrors[wait.runError]) : label;
+  }
+  if (wait.failure) return described(words[wait.failure]);
+  if (wait.event === 'time') {
+    if (!wait.until) return words.scheduled;
+    const date = new Date(wait.until);
+    const locale = localeOf(language);
+    return described(words.fires(date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
+      date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })));
+  }
+  const agent = wait.who?.kind === 'agent' && wait.who.id !== doerOf(task)?.id ? wait.who.name : null;
+  switch (wait.kind) {
+    case 'person': {
+      const span = spanText(t, sinceSeconds(wait.since, now));
+      const name = wait.who?.kind === 'person' && wait.who.name || (wait.event === 'ceo' ? words.ceo : words.someone);
+      return described(asksYou ? words.you(span) : words.person(name, span));
+    }
+    case 'after': return words.after(wait.reason);
+    case 'review': return words.review(agent);
+    case 'run': return words.run(wait.reason);
+    case 'work': return words.work(wait.reason);
+    case 'external': return agent ? described(words.employee(agent)) : wait.reason || words.inWork;
+  }
+}
+
+/* The most important work fact, or what this person is needed for. */
+export function waitText(t: Messages, task: WaitTask, now = Date.now(), personId?: string, language?: Language): string | null {
+  const wait = taskWaits(task, now).find(w => personId === undefined || isWaitForPerson(w, personId));
+  return wait ? waitLabel(t, task, wait, now, language) : null;
 }
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);

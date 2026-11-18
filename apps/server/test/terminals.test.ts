@@ -843,7 +843,7 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     expect(await next(builtin, 'term.input')).toMatchObject({ data: '\r' });
     /* The owner's turn stands either way, so wait for the mark itself: then the Enter is the turn's last word. */
     await until(async () => (await events(app, ceo)).some((e: { kind: string }) => e.kind === 'typed'));
-    expect(await decisionPrincipal(db, greeting.jobId)).toMatchObject({ personId: owner!.id, sourceSeq: expect.any(Number) });
+    expect(await decisionPrincipal(db, greeting.jobId)).toMatchObject({ personId: owner!.id, sourceSeq: null });
     /* One mark for the same person, however many times they press Enter. */
     screen.ws.send(JSON.stringify({ type: 'input', data: 'y\r' }));
     await next(builtin, 'term.input');
@@ -959,7 +959,7 @@ describe('words a person typed in a running turn, which the program takes after 
     expect(said).toHaveLength(1);
     expect(said[0]).toMatchObject({ data: { text: 'and the limits' }, person: { id: personId } });
     const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
-    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: answersCeo ? personId : owner!.id });
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: owner!.id });
     const client = await mcp(at.app, opened.toolToken!);
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
   });
@@ -1037,7 +1037,8 @@ describe('words a person wrote into the last seconds of a turn, which the progra
     const opened = await writtenIn(at, at.clara);
     expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String) });
     expect(await jobOf(at.app, opened.jobId!)).toEqual({ createdBy: at.claraId, answersCeo: true });
-    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: at.claraId });
+    const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: owner!.id });
     const client = await mcp(at.app, opened.toolToken!);
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
   });

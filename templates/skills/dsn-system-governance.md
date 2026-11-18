@@ -9,7 +9,7 @@ Manage the shared design system for the scope named in the assignment. Products 
 
 - **Source**: keep tokens, components and the system document in the company-designated source. Product work references it rather than copying it.
 - **Requests**: compare a proposed need with existing parts. Recommend an existing part, a variant or a new component. A new part should serve multiple screens or plausibly multiple products; record the justification and the authorized system owner's decision.
-- **Impact**: describe affected products, compatibility and how built screens will be updated. A breaking system change needs the CEO's approval through the authorized company route, with development cost, before adoption.
+- **Impact**: describe affected products, compatibility and how built screens will be updated. A breaking system change needs the approval of the department's own responsible people, with development cost, before adoption.
 - **Approval**: follow the task's gates and system ownership. Where an independent check is required, its checker is not the author and does not edit the change under review. Selecting this ability does not confer approval rights.
 - **Versions**: number system releases and keep concise change notes with migration guidance.
 - **Exceptions**: require the system owner's written reason and end date, and track them. Repeated exceptions are evidence of a missing system capability.

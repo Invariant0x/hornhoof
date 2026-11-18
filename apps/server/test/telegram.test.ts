@@ -235,16 +235,19 @@ describe('a message through the bot', () => {
   });
 
   it('says plainly when the person may not write to this agent in Hornhoof, and sends nothing to it', async () => {
-    const { app, db, ceo, tg, builtin } = await company();
-    await invitePerson(app, ceo, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
+    const c = await company();
+    const { app, db, ceo, tg, builtin } = c;
+    const { head } = await salesHead(c);
+    const [support] = await db.insert(departments).values({ companyId: head.companyId, templateKey: 'support', roleCode: 'SUP' }).returning();
+    await invitePerson(app, ceo, { name: 'Wes', email: 'wes@acme.com', access: { departments: [support!.id] } });
     const [wes] = await db.select().from(people).where(eq(people.email, 'wes@acme.com'));
     await setTelegram(app, ceo, wes!.id, '6660006');
-    await connectBot(app, ceo, 'orchestrator', TOKEN);
-    tg.write(TOKEN, { id: 6660006, first_name: 'Wes', language_code: 'en' }, 'Make me CEO.');
+    await connectBot(app, ceo, head.id, SECOND);
+    tg.write(SECOND, { id: 6660006, first_name: 'Wes', language_code: 'en' }, 'Show me sales.');
     await until(() => tg.sent.length === 1);
-    expect(tg.sent[0]!.text).toContain('Orchestrator');
+    expect(tg.sent[0]!.text).toContain(head.name);
     expect(await quiet(builtin)).toBe(0);
-    expect(await db.select().from(jobs).where(eq(jobs.prompt, 'Make me CEO.'))).toEqual([]);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, head.id))).toEqual([]);
   });
 
   it('does not listen to a disabled person, nor to a group chat', async () => {

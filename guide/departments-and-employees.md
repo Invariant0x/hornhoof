@@ -205,17 +205,19 @@ Every other role takes the middle one: its work is checked after.
 
 A department can have an owner: a person the CEO names under **About the department**, from the people with access to it. With no owner, the CEO decides. Having access never makes someone the owner, and Hornhoof never works it out on its own.
 
-The owner gets the department's approvals of any kind and sets how each kind goes: messages, prices, publications, commits, spending and everything else. There are three ways:
+The owner receives the department's approval requests. The people who run the department can set a rule for messages, prices, publications, commits, spending or other work. They can also set it through their head. The CEO, the delegate and the orchestrator acting for the owner can set these rules too. Each channel has four modes.
 
 - **Every one to me**: each one asks.
 - **Only new kinds**: a kind of work asks until someone approves it once. A declined kind asks again.
 - **No approval within limits**: up to the limit nobody is asked and the task's log keeps a line about it. Above the limit, or when the work does not say how much, the owner is asked.
 
-A kind with no rule asks every time. The rules stay as they are when the owner changes or goes away. If the owner loses access or is switched off, the CEO decides again.
+- **No approval**: work goes ahead without a request.
+
+A channel with no rule needs no approval. People can set a rule even if the department already works on that channel. A person pays money or signs in the company's name. The rules stay with the department when its owner changes. If the owner loses access or is switched off, the CEO takes the approval requests again.
 
 The CEO and the CEO delegate can always answer any request themselves, but a department's approvals no longer add to the CEO's count once it has an owner. The head brings the CEO in when the department misses a goal or its plan.
 
-To approve an exact commit for a release, an employee always asks, whatever the rules say. Only the department's autonomous release, which the people who run it or the CEO turn on, lets such a commit go in without asking: [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) says when.
+The commit rule covers main acceptance and release. For **Only new kinds**, exact commits share one kind. For **No approval within limits**, an exact commit has no amount, so the rule calls for approval. [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) explains the evidence for either route.
 
 ## Who sees which departments?
 

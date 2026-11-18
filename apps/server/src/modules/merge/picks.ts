@@ -6,7 +6,7 @@ import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
 import { parkedNodes, parkedOf, rowsByKeys, type Row } from './read.js';
-import { ORCHESTRATORS_TABLES, SOFT_REFS, TABLE_RULES, ceos, ruleOf } from './rules.js';
+import { SOFT_REFS, TABLE_RULES, ceos, ruleOf } from './rules.js';
 import { nameOf, valueWords } from './words.js';
 
 /* here keeps the leader's row as it is, there takes the source's side, value writes the picker's own for one conflict. */
@@ -35,7 +35,7 @@ class NotTaken extends Error {}
 const iso = (value: string | Date | null): string | null => (value === null ? null : new Date(value).toISOString());
 
 /* The words of a filter as SQL, with its values after those already there. */
-function where(f: PickFilter & { settled?: boolean; after?: string }, who: Picker, params: unknown[]): string {
+function where(f: PickFilter & { settled?: boolean; after?: string }, params: unknown[]): string {
   const said: string[] = [];
   const add = (text: (n: number) => string, value: unknown): void => {
     params.push(value);
@@ -47,7 +47,6 @@ function where(f: PickFilter & { settled?: boolean; after?: string }, who: Picke
   if (f.from) add(n => `COALESCE(c.at, c.created_at) >= $${n}::timestamptz`, f.from);
   if (f.to) add(n => `COALESCE(c.at, c.created_at) <= $${n}::timestamptz`, f.to);
   if (f.after) add(n => `(COALESCE(c.at, c.created_at), c.id) > (SELECT COALESCE(a.at, a.created_at), a.id FROM net.merge_conflicts a WHERE a.id = $${n}::uuid)`, f.after);
-  if (who.kind === 'orchestrator') add(n => `c.tbl IN (SELECT jsonb_array_elements_text($${n}::jsonb))`, JSON.stringify(ORCHESTRATORS_TABLES()));
   if (f.settled !== undefined) said.push(f.settled ? 'c.picked IS NOT NULL' : 'c.picked IS NULL');
   return said.length > 0 ? said.join(' AND ') : 'true';
 }
@@ -56,13 +55,12 @@ const SELECT = `SELECT c.id, c.merge, m.label, m.path, c.tbl, c.key, c.op, c.kin
   FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge`;
 const ORDER = 'ORDER BY COALESCE(c.at, c.created_at), c.id';
 
-/* What a merge could not prove, as whoever asks may see it: the orchestrator his own, the CEO all. Open ones unless
-   asked otherwise, oldest first, a page at a time. A secret column's value is never shown. */
-export async function conflictsOf(db: Db, who: Picker, f: PickFilter & { settled?: boolean; after?: string; limit?: number }): Promise<{ conflicts: ConflictView[]; more: boolean }> {
+/* What a merge could not prove, oldest first, a page at a time. A secret column's value stays in storage. */
+export async function conflictsOf(db: Db, f: PickFilter & { settled?: boolean; after?: string; limit?: number }): Promise<{ conflicts: ConflictView[]; more: boolean }> {
   const q = queryOf(db);
   const limit = Math.min(Math.max(f.limit ?? 50, 1), 100);
   const params: unknown[] = [];
-  const rows = await q<ConflictRow>(`${SELECT} WHERE ${where({ ...f, settled: f.settled ?? false }, who, params)} ${ORDER} LIMIT ${limit + 1}`, params);
+  const rows = await q<ConflictRow>(`${SELECT} WHERE ${where({ ...f, settled: f.settled ?? false }, params)} ${ORDER} LIMIT ${limit + 1}`, params);
   const shown = rows.slice(0, limit);
   const ids = [...new Set(shown.flatMap(row => row.task_id ?? []))];
   const tasks = new Map<string, { id: string; number: number; title: string }>();
@@ -75,7 +73,7 @@ export async function conflictsOf(db: Db, who: Picker, f: PickFilter & { settled
     const words = (side: Row | null): Record<string, string> | null => (side ? Object.fromEntries(cols.map(column => [column, valueWords(row.tbl, column, side[column])])) : null);
     return {
       id: row.id, merge: row.merge, label: row.label, table: row.tbl, topic: row.topic, what: nameOf(row.tbl, row.here ?? row.there, row.key), kind: row.kind, cols: row.cols,
-      here: words(row.here), there: words(row.there), at: iso(row.at), task: (row.task_id && tasks.get(row.task_id)) || null, whose: ceos(row.tbl) ? ('ceo' as const) : ('orchestrator' as const), picked: row.picked,
+      here: words(row.here), there: words(row.there), at: iso(row.at), task: (row.task_id && tasks.get(row.task_id)) || null, whose: (permanentDeletion(row, 'there') || ceos(row.tbl)) ? ('ceo' as const) : ('orchestrator' as const), picked: row.picked,
     };
   });
   return { conflicts, more: rows.length > limit };
@@ -134,6 +132,13 @@ async function unitOf(q: Query, facts: Facts, conflict: ConflictRow, take: 'ther
   return { ...unit, set: conflict.cols.length > 0 ? conflict.cols : differing(t, conflict.there, y) };
 }
 
+function permanentDeletion(conflict: ConflictRow, take: 'there' | 'value', value?: Record<string, unknown>): boolean {
+  if (conflict.op === 'delete') return true;
+  if (conflict.tbl !== 'people') return false;
+  const changed = take === 'there' ? conflict.there : value;
+  return Boolean(changed?.removed_at && !conflict.here?.removed_at);
+}
+
 /* Everything a pick must hold to before it writes; it throws why not. */
 function allowed(conflict: ConflictRow, take: Take, value?: Record<string, unknown>): void {
   if (conflict.picked) throw new NotTaken('Already settled.');
@@ -142,6 +147,9 @@ function allowed(conflict: ConflictRow, take: Take, value?: Record<string, unkno
   if (written.some(column => own.includes(column))) throw new NotTaken(OWNERS_ALONE);
   if (take !== 'value') return;
   if (conflict.kind !== 'differs' || !value || Object.keys(value).length === 0) throw new NotTaken('A value of your own settles only a row that differs, in its own columns.');
+  if (conflict.tbl === 'people' && Object.keys(value).some(column => column.startsWith('deletion_'))) {
+    throw new NotTaken('A deletion decision or its progress must come from the removal workflow.');
+  }
   const foreign = Object.keys(value).find(column => !conflict.cols.includes(column));
   if (foreign) throw new NotTaken(`This conflict is not about ${foreign}.`);
 }
@@ -155,9 +163,8 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
   if (take === 'value' && f.ids?.length !== 1) throw new ApiError(400, 'validation', 'A value of your own settles one conflict: name it by its id.');
   const q = queryOf(db);
   const params: unknown[] = [];
-  /* Named by id, a conflict answers for itself even when it is settled or another's; in bulk only the open ones a
-     picker may settle are taken at all. */
-  const found = await q<ConflictRow>(`${SELECT} WHERE ${where({ ...f, settled: f.ids ? undefined : false }, f.ids ? { kind: 'ceo', personId: '' } : who, params)} ${ORDER} LIMIT ${AT_ONCE}`, params);
+  /* A pick by id reports an already settled conflict. Bulk picks visit open conflicts. */
+  const found = await q<ConflictRow>(`${SELECT} WHERE ${where({ ...f, settled: f.ids ? undefined : false }, params)} ${ORDER} LIMIT ${AT_ONCE}`, params);
   const facts = await factsOf(q);
   const by = who.kind === 'ceo' ? `person:${who.personId}` : `agent:${who.agentId}`;
   const result: Picked = { settled: 0, here: 0, there: 0, refused: [], tasks: [] };
@@ -166,7 +173,7 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
   for (const conflict of found) {
     if (done.has(conflict.id)) continue;
     try {
-      const settled = await db.transaction(async tx => settle(queryOf(tx as unknown as Db), facts, by, conflict, take, value));
+      const settled = await db.transaction(async tx => settle(queryOf(tx as unknown as Db), facts, who, by, conflict, take, value));
       for (const one of settled) {
         done.add(one.id);
         result.settled += 1;
@@ -192,7 +199,7 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
 }
 
 /* One conflict, or the group a refused one hangs together with, inside one transaction. The conflicts it settled. */
-async function settle(q: Query, facts: Facts, by: string, asked: ConflictRow, take: Take, value?: Record<string, unknown>): Promise<ConflictRow[]> {
+async function settle(q: Query, facts: Facts, who: Picker, by: string, asked: ConflictRow, take: Take, value?: Record<string, unknown>): Promise<ConflictRow[]> {
   const [fresh] = await q<ConflictRow>(`${SELECT} WHERE c.id = $1::uuid FOR UPDATE OF c`, [asked.id]);
   if (!fresh) throw new NotTaken('There is no such conflict any more.');
   let group = [fresh];
@@ -200,7 +207,12 @@ async function settle(q: Query, facts: Facts, by: string, asked: ConflictRow, ta
     const refused = await q<ConflictRow>(`${SELECT} WHERE c.merge = $1::uuid AND c.kind = 'refused' AND c.picked IS NULL AND c.id <> $2::uuid ${ORDER} FOR UPDATE OF c`, [fresh.merge, fresh.id]);
     group = groupOf(facts, fresh, refused);
   }
-  for (const conflict of group) allowed(conflict, take, value);
+  for (const conflict of group) {
+    allowed(conflict, take, value);
+    if (who.kind === 'orchestrator' && take !== 'here' && permanentDeletion(conflict, take, value)) {
+      throw new NotTaken('Only the CEO can choose a permanent deletion.');
+    }
+  }
   if (take !== 'here') await write(q, facts, group, take, value);
   await q(
     `UPDATE net.merge_conflicts SET picked = $2, value = $3::jsonb, picked_by = $4, picked_at = now() WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))`,

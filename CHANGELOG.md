@@ -10,6 +10,80 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
+- The orchestrator acts with the company owner's rights through named tools, the generic API and HTTP, in any turn and between turns.
+- Permanently deleting a person records the CEO's yes for that person and resumes unfinished cleanup on retry.
+- The orchestrator can use an open machine grant whoever started the turn or last wrote.
+- Choosing access for every agent opens the machine for the selected duration in one step.
+- The orchestrator can see personal assistants and their conversations while each assistant takes orders from its person.
+- The orchestrator can read and settle ordinary merge conflicts, and only a direct CEO choice can pick a permanent deletion.
+- A department head can enable a skill that grants only department tracker work.
+- The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
+- Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
+- Assignment changes made by a department head show the head and the person whose authority it used.
+- Editing an employee card preserves a tracker nudge that arrives during the edit.
+- One-shot batches save the wake with their delivery claim so a failed write can be retried.
+- Agent terminals, recordings, and output tails stay readable after vault calls, with only known secret values masked.
+- Sensitive tool history shows the entry, site, and login with passwords and codes masked.
+- A cancelled turn in the phone queue no longer delays lending to the next waiting turn.
+- Tasks and goals keep their recorded responsible person if they close while responsibility is being passed on.
+- A failed tracker upgrade notice no longer stops other hiring notices from being sent.
+- Operator screens and replies hide short known credentials before they leave a node, using the same masking rules as the server.
+- The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
+- A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
+- Company phone checks wait until a phone is idle and run less often, so they do not interrupt an agent using the screen.
+- Company phones stay awake with the screen set to its lowest manual brightness to save battery.
+- Tracker screenshots can render at phone widths with the version footer hidden.
+- The version and build appear in their own footer below every screen.
+- Failed test and work runs keep the run number with its label and give the cause in plain language.
+- The selected department uses the full sidebar row, and department, pipeline, and board card text wraps at spaces when possible.
+- The board shows Failures and Stopped columns only when they have tasks and keeps each person's name together when it fits.
+- In Turns and releases, each question button sits directly under its task's wait time.
+- Wait lines name the person before the elapsed time and show only the time when the status already says the task waits for you.
+- Task lists, boards, cards, and turns show who needs to act, what work is running, when a timer fires, and why work failed.
+- The tracker counts failures separately and counts each task needing your answer once.
+- Tracker boards keep all columns in one row when they fit and stack every column in order when space runs short.
+- Pipeline board headings all start at the same edge, with the count after the name.
+- The task lists panel sits against the start edge below app navigation and fills the available height.
+- Tracker goal links get more room and underline on hover or keyboard focus.
+- Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
+
+### Added
+
+- Every new department starts with a ready pipeline, and the orchestrator can add a different one or make it the default.
+- The orchestrator offers to set up a ready pipeline for work such as video editing when someone first gets started.
+- The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.
+- Everyone can write to the orchestrator from the company Telegram bot or through their personal assistant.
+- Connected company phones have their working settings restored automatically, and Machines shows anything that still needs attention.
+- People and agents can set task priority, which appears on the task card and orders tasks within each list group.
+- The map uses squares for employees, diamonds for generalists and ghost outlines for one-shot calls, with a legend for all three.
+- Declared one-shot stages show their places before a call begins and distinguish running calls from waiting calls.
+- Every starter kit shows its one-shot places on the map before a subscription is connected.
+- Owners of one-shot stages get guidance on briefing the calls and using their answers and the judge's verdict.
+- Worker marks also appear in the department staff list, employee card and tracker, and the task route marks its one-shot stages.
+
+### Changed
+
+- Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
+- Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
+- Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
+- The approval and release guides explain when to ask and which checks prove the exact commit.
+- Employees can save full assignments, skill overrides and notebook notes, and agent cards no longer show an instruction budget.
+- Turns carry the full instructions and notebook, with skills delivered as files or inline as the node supports.
+- Employees can send messages and file improvements throughout a turn.
+- People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
+- One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
+- Home device helpers carry out reversible cleanup and settings changes allowed by the household rules.
+- The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
+- Task rows show what they wait for and which tasks from other departments need them.
+- Task lists distinguish status, priority, people, departments and executor programs by shape and color.
+- The task sidebar shows company people and wait counts, with shortcuts to due dates, department goals and work outside a pipeline.
+- The tracker puts the current place, person picker and search in one header, followed by views and compact filters.
+- The tracker can show tasks by due date and department goals, and new tasks on a pipeline keep that pipeline.
+- Expand a task from the arrow next to its title to see its subtasks in the same list columns.
+- On narrow screens, tracker rows stack their facts and show the full names behind the initials.
+- New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
+- Status and pipeline boards use more compact cards, with smaller titles and details and more room for the question button label.
+- Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
 ## [0.32.1] - 2026-11-17
 

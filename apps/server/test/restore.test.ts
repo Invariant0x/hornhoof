@@ -7,13 +7,13 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, certificates, computerRuns, departments, invites, machineAccess, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions } from '../src/db/schema.js';
+import { agents, assistants, certificates, computerRuns, departments, invites, machineAccess, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions } from '../src/db/schema.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { CHOICE_FILE } from '../src/modules/merge/kept.js';
-import { appOn, as, invitePerson, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
+import { appOn, as, invitePerson, ownPlan, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
 import { backupCompany, from, MACHINE_ID, OWN } from './helpers-backups.js';
 import { openTestDb, prepareSharedDatabase } from './helpers-db.js';
 
@@ -259,6 +259,48 @@ describe('a restore from a backup', () => {
     /* Twice is as once. */
     await applyCarry(s.app.ctx, carry);
     expect((await activeRecovery(db, s.config))?.recipient).toBe(newer.recipient);
+  });
+
+  it('keeps a permanent removal and applies it to assistants present only in the backup', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { whole: true } });
+    const row = (await db.select().from(people).where(eq(people.name, 'Dana')))[0]!;
+    await db.update(people).set({ telegramUsername: 'dana', telegramUserId: 1234 }).where(eq(people.id, row.id));
+    const added = await app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name: 'Ava', owner: row.id, program: 'avaclone' }, ...as(ceo) });
+    expect(added.statusCode).toBe(201);
+    const helper = added.json().person.id as string;
+    const plan = await ownPlan(db, row.email!);
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${helper}/assistant`, payload: { plan }, ...as(dana) })).statusCode).toBe(200);
+    const [assistant] = await db.select().from(assistants).where(eq(assistants.personId, helper));
+    const key = await app.inject({ method: 'POST', url: `/api/people/${helper}/key`, ...as(ceo) });
+    expect(key.statusCode).toBe(201);
+    const removedAt = '2026-11-10T08:00:00.000Z';
+    const older = { id: row.id, status: row.status, passwordHash: row.passwordHash, scopeKind: row.scopeKind, isOwner: false, isCeoDelegate: false, access: [] };
+    const person = { ...older, status: 'disabled' as const, removedAt };
+    const carry: Carry = { people: [person], invites: [], machines: [], serials: [], recoveryKeys: [] };
+
+    await applyCarry(app.ctx, carry);
+    await applyCarry(app.ctx, carry);
+    await applyCarry(app.ctx, { ...carry, people: [older] });
+    const stored = async (id: string) => (await db.select().from(people).where(eq(people.id, id)))[0]!;
+    expect(await stored(row.id)).toMatchObject({ name: 'Dana', status: 'disabled', removedAt: new Date(removedAt), email: null, passwordHash: null, telegramUsername: null, telegramUserId: null });
+    expect(await stored(helper)).toMatchObject({ name: 'Ava', status: 'disabled', removedAt: new Date(removedAt) });
+    expect((await db.select().from(agents).where(eq(agents.id, assistant!.agentId!)))[0]).toMatchObject({ removedAt: expect.any(Date), subscriptionId: null });
+    expect((await db.select().from(assistants).where(eq(assistants.personId, helper)))[0]).toMatchObject({ keyHash: null, wakeSecretEnc: null });
+  });
+
+  it('keeps a removal when the restored backup is older than the person', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const id = randomUUID();
+    const removedAt = '2026-11-10T08:00:00.000Z';
+    const carry: Carry = {
+      people: [{ id, status: 'disabled', passwordHash: null, scopeKind: 'listed', isOwner: false, isCeoDelegate: false, access: [], removedAt, removedName: 'Dana' }],
+      invites: [], machines: [], serials: [], recoveryKeys: [],
+    };
+    await applyCarry(app.ctx, carry);
+    expect(await db.select().from(people).where(eq(people.id, id))).toMatchObject([{ id, name: 'Dana', removedAt: new Date(removedAt), status: 'disabled', email: null }]);
   });
 
   it('keeps who holds the data and the link', async () => {

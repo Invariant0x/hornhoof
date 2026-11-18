@@ -9,10 +9,9 @@ import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
 import { turnProtection } from './privacy.js';
 import { isOperations } from '../operations/required.js';
-import { ApiError } from '../../errors.js';
+import { ApiError, modeRefusal } from '../../errors.js';
 import { guardTools, invocationOf } from './calls.js';
 import { callName, CUT_OFF, cutOff, PAUSED, READ_TOOLS } from './read-tools.js';
-import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
 import { readKeeperState } from '../keeper/state.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
@@ -215,7 +214,7 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
        id, so nothing is written of it. Several calls in one request are not taken there, as the front door takes
        none: each call is judged by itself. */
     const reading = ctx.mode.current() === 'read' ? { cut: readKeeperState(ctx.config.controlDir)?.internet === false } : null;
-    const paused = () => new ApiError(503, 'unavailable', READ_ONLY_MESSAGE, 'read_only');
+    const paused = () => modeRefusal('read_only');
     if (reading && Array.isArray(req.body)) throw new ApiError(400, 'validation', 'Hornhoof takes one call per request.');
     const name = reading && !reading.cut ? callName(req.body) : null;
     if (name !== null && !READ_TOOLS.has(name)) throw paused();

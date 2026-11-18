@@ -5,7 +5,7 @@ import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
-import type { UnitFingerprint } from '@hornhoof/protocol';
+import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -126,6 +126,9 @@ export const people = pgTable(
     /* Deleted by the CEO: off the lists and the map, with no sign-in, email or Telegram, while the old tasks and answers
        that name them keep pointing here. */
     removedAt: timestamp('removed_at', { withTimezone: true }),
+    deletionApprovedBy: uuid('deletion_approved_by').references((): AnyPgColumn => people.id),
+    deletionApprovedAt: timestamp('deletion_approved_at', { withTimezone: true }),
+    deletionCompletedAt: timestamp('deletion_completed_at', { withTimezone: true }),
   },
   t => [
     index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId),
@@ -971,7 +974,6 @@ export const agentEvents = pgTable(
   },
   t => [
     index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
-    index('agent_events_message_sender_window').on(t.companyId, sql`(${t.data}->>'by')`, t.createdAt).where(sql`${t.kind} = 'message'`),
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
@@ -1101,8 +1103,7 @@ export const turnReleases = pgTable(
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
-    /* The release task it was asked on, and what approved its commit: a person there, or, with autonomous release on and
-       every commit of it checked, the entry of the autonomous release log. One of the two, never both. */
+    /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
     approvalRequestId: uuid('approval_request_id').references((): AnyPgColumn => requests.id),
     autonomousReleaseId: uuid('autonomous_release_id').references((): AnyPgColumn => autonomousReleases.id),
@@ -1115,7 +1116,7 @@ export const turnReleases = pgTable(
   t => [
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
-    check('turn_releases_approved_once', sql`(${t.approvalRequestId} IS NULL) <> (${t.autonomousReleaseId} IS NULL)`),
+    check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
   ],
 );
 
@@ -1184,6 +1185,7 @@ export const tasks = pgTable(
     responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
     /* Why the task exists, in plain words; the brief says what the result is. */
     why: text('why').notNull().default(''),
+    priority: text('priority').$type<TaskPriority>(),
     dueAt: timestamp('due_at', { withTimezone: true }),
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
@@ -1196,6 +1198,7 @@ export const tasks = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [
+    check('tasks_priority_known', sql`${t.priority} in ('urgent', 'high', 'normal', 'low')`),
     unique('tasks_company_number').on(t.companyId, t.number),
     index('tasks_goal_id').on(t.goalId),
     index('tasks_responsible').on(t.responsiblePersonId),
@@ -1350,6 +1353,8 @@ export const pipelines = pgTable(
     companyId: companyId(),
     departmentId: uuid('department_id').notNull().references(() => departments.id),
     name: text('name').notNull(),
+    catalogKey: text('catalog_key'),
+    isDefault: boolean('is_default').notNull().default(false),
     why: text('why').notNull().default(''),
     position: integer('position').notNull().default(0),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1359,7 +1364,11 @@ export const pipelines = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     version: integer('version').notNull().default(0),
   },
-  t => [index('pipelines_department_id').on(t.departmentId)],
+  t => [
+    index('pipelines_department_id').on(t.departmentId),
+    uniqueIndex('pipelines_department_catalog').on(t.departmentId, t.catalogKey),
+    uniqueIndex('pipelines_department_default').on(t.departmentId).where(sql`${t.isDefault}`),
+  ],
 );
 
 /* A stage of a pipeline: none above it for the first ones after the head, owned by a role or by one employee. */
@@ -1890,8 +1899,8 @@ export const testSuiteMemory = pgTable(
   t => [primaryKey({ name: 'test_suite_memory_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.suiteId] })],
 );
 
-/* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
-   and agreements. People who see the whole company read and change it too. */
+/* The company's notebook holds the CEO's decisions, rules and agreements across conversations. People who see the whole
+   company read and change it too. */
 export const notebookNotes = pgTable(
   'notebook_notes',
   {
@@ -2044,6 +2053,20 @@ export const feedbackSignals = pgTable(
   },
   t => [primaryKey({ columns: [t.cardId, t.installation] })],
 );
+
+/* The result of a proposal and its update commit together, so a replay cannot add another finding or signal. */
+export const improvementSubmissions = pgTable('improvement_submissions', {
+  key: text('key').primaryKey(),
+  result: jsonb('result').$type<{ improvement: string; sent?: { number: number | null }; note?: string }>(),
+});
+
+/* The sender keeps the repeat count it offered and whether it was accepted. The inbox keeps which card took the signal. */
+export const feedbackSubmissions = pgTable('feedback_submissions', {
+  key: text('key').primaryKey(),
+  repeats: integer('repeats'),
+  sent: boolean('sent').notNull().default(false),
+  cardId: uuid('card_id').references(() => feedbackInbox.id, { onDelete: 'cascade' }),
+});
 
 /* The company's public link at the relay, like acme.hornhoof.org: its name and address, the key that changes or removes
    it there and the tunnel's settings, the last two encrypted. One deployment has one company, so at most one link. */

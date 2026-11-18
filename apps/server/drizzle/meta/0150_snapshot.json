@@ -1,6 +1,6 @@
 {
-  "id": "64aecfbe-dd05-4000-9edc-b5f4e5bd56c7",
-  "prevId": "4d13c900-f20f-40c6-b0f8-561a6e8de0fe",
+  "id": "baa5811a-a8c0-4450-8a9c-2a08d5c7fffc",
+  "prevId": "c5feaec3-0e34-4a4f-8f52-f04c8cd255b0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -243,34 +243,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_events_message_sender_window": {
-          "name": "agent_events_message_sender_window",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "(\"data\"->>'by')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"agent_events\".\"kind\" = 'message'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3621,6 +3593,58 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.feedback_submissions": {
+      "name": "feedback_submissions",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "repeats": {
+          "name": "repeats",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sent": {
+          "name": "sent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "card_id": {
+          "name": "card_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "feedback_submissions_card_id_feedback_inbox_id_fk": {
+          "name": "feedback_submissions_card_id_feedback_inbox_id_fk",
+          "tableFrom": "feedback_submissions",
+          "tableTo": "feedback_inbox",
+          "columnsFrom": [
+            "card_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.goal_events": {
       "name": "goal_events",
       "schema": "",
@@ -4429,6 +4453,31 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.improvement_submissions": {
+      "name": "improvement_submissions",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -11318,6 +11367,24 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "deletion_approved_by": {
+          "name": "deletion_approved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_approved_at": {
+          "name": "deletion_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_completed_at": {
+          "name": "deletion_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -11402,6 +11469,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "assistant_of"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "people_deletion_approved_by_people_id_fk": {
+          "name": "people_deletion_approved_by_people_id_fk",
+          "tableFrom": "people",
+          "tableTo": "people",
+          "columnsFrom": [
+            "deletion_approved_by"
           ],
           "columnsTo": [
             "id"
@@ -12321,6 +12401,19 @@
           "primaryKey": false,
           "notNull": true
         },
+        "catalog_key": {
+          "name": "catalog_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "why": {
           "name": "why",
           "type": "text",
@@ -12387,6 +12480,43 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pipelines_department_catalog": {
+          "name": "pipelines_department_catalog",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "catalog_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pipelines_department_default": {
+          "name": "pipelines_department_default",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"pipelines\".\"is_default\"",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -16361,6 +16491,12 @@
           "notNull": true,
           "default": "''"
         },
+        "priority": {
+          "name": "priority",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "due_at": {
           "name": "due_at",
           "type": "timestamp with time zone",
@@ -16744,6 +16880,10 @@
       },
       "policies": {},
       "checkConstraints": {
+        "tasks_priority_known": {
+          "name": "tasks_priority_known",
+          "value": "\"tasks\".\"priority\" in ('urgent', 'high', 'normal', 'low')"
+        },
         "tasks_counts": {
           "name": "tasks_counts",
           "value": "\"tasks\".\"silent\" >= 0"
@@ -18293,7 +18433,7 @@
         },
         "turn_releases_approved_once": {
           "name": "turn_releases_approved_once",
-          "value": "(\"turn_releases\".\"approval_request_id\" IS NULL) <> (\"turn_releases\".\"autonomous_release_id\" IS NULL)"
+          "value": "\"turn_releases\".\"approval_request_id\" IS NULL OR \"turn_releases\".\"autonomous_release_id\" IS NULL"
         }
       },
       "isRLSEnabled": false

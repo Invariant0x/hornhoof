@@ -396,6 +396,11 @@ describe('renderOperatorScreen', () => {
     expect((await renderOperatorScreen(input)).png.equals(here)).toBe(true);
   });
 
+  it('keeps a previous mask intact while hiding the same short literal elsewhere', () => {
+    const out = renderOperatorScreenSvg({ cells: '[hid\x1b[31mden\x1b[0m] or hidden', cols: 30, rows: 2, secrets: ['hidden'] });
+    expect(out.text).toBe('[hidden] or [hidden]');
+  });
+
   it('does not join short secrets across a hard line break', async () => {
     const out = renderOperatorScreenSvg({ cells: 'go to\npage', cols: 20, rows: 3, secrets: ['top'] });
     expect(out.text).toBe('go to\npage');

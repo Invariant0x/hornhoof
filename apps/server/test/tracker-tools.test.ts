@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, assistants, companies, departments, goals, jobs, people, pipelines, pipelineStages, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, assistants, companies, departments, goals, jobs, people, pipelines, pipelineStages, subscriptions, taskRoutes, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { createPipeline, editPipeline } from '../src/modules/tracker/pipelines.js';
 import { as, echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
@@ -53,6 +53,58 @@ describe('tracker tools', () => {
     expect(await has(head)).toEqual(['goals', 'set_goal', 'set_pipeline']);
     expect(await has(orchestrator)).toEqual(['goals', 'set_goal', 'set_pipeline']);
     expect(await has(pia)).toEqual(['goals', 'set_goal', 'set_pipeline', 'tidy_task']);
+  });
+
+  it('lets the orchestrator discover, add and switch ready pipelines in one call', async () => {
+    const { app, ceo, ctx, db, dev, orchestrator, head, bruno, tools, work } = await company();
+    const client = await tools(orchestrator);
+    const catalog = await call(client, 'pipeline_catalog', { kind: 'development' });
+    expect(catalog.isError, text(catalog)).toBeFalsy();
+    expect(JSON.parse(text(catalog))).toMatchObject([{
+      department: 'development', default: 'development-changes',
+      pipelines: expect.arrayContaining([expect.objectContaining({ key: 'development-docs', why: expect.any(String) })]),
+    }]);
+
+    const apply = (pipeline: string, mode: string) => call(client, 'apply_pipeline', { department: dev.id, pipeline, mode });
+    expect((await apply('sales-outreach', 'add')).isError).toBe(true);
+    const installed = JSON.parse(text(await apply('development-changes', 'set_default')));
+    const { task: existing } = await work();
+    expect(existing.pipelineId).toBe(installed.id);
+
+    const added = JSON.parse(text(await apply('development-docs', 'add')));
+    expect(added).toMatchObject({ catalogKey: 'development-docs', isDefault: false, stages: expect.arrayContaining([
+      expect.objectContaining({ name: 'Check examples', ownerRole: 'DEV-REV', oneShot: { fanOut: 3, judge: true } }),
+    ]) });
+    expect(JSON.parse(text(await apply('development-docs', 'add'))).id).toBe(added.id);
+    const switched = JSON.parse(text(await apply('development-docs', 'set_default')));
+    expect(switched).toMatchObject({ id: added.id, isDefault: true });
+    expect(JSON.parse(text(await apply('development-docs', 'set_default')))).toMatchObject({ id: added.id, version: switched.version });
+
+    const made = await createTask(ctx, { agentId: head.id }, { title: 'Write a guide', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, resultKind: 'document' });
+    expect(made.task.pipelineId).toBe(added.id);
+    const [route] = await db.select().from(taskRoutes).where(eq(taskRoutes.taskId, made.task.id));
+    expect(route!.state.oneShot?.review?.judge).toContain('examples');
+    expect(route!.state.oneShot?.security).toBeUndefined();
+    const loose = await createTask(ctx, { agentId: head.id }, { title: 'Outside a pipeline', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, pipelineId: null });
+    expect(loose.task.pipelineId).toBeNull();
+
+    const current = (await app.inject({ url: `/api/pipelines?department=${dev.id}`, ...as(ceo) })).json().pipelines;
+    expect(current).toHaveLength(2);
+    expect(current).toContainEqual(expect.objectContaining({ id: installed.id, isDefault: false, archived: false }));
+    expect((await db.select().from(tasks).where(eq(tasks.id, existing.id)))[0]!.pipelineId).toBe(installed.id);
+    expect(await names(await tools(head))).not.toContain('apply_pipeline');
+  });
+
+  it('sets tracker priority through task creation and editing', async () => {
+    const { db, head, bruno, tools } = await company();
+    const agent = await tools(head);
+    const made = await call(agent, 'create_task', { title: 'Checkout', brief: 'Pay.', body: 'Card.', executor: bruno.id, resultKind: 'coordination', priority: 'low' });
+    expect(made.isError, text(made)).toBeFalsy();
+    const [task] = await db.select().from(tasks).where(eq(tasks.title, 'Checkout'));
+    expect(task).toMatchObject({ priority: 'low' });
+    const edited = await call(agent, 'update_task', { task: task!.number, priority: 'high' });
+    expect(edited.isError, text(edited)).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, task!.id)))[0]).toMatchObject({ priority: 'high', version: task!.version });
   });
 
   it('set goals of the own department, the company ones only through the orchestrator', async () => {

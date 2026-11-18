@@ -92,8 +92,10 @@ describe('what hh-browse makes of a page', () => {
     expect(printed).toMatch(/Screenshot: \/work\/catalogue\.png[^\n]*hh-attach/);
     const login = formatResult({ ...result, status: 'login_required', reason: 'The page asks to sign in.', screenshot: null });
     expect(login).toMatch(/^Status: login_required\n/);
-    expect(login).toMatch(/note this address[^\n]*for a person[^\n]*go on with the other addresses/i);
-    expect(login).toMatch(/never try to get past/i);
+    /* A sign-in is the agent's own: it types the vault's sign-in in a real browser, as hh-browse signs in nowhere. */
+    expect(login).toMatch(/\nNext: Sign in yourself, as a person does: take the site's sign-in with vault_entries and vault_entry[^\n]*real browser on your machine/);
+    expect(login).toMatch(/code the site sends to a person's phone[^\n]*tell your head[^\n]*go on with the other addresses meanwhile/);
+    expect(login).not.toMatch(/never try to get past|for a person in your report/i);
     const cut = formatResult({ ...result, text: 'a'.repeat(10), textLength: 50 });
     expect(cut).toMatch(/first 10 of 50 characters/);
     expect([exitCode('ok'), exitCode('login_required'), exitCode('robot_check'), exitCode('http_error'), exitCode('refused'), exitCode('failed')]).toEqual([0, 0, 0, 0, 2, 1]);
