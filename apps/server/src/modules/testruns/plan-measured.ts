@@ -13,7 +13,7 @@ const PARTS_READ = 40;
 const PREPARATIONS_READ = 5;
 const FALLBACK = { setupMs: 10_000, collectMs: 1000 };
 
-type Row = { computer: string | null; files: (typeof testPartTimings.$inferSelect)['files']; receipt: (typeof testParts.$inferSelect)['environmentReceipt']; selection: (typeof testParts.$inferSelect)['environmentSelection'] };
+type Row = { computer: string | null; files: (typeof testPartTimings.$inferSelect)['files']; receipt: (typeof testParts.$inferSelect)['environmentReceipt']; selection: (typeof testParts.$inferSelect)['environmentSelection']; error: string | null };
 
 /* What a part said a file took, for the one unit of the inventory at that path. */
 function fileTimes(rows: Row[], snapshot: EnvironmentSnapshot): FileTime[] {
@@ -26,9 +26,10 @@ function fileTimes(rows: Row[], snapshot: EnvironmentSnapshot): FileTime[] {
   }
   return times;
 }
-/* How long each part's command ran, for all its files. */
-function partTimes(rows: Row[]): PartTime[] {
-  return rows.flatMap(row => {
+/* How long each part's command ran, for all its files: only a part whose command ran to its end, passed or failed, ran them all. One
+   stopped at its limit, or by anything else, ran only some of them in that time. */
+export function partTimes(rows: Row[]): PartTime[] {
+  return rows.filter(row => row.error === null || row.error === 'failed').flatMap(row => {
     const selection = row.selection?.selection, ms = row.receipt?.phases.commandMs;
     const suites = selection?.kind === 'batch' ? selection.selections : selection?.kind === 'suite' ? [selection] : [];
     const files = suites.flatMap(suite => suite.files.map(file => ({ suiteId: suite.suiteId, file })));
@@ -52,7 +53,7 @@ export function measuredHistory(ctx: Pick<Ctx, 'db'>) {
   return async (_run: unknown, snapshot: EnvironmentSnapshot): Promise<PlanningHistory | null> => {
     const scope = snapshot.description.repositoryScope;
     const repository = and(eq(testRuns.companyId, scope.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`);
-    const rows = await ctx.db.select({ computer: testParts.computer, files: testPartTimings.files, receipt: testParts.environmentReceipt, selection: testParts.environmentSelection })
+    const rows = await ctx.db.select({ computer: testParts.computer, files: testPartTimings.files, receipt: testParts.environmentReceipt, selection: testParts.environmentSelection, error: testParts.error })
       .from(testPartTimings).innerJoin(testParts, eq(testParts.id, testPartTimings.partId)).innerJoin(testRuns, eq(testRuns.id, testPartTimings.runId))
       .where(and(repository, inArray(testParts.status, ['passed', 'failed']), isNotNull(testParts.computer)))
       .orderBy(desc(testPartTimings.createdAt), desc(testPartTimings.partId)).limit(PARTS_READ);
