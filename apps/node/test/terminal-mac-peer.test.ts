@@ -42,6 +42,7 @@ async function opened(mode = 'own', roots = [10]) {
     if (file === '/bin/ps') {
       if (current === 'ps-timeout') throw timedOut(file);
       if (current === 'ps-error') throw new Error('spawn /bin/ps EAGAIN');
+      if (current === 'ps-empty') return '';
       if (only === null) return TABLE;
       if (!PARENTS.has(only)) throw Object.assign(new Error('Command failed: /bin/ps'), { code: 1, killed: false });
       return `${PARENTS.get(only)}\n`;
@@ -122,7 +123,7 @@ describe('macOS hook ownership without proc', () => {
     expect(c.heard).toEqual([]);
   });
 
-  it.each(['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error'])("answers a genuine owner's tool hooks with a retryable 502 when the lookup gives no answer (%s), and keeps none of it", async mode => {
+  it.each(['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error', 'ps-empty'])("answers a genuine owner's tool hooks with a retryable 502 when the lookup gives no answer (%s), and keeps none of it", async mode => {
     const c = await opened(mode);
     expect(await post(c.url, c.agent, 55, 'tool')).toBe(502);
     expect(await post(c.url, c.agent, 55, 'tooldone')).toBe(502);
@@ -141,7 +142,7 @@ describe('macOS hook ownership without proc', () => {
     expect(await post(c.url, c.agent, 'zero')).toBe(403);
     /* A new connection: this one keeps its refusal of pid 55. */
     c.agent.destroy();
-    for (const mode of ['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error']) {
+    for (const mode of ['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error', 'ps-empty']) {
       c.mode(mode);
       expect(await post(c.url, c.agent, 55, 'tool')).toBe(502);
     }
@@ -153,6 +154,7 @@ describe('macOS hook ownership without proc', () => {
       { key: 'agent-1', event: 'tool', reason: 'owner check unavailable: lsof failed' },
       { key: 'agent-1', event: 'tool', reason: 'owner check unavailable: ps timed out' },
       { key: 'agent-1', event: 'tool', reason: 'owner check unavailable: ps failed' },
+      { key: 'agent-1', event: 'tool', reason: 'owner check unavailable: ps gave no process table' },
     ]);
     expect(JSON.stringify(c.rejected)).not.toContain(c.url.split('/').at(-1)!);
   });

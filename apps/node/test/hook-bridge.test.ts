@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { request } from 'node:http';
+import { Agent as HttpAgent, request } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent, OwnerUnknown, socketOf, type Peer } from '../src/terminal/peer.js';
@@ -155,6 +155,62 @@ describe('hook delivery through the bridge', () => {
     expect((await fetch(hookUrl, { method: 'POST', body: '{}' })).status).toBe(403);
     expect((await fetch(attachUrl + '/file')).status).toBe(403);
     expect(unowned).toEqual([['agent-1', 'start']]);
+  });
+
+  /* Calls on one kept connection, as one program makes them, each with its own call id. */
+  function kept(bridge: Bridge, url: string) {
+    const agent = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+    close.push(() => agent.destroy());
+    const sockets = new Set<unknown>();
+    bridge['server']!.on('connection', socket => sockets.add(socket));
+    let n = 0;
+    const call = () => new Promise<number>((resolve, reject) => {
+      const req = request(url + '/stop', { method: 'POST', agent, headers: { 'x-hh-pid': String(process.pid), 'x-hh-call': `kept-${n++}` } }, res => { res.resume();res.on('end', () => resolve(res.statusCode!)); });
+      req.on('error', reject).end('{}');
+    });
+    return { call, sockets };
+  }
+
+  it('asks a refused caller again on its kept connection, so it passes once its pane has its program again', async () => {
+    let adopted = false;const heard: string[] = [];
+    const b = await opened((_key, event) => void heard.push(event), async (_key, _peer, why) => adopted || (why?.("the caller is not under the agent's pane"), false));
+    const c = kept(b.bridge, b.url);
+    expect(await c.call()).toBe(403);
+    adopted = true;
+    expect(await c.call()).toBe(200);
+    expect(heard).toEqual(['stop']);
+    expect(c.sockets.size).toBe(1);
+  });
+
+  it("answers a hook whose owner check outlasts the hook's wait with a retryable 502 first, on the bridge's clock", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    close.push(() => vi.useRealTimers());
+    let checking!: () => void;const checked = new Promise<void>(resolve => { checking = resolve; });
+    const b = await opened(() => { throw Error('must not run'); }, () => { checking();return new Promise<boolean>(() => {}); });
+    const c = kept(b.bridge, b.url);
+    let status = 0;
+    const answer = c.call().then(code => { status = code; });
+    await checked;
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(status).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    await answer;
+    expect(status).toBe(502);
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'owner check unavailable: owner check timed out' }]);
+  });
+
+  it('reads the socket table again for the next call when it could not be read as the connection opened', async () => {
+    let unreadable = true;const heard: string[] = [];const rejected: Rejection[] = [];
+    const capture = async () => { if (unreadable) throw new OwnerUnknown('socket table read failed');return { acceptedInode: '7' }; };
+    const bridge = new Bridge('http://127.0.0.1:9', (_key, event) => void heard.push(event), async (_key, peer) => peer.acceptedInode === '7', { capture, rejected: (key, event, reason) => rejected.push({ key, event, reason }) });
+    await bridge.start();close.push(() => bridge.stop());
+    const c = kept(bridge, bridge.agent('agent-1').hookUrl);
+    expect(await c.call()).toBe(502);
+    unreadable = false;
+    expect(await c.call()).toBe(200);
+    expect(heard).toEqual(['stop']);
+    expect(c.sockets.size).toBe(1);
+    expect(rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'owner check unavailable: socket table read failed' }]);
   });
 
   it('does not trust a borrowed pid or a cached successful stop before checking the caller', async () => {

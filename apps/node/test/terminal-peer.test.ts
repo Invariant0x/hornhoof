@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fromAgent, OwnerUnknown } from '../src/terminal/peer.js';
+import { fromAgent, OwnerUnknown, socketOf } from '../src/terminal/peer.js';
 
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
 const folders: string[] = [];
@@ -102,5 +102,12 @@ describe('which agent a connection to the bridge comes from', () => {
     const lost = fromAgent(async () => { throw new Error('no server running on /tmp/tmux-0/hh'); }, fakeProc(socket, 12));
     await expect(lost('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
     await expect(lost('agent-1', socket)).rejects.toThrow('tmux pane lookup failed');
+  });
+
+  it('gives no answer when the socket table cannot be read, rather than taking it for an empty one', async () => {
+    const proc = fakeProc(socket, 12);
+    rmSync(join(proc, 'net', 'tcp'));
+    await expect(socketOf(proc, socket)).rejects.toThrow(new OwnerUnknown('socket table read failed'));
+    await expect(fromAgent(panes, proc)('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
   });
 });
