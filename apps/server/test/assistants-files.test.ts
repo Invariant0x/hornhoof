@@ -150,7 +150,7 @@ describe('a link to one file, for its owner to open on a phone', () => {
     const [payload, mac] = new URL(url).pathname.split('/').pop()!.split('.');
     const otherPayload = new URL(fileLink(c.app.ctx.config.secret, 'https://ann.hornhoof.org', other.id)).pathname.split('/').pop()!.split('.')[0];
     const stop = signedToken(c.app.ctx.config.secret, 'another link', { f: kept.id, until: Date.now() + 60_000 });
-    const wrong = [`${payload}.${mac!.slice(0, -1)}${mac!.endsWith('A') ? 'B' : 'A'}`, `${otherPayload}.${mac}`, stop, 'not-a-link', `${payload}.${mac}.x`];
+    const wrong = [`${payload}.${mac!.startsWith('A') ? 'B' : 'A'}${mac!.slice(1)}`, `${otherPayload}.${mac}`, stop, 'not-a-link', `${payload}.${mac}.x`];
     for (const link of wrong) {
       const got = await opened(c, `https://ann.hornhoof.org/api/files/${link}`);
       expect(got.statusCode).toBe(404);
