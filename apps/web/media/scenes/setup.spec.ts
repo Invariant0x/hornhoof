@@ -1,4 +1,6 @@
+import { COMPANY_TEMPLATE_KEYS } from '@hornhoof/protocol/catalog';
 import { expect, test } from '@playwright/test';
+import { en } from '../../src/i18n/en';
 import { createSceneRecorder, smoothScrollBody } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
@@ -10,7 +12,8 @@ test('setup.gif: type Moonfern, pick Startup among the nine templates, go on', a
 
   await page.goto('/?code=mf9k2x7p');
   await expect(page.getByRole('heading', { name: 'Name your company' })).toBeVisible();
-  await expect(page.locator('.template-card')).toHaveCount(10);
+  const kits = page.getByRole('group', { name: en.companyTemplates.heading });
+  await expect(kits.getByRole('radio')).toHaveCount(COMPANY_TEMPLATE_KEYS.length + 1);
   await recorder.markReady();
 
   await page.waitForTimeout(550);
@@ -25,10 +28,10 @@ test('setup.gif: type Moonfern, pick Startup among the nine templates, go on', a
   await smoothScrollBody(page, 210, 8, 42);
   await page.waitForTimeout(500);
 
-  const startupCard = page.locator('.template-card', { hasText: 'Startup' });
+  const startupCard = kits.getByText(en.companyTemplates.startup.name, { exact: true });
   await startupCard.scrollIntoViewIfNeeded();
   await startupCard.click();
-  await expect(startupCard).toHaveClass(/on/);
+  await expect(kits.getByRole('radio', { name: /^Startup/ })).toBeChecked();
   await page.waitForTimeout(1200);
 
   const nextButton = page.getByRole('button', { name: 'Next', exact: true });
@@ -43,7 +46,7 @@ test('setup.gif: type Moonfern, pick Startup among the nine templates, go on', a
   /* Step back to step 0, clear input and return smoothly to top so first and last frames match. */
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Name your company' })).toBeVisible();
-  await page.locator('.template-card').first().click();
+  await kits.getByText(en.companyTemplates.empty.name, { exact: true }).click();
   const resetInput = page.getByLabel('Company name');
   await resetInput.fill('');
   await resetInput.focus();

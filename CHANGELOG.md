@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- The README animations show the current map, department routes, tracker, task cards and agent windows.
+
 ### Added
 
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.

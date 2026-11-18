@@ -1,7 +1,10 @@
 import { expect, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test';
 
-import { LANGUAGES, type Language, type Messages } from '../../src/i18n';
+import type { Messages } from '../../src/i18n';
 import { BASE_ISO, isoMinutes } from './clock';
+import { FRAME_SIZES, FRAME_THEMES, frameLanguages } from './frame-languages';
+import { MOONFERN_PIPELINE } from './pipelines';
+import { expectBetaBoard } from './scene-locators';
 import { serveMoonfern } from './serve';
 import { prepareScenePage } from './stream';
 import { MOONFERN_TASKS } from './tasks';
@@ -42,14 +45,12 @@ export function reportUnmocked(errors: string[]): void {
   if (errors.length) console.log(`[media] unanswered or failed while recording:\n${errors.join('\n')}`);
 }
 
-const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
-const THEMES = ['cyberpunk', 'light'] as const;
 const LIST_PARENT = 'Plant identification camera flow with an indoor lighting guide, a preview that explains what the camera found, and care tips for the three plants that look most like the photo';
 const LIST_NOTE = 'Check the camera preview with the new lighting guide before it goes to the beta testers.';
 
 const listTasks = MOONFERN_TASKS.map(task => task.number === 221 ? {
   ...task, title: LIST_PARENT, priority: 'urgent' as const, externalWait: {
-    since: BASE_ISO, until: isoMinutes(60), reason: LIST_NOTE, on: { kind: 'employee' as const, employee: 'dev-head', name: 'Jordan' },
+    since: BASE_ISO, until: isoMinutes(60), reason: LIST_NOTE, on: { kind: 'employee' as const, employee: 'dev-head', name: 'Dana' },
   },
 } : task.number === 224 ? { ...task, priority: 'high' as const, goal: null } : task);
 
@@ -66,29 +67,31 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
   const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, filters.goal, ...Object.values(statuses)];
   return view === 'tasks'
     ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due, list.addTask,
-      list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', '')]
+      list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', ''),
+      t.tracker.card.executor, t.tracker.card.responsible, t.tracker.card.due, t.tasks.taskActions, t.tasks.log]
     : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
       t.tracker.groups.waitingYou, t.tracker.time.minutes(49), t.tracker.wait.failedRun('17', false)];
 }
 
-const RTL = new Set(['ar', 'fa', 'he', 'ur']);
-async function frameLanguages(view: 'tasks' | 'board' | 'turns'): Promise<{ id: Language; t: Messages }[]> {
-  const ranked = await Promise.all(LANGUAGES.map(async ({ id }) => {
-    const dictionary = await import(`../../src/i18n/${id}.ts`) as Record<Language, Messages>;
-    const t = dictionary[id];
-    return { id, t, length: trackerWords(t, view).join('').length };
-  }));
-  ranked.sort((a, b) => a.length - b.length);
-  const picked = [ranked[0]!, ranked.at(-1)!, ranked.find(({ id }) => RTL.has(id))];
-  return [...new Map(picked.flatMap(item => item ? [[item.id, item] as const] : [])).values()];
+export async function expectTaskCard(page: Page, t: Messages, title: string): Promise<Locator> {
+  const card = page.getByRole('complementary', { name: `#221 ${title}`, exact: true });
+  await expect(card.getByRole('heading', { name: title, exact: true })).toBeVisible();
+  const facts = card.getByRole('group', { name: t.tracker.card.facts });
+  await expect(facts).toContainText('Sam Rivera');
+  await expect(facts.getByRole('link', { name: '#244 Frame guide overlay for the leaf', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: t.tasks.taskActions, exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(card.locator('.tp-brief')).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Done when', exact: true })).toBeVisible();
+  await expect(card.getByRole('region', { name: t.tasks.log })).toBeVisible();
+  return card;
 }
 
 /* Real geometry checks run alongside the still pictures in each browser engine. */
 export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tasks' | 'board' | 'turns'): Promise<void> {
   const paths = { tasks: '/tasks?department=dept-dev', board: '/tasks?department=dept-dev&view=board', turns: '/tasks?show=turns' };
-  for (const { id, t } of await frameLanguages(view)) {
-    for (const theme of THEMES) {
-      for (const size of SIZES) {
+  for (const { id, t } of await frameLanguages(t => trackerWords(t, view))) {
+    for (const theme of FRAME_THEMES) {
+      for (const size of FRAME_SIZES) {
         const context = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: size, timezoneId: 'UTC' });
         try {
           const frame = await context.newPage();
@@ -147,7 +150,7 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
           }
           if (view !== 'turns') {
             if (!wide) await frame.getByRole('button', { name: t.tracker.side.open }).click();
-            await assertSelectedDepartment(sidebar);
+            await assertSelectedDepartment(sidebar, t);
             if (view === 'board') await expect(sidebar.getByRole('button', { name: `${t.tracker.side.failures} 0` })).toBeVisible();
             await assertTrackerFit(frame);
             if (!wide) await sidebar.getByRole('button', { name: t.tracker.side.close }).click();
@@ -157,12 +160,15 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
               await region.getByRole('region', { name: t.tracker.statuses.waits }).locator('.tr-card').first().scrollIntoViewIfNeeded();
               await frame.screenshot({ path: info.outputPath(`board-person-${id}-${theme}-${size.width}.png`) });
             }
-            await frame.goto('/tasks?department=dept-dev&pipeline=pl-beta&view=board');
-            await expect(region.locator('.tr-col').nth(1)).toBeVisible();
-            await expect(region.getByRole('region', { name: 'TestFlight smoke test' })).toBeVisible();
+            await frame.goto(`/tasks?department=dept-dev&pipeline=${MOONFERN_PIPELINE.id}&view=board`);
+            const smoke = await expectBetaBoard(region, t);
             await assertBoard(region, wide, t);
             await assertTrackerFit(frame);
             await frame.screenshot({ path: info.outputPath(`pipeline-${id}-${theme}-${size.width}.png`) });
+            if (!wide) {
+              await smoke.scrollIntoViewIfNeeded();
+              await frame.screenshot({ path: info.outputPath(`pipeline-smoke-${id}-${theme}-${size.width}.png`) });
+            }
 
             fixture.setTasks(MOONFERN_TASKS.map(task => task.number === 224 ? {
               ...task, time: { ...task.time!, waitsOn: [{ kind: 'run', who: null, since: BASE_ISO, reason: '17', failure: 'run' }] },
@@ -223,12 +229,12 @@ async function expectOneLine(label: Locator): Promise<void> {
   expect(lines).toBe(1);
 }
 
-async function assertSelectedDepartment(sidebar: Locator): Promise<void> {
+async function assertSelectedDepartment(sidebar: Locator, t: Messages): Promise<void> {
   const head = sidebar.locator('.tr-dept-head.on');
   await expect(head.getByRole('button', { name: 'Development', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(head.getByRole('button', { expanded: true })).toBeVisible();
   await expectOneLine(head.getByText('Development', { exact: true }));
-  const pipeline = sidebar.getByText('Beta build way', { exact: true });
+  const pipeline = sidebar.getByText(t.tracker.side.defaultPipeline(MOONFERN_PIPELINE.name), { exact: true });
   await expect(pipeline).toHaveCSS('overflow-wrap', 'break-word');
   const widths = await head.evaluate(row => [row.getBoundingClientRect().width, row.parentElement!.getBoundingClientRect().width]);
   expect(Math.abs(widths[0]! - widths[1]!)).toBeLessThanOrEqual(1);

@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { en } from '../../src/i18n/en';
 import { createSceneRecorder } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
-import { pickView, reportUnmocked, trackerFrames } from '../moonfern/tracker-scene';
+import { expectTaskCard, pickView, reportUnmocked, trackerFrames } from '../moonfern/tracker-scene';
 
 /* The tracker as Maya meets Development's work: the list grouped by what each task needs now, with who does it, who answers
-   for it, its goal and its date; a task's card with its why, its time and its parts; then the same work as a board. */
+   for it, its goal and its date; a task's brief, related tasks and recent steps; then the same work as a board. */
 test('tasks.gif: the tracker shows a department as a list, a card and a board', async ({ page }) => {
   const recorder = createSceneRecorder(page);
   const watcher = await prepareScenePage(page);
@@ -18,11 +19,12 @@ test('tasks.gif: the tracker shows a department as a list, a card and a board', 
   await recorder.markReady();
   await page.waitForTimeout(1700);
 
-  /* The camera flow: why it exists, who answers for it, when it is due, how long it is in work and its three parts. */
-  await list.getByRole('listitem', { name: '#221 Plant identification camera flow', exact: true }).locator('.tr-title').first().click();
-  await expect(page.getByText('Naming a plant from a photo is why people install Moonfern.').first()).toBeVisible();
+  const title = 'Plant identification camera flow';
+  await list.getByRole('listitem', { name: `#221 ${title}`, exact: true }).getByRole('button', { name: title, exact: true }).click();
+  const card = await expectTaskCard(page, en, title);
   await page.waitForTimeout(3000);
-  await page.keyboard.press('Escape');
+  await card.getByRole('button', { name: en.window.close, exact: true }).click();
+  await expect(card).toHaveCount(0);
   await page.waitForTimeout(500);
 
   /* The same work as a board: a column for each state, cards moved by the work itself. */
