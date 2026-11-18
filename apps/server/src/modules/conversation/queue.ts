@@ -41,7 +41,7 @@ import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { repositoryScope } from '../testruns/describe.js';
 import { queuedInput, queuedUsed } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn, type TurnWords } from './turn-words.js';
-import { cancelUnsentDelivery, reserveDelivery } from '../program-operator/deliveries.js';
+import { cancelUnsentDelivery, DeliveryTargetMismatch, reserveDelivery } from '../program-operator/deliveries.js';
 import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
@@ -228,8 +228,8 @@ export const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId)
 /* Only a node's empty start opens the program while the plan's real turns wait. */
 const programStart = and(eq(jobs.prompt, ''), isNull(jobs.taskId), isNull(jobs.createdBy));
 
-export async function liveSubscription(ctx: Ctx, agentId: string) {
-  const [row] = await ctx.db.select({ sub: subscriptions }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
+export async function liveSubscription(ctx: { db: Pick<Ctx['db'], 'select'> }, agentId: string) {
+  const [row] = await ctx.db.select({ sub: subscriptions }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
   return row && !row.sub.removedAt ? row.sub : null;
 }
 
@@ -365,12 +365,17 @@ export const NOTHING_UNREAD = 'Nothing in the inbox was unread when this turn wa
 
 /* The one waiting turn of the agent that takes its inbox, made for the first letter that has none to wait for. */
 async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Promise<string> {
-  const [open] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(t.agentId), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
-  if (open) return open.id;
-  const sub = await liveSubscription(ctx, t.agentId);
-  if (!sub) throw new NoSubscription();
-  const [job] = await ctx.db.insert(jobs).values({ companyId: t.companyId, subscriptionId: sub.id, agentId: t.agentId, kind: 'conversation', prompt: INBOX_PROMPT, inboxWake: true, timeoutMs: TURN_TIMEOUT_MS, createdBy: null }).returning({ id: jobs.id });
-  return job!.id;
+  return ctx.db.transaction(async tx => {
+    /* Removal holds the same employee row, so no inbox turn can appear after its waiting turns were ended. */
+    const [agent] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, t.agentId), eq(agents.companyId, t.companyId), isNull(agents.removedAt))).for('no key update');
+    if (!agent) throw new NoSubscription();
+    const [open] = await tx.select(idOnly(jobs)).from(jobs).where(and(conversationOf(t.agentId), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
+    if (open) return open.id;
+    const sub = await liveSubscription({ db: tx }, t.agentId);
+    if (!sub) throw new NoSubscription();
+    const [job] = await tx.insert(jobs).values({ companyId: t.companyId, subscriptionId: sub.id, agentId: t.agentId, kind: 'conversation', prompt: INBOX_PROMPT, inboxWake: true, timeoutMs: TURN_TIMEOUT_MS, createdBy: null }).returning({ id: jobs.id });
+    return job!.id;
+  });
 }
 
 /* A letter in inbox mode waits in the inbox for the one turn that takes it, and shows in the window with that turn; it goes
@@ -1136,7 +1141,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   await fallbackMove(ctx, agentId);
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
-  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+  const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
   if (!agent || !(await placement(ctx, agent, sub))) return;
   if (await heldByOperator(ctx, agent)) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
@@ -1234,6 +1239,13 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {
+    if (err instanceof DeliveryTargetMismatch) {
+      const [ended] = await db.update(jobs).set({ status: 'obsolete', error: 'delivery_target_missing', result: err.message, toolTokenHash: null, finishedAt: new Date() })
+        .where(and(eq(jobs.id, job.id), eq(jobs.status, 'running'))).returning({ id: jobs.id });
+      if (ended) ctx.log.info({ jobId: job.id, agentId }, 'A turn ended because its program delivery target no longer exists.');
+      await publishWorking(ctx, job.companyId);
+      return;
+    }
     /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */
     ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
   }

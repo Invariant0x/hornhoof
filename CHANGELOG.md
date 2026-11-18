@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed
