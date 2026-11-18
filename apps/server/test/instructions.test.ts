@@ -113,9 +113,8 @@ describe('independent Security before integration', () => {
     return renderInstructions(shipped, agent({ roleKey, kind: role.kind === 'head' ? 'head' : 'worker', skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
   };
 
-  it('writes the Security rule once: external checkers only in echelon tasks, a member of a turnkey team alone, and the old scope nowhere', () => {
-    for (const skill of shipped.skills.values()) expect(skill.body, skill.id).not.toMatch(/This applies to urgent work, small tasks, direct named orders/);
-    for (const role of shipped.roles.values()) expect(role.body, role.id).not.toMatch(/This applies to urgent work, small tasks, direct named orders/);
+  /* That the old scope is nowhere is a rule of the product policy, templates-policy.test.ts. */
+  it('writes the Security rule whole in every integration ability: external checkers only in echelon tasks, a member of a turnkey team alone', () => {
     for (const id of INTEGRATION_ABILITIES) expect(shipped.skills.get(id)!.body, id).toContain(SECURITY_RULE);
   });
 
@@ -275,7 +274,8 @@ describe('renderInstructions', () => {
     expect(off.text).not.toContain('## Skills');
   });
 
-  /* No node gives an agent obra/superpowers any more, so nothing an employee or the orchestrator reads speaks of it. */
+  /* No node gives an agent obra/superpowers any more, so nothing an employee or the orchestrator reads speaks of it. Every
+     skill's own text keeps to it by the product policy, templates-policy.test.ts. */
   it('names superpowers in no instructions and no skill an employee of any role or the orchestrator reads', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const read = (told: { text: string; whole: string; skills: { name: string; description: string; body: string }[] }) => [told.text, told.whole, ...told.skills.flatMap(f => [f.name, f.description, f.body])];
@@ -285,9 +285,6 @@ describe('renderInstructions', () => {
       for (const text of read(told)) expect(text, role.id).not.toMatch(/superpowers/i);
     }
     for (const text of read(orchestratorSteady(shipped))) expect(text).not.toMatch(/superpowers/i);
-    for (const skill of shipped.skills.values()) {
-      for (const text of [skill.id, skill.title.en, skill.title.ru, skill.description.en, skill.description.ru, skill.body]) expect(text, skill.id).not.toMatch(/superpowers/i);
-    }
   });
 
   it('tells employees and the orchestrator to reach people through company tools and to keep the effort and model of the job', () => {
