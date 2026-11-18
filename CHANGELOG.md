@@ -17,10 +17,6 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Removed computer access details from agent windows, including the orchestrator's window.
 - The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
 - Telegram sends only the finished answer and its files, in the language you write to the bot.
-- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
-- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
-- On phones, task details stack under the title and long text wraps within the list.
-- Removed computer access details from agent windows, including the orchestrator's window.
 
 ### Added
 
