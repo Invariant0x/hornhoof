@@ -179,6 +179,22 @@ describe('macOS hook ownership without proc', () => {
     expect(await macOwner(table(loop))(async () => [77]).owns!('agent-1', peer)).toBe(false);
   });
 
+  it("refuses a call that reaches a native macOS node from a container through Docker's proxy", async () => {
+    /* As lsof -Fpn shows such a connection on the Mac: Docker's com.docker.backend, a child of launchd, holds the caller's
+       end. Its lineage reaches no pane, and a pid from inside the container names no process of the Mac that holds it. */
+    const proxy = 4321;
+    const run: Command = async (file, args) => {
+      if (file === '/bin/ps') return `    1     0\n ${proxy}     1\n   10     1\n`;
+      const only = args.includes('-p') ? Number(args[args.indexOf('-p') + 1]) : null;
+      return only === null || only === proxy ? `p${proxy}\nf31\nn127.0.0.1:1->127.0.0.1:2\n` : '';
+    };
+    const reasons: string[] = [];
+    const owner = macOwner(run)(async () => [10]);
+    expect(await owner.owns!('agent-1', { port: 1, bridgePort: 2 }, reason => void reasons.push(reason))).toBe(false);
+    expect(await owner.owns!('agent-1', { port: 1, bridgePort: 2, pid: 57 }, reason => void reasons.push(reason))).toBe(false);
+    expect(reasons).toEqual(["the caller is not under the agent's pane", 'the hinted process does not hold the connection']);
+  });
+
   it('captures ancestry before waiting for a slow pane lookup', async () => {
     let atPane!: () => void;
     const entered = new Promise<void>(resolve => { atPane = resolve; });

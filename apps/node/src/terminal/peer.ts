@@ -1,4 +1,4 @@
-import { readdir, readFile, readlink } from 'node:fs/promises';
+import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { checkProcesses } from '../check-processes.js';
 
@@ -98,6 +98,7 @@ export function fromAgent(panes: Panes, proc = '/proc'): Owns {
    the exact inode captured for this connection, never a socket named by the caller. */
 async function hintedOwner(proc: string, pid: number, link: string, panes: () => Promise<number[]>, why: (reason: string) => void): Promise<boolean> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return refuse(why, 'malformed pid hint');
+  if (!(await stat(join(proc, String(pid))).then(() => true, () => false))) return refuse(why, 'the hinted process is gone, as a caller that gave up before its check is');
   if (!(await holds(proc, pid, link))) return refuse(why, 'the hinted process does not hold the connection');
   const lineage = await ancestors(proc, pid);
   const caller = await terminalSession(proc, pid);

@@ -85,6 +85,7 @@ describe('which agent a connection to the bridge comes from', () => {
     const why = (reason: string) => void reasons.push(reason);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 0 }, why)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 99 }, why)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, port: 41235 }, why)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', socket, why)).toBe(false);
@@ -92,6 +93,7 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(reasons).toEqual([
       'malformed pid hint',
       'the hinted process does not hold the connection',
+      'the hinted process is gone, as a caller that gave up before its check is',
       "the caller is not under the agent's pane",
       'the connection is not in the socket table',
       "no process under the agent's pane holds the connection",
