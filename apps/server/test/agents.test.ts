@@ -9,7 +9,9 @@ import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/e
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn, prepareApp } from './helpers.js';
+
+await prepareApp();
 
 /* Which employees' lanes were asked for, in order: a change to an employee waits in its lane while another is written. */
 const lanes = vi.hoisted(() => [] as string[]);

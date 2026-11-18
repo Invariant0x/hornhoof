@@ -1132,6 +1132,16 @@ async function turnOperatorDeliveries(
   return { operatorDelivery, operatorSourceDelivery: await sourceDeliveryMetadataForJob(ctx.db, agent.id, job.id) };
 }
 
+async function failedTurnDelivery(ctx: Ctx, job: Queued, err: unknown): Promise<void> {
+  if (err instanceof DeliveryTargetMismatch) {
+    const [ended] = await ctx.db.update(jobs).set({ status: 'obsolete', error: 'delivery_target_missing', result: err.message, toolTokenHash: null, finishedAt: new Date() })
+      .where(and(eq(jobs.id, job.id), eq(jobs.status, 'running'))).returning({ id: jobs.id });
+    if (ended) ctx.log.info({ jobId: job.id, agentId: job.agentId }, 'A turn ended because its program delivery target no longer exists.');
+    return;
+  }
+  ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -1239,15 +1249,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {
-    if (err instanceof DeliveryTargetMismatch) {
-      const [ended] = await db.update(jobs).set({ status: 'obsolete', error: 'delivery_target_missing', result: err.message, toolTokenHash: null, finishedAt: new Date() })
-        .where(and(eq(jobs.id, job.id), eq(jobs.status, 'running'))).returning({ id: jobs.id });
-      if (ended) ctx.log.info({ jobId: job.id, agentId }, 'A turn ended because its program delivery target no longer exists.');
-      await publishWorking(ctx, job.companyId);
-      return;
-    }
-    /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */
-    ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
+    await failedTurnDelivery(ctx, job, err);
   }
   if (sent) {
     turnSent(ctx, place.node, agentId);

@@ -4,6 +4,9 @@ import { agentInbox, agents, companies, jobs, programDeliveries } from '../src/d
 import { enqueueTurn, insertTurn, NoSubscription, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { failureCompany } from './failure-company.js';
 import { operatorCompany } from './program-operator-company.js';
+import { prepareApp } from './helpers.js';
+
+await prepareApp();
 
 const NOW = new Date('2026-11-18T00:00:00Z');
 beforeEach(() => {
