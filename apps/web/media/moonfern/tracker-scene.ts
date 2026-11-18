@@ -155,6 +155,15 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             await assertTrackerFit(frame);
             if (!wide) await sidebar.getByRole('button', { name: t.tracker.side.close }).click();
           }
+          if (view === 'tasks') {
+            const parent = region.getByRole('listitem', { name: `#221 ${LIST_PARENT}`, exact: true });
+            await parent.getByRole('button', { name: LIST_PARENT, exact: true }).click();
+            const card = await expectTaskCard(frame, t, LIST_PARENT);
+            await expect(card.getByRole('region', { name: t.tasks.log })).toContainText(LIST_NOTE);
+            const body = card.locator('.ac-body');
+            expect(await body.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+            await frame.screenshot({ path: info.outputPath(`task-card-${id}-${theme}-${size.width}.png`) });
+          }
           if (view === 'board') {
             if (!wide) {
               await region.getByRole('region', { name: t.tracker.statuses.waits }).locator('.tr-card').first().scrollIntoViewIfNeeded();

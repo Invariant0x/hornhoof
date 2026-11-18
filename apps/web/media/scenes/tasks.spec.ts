@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { en } from '../../src/i18n/en';
 import { createSceneRecorder } from '../moonfern/record';
+import { releaseFrames } from '../moonfern/release-frames';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
 import { expectTaskCard, pickView, reportUnmocked, trackerFrames } from '../moonfern/tracker-scene';
@@ -43,3 +44,9 @@ test('tasks.gif: the tracker shows a department as a list, a card and a board', 
 test('tracker screenshots: tasks at desktop and phone widths', async ({ browser }, info) => {
   await trackerFrames(browser, info, 'tasks');
 });
+
+for (const view of ['map', 'starter', 'agent'] as const) {
+  test(`tracker screenshots: ${view} at desktop and phone widths`, async ({ browser }, info) => {
+    await releaseFrames(browser, info, view);
+  });
+}
