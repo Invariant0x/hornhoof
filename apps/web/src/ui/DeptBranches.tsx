@@ -1,7 +1,8 @@
-import { useEffect, useId, useState } from 'react';
-import { api } from '../api';
+import { useId } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
+import { useLive } from '../tasks';
 import type { Department, DepartmentBranch, DepartmentBranches } from '../types';
+import { useLoadFailure } from './LoadFailure';
 
 const stateOf = (t: Messages, b: DepartmentBranch) => t.dept.branches.state[b.status][b.merged === false ? 'notIn' : 'unknown'];
 
@@ -21,26 +22,9 @@ function BranchList({ branches }: { branches: DepartmentBranch[] }) {
   );
 }
 
-/* A department's branches as the server says them, read again when the department changes. */
-function useBranches(departmentId: string): { found: DepartmentBranches | null; failure: unknown } {
-  const [found, setFound] = useState<DepartmentBranches | null>(null);
-  const [failure, setFailure] = useState<unknown>(null);
-  useEffect(() => {
-    let live = true;
-    api.get<DepartmentBranches>(`/api/departments/${departmentId}/branches`).then(
-      answer => { if (live && answer) setFound(answer); },
-      err => { if (live) setFailure(err); },
-    );
-    return () => {
-      live = false;
-    };
-  }, [departmentId]);
-  return { found, failure };
-}
-
 /* Why the branches could not be had, that they are still on the way, why the repository could not say them, and the
    branches themselves. */
-function BranchesFound({ found, failure }: { found: DepartmentBranches | null; failure: unknown }) {
+function BranchesFound({ found, failure }: { found: DepartmentBranches | undefined; failure: unknown }) {
   const t = useT();
   if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   if (!found) return <p className="muted">{t.dept.branches.loading}</p>;
@@ -57,12 +41,13 @@ function BranchesFound({ found, failure }: { found: DepartmentBranches | null; f
 export function DeptBranches({ departmentId }: { departmentId: string }) {
   const t = useT();
   const id = useId();
-  const { found, failure } = useBranches(departmentId);
+  const { data: found, failure } = useLive(`/api/departments/${departmentId}/branches`, (branches: DepartmentBranches) => branches, () => false);
+  const shown = useLoadFailure(failure);
   return (
     <section aria-labelledby={`${id}-branches`}>
       <h3 id={`${id}-branches`}>{t.dept.branches.title}</h3>
       <p className="muted">{t.dept.branches.hint}</p>
-      <BranchesFound found={found} failure={failure} />
+      <BranchesFound found={found} failure={shown} />
     </section>
   );
 }

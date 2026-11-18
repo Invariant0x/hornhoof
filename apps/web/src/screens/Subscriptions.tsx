@@ -457,7 +457,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     };
   }, []);
 
-  const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure } = usePlanCommands(live, setFailure);
+  const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure, commandsFailure } = usePlanCommands(live);
   /* Where this person connects an API key: anywhere with the whole company, else only in the departments they run. */
   const places = me.person.scopeKind === 'company' ? null : apiPlaces ?? [];
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
@@ -572,7 +572,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
-      <LoadFailure failure={readFailure} />
+      <LoadFailure failure={readFailure ?? commandsFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}

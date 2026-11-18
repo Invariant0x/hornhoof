@@ -1,9 +1,14 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { deferred } from '../../../test-support/deferred.mjs';
+import { heardAgain } from '../src/live';
+import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
-import type { UpdatesView } from '../src/types';
+import type { GoalView, UpdatesView } from '../src/types';
+import { DeptBranches } from '../src/ui/DeptBranches';
+import { UpdateSaysIt } from '../src/ui/LoadFailure';
 import { page } from '../src/updates';
-import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASKS } from './api-mock';
+import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASK_DETAIL, TASKS } from './api-mock';
 import { userEvent, waitFor } from './subscriptions-helpers';
 
 /* While the update panel shows an update in progress, a load the server refused for maintenance draws no bar of its own:
@@ -22,11 +27,16 @@ const view = (step: 'install' | 'health'): UpdatesView => ({
   updater: { present: true, status: { id: 'u1', version: '0.4.1', commit: 'b'.repeat(40), state: 'running', step, log: '', at: '2026-10-30T02:05:00Z' }, waiting: null, calledOff: null },
 });
 
+const finished = (): UpdatesView => {
+  const last = view('health');
+  return { ...last, updater: { ...last.updater, status: { ...last.updater.status!, state: 'rolled_back', step: 'finished' } } };
+};
+
 type Answer = readonly [number, unknown?];
 
 /* The server as an update holds it. The updates poll first answers with the update running, so the panel has it to show;
    while held, it and every load of the test's routes get the maintenance refusal; once the update ends they answer again. */
-function server(routes: Record<string, Answer>, updates: 'running' | 'none' = 'running') {
+function server(routes: Record<string, Answer>, updates: 'running' | 'none' = 'running', available: Record<string, Answer> = {}) {
   const state = { held: true, polls: 0 };
   const calls = mockApi({
     'GET /api/updates': () => {
@@ -35,6 +45,7 @@ function server(routes: Record<string, Answer>, updates: 'running' | 'none' = 'r
       return [200, view(state.held ? 'install' : 'health')];
     },
     ...Object.fromEntries(Object.entries(routes).map(([key, answer]) => [key, () => (state.held && key.startsWith('GET ') ? [...REFUSED] : [...answer])])),
+    ...Object.fromEntries(Object.entries(available).map(([key, answer]) => [key, [...answer]])),
   });
   return { end: () => { state.held = false; }, asked: (path: string) => calls.filter(c => c.method === 'GET' && c.path === path).length };
 }
@@ -46,8 +57,8 @@ const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sec
 const progress = () => screen.getByRole('progressbar', { name: 'Update progress' });
 
 /* The Shell under a held server, with the panel saying maintenance after the next poll on the test's clock. */
-async function held(routes: Record<string, Answer>) {
-  const s = server(routes);
+async function held(routes: Record<string, Answer>, available?: Record<string, Answer>) {
+  const s = server(routes, 'running', available);
   render(<Shell me={ME} onSignOut={() => {}} />);
   await waitFor(progress);
   await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
@@ -130,6 +141,134 @@ describe('a maintenance refusal while the update panel shows', () => {
     await waitFor(() => screen.getByText('Nothing yet. Operations puts here what it finds on its rounds.'));
     expect(bars()).toEqual([]);
   });
+
+  it('retries a refused load when the update finishes between successful polls', async () => {
+    const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
+    let updating = true;
+    const calls = mockApi({
+      'GET /api/updates': () => [200, updating ? view('install') : finished()],
+      'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(progress);
+    await takenIn();
+    expect(bars()).toEqual([]);
+    const before = calls.filter(call => call.path === '/api/org').length;
+    await updateEnds(() => { updating = false; });
+    expect(calls.filter(call => call.path === '/api/org').length).toBeGreaterThan(before);
+    expect(screen.getByText('Ivan')).toBeVisible();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('reloads the web app when the server comes back on a different build', async () => {
+    const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
+    let updating = true;
+    let polls = 0;
+    const current = { ...finished().current, commit: 'b'.repeat(40) };
+    const calls = mockApi({
+      'GET /api/updates': () => {
+        if (!updating) return [200, { ...finished(), current }];
+        return ++polls === 1 ? [200, view('install')] : [...REFUSED];
+      },
+      'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(progress);
+    await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
+    await takenIn();
+    const before = calls.filter(call => call.path === '/api/org').length;
+    await updateEnds(() => { updating = false; });
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(calls.filter(call => call.path === '/api/org')).toHaveLength(before);
+  });
+
+  it('still reports a task list failure when the department list was refused for maintenance', async () => {
+    const { asked } = await held({
+      'GET /api/org': [200, ORG],
+      'GET /api/task-departments': [200, { whole: true, mayPlanCompany: true, departments: [] }],
+    }, { 'GET /api/tasks?status=all': BROKEN });
+    await userEvent.click(tab('Tasks'));
+    await waitFor(() => expect(asked('/api/task-departments')).toBeGreaterThan(0));
+    await takenIn();
+    expect(bars()).toEqual(['Something went wrong.']);
+  });
+
+  it('clears and retries the subscription command load when only that request was refused', async () => {
+    const { end, asked } = await held({
+      'GET /api/org': [200, ORG],
+      'GET /api/nodes/commands': [200, { commands: [] }],
+    }, {
+      'GET /api/subscriptions': [200, { subscriptions: SUBS }],
+    });
+    await userEvent.click(tab('Subscriptions & API'));
+    await waitFor(() => screen.getAllByText(SUBS[0]!.label)[0]!);
+    await takenIn();
+    expect(bars()).toEqual([]);
+    const before = asked('/api/nodes/commands');
+    await updateEnds(end);
+    expect(asked('/api/nodes/commands')).toBeGreaterThan(before);
+    expect(bars()).toEqual([]);
+  });
+
+  it('keeps the recovered People page when an older maintenance refusal arrives late', async () => {
+    let held = true;
+    let polls = 0;
+    const refused = deferred();
+    const calls = mockApi({
+      'GET /api/updates': () => held && ++polls > 1 ? [...REFUSED] : [200, held ? view('install') : finished()],
+      'GET /api/org': [200, ORG],
+      'GET /api/people': async () => {
+        if (!held) return [200, { people: PEOPLE }];
+        await refused.promise;
+        return [...REFUSED];
+      },
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(progress);
+    await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
+    await userEvent.click(tab('People'));
+    await waitFor(() => expect(calls.some(call => call.path === '/api/people')).toBe(true));
+    await updateEnds(() => { held = false; });
+    await waitFor(() => screen.getByRole('cell', { name: 'Maria' }));
+    await act(async () => { refused.resolve(); });
+    expect(bars()).toEqual([]);
+  });
+
+  const goal: GoalView = { id: 'g1', number: 1, title: 'More subscribers', why: '', department: null, parentId: null, responsible: null,
+    target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 0, mayEdit: false };
+  it.each([
+    ['/tasks/t12', '/api/tasks/t12', { task: TASK_DETAIL }, '#12 Checkout API'],
+    ['/tasks/g1?card=goal', '/api/goals/g1', { goal, log: [] }, goal.title],
+  ] as const)('keeps the detail drawer silent in maintenance and recovers it at %s', async (url, path, answer, title) => {
+    window.history.replaceState(null, '', url);
+    const { end, asked } = await held({ 'GET /api/org': [200, ORG], [`GET ${path}`]: [200, answer] });
+    await waitFor(() => expect(asked(path)).toBeGreaterThan(0));
+    await takenIn();
+    const whileHeld = bars();
+    await updateEnds(end);
+    expect(screen.getByRole('complementary', { name: title })).toBeVisible();
+    expect(whileHeld).toEqual([]);
+    expect(bars()).toEqual([]);
+  });
+
+  it.each([
+    ['Branches', '/api/departments/d2/branches', { branches: [], problem: null }, <DeptBranches departmentId="d2" />,
+      () => screen.queryByText('Every accepted branch of the department is in main.')],
+    ['Company Link', '/api/link', { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' },
+      <Settings me={ME} group="company" onClose={() => {}} />, () => screen.queryByRole('link', { name: 'https://acme.hornhoof.org' })],
+  ] as const)('clears the maintenance refusal and loads %s without reopening it', async (_name, path, answer, content, found) => {
+    let held = true;
+    const calls = mockApi({ [`GET ${path}`]: () => held ? [...REFUSED] : [200, answer] });
+    const { rerender } = render(<UpdateSaysIt value={true}>{content}</UpdateSaysIt>);
+    await takenIn();
+    const whileHeld = bars();
+    held = false;
+    rerender(<UpdateSaysIt value={false}>{content}</UpdateSaysIt>);
+    await act(async () => { heardAgain(); });
+    expect({ whileHeld, reads: calls.filter(call => call.path === path).length, loaded: found() !== null }).toEqual({
+      whileHeld: [], reads: 2, loaded: true,
+    });
+  });
 });
 
 describe('what still draws its bar', () => {
@@ -144,6 +283,19 @@ describe('what still draws its bar', () => {
     server({ 'GET /api/org': [200, ORG] }, 'none');
     render(<Shell me={ME} onSignOut={() => {}} />);
     await waitFor(() => screen.getByText(MAINTENANCE));
+    expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
+  });
+
+  it('a maintenance refusal when a server move replaces the update panel', async () => {
+    mockApi({
+      'GET /api/updates': [200, view('install')],
+      'GET /api/org': [...REFUSED],
+      'GET /api/network/switch': [200, { self: null, moving: true, from: null, to: 'm1', since: null, cut: false, question: false }],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(() => screen.getByText(/Moving the company to another machine/));
+    await takenIn();
+    expect(bars()).toContain(MAINTENANCE);
     expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
   });
 

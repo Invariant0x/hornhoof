@@ -3,11 +3,11 @@ import { api } from '../api';
 import type { ShownCommand, SubView } from '../types';
 import { toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { everyVisible } from '../guard';
-import { useStream } from '../live';
+import { latestAnswers, useStream } from '../live';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type Controls = {
-  failure: unknown;
+  failure: unknown; commandsFailure: unknown;
   subs: SubView[] | null; setSubs: Setter<SubView[] | null>; commands: ShownCommand[] | null;
   /* Where this person connects an API key: anywhere (null), or only in these departments, which they run. */
   apiPlaces: string[] | null;
@@ -35,26 +35,28 @@ const dismiss = (all: ShownCommand[] | null, commandId: string, subId: string) =
   all?.map(c => c.id === commandId ? { ...c, dismissedSubscriptionIds: [...(c.dismissedSubscriptionIds ?? []), subId] } : c) ?? null;
 
 /* The list and its commands share a revision: a reply started before a local action cannot overwrite its result. */
-export function usePlanCommands(live: { current: boolean }, setFailure: Setter<unknown>): Controls {
-  const [failure, setReadFailure] = useState<unknown>(null);
+export function usePlanCommands(live: { current: boolean }): Controls {
+  const [readFailure, setReadFailure] = useState<{ plans: unknown; commands: unknown }>({ plans: null, commands: null });
   const [subs, setSubs] = useState<SubView[] | null>(null);
   const [apiPlaces, setApiPlaces] = useState<string[] | null>([]);
   const [commands, setCommands] = useState<ShownCommand[] | null>(null);
   const revision = useRef(0);
+  const [askPlans] = useState(latestAnswers);
   const load = useCallback(async () => {
     const started = revision.current;
+    const fresh = askPlans();
+    const wanted = () => live.current && started === revision.current && fresh();
     try {
       const next = await readPlans();
-      if (!live.current || started !== revision.current) return;
+      if (!wanted()) return;
       setSubs(next.subscriptions);
       setApiPlaces(next.apiPlaces);
-      setReadFailure(null);
+      setReadFailure({ plans: null, commands: next.error });
       if (next.commands) setCommands(next.commands);
-      if (next.error) setFailure(next.error);
     } catch (err) {
-      setReadFailure(err);
+      if (wanted()) setReadFailure({ plans: err, commands: null });
     }
-  }, [live, setFailure]);
+  }, [askPlans, live]);
   useEffect(() => {
     void load();
     return everyVisible(() => void load(), 5000);
@@ -78,5 +80,5 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
     revision.current++;
     setCommands(list => dismiss(list, command.id, id));
   };
-  return { subs, setSubs, apiPlaces, commands, load, connected, newCommand, dismissCommand, failure };
+  return { subs, setSubs, apiPlaces, commands, load, connected, newCommand, dismissCommand, failure: readFailure.plans, commandsFailure: readFailure.commands };
 }

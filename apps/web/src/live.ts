@@ -88,6 +88,20 @@ export function heardAgain(): void {
   tell({ type: 'reconnected' });
 }
 
+/* A newer answer can arrive before an earlier request completes. Only answers still in order count. */
+export function latestAnswers(): () => () => boolean {
+  let asked = 0;
+  let shown = 0;
+  return () => {
+    const n = ++asked;
+    return () => {
+      if (n < shown) return false;
+      shown = n;
+      return true;
+    };
+  };
+}
+
 /* Calls fn for everything the server says live until the returned function is called. */
 export function listen(fn: Listener): () => void {
   listeners.add(fn);
