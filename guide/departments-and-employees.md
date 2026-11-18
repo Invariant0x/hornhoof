@@ -119,7 +119,7 @@ A department's sub-unit can be marked "Works turnkey" on the department's screen
 
 ## How is work checked in the other departments?
 
-Every department has a route of its own: the stages its work goes through in a turn that runs in stages. Development has the longest one. In Marketing, Sales, Support, Business development, Design and Finance a task is done by one employee and checked by another before the head accepts it. In Operations a fix is checked by another engineer and then run in the test environment, where the department keeps code. Home devices and Household have no check: one helper does the work, and anything that acts on the real world waits for a person.
+Every department has a route of its own: the stages its work goes through in a turn that runs in stages. Development has the longest one. In Marketing, Sales, Support, Business development, Design and Finance a task is done by one employee and checked by another before the head accepts it. In Video production the character and style keeper checks every shot before editing, and the quality reviewer checks the cut before delivery. In Operations a fix is checked by another engineer and then run in the test environment, where the department keeps code. Home devices and Household have no check: one helper does the work, and anything that acts on the real world waits for a person.
 
 | Department | Who checks |
 | --- | --- |
@@ -130,6 +130,7 @@ Every department has a route of its own: the stages its work goes through in a t
 | Design | Design QA |
 | Finance | Finance auditor |
 | Operations | Reliability engineer and Integrations engineer, each the other's work |
+| Video production | Character and style keeper for every shot before editing, then Quality reviewer for the cut |
 
 The one who checks carries the skill "Checking a result" and runs a model at least as strong as the author's. It corrects what it finds itself and passes the result on, or sends work that answers the wrong question to the head.
 
@@ -184,12 +185,13 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Operations | - | Integrations engineer, Reliability engineer, Weak point collector | Accounts administrator, Head of operations, Product manager, Program operator, Task watchdog |
 | Sales | - | Account executive, Sales reviewer | Head of sales, Product manager, Sales development representative, Sales operations analyst |
 | Support | - | Second-line support, Support quality reviewer | First-line support, Head of support, Knowledge base editor, Product manager |
+| Video production | - | Character and style keeper, Quality reviewer, Story and script writer | Generation operator, Head of video production, Product manager, Storyboard artist, Video editor |
 
 Each role asks for a strength of model, and an employee hired without a model named runs the one of that strength its plan has, by name. When the plan has none of that strength it takes the nearest stronger one, else the nearest weaker.
 
 Top roles, the strongest model there is, for work nobody checks after: Architect, Security engineer.
 
-Deep roles, a strong model, for whoever checks the work of others or leads risky work: Code reviewer, Controller, Design QA, Editor, Finance auditor, Head of business development, Head of development, Red team, Research reviewer, Sales reviewer, Support quality reviewer.
+Deep roles, a strong model, for whoever checks the work of others or leads risky work: Character and style keeper, Code reviewer, Controller, Design QA, Editor, Finance auditor, Head of business development, Head of development, Quality reviewer, Red team, Research reviewer, Sales reviewer, Support quality reviewer.
 
 Fast roles, the lightest model, for simple work that comes in a stream: Calendar helper, First-line support, Product manager, Sales development representative, Social media manager, Supplies helper, Task watchdog.
 

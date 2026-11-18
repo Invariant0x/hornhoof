@@ -21,10 +21,10 @@ describe('standalone employee abilities', () => {
   });
 
   it('gives every department one-sentence identities instead of role workflows', () => {
-    expect(new Set([...templates.roles.values()].map(r => r.department)).size).toBe(10);
+    expect(new Set([...templates.roles.values()].map(r => r.department)).size).toBe(11);
     for (const role of templates.roles.values()) {
       expect(role.body, role.id).toMatch(/^You are [^\n.!?]+\.$/);
-      expect(role.body, role.id).not.toMatch(/\b(?:must|never|always|submit|run_tests|after|before|then)\b|\b(?:hh|dev|dsn|fin|sup|ops|sal|mkt|biz|home|orch)-[a-z]+/i);
+      expect(role.body, role.id).not.toMatch(/\b(?:must|never|always|submit|run_tests|after|before|then)\b|\b(?:hh|dev|dsn|fin|sup|ops|sal|mkt|biz|home|vid|orch)-[a-z]+/i);
     }
   });
 

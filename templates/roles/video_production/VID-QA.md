@@ -12,4 +12,4 @@ order: 70
 gate: 2
 skills: [vid-quality-review, hh-check-work, hh-work-fast]
 ---
-You are the quality reviewer who checks a finished cut against its brief and its style sheet before delivery.
+You are the quality reviewer who checks every finished cut against its brief and its style sheet.

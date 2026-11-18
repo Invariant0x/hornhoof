@@ -76,6 +76,15 @@ Setup offers these. A template creates its departments and their employees right
 | Agency | Sales, delivery through operations, and support for client work. |
 | Research lab | Development with an architect and documentation, for research work. |
 | Home | Home devices and network, and the household. |
+| Video studio | Video production from the script to the final cut, with a keeper of each character's look. Needs an API key of a video model. |
+
+## Video
+
+### Videos with the same characters in every shot
+
+Pick the Video studio template, or add a Video production department. A writer makes the script and the shot list, a storyboard artist draws a frame for each shot, and the character and style keeper keeps a sheet for every character: reference frames from the front, the side and the back, hair, head covering, clothes, colours, accessories, face and proportions. Generation operators make each shot from the keeper's reference frame with the same wording of the look, drafts first and finals only for shots the keeper accepted. Nothing goes to editing without the keeper's yes, and a shot that differs in any detail is made again. The editor cuts it with sound, music, titles and an end card, and the quality reviewer checks the cut against the brief before delivery. Prompts, reference frames and the cost of each video are kept in git.
+
+The video model works through an API key, either of a service that offers several video models or of the model's maker. Save it in the vault and set a spend limit; the employees keep their usual subscriptions. A subscription to a video site gives no API and does not work for agents.
 
 ## Home
 

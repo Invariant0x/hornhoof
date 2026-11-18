@@ -171,6 +171,37 @@ describe('Department view', () => {
     expect(route.getByRole('img', { name: judge })).toHaveAttribute('title', judge);
   });
 
+  it.each(checkedLocales)('shows the video production route with a square for every permanent place and diamonds for its draft calls in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const t = messages[language], [dev] = DEV_ORG.departments;
+    const video = { ...dev!, id: 'd7', name: null, templateKey: 'video_production' as const, roleCode: 'VID', products: [], employees: [], teams: [] };
+    const owners: [string, string, { en: string; ru: string }][] = [
+      ['Take the brief', 'VID-HEAD', { en: 'Head of video production', ru: 'Руководитель видеопроизводства' }],
+      ['Make the character and style sheets', 'VID-KEEP', { en: 'Character and style keeper', ru: 'Хранитель персонажей и стиля' }],
+      ['Generate draft shots', 'VID-GEN', { en: 'Generation operator', ru: 'Оператор генерации' }],
+      ['Check continuity', 'VID-KEEP', { en: 'Character and style keeper', ru: 'Хранитель персонажей и стиля' }],
+    ];
+    const stages = owners.map(([name, ownerRole, ownerTitle], position) => ({ id: `s${position}`, parentId: position ? `s${position - 1}` : null, name, ownerRole, ownerTitle, owner: null, position,
+      ...(name === 'Generate draft shots' ? { echelon: 'development', oneShot: { fanOut: 3, judge: true } } : {}) }));
+    const pipeline = { id: 'video', department: { id: video.id, name: 'Video production' }, catalogKey: 'video-production', name: 'Video production',
+      why: '', archived: false, isDefault: true, version: 1, stages };
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...video, pipelines: [pipeline] }} deputies={[]} selected={null}
+      panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const names = t.pipelineCatalog['video-production'];
+    const route = within(screen.getByRole('region', { name: names.name }));
+    const permanent = { en: 'Permanent agent', ru: 'Постоянный агент' }[language];
+    expect(route.getAllByRole('img', { name: permanent })).toHaveLength(owners.length);
+    for (const [name] of owners) expect(route.getByRole('heading', { name: names.stages[name as keyof typeof names.stages] })).toBeVisible();
+    const draft = route.getByRole('heading', { name: names.stages['Generate draft shots'] }).closest('li')!;
+    const call = { en: 'One-shot call: starts from zero each time, no memory', ru: 'Разовый вызов: каждый раз с нуля, без памяти' }[language];
+    const diamonds = within(draft).getAllByRole('img', { name: new RegExp(`^${call}`) });
+    expect(diamonds).toHaveLength(4);
+    expect(diamonds.every(mark => mark.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]'))).toBe(true);
+    expect(diamonds[3]).toHaveAccessibleName(`${call}. ${owners[2]![2][language]}, ${t.workers.judge}. ${t.workers.idle}`);
+    const check = route.getByRole('heading', { name: names.stages['Check continuity'] }).closest('li')!;
+    expect(within(check).queryByRole('img', { name: new RegExp(`^${call}`) })).toBeNull();
+  });
+
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
   it('keeps the words of a department with no head and no employees in their own direction', () => {
     mockApi({});

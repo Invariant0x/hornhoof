@@ -65,12 +65,24 @@ describe('Setup', () => {
     /* A template brings its people, who wait only for a subscription; the card counts the turnkey teams among them. */
     expect(screen.getByText(/departments and their employees right away/)).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('21 employees'));
-    /* The eight ready-made companies, named by the template, not by the scheme picture. */
-    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
+    /* The ten ready-made companies, named by the template, not by the scheme picture. */
+    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home|Video studio/ })).toHaveLength(10);
     /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.getByRole('radio', { name: /Full company/ })).toHaveAccessibleName(expect.stringContaining('Departments: Operations, Development'));
     for (const radio of screen.getAllByRole('radio')) expect(radio).toHaveAccessibleName(expect.not.stringContaining('Department scheme'));
+  });
+
+  it('offers the Video studio, with its video production department, its people and the API key it needs', async () => {
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    const video = screen.getByRole('radio', { name: /Video studio/ });
+    /* Operations and Video production with every role, and one member of each turnkey team. */
+    expect(video).toHaveAccessibleName(expect.stringContaining('Departments: Operations, Video production.'));
+    expect(video).toHaveAccessibleName(expect.stringContaining('18 employees'));
+    expect(video).toHaveAccessibleName(expect.stringContaining('Needs an API key of a video model'));
+    await user.click(video);
+    expect(video).toBeChecked();
   });
 
   it('sends the chosen company template with the company', async () => {
