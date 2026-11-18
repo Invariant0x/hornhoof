@@ -579,7 +579,7 @@ select:disabled { opacity: .55; }
    under the floating header, so there the room is a band in the page's own color that stays at the top: text never shows
    around the glass blocks. On the map the canvas runs under the header, and the room lets every touch through to it. */
 .body::before { content: ''; position: sticky; top: 0; display: block; block-size: var(--header-room); pointer-events: none; }
-.body.page::before { z-index: 5; background: var(--bg); }
+.body.page::before { z-index: 5; background: var(--bg); pointer-events: auto; }
 /* The bars of the shell, the banners first and then what failed to load: each takes its own row of the page under the
    header's room, never under the header, and what the page shows comes after them. Over the map and a department they
    stand above the canvas; on a page they scroll under its band. */

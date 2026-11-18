@@ -65,6 +65,8 @@ describe('Shell', () => {
     expect(room('block-size')).toBe('var(--header-room)');
     expect(room('margin-bottom')).toBeUndefined();
     expect(decl('.body.page::before', 'background')).toBe('var(--bg)');
+    /* What scrolled under the band is out of sight, so a click there reaches the band, not what is under it. */
+    expect(decl('.body.page::before', 'pointer-events')).toBe('auto');
     expect(decl('.shell', '--header-room')).toBe('calc(2 * var(--bar-top) + var(--bar-size))');
     expect(decl('.topbar', 'inset-block-start')).toBe('var(--bar-top)');
     expect(decl('.tabs', 'height')).toBe('var(--bar-size)');
