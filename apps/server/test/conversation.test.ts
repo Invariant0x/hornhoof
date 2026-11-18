@@ -161,11 +161,36 @@ describe('the orchestrator\'s conversation', () => {
     expect(message.data.text).toBe('Read the task and its log before continuing.');
   });
 
+  it('lets an invited person pick the assistant offer and read their answer without opening shared history', async () => {
+    const { app, ceo, builtin } = await live();
+    const joined = await invitePerson(app, ceo, { name: 'Sam', email: 'sam@example.test', access: { whole: true } });
+    const path = '/api/orchestrator/first-contact';
+    expect((await app.inject({ url: path, ...as(joined) })).json()).toEqual({ offers: ['chooseDepartments', 'setUpPipeline', 'telegram', 'assistant'] });
+    const chosen = await app.inject({ method: 'POST', url: path, ...as(joined), payload: { offer: 'assistant', language: 'en' } });
+    expect(chosen.statusCode).toBe(202);
+    const run = await nextRun(builtin);
+    expect(run.jobId).toBe(chosen.json().jobId);
+    expect(run.prompt).toContain('Set up my personal assistant');
+    expect(run.prompt).toContain('Sam');
+    builtin.send({ type: 'job.started', jobId: run.jobId });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'What should I call your assistant?' } });
+    await finish(builtin, run);
+    const answerUrl = `${path}/${run.jobId}`;
+    await until(async () => (await app.inject({ url: answerUrl, ...as(joined) })).json().status === 'done');
+    expect((await app.inject({ url: answerUrl, ...as(joined) })).json().replies).toEqual(['What should I call your assistant?']);
+    expect((await app.inject({ url: path, ...as(joined) })).json().last).toMatchObject({ id: run.jobId, offer: 'assistant', answer: { status: 'done', replies: ['What should I call your assistant?'] } });
+    expect((await app.inject({ url: path, ...as(ceo) })).json().last).toBeUndefined();
+    expect((await app.inject({ url: answerUrl, ...as(ceo) })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/agents/orchestrator/events', ...as(joined) })).statusCode).toBe(403);
+  });
+
   it('starts with a greeting turn that carries his instructions and a tool token, once', async () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: `From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN}`, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run).toMatchObject({ effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run.prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN}`)).toBe(true);
+    expect(run.prompt).toContain('Set up departments for the work I do');
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -185,7 +210,9 @@ describe('the orchestrator\'s conversation', () => {
     await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
     await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
-    expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
+    const prompt = (await nextRun(builtin)).prompt;
+    expect(prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`)).toBe(true);
+    expect(prompt).toContain('Choose what to ship next');
     expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
 
@@ -198,7 +225,8 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).ready);
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const prompt = (await nextRun(builtin)).prompt;
-    expect(prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_STAFFED}`);
+    expect(prompt.startsWith(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_STAFFED}`)).toBe(true);
+    expect(prompt).toContain('Fix a problem in my project');
     expect(prompt).not.toContain('offer to staff');
   });
 
@@ -251,7 +279,7 @@ describe('the orchestrator\'s conversation', () => {
     });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const [job] = await db.select().from(jobs);
-    expect(job).toMatchObject({ status: 'queued', startedAt: null, toolTokenHash: null, prompt: FIRST_TURN });
+    expect(job).toMatchObject({ status: 'queued', startedAt: null, toolTokenHash: null, prompt: expect.stringContaining(FIRST_TURN) });
     builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     expect((await nextRun(builtin)).jobId).toBe(job!.id);
   });

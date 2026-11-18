@@ -104,6 +104,7 @@ import { googleSheetsRoutes } from './modules/google/routes.js';
 import { vaultRoutes } from './modules/vault/routes.js';
 import { phoneRoutes } from './modules/phones/routes.js';
 import { closePhoneRequests } from './modules/phones/rpc.js';
+import { startPhoneReadiness } from './modules/phones/readiness.js';
 import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
 import { modelsReader, type ModelsReader } from './modules/subscriptions/api-models.js';
 
@@ -468,6 +469,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   googleSheetsRoutes(app, ctx);
   vaultRoutes(app, ctx);
   phoneRoutes(app, ctx);
+  startPhoneReadiness(app, ctx);
   app.addHook('onClose', async () => { closePhoneRequests(ctx); });
   assistantRoutes(app, ctx);
   assistantMcpRoutes(app, ctx);

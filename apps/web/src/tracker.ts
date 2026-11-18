@@ -1,10 +1,11 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { goals as trees, humanStatus, type Asks, type Goal as TaskTree, type HumanStatus } from './task-board';
-import type { Employee, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskLine } from './types';
+import type { Employee, GoalView, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 export type { TaskTree };
 
-/* Three ways to look at the same work. */
-export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
+/* Ways to look at the same work. */
+export const TRACKER_VIEWS = ['list', 'board', 'due', 'goals', 'graph'] as const;
 export type TrackerView = (typeof TRACKER_VIEWS)[number];
 
 /* The columns of the status board, and what the status filter picks: waits holds whatever stands still, a person's answer
@@ -20,12 +21,19 @@ export function boardStatus(task: TaskLine, asksYou = false): BoardStatus {
   return status;
 }
 
-/* The order the list's groups read in: what needs people first, then what stopped, is checked, moves and has not started,
-   and what is over. */
-const NEED: HumanStatus[] = ['waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
+type ListStatus = HumanStatus | 'waitingPerson';
+const LIST_ORDER: ListStatus[] = ['working', 'review', 'waitingPerson', 'waitingYou', 'waiting', 'stopped', 'notStarted', 'paused', 'done', 'cancelled'];
+
+function listStatus(task: TaskLine, asksYou = false): ListStatus {
+  const status = humanStatus(task, asksYou);
+  if ((status === 'waiting' || status === 'waitingYou') && task.time?.waitsOn.some(wait => wait.kind === 'person')) return 'waitingPerson';
+  return status;
+}
+export const priorityOf = (task: TaskLine) => task.priority ?? 'normal';
+const byPriority = (a: TaskTree, b: TaskTree) => TASK_PRIORITIES.indexOf(priorityOf(a.task)) - TASK_PRIORITIES.indexOf(priorityOf(b.task)) || newestFirst(a, b);
 const newestFirst = (a: TaskTree, b: TaskTree) => b.task.number - a.task.number;
 
-export type ListGroup = { status: HumanStatus; trees: TaskTree[] };
+export type ListGroup = { status: ListStatus; trees: TaskTree[] };
 
 /* Each task's subtasks done of all of them, cancelled ones aside, counted over all the work: what a view leaves out of sight
    still counts. */
@@ -44,7 +52,7 @@ function counted(nodes: TaskTree[], all: TaskLine[]): TaskTree[] {
    subtasks are counted over, when those given are only part of it. */
 export function listGroups(tasks: TaskLine[], asksYou?: Asks, all: TaskLine[] = tasks): ListGroup[] {
   const top = counted(trees(tasks), all);
-  return NEED.map(status => ({ status, trees: top.filter(tree => humanStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(newestFirst) })).filter(g => g.trees.length > 0);
+  return LIST_ORDER.map(status => ({ status, trees: top.filter(tree => listStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(byPriority) })).filter(g => g.trees.length > 0);
 }
 
 /* A stage with how deep it stands in its pipeline's tree. */
@@ -108,7 +116,7 @@ export function filterTasks(tasks: TaskLine[], f: WorkFilter, goals: GoalView[],
     if (served && !(task.goal && served.has(task.goal.id))) return false;
     if (f.department && (task.department?.id ?? 'none') !== f.department) return false;
     if (f.product && task.product?.id !== f.product) return false;
-    return !f.pipeline || task.pipelineId === f.pipeline;
+    return !f.pipeline || (task.pipelineId ?? 'none') === f.pipeline;
   });
 }
 
@@ -129,21 +137,6 @@ export const isWaitForPerson = (wait: NonNullable<TaskLine['time']>['waitsOn'][n
 
 export function waitingOn(tasks: TaskLine[], personId: string): TaskLine[] {
   return tasks.filter(t => !closed(t) && (t.time?.waitsOn ?? []).some(w => isWaitForPerson(w, personId)));
-}
-
-/* Who answers for the departments and the goals, in the departments' order: the departments each answers for and how many
-   open tasks they hold. */
-export type Responsible = { person: PersonRef; departments: string[]; open: number };
-export function responsibles(departments: { id: string; responsible?: PersonRef | null }[], goals: GoalView[], tasks: TaskLine[]): Responsible[] {
-  const people: Responsible[] = [];
-  const add = (person: PersonRef, department?: string) => {
-    let found = people.find(r => r.person.id === person.id);
-    if (!found) people.push((found = { person, departments: [], open: tasks.filter(t => !closed(t) && t.responsible?.id === person.id).length }));
-    if (department) found.departments.push(department);
-  };
-  for (const d of departments) if (d.responsible) add(d.responsible, d.id);
-  for (const g of goals) if (g.status === 'active') add(g.responsible);
-  return people;
 }
 
 /* A department's employees for the left panel: those at work first, then the rest, at least so many in sight. */

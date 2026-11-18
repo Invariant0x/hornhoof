@@ -4,10 +4,11 @@ import { PROVIDER_NAMES } from '../providers';
 import type { Employee, EmployeeStatus } from '../types';
 import { Bar, percent } from './Bar';
 import { Edge } from './Edge';
-import { AgentIcon, ProviderMark } from './icons';
+import { ProviderMark } from './icons';
 import { AgentState, type AgentLive } from './AgentState';
 import { CH, CW } from '../screens/schema';
 import { stageName } from './stage-name';
+import { employeeKind, WorkerMark } from './WorkerMark';
 
 export const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
 
@@ -65,7 +66,7 @@ export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serve
       >
         <Edge cut={10} halo>
           <span className="r1">
-            <AgentIcon />
+            <WorkerMark kind={employeeKind(e.turnkey)} />
             <span className="mn">{e.name}</span>
             <ProviderMark provider={e.provider} />
             <span className="st" title={t.dept.status[e.status]}>{t.dept.status[e.status]}</span>

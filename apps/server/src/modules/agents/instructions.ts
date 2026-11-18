@@ -159,7 +159,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 /* The orchestrator's skills, always on after his standing role: working in Hornhoof as everyone does, leading as every
    head does, then what only he does, and development's own way of leading for when he needs it. */
 export const ORCHESTRATOR_SKILLS = [
-  'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
+  'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
   'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working',
 ] as const;
 

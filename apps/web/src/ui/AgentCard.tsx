@@ -15,6 +15,7 @@ import { FallbackLine } from './PlanFallbacks';
 import { useNow } from './reset';
 import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
+import { employeeKind, WorkerMark } from './WorkerMark';
 
 /* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
 /* onRemoved: the agent is gone, and so is what stood for it. */
@@ -314,7 +315,9 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
           {card.role && card.role.title[language] !== card.name && <p>{card.role.title[language]}</p>}
           {where && <p className="muted">{where}</p>}
           <p className="ac-state">
-            <i className={`dot ${card.state}`} />
+            {card.kind === 'worker' || card.kind === 'head'
+              ? <WorkerMark kind={employeeKind(card.turnkey)} className={card.state} />
+              : <i className={`dot ${card.state}`} />}
             {t.dept.states[card.state]}
             <AgentState agent={stateAgent} serverNow={serverNow} />
           </p>

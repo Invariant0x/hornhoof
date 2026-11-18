@@ -13,6 +13,7 @@ function phone() {
     devices: vi.fn(async () => [{ serial, status: 'device' as const, model: null }]),
     identity: vi.fn(async () => 'a'.repeat(64)), tree: vi.fn(async () => ''),
     screenshot: vi.fn(async () => Buffer.from('unreadable recorded picture')), act: vi.fn(async () => {}),
+    readiness: vi.fn(async () => []),
   };
   const replies: PhoneReply[] = [];
   const executor = new PhoneExecutor({ adb, send: message => { if (message.type === 'phone.reply') replies.push(message); } });

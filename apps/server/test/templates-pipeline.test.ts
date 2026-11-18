@@ -75,10 +75,10 @@ const POINTS: Record<string, RegExp[]> = {
     /valid and rejected cases/i,
   ],
   'home-work-pipeline': [
-    /Every physical action[\s\S]*exact action, target[\s\S]*amount and time/i,
-    /camera or microphone content[\s\S]*Streams and recordings are not ordinary device metadata/i,
-    /person still approves each action/i,
-    /people make payments in their own accounts/i,
+    /Check changes to devices and scenes on each affected device[\s\S]*restore the previous setting/i,
+    /Irreversible deletion needs the CEO's yes[\s\S]*a person makes payments and signs in the company's name/i,
+    /Streams and recordings need a separate assignment and existing access/i,
+    /Group routine checks and changes the notebook allows/i,
     /private to the home[\s\S]*never ask for or store card, bank or account secrets/i,
   ],
   'sal-work-pipeline': [

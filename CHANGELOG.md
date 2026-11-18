@@ -27,6 +27,22 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Operator screens and replies hide short known credentials before they leave a node, using the same masking rules as the server.
 - The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
+- Company phone checks wait until a phone is idle and run less often, so they do not interrupt an agent using the screen.
+- Company phones stay awake with the screen set to its lowest manual brightness to save battery.
+
+### Added
+
+- Every new department starts with a ready pipeline, and the orchestrator can add a different one or make it the default.
+- The orchestrator offers to set up a ready pipeline for work such as video editing when someone first gets started.
+- The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.
+- Everyone can write to the orchestrator from the company Telegram bot or through their personal assistant.
+- Connected company phones have their working settings restored automatically, and Machines shows anything that still needs attention.
+- People and agents can set task priority, which appears on the task card and orders tasks within each list group.
+- The map uses squares for employees, diamonds for generalists and ghost outlines for one-shot calls, with a legend for all three.
+- Declared one-shot stages show their places before a call begins and distinguish running calls from waiting calls.
+- Every starter kit shows its one-shot places on the map before a subscription is connected.
+- Owners of one-shot stages get guidance on briefing the calls and using their answers and the judge's verdict.
+- Worker marks also appear in the department staff list, employee card and tracker, and the task route marks its one-shot stages.
 
 ### Changed
 
@@ -39,6 +55,16 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Employees can send messages and file improvements throughout a turn.
 - People can send distinct feedback without a personal hourly quota, and retries do not count the same submission twice.
 - One-shot calls and their judges run until they finish or are stopped, unless the caller sets a time limit.
+- Home device helpers carry out reversible cleanup and settings changes allowed by the household rules.
+- The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
+- Task rows show what they wait for and which tasks from other departments need them.
+- Task lists distinguish status, priority, people, departments and executor programs by shape and color.
+- The task sidebar shows company people and wait counts, with shortcuts to due dates, department goals and work outside a pipeline.
+- The tracker puts the current place, person picker and search in one header, followed by views and compact filters.
+- The tracker can show tasks by due date and department goals, and new tasks on a pipeline keep that pipeline.
+- Expand a task from the arrow next to its title to see its subtasks in the same list columns.
+- On narrow screens, tracker rows stack their facts and show the full names behind the initials.
+- New tasks in every department follow routes with one-shot stages, and Review and Security in Development each use three calls and a judge; tasks created earlier keep their route.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
 ## [0.32.1] - 2026-11-17

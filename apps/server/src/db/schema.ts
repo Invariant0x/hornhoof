@@ -5,7 +5,7 @@ import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updates/control.js';
-import type { UnitFingerprint } from '@hornhoof/protocol';
+import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -1185,6 +1185,7 @@ export const tasks = pgTable(
     responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
     /* Why the task exists, in plain words; the brief says what the result is. */
     why: text('why').notNull().default(''),
+    priority: text('priority').$type<TaskPriority>(),
     dueAt: timestamp('due_at', { withTimezone: true }),
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
@@ -1197,6 +1198,7 @@ export const tasks = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [
+    check('tasks_priority_known', sql`${t.priority} in ('urgent', 'high', 'normal', 'low')`),
     unique('tasks_company_number').on(t.companyId, t.number),
     index('tasks_goal_id').on(t.goalId),
     index('tasks_responsible').on(t.responsiblePersonId),
@@ -1351,6 +1353,8 @@ export const pipelines = pgTable(
     companyId: companyId(),
     departmentId: uuid('department_id').notNull().references(() => departments.id),
     name: text('name').notNull(),
+    catalogKey: text('catalog_key'),
+    isDefault: boolean('is_default').notNull().default(false),
     why: text('why').notNull().default(''),
     position: integer('position').notNull().default(0),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1360,7 +1364,11 @@ export const pipelines = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     version: integer('version').notNull().default(0),
   },
-  t => [index('pipelines_department_id').on(t.departmentId)],
+  t => [
+    index('pipelines_department_id').on(t.departmentId),
+    uniqueIndex('pipelines_department_catalog').on(t.departmentId, t.catalogKey),
+    uniqueIndex('pipelines_department_default').on(t.departmentId).where(sql`${t.isDefault}`),
+  ],
 );
 
 /* A stage of a pipeline: none above it for the first ones after the head, owned by a role or by one employee. */
