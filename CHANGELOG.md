@@ -7,6 +7,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 ### Fixed
+- Tracker screenshots can render at phone widths with the version footer hidden.
 - The version and build appear in their own footer below every screen.
 - Failed test and work runs keep the run number with its label and give the cause in plain language.
 - The selected department uses the full sidebar row, and department, pipeline, and board card text wraps at spaces when possible.

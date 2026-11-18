@@ -115,16 +115,12 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             expect(Math.max(...top) - Math.min(...top)).toBeLessThanOrEqual(1);
           }
           await assertTrackerFit(frame);
-          const version = frame.locator('.version-mark');
-          await expect(version).toBeVisible();
+          await assertTrackerEdges(frame, size.width);
           await frame.screenshot({ path: info.outputPath(`${view}-${id}-${theme}-${size.width}.png`) });
           if (view === 'board') {
             const last = region.getByRole('region', { name: t.tracker.statuses.done, exact: true }).locator('.tr-card').last();
             await last.evaluate(card => card.scrollIntoView({ block: 'end', inline: 'nearest' }));
-            const [card, body, footer] = await Promise.all([last.boundingBox(), frame.locator('.tracker-page').boundingBox(), version.boundingBox()]);
-            expect(card!.y).toBeGreaterThanOrEqual(body!.y);
-            expect(Math.abs(card!.y + card!.height - (body!.y + body!.height))).toBeLessThanOrEqual(1);
-            expect(card!.y + card!.height).toBeLessThanOrEqual(footer!.y + 1);
+            await assertTrackerEdges(frame, size.width, last);
             await frame.screenshot({ path: info.outputPath(`board-bottom-${id}-${theme}-${size.width}.png`) });
             await frame.locator('.tracker-page').evaluate(element => { element.scrollTop = 0; });
           }
@@ -167,6 +163,33 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
       }
     }
   }
+}
+
+export async function assertTrackerEdges(page: Pick<Page, 'locator'>, width: number, last?: Locator): Promise<void> {
+  const tracker = page.locator('.tracker-page');
+  if (width <= 760) {
+    const covering = await tracker.evaluate(body => {
+      const area = body.getBoundingClientRect();
+      return Array.from(document.body.querySelectorAll('*')).filter(element => {
+        const style = getComputedStyle(element);
+        if (style.position !== 'fixed' || style.display === 'none' || style.visibility !== 'visible' || style.opacity === '0') return false;
+        const box = element.getBoundingClientRect();
+        return Math.max(box.left, area.left) < Math.min(box.right, area.right)
+          && Math.max(box.top, area.top) < Math.min(box.bottom, area.bottom);
+      }).map(element => element.id ? `#${element.id}` : element.getAttribute('class') || element.localName);
+    });
+    expect(covering, 'fixed elements overlapping the tracker').toEqual([]);
+    return;
+  }
+  const version = page.locator('.version-mark');
+  if (!last) {
+    await expect(version).toBeVisible();
+    return;
+  }
+  const [card, body, footer] = await Promise.all([last.boundingBox(), tracker.boundingBox(), version.boundingBox()]);
+  expect(card!.y).toBeGreaterThanOrEqual(body!.y);
+  expect(Math.abs(card!.y + card!.height - (body!.y + body!.height))).toBeLessThanOrEqual(1);
+  expect(card!.y + card!.height).toBeLessThanOrEqual(footer!.y + 1);
 }
 
 async function expectOneLine(label: Locator): Promise<void> {
