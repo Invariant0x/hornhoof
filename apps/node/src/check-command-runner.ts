@@ -6,7 +6,7 @@ import type { ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
-import { checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlots, withCheckSlot } from './check-queue.js';
+import { checkLeaseJob, checkQueueOffline, currentCheckLease, reuseCheckLease, suspendCheckSlots, withCheckSlot } from './check-queue.js';
 import { assertCheckGroup, checkGroupMembers, cleanCheckGroup, signalCheckGroup, type CheckGroup } from './check-group.js';
 import { trackCheckProcess } from './check-processes.js';
 import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
@@ -93,7 +93,7 @@ const held = (res: ServerResponse, group: CheckGroup, uid: number) => async (sig
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
   const run = input.wait ? held(res, input.group!, user?.uid ?? process.getuid!()) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
-  if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
+  if (input.lease) return reuseCheckLease(input.lease, key, signal, run, jobId);
   return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
 
@@ -107,6 +107,13 @@ function parseCommand(body: Buffer): Command {
   return input;
 }
 
+export function checkCommandParent(body: Buffer, key: string): { jobId?: string } | null {
+  try {
+    const id = z.uuid().safeParse(JSON.parse(body.toString('utf8'))?.lease);
+    return id.success ? { jobId: checkLeaseJob(id.data, key) } : null;
+  } catch { return null; }
+}
+
 /* True when the command ran to its end with code 0. */
 export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse, jobId?: string, callerPid?: number): Promise<boolean> {
   assertCommandUser();
@@ -114,7 +121,7 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   try {
     /* One that only waits runs in the agent's shell as it would with no queue, whatever it is. */
-    if (input.wait && checkQueueOffline()) { send(res, { type: 'unavailable' }); return false; }
+    if (input.wait && !input.lease && checkQueueOffline()) { send(res, { type: 'unavailable' }); return false; }
     if (input.wait) {
       if (!input.group) throw new Error('A waiting check must register its process group.');
       await assertCheckGroup(input.group, user?.uid ?? process.getuid!(), callerPid);

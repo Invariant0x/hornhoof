@@ -1,10 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { CheckSlotQueue } from '@hornhoof/protocol';
 import ts from 'typescript';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { configureCheckCommands, installCheckCommand } from '../src/check-command-runner.js';
 import { classifyAgentCommand } from '../src/command-guard.js';
-import { createAgentCommandGuard } from '../src/check-runtime.js';
+import { createAgentCommandGuard, runQueuedPart } from '../src/check-runtime.js';
+import { runTests } from '../src/tests.js';
 import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import type { JobUser } from '../src/isolation.js';
 import { tmpdir } from 'node:os';
@@ -51,6 +53,26 @@ describe('check command bridge', () => {
   beforeEach(() => {
     configureCheckCommands(user, (_key, input) => classifyAgentCommand({ ...input, workspaceRoot: '/tmp' }));
     onTestFinished(() => configureCheckCommands(null));
+  });
+
+  it('finishes a part whose child uses hh-check under its only machine slot', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-check-part-'));
+    installCheckCommand(dir, realpathSync(cli));
+    const queue = new CheckSlotQueue(() => 1), active = new Map<string, () => void>(), positions: number[] = [];
+    const client = new CheckClient(frame => {
+      if (frame.type === 'check.release') { active.get(frame.id)?.(); return true; }
+      void queue.withSlot(() => new Promise<void>(resolve => {
+        active.set(frame.id, () => { active.delete(frame.id); resolve(); });
+        client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+      }), { onPosition: position => positions.push(position) });
+      return true;
+    });
+    client.online(true); setCheckClient(client);
+    onTestFinished(() => { client.stop(); setCheckClient(null); rmSync(dir, { recursive: true, force: true }); });
+    const done = await runQueuedPart({ type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'hh-check -- hh-check -- printf nested-check', part: 1, parts: 1, timeoutMs: 60_000 }, runTests, { dir, user: null, hidden: [] }, () => {}, () => {});
+    expect(done).toMatchObject({ ok: true, log: expect.stringContaining('\nnested-check') });
+    expect(positions).toEqual([]);
+    expect(active.size).toBe(0);
   });
   it('runs a command through a granted slot with its output and exit code', async () => {
     const key = '10000000-0000-4000-8000-000000000001';
@@ -218,6 +240,26 @@ describe('check command bridge', () => {
       expect(opened).toEqual([key, key]);
       expect(ended).toEqual([false, true]);
       expect(asked).toMatchObject([{ agentId: key, jobId: STEP }, { agentId: key, jobId: STEP }]);
+    });
+
+    it('runs a nested hh-check in the same step and lease between turns', async () => {
+      const key = '10000000-0000-4000-8000-000000000014';
+      const asked = grantingQueue(), ended: boolean[] = [];
+      let opened = false;
+      const bridge = await bridgeWith(async () => {
+        if (opened) return { refused: 'This agent already has a step.' };
+        opened = true;
+        return { jobId: STEP, signal: new AbortController().signal, end: ok => ended.push(ok) };
+      });
+      const hook = bridge.agent(key).hookUrl;
+      const response = await fetch(hook.replace('/hook/', '/check/'), { method: 'POST', body: JSON.stringify({
+        command: [process.execPath, realpathSync(cli), '--', '/usr/bin/printf', 'nested'], cwd: '/tmp', env: { HH_BRIDGE: hook },
+      }) });
+      const frames = (await response.text()).trim().split('\n').map(line => JSON.parse(line));
+      expect(frames).toContainEqual({ type: 'stdout', data: Buffer.from('nested').toString('base64') });
+      expect(frames.at(-1)).toMatchObject({ type: 'exit', code: 0 });
+      expect(asked).toMatchObject([{ agentId: key, jobId: STEP }]);
+      expect(ended).toEqual([true]);
     });
 
     it("gives Hornhoof's words when the command may not run, and the old answer when Hornhoof cannot be asked", async () => {

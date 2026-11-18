@@ -18,6 +18,7 @@ import { machineLoad } from './load.js';
 import { namedWorkers, partShare, vitestWorkers } from './vitest-workers.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
+import { currentCheckLease } from './check-queue.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 export type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
@@ -118,7 +119,8 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
 const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
 function partBase(root: string, dir: string): Record<string, string> {
   const tools = Object.fromEntries(MACHINE_TOOLS.flatMap(key => (process.env[key] ? [[key, process.env[key]]] : [])));
-  return { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools };
+  const lease = currentCheckLease(), path = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
+  return { PATH: lease ? `${join(dir, 'tools', 'bin')}:${path}` : path, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools, ...(lease ? { HH_CHECK_SLOT: lease } : {}) };
 }
 
 /* Runs one program in a process group of its own, so a stop or the time limit ends everything it started. */

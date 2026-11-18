@@ -95,7 +95,7 @@ async function lapsed(rest: AsyncGenerator<Frame>): Promise<string> {
   } catch (error) { return error instanceof Error && error.message ? error.message : 'The machine check slot ended.'; }
 }
 
-/* Outside an agent turn there is no machine lease. Preserve the ordinary local command and shell signal status. */
+/* Keep a local command in the caller's process group and preserve its shell signal status. */
 async function localWaited(command: string[], env: NodeJS.ProcessEnv): Promise<number> {
   const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', detached: false, env });
   let stopped: NodeJS.Signals | null = null, killing: NodeJS.Timeout | undefined;
@@ -204,6 +204,8 @@ export async function checkCommand(args: string[], env: NodeJS.ProcessEnv): Prom
   const wait = args[0] === '--wait', rest = wait ? args.slice(1) : args;
   const command = rest[0] === '--' ? rest.slice(1) : rest;
   if (!command.length) throw new Error('Usage: hh-check [--wait] -- COMMAND [ARGUMENTS]');
+  /* Parts have no agent bridge. Their commands already run as the part user in the group the node holds and cleans up. */
+  if (!env.HH_BRIDGE && env.HH_CHECK_SLOT) return localWaited(command, env);
   if (wait) return waited(command, env);
   if (!env.HH_BRIDGE) throw new Error('hh-check works inside a Hornhoof agent turn.');
   const stop = new AbortController(), abort = () => stop.abort();

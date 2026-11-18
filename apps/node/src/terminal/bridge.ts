@@ -5,7 +5,7 @@ import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
-import { serveCheckCommand } from '../check-command-runner.js';
+import { checkCommandParent, serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
 import { ToolsMemory } from './tools-memory.js';
@@ -75,6 +75,7 @@ export class Bridge {
   private readonly checkStops = new Map<string, Set<AbortController>>();
   /* Check commands that run in a step of their own, with no turn: a turn's token does not stop them. */
   private readonly stepStops = new Map<string, Set<AbortController>>();
+  private readonly checkSteps = new Map<string, { jobId: string; signal: AbortSignal }>();
   private readonly failures: HookFailures;
   /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
   private readonly refusals: HookFailures;
@@ -408,13 +409,17 @@ export class Bridge {
 
   /* A check command runs in the agent's turn, or with none in a step Hornhoof opens for it as for a tool call. */
   private async checkCommand(key: string, body: Buffer, res: ServerResponse, callerPid?: number): Promise<void> {
+    const parent = checkCommandParent(body, key), parentStep = parent?.jobId ? this.checkSteps.get(parent.jobId) : undefined;
+    if (parentStep) return void (await this.runCheck(key, body, res, this.stepStops, parentStep, callerPid));
     if (this.tokens.has(key)) return void (await this.runCheck(key, body, res, this.checkStops, undefined, callerPid));
+    if (parent) return reply(res, 403, 'The parent check slot is no longer active.');
     const step = (await this.options.checkStep?.(key)) ?? null;
     if (!step) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
     if ('refused' in step) return reply(res, 409, step.refused);
     let ok = false;
+    this.checkSteps.set(step.jobId, step);
     try { ok = await this.runCheck(key, body, res, this.stepStops, step, callerPid); }
-    finally { step.end(ok); }
+    finally { this.checkSteps.delete(step.jobId); step.end(ok); }
   }
 
   /* It stops when its program goes, and as its turn's token changes or as Hornhoof stops its step. True when it ran to
