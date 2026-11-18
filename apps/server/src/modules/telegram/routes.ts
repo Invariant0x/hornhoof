@@ -7,7 +7,7 @@ import { employeeChangedBy, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentChanges, telegramBots, telegramReplies } from '../../db/schema.js';
+import { agentChanges, telegramBots } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
@@ -59,11 +59,10 @@ async function keepBot(ctx: Ctx, me: Person, agent: AgentRow, token: string, bot
   try {
     await ctx.db.transaction(async tx => {
       const [before] = await tx.select().from(telegramBots).where(eq(telegramBots.agentId, agent.id)).for('update');
-      if (!before) await tx.insert(telegramBots).values(values);
+      if (before?.botUserId === bot.id) await tx.update(telegramBots).set(values).where(eq(telegramBots.id, before.id));
       else {
-        const same = before.botUserId === bot.id;
-        await tx.update(telegramBots).set({ ...values, updateOffset: same ? before.updateOffset : 0 }).where(eq(telegramBots.id, before.id));
-        if (!same) await tx.delete(telegramReplies).where(eq(telegramReplies.botId, before.id));
+        if (before) await tx.delete(telegramBots).where(eq(telegramBots.id, before.id));
+        await tx.insert(telegramBots).values(values);
       }
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'telegram', before: before ? `@${before.username}` : null, after: `@${bot.username}` });
     });

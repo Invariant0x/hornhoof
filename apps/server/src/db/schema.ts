@@ -1002,8 +1002,19 @@ export const telegramBots = pgTable('telegram_bots', {
   createdAt: createdAt(),
 });
 
-/* A person's message that came through a bot, whose answer goes back to their chat: the turn it went into, the last event
-   of that turn already sent there, whether anything was, and the language the bot speaks to them in. */
+/* The language a person last wrote in to this bot, even if the bot could not pass their message on. */
+export const telegramChatLanguages = pgTable(
+  'telegram_chat_languages',
+  {
+    botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+  },
+  t => [primaryKey({ columns: [t.botId, t.chatId] })],
+);
+
+/* A person's message that came through a bot, whose answer goes back to their chat: the turn it went into, the events
+   already handled, and the language the bot speaks to them in. */
 export const telegramReplies = pgTable(
   'telegram_replies',
   {

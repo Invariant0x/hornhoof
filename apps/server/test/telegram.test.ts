@@ -3,7 +3,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, people, telegramBots, telegramReplies } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, telegramBots, telegramReplies } from '../src/db/schema.js';
 import { splitForTelegram } from '../src/modules/telegram/api.js';
 import { fakeTelegram, type FakeTelegram, type TelegramUser } from './fake-telegram.js';
 import { appOn, as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -233,6 +233,48 @@ describe('a message through the bot', () => {
     expect(tg.sent[1]!.text).toContain('8880009');
     expect(tg.sent[1]!.text).toMatch(/^[\x20-\x7e\n]+$/);
     expect(await quiet(builtin)).toBe(0);
+  });
+
+  it('uses the latest written language for bot words in that chat alone', async () => {
+    const c = await company();
+    const { app, ceo, tg } = c;
+    const { head } = await salesHead(c);
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    await connectBot(app, ceo, head.id, SECOND);
+    const guest = { id: 8880010, first_name: 'Lena', language_code: 'en' };
+    const voice = { voice: { file_id: 'v-1', duration: 33 } };
+    tg.write(TOKEN, guest, 'Здравствуйте.');
+    tg.send(TOKEN, guest, voice);
+    await until(() => tg.sent.length === 2);
+    expect.soft(tg.sent.map(s => s.text)).toEqual([
+      expect.stringContaining('Я вас пока не знаю.'),
+      expect.stringContaining('Я вас пока не знаю.'),
+    ]);
+    tg.send(SECOND, guest, voice);
+    await until(() => tg.sent.length === 3);
+    expect(tg.sent[2]!.text).toContain('I do not know you yet.');
+    const russianApp = { ...guest, language_code: 'ru' };
+    tg.write(TOKEN, russianApp, 'Hello again.');
+    tg.send(TOKEN, russianApp, voice);
+    await until(() => tg.sent.length === 5);
+    expect(tg.sent.slice(3).map(s => s.text)).toEqual([
+      expect.stringContaining('I do not know you yet.'),
+      expect.stringContaining('I do not know you yet.'),
+    ]);
+  });
+
+  it('finds the written language in older Telegram messages even after a voice note', async () => {
+    const { app, db, ceo, owner, tg, orchestrator } = await company();
+    await setTelegram(app, ceo, owner.id, String(IVAN.id));
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    const [bot] = await db.select().from(telegramBots);
+    await db.insert(agentEvents).values([
+      { companyId: owner.companyId, personId: owner.id, agentId: orchestrator.id, kind: 'message', data: { channel: 'telegram', text: 'Посмотри видео.', telegram: { bot: bot!.id, chat: IVAN.id, update: 2 } } },
+      { companyId: owner.companyId, personId: owner.id, agentId: orchestrator.id, kind: 'message', data: { channel: 'telegram', text: '[A voice message, 33 s, with no transcript: its recording is the file voice.ogg below.]', telegram: { bot: bot!.id, chat: IVAN.id, update: 3 } } },
+    ]);
+    tg.send(TOKEN, IVAN, { dice: { emoji: '🎲', value: 3 } });
+    await until(() => tg.sent.length === 1);
+    expect(tg.sent[0]!.text).toContain('Такое сообщение я прочитать не могу.');
   });
 
   it('says plainly when the person may not write to this agent in Hornhoof, and sends nothing to it', async () => {

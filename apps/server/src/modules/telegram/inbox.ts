@@ -9,7 +9,8 @@ import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { writeToAgent } from '../conversation/routes.js';
 import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
-import { agentName, langOf, WORDS, type BotLang } from './words.js';
+import { chatLanguage } from './language.js';
+import { agentName, WORDS, type BotLang } from './words.js';
 
 type Bot = Pick<typeof telegramBots.$inferSelect, 'id' | 'companyId' | 'agentId'>;
 /* Sends a few words of the bot's own to a chat. */
@@ -48,7 +49,8 @@ async function awaitAnswer(ctx: Pick<Ctx, 'db'>, bot: Bot, jobId: string, chatId
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'telegram'->>'update' = ${String(update)}`))
     .orderBy(desc(agentEvents.seq))
     .limit(1);
-  await ctx.db.insert(telegramReplies).values({ botId: bot.id, jobId, chatId, afterSeq: said?.seq ?? before, lang }).onConflictDoNothing();
+  await ctx.db.insert(telegramReplies).values({ botId: bot.id, jobId, chatId, afterSeq: said?.seq ?? before, lang })
+    .onConflictDoUpdate({ target: [telegramReplies.botId, telegramReplies.jobId, telegramReplies.chatId], set: { lang } });
 }
 
 /* What a person sends besides words, read for the agent: its notes in place of what cannot go as a file, and the files. */
@@ -139,7 +141,8 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const message = update?.message;
   if (!update || !message?.from || message.from.is_bot || message.chat.type !== 'private') return false;
   const chatId = message.chat.id;
-  const lang = langOf(message.from.language_code);
+  const messages = all.map(u => u.message!);
+  const lang = await chatLanguage(ctx.db, bot, chatId, messages, message.from.language_code);
   const words = WORDS[lang];
   const me = await senderOf(ctx, bot.companyId, message.from);
   if (!me) {
@@ -157,7 +160,6 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
     await say(chatId, words.notYours(name));
     return false;
   }
-  const messages = all.map(u => u.message!);
   const came: Came = { notes: [], files: [] };
   for (const m of messages) {
     const one = whatCame(m);

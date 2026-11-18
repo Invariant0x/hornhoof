@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentEvents, agents, assistants, attachments, jobs, people } from '../src/db/schema.js';
+import { agentEvents, agents, assistants, attachments, jobs, people, telegramReplies } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -114,6 +114,23 @@ describe('a file sent to a head through its Telegram bot', () => {
     expect(run.prompt).toContain('voice.ogg: hh-fetch message');
   });
 
+  it('keeps the language of the person\'s earlier text for a voice message without a transcript', async () => {
+    const { tg, db, builtin } = await company();
+    const user = { ...IVAN, language_code: 'en' };
+    tg.write(TOKEN, user, 'Посмотри видео.');
+    const first = await nextOf(builtin, 'job.run');
+    builtin.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(() => builtin.acks.includes(first.jobId));
+    tg.files.set('v-1', OGG);
+    tg.send(TOKEN, user, { voice: { file_id: 'v-1', file_size: OGG.length, duration: 33 } });
+    const voice = await nextOf(builtin, 'job.run');
+    expect(voice.prompt).toContain('A voice message, 33 s, with no transcript');
+    const forVoice = () => db.select().from(telegramReplies).where(eq(telegramReplies.jobId, voice.jobId));
+    await until(async () => (await forVoice()).length === 1);
+    const [reply] = await forVoice();
+    expect(reply!.lang).toBe('ru');
+  });
+
   it('reads a sticker as what it shows, and keeps a still one as a picture', async () => {
     const { tg, builtin } = await company();
     tg.files.set('s-1', WEBP);
@@ -125,7 +142,7 @@ describe('a file sent to a head through its Telegram bot', () => {
 
   it('tells the person when a file is over what Telegram gives a bot, and still passes the words on', async () => {
     const { tg, builtin, db } = await company();
-    tg.send(TOKEN, IVAN, { document: { file_id: 'big', file_name: 'video.mov', file_size: 50 * 1024 * 1024 }, caption: 'Смотри видео' });
+    tg.send(TOKEN, { ...IVAN, language_code: 'en' }, { document: { file_id: 'big', file_name: 'video.mov', file_size: 50 * 1024 * 1024 }, caption: 'Смотри видео' });
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('Смотри видео');
     expect(run.prompt).toContain('[video.mov (50 MB) did not come: Telegram gives a bot files of up to 20 MB.]');
