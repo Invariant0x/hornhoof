@@ -55,14 +55,22 @@ describe('Shell', () => {
     }
     await user.click(tab('Map'));
     expect(screen.getByRole('main')).not.toHaveClass('page');
-    /* A band in the page's own color stays at the top of what scrolls, as tall as the bar and the gap above it, and
-       takes no room from the page. */
-    const band = (property: string) => decl('.body.page::before', property);
-    expect(band('position')).toBe('sticky');
-    expect(band('top')).toBe('0');
-    expect(band('background')).toBe('var(--bg)');
-    expect(px(band('height'))).toBeGreaterThanOrEqual(px(decl('.topbar', 'top')) + px(decl('.tabs', 'height')));
-    expect(px(band('margin-bottom'))).toBe(-px(band('height')));
+    /* The header's room heads what scrolls on every tab, as tall as the bar and the gap above it, said once on the shell;
+       on a page it is a band in the page's own color that stays at the top, and on the map it lets touches through to
+       the canvas. The bars of the shell and the page start under it, so it takes its room from the page. */
+    const room = (property: string) => decl('.body::before', property);
+    expect(room('position')).toBe('sticky');
+    expect(room('top')).toBe('0');
+    expect(room('pointer-events')).toBe('none');
+    expect(room('block-size')).toBe('var(--header-room)');
+    expect(room('margin-bottom')).toBeUndefined();
+    expect(decl('.body.page::before', 'background')).toBe('var(--bg)');
+    /* What scrolled under the band is out of sight, so a click there reaches the band, not what is under it. */
+    expect(decl('.body.page::before', 'pointer-events')).toBe('auto');
+    expect(decl('.shell', '--header-room')).toBe('calc(2 * var(--bar-top) + var(--bar-size))');
+    expect(decl('.topbar', 'inset-block-start')).toBe('var(--bar-top)');
+    expect(decl('.tabs', 'height')).toBe('var(--bar-size)');
+    expect(px(decl('.shell', '--bar-top'))).toBeGreaterThan(0);
   });
 
   it('opens the machines of the company from their own tab', async () => {
@@ -110,43 +118,67 @@ describe('Shell', () => {
   });
 
   describe('at a machine of the company', () => {
-    const closed = accessView('dev-laptop', { machine: { id: 'm1' } });
-    const menu = async (here: object | null, extra: Parameters<typeof mockApi>[0] = {}) => {
-      const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/machines/here': [200, here ?? { machine: null, view: null }], ...extra });
-      const user = userEvent.setup();
+    const own = accessView('dev-laptop', { machine: { id: 'm1' } });
+    const show = (routes: Parameters<typeof mockApi>[0] = {}) => {
+      const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }], ...routes });
       render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
-      await user.click(screen.getByRole('button', { name: /^(Account|Аккаунт)$/ }));
-      await waitFor(() => expect(calls.some(call => call.path === '/api/machines/here')).toBe(true));
-      return { calls, user };
+      return { calls, user: userEvent.setup() };
+    };
+    const card = async (user: ReturnType<typeof userEvent.setup>, hostname: string) => {
+      await user.click(screen.getByRole('button', { name: /^(Machines|Машины)$/ }));
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^(Open the card of |Открыть карточку )${hostname}$`) }));
+      return within(screen.getByRole('article', { name: hostname }));
     };
 
-    it('offers its owner to give the orchestrator access to it, and closes the menu once it is open', async () => {
-      const { calls, user } = await menu({ machine: closed.machine, view: closed }, { 'POST /api/machines/m1/access/open': [200, { ...closed, until: '2099-01-01T00:00:00.000Z' }] });
-      await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (dev-laptop)' }));
-      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', duration: '1h' } }));
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument());
+    it('shows standing access and lets its owner close and reopen it from the machine card without a key', async () => {
+      let access = own;
+      const { calls, user } = show({
+        'GET /api/me/key': [200, { key: null }],
+        'GET /api/machines': () => [200, { machines: [{ ...MACHINES[0]!, access }] }],
+        'POST /api/machines/m1/access/close': () => [200, (access = { ...own, open: false, scope: null })],
+        'POST /api/machines/m1/access/open': () => [200, (access = own)],
+      });
+      const machine = await card(user, 'dev-laptop');
+      const controls = within(machine.getByRole('region', { name: 'Computer access' }));
+      expect(controls.getByText('For the orchestrator')).toBeInTheDocument();
+      expect(controls.getAllByRole('button').map(button => button.textContent)).toEqual(['Close access']);
+      await user.click(controls.getByRole('button', { name: 'Close access' }));
+      expect(await controls.findByText('Access closed')).toBeInTheDocument();
+      expect(controls.getAllByRole('button').map(button => button.textContent)).toEqual(['Reopen access']);
+      await user.click(controls.getByRole('button', { name: 'Reopen access' }));
+      expect(await controls.findByText('For the orchestrator')).toBeInTheDocument();
+      expect(calls.filter(call => call.method === 'POST')).toEqual([
+        { method: 'POST', path: '/api/machines/m1/access/close', body: undefined },
+        { method: 'POST', path: '/api/machines/m1/access/open', body: undefined },
+      ]);
     });
 
     it.each([
-      ['a machine that is not theirs to open', { ...closed, canOpen: false }],
-      ['a machine that is open already', { ...closed, until: '2099-01-01T00:00:00.000Z' }],
-      ['a machine that does not hold their key', { ...closed, key: 'not_held' }],
-      ['a machine Hornhoof cannot reach', { ...closed, reachable: false }],
-    ])('offers nothing at %s', async (_name, view) => {
-      await menu({ machine: view.machine, view });
-      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Give the orchestrator access/ })).not.toBeInTheDocument();
+      { open: true, scope: 'orchestrator' as const, status: 'Access open' },
+      { open: false, scope: null, status: 'Access closed' },
+    ])('shows $status on someone else\'s machine without a switch', async ({ status, ...state }) => {
+      const access = accessView('build-box', { ...state, machine: { id: 'm2', personId: 'p2' }, reachable: false, canOpen: false, canClose: false });
+      const { user } = show({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[1]!, access }] }] });
+      const machine = await card(user, 'build-box');
+      const controls = within(machine.getByRole('region', { name: 'Computer access' }));
+      expect(controls.getByText(status)).toBeInTheDocument();
+      expect(controls.queryAllByRole('button')).toEqual([]);
     });
 
-    it('offers nothing elsewhere, or on a server that knows no such thing', async () => {
-      await menu(null);
-      expect(screen.queryByRole('button', { name: /Give the orchestrator access/ })).not.toBeInTheDocument();
+    it('offers no access switch on a card without computer access', async () => {
+      const { user } = show();
+      const machine = await card(user, 'dev-laptop');
+      expect(machine.queryByRole('region', { name: 'Computer access' })).not.toBeInTheDocument();
     });
 
-    it('offers it in Russian', async () => {
+    it('offers to reopen its owner\'s offline machine in Russian', async () => {
       localStorage.setItem('hh-lang', 'ru');
-      await menu({ machine: closed.machine, view: closed });
-      expect(await screen.findByRole('button', { name: 'Дать оркестратору доступ к этой машине (dev-laptop)' })).toBeInTheDocument();
+      const access = { ...own, open: false, scope: null, reachable: false };
+      const { user } = show({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, online: false, access }] }] });
+      const machine = await card(user, 'dev-laptop');
+      const controls = within(machine.getByRole('region', { name: 'Доступ к машинам' }));
+      expect(controls.getByText('Машина не в сети.')).toBeInTheDocument();
+      expect(controls.getByRole('button', { name: 'Снова открыть доступ' })).toBeInTheDocument();
     });
   });
 
@@ -207,18 +239,15 @@ describe('Shell', () => {
   });
 });
 
-/* The account menu as Design's reference draws it (spec 1.1, section 3, and its picture): its heading, then rows in four
-   groups with a line between them, giving access, Settings, the pages of the whole company, About and Log out; a group
-   with nothing in it and its line not drawn. */
+/* The account menu's heading and groups of rows, with a line between groups that have entries. */
 describe('the account menu', () => {
-  const closed = accessView('dev-laptop', { machine: { id: 'm1' } });
   const OPEN = { id: 'i1', title: 'Install jq', text: 'jq', seen: 1, status: 'open', result: null, at: '2026-11-15T09:00:00.000Z', updatedAt: '2026-11-15T09:00:00.000Z', agent: { id: 'w1', name: 'Wendy' }, department: { id: 'd9', name: 'Operations' }, decidedBy: null, scope: 'company', code: null };
   const LISTED = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };
 
   /* What the menu holds from its top: its heading, a line, or a row by its words, its count apart. */
   const rows = (menu: HTMLElement) => [...menu.children].map(child => {
     if (child.matches('.am-head')) return 'head';
-    if (child.matches('hr.am-sep')) return '—';
+    if (child.matches('hr.am-sep')) return 'line';
     if (child.matches('button.mi')) return [...child.children].map(part => part.textContent).join(' + ');
     return `? ${child.tagName} ${child.className}`;
   });
@@ -231,26 +260,27 @@ describe('the account menu', () => {
     return { calls, user, menu: document.querySelector<HTMLElement>('.account-menu')! };
   }
 
-  it('puts giving access first, then Settings, then Improvements with its count, the inbox and Versions, then About and Log out', async () => {
-    const { menu } = await open(ME, {
-      'GET /api/machines/here': [200, { machine: closed.machine, view: closed }],
+  it('groups Settings, company pages and sign-out without fetching machine access', async () => {
+    const { calls, menu } = await open(ME, {
       'GET /api/feedback': [200, { inbox: true }],
       'GET /api/improvements': [200, { improvements: [OPEN, { ...OPEN, id: 'i2' }, { ...OPEN, id: 'i3', status: 'done' }] }],
     });
-    await waitFor(() => expect(rows(menu)).toEqual([
-      'head', '\u2014', 'Give the orchestrator access to this machine (dev-laptop)', '\u2014', 'Talk to the orchestrator', 'Settings',
-      '—', 'Improvements + 2', 'Feedback inbox', 'Versions',
-      '—', 'About', 'Log out',
-    ]));
-    expect(within(menu).getByRole('button', { name: 'Improvements, 2 to decide' })).toBeInTheDocument();
+    await within(menu).findByRole('button', { name: 'Improvements, 2 to decide' });
+    await within(menu).findByRole('button', { name: 'Feedback inbox' });
+    expect(rows(menu)).toEqual([
+      'head', 'line', 'Talk to the orchestrator', 'Settings',
+      'line', 'Improvements + 2', 'Feedback inbox', 'Versions',
+      'line', 'About', 'Log out',
+    ]);
+    expect(calls.some(call => call.path === '/api/machines/here')).toBe(false);
     expect(within(menu.querySelector('.am-head')!).getByText('ivan@acme.com').closest('bdi')).toHaveAttribute('dir', 'ltr');
+    expect(await within(menu).findByText('0.4.0 (abc1234)', { selector: 'bdi' })).toHaveAttribute('dir', 'ltr');
     expect(menu.querySelector('.am-head > .menu-version')).toHaveTextContent('Version 0.4.0 (abc1234)');
-    expect(within(menu).getByText('0.4.0 (abc1234)', { selector: 'bdi' })).toHaveAttribute('dir', 'ltr');
   });
 
   it('draws no empty group and no line of its own for a person who sees only some departments', async () => {
     const { menu } = await open(LISTED);
-    await waitFor(() => expect(rows(menu)).toEqual(['head', '\u2014', 'Talk to the orchestrator', 'Settings', '\u2014', 'About', 'Log out']));
+    expect(rows(menu)).toEqual(['head', 'line', 'Talk to the orchestrator', 'Settings', 'line', 'About', 'Log out']);
   });
 
   it('draws each row as a line of the panel 44 px high, its words at the start, with no frame', () => {

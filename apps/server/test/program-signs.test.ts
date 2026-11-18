@@ -1,13 +1,13 @@
 import type { ProgramState } from '@hornhoof/protocol';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
-import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
+import { agentProgramState, checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 
@@ -16,6 +16,10 @@ const MIN = 60_000;
 async function company() {
   const c = await failureCompany();
   return { ...c, operator: await c.hire('Olga', 'worker', 'OPS-PROGRAM', c.ops.id) };
+}
+function alarmsAbout(c: Awaited<ReturnType<typeof company>>, id: string) {
+  return c.db.select({ agentId: agentEvents.agentId }).from(agentEvents)
+    .where(and(eq(agentEvents.kind, 'message'), sql`split_part(${agentEvents.data}->>'silentJob', ':', 1) = ${id}`));
 }
 /* A working task with its required route, and a turn that carries the wake state a real assignment leaves. */
 async function taskTurn(c: Awaited<ReturnType<typeof company>>) {
@@ -132,29 +136,32 @@ describe('silence measured by signs of life', () => {
       const now = signAt + minutes * MIN;
       await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
       await checkSilentTurns(c.ctx, new Date(now));
-      return (await c.turnsOf(c.operator.id)).length;
+      return (await alarmsAbout(c, id)).length;
     };
     expect([await quietFor(10), await quietFor(19), await quietFor(20), await quietFor(39), await quietFor(40)]).toEqual([1, 1, 2, 2, 3]);
   });
 
-  it('tells the head of Operations while the program operator is at work, and an operator at work when there is no head', async () => {
+  it.each([
+    ['Operations head', [], 'operations'],
+    ['orchestrator', ['operations'], 'orchestrator'],
+    ['department head', ['operations', 'orchestrator'], 'department'],
+  ] as const)('tells the %s when the operator is busy and earlier recipients are silent', async (_, unavailable, expected) => {
     const c = await company();
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
-    await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.operator.id, prompt: 'Another program', createdBy: null });
-    const signAt = Date.now();
-    const quietFor = async (minutes: number) => {
-      const now = signAt + minutes * MIN;
-      await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
-      await checkSilentTurns(c.ctx, new Date(now));
-    };
-    await quietFor(10);
-    expect(await c.turnsOf(c.operator.id)).toHaveLength(2);
-    const [opsHead] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Hugo', kind: 'head', roleKey: 'OPS-HEAD', departmentId: c.ops.id, subscriptionId: c.sub.id, model: '' }).returning();
-    await quietFor(20);
-    /* The operator's own quiet turn is told to the head too: only the call about the developer counts here. */
-    expect((await c.turnsOf(opsHead!.id)).filter(turn => turn.prompt.includes(c.agent.id))).toHaveLength(1);
-    expect(await c.turnsOf(c.operator.id)).toHaveLength(2);
-    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
+    const operations = await c.hire('Hugo', 'head', 'OPS-HEAD', c.ops.id);
+    const [orchestrator] = await c.db.select().from(agents).where(and(eq(agents.companyId, c.companyId), eq(agents.kind, 'orchestrator')));
+    const recipients = { operations, orchestrator: orchestrator!, department: c.head };
+    const startedAt = new Date('2026-11-03T10:00:00Z');
+    const now = new Date(+startedAt + SILENT_TURN_MS);
+    const running = { companyId: c.companyId, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work', status: 'running', timeoutMs: SILENT_TURN_MS } as const;
+    const [stuck] = await c.db.insert(jobs).values({ ...running, agentId: c.agent.id, startedAt }).returning();
+    await c.db.insert(jobs).values([
+      { ...running, agentId: c.operator.id, startedAt: now },
+      ...unavailable.map(key => ({ ...running, agentId: recipients[key].id, startedAt })),
+    ]);
+
+    await checkSilentTurns(c.ctx, now);
+
+    expect(await alarmsAbout(c, stuck!.id)).toEqual([{ agentId: recipients[expected].id }]);
   });
 
   it('never calls a live node asking a person silent, even after two hours without a sign', async () => {
@@ -192,7 +199,7 @@ describe('silence measured by signs of life', () => {
       const now = signAt + minutes * MIN;
       await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt, screenAt: signAt, signAt }, new Date(now));
       await checkSilentTurns(c.ctx, new Date(now));
-      return (await c.turnsOf(c.operator.id)).length;
+      return (await alarmsAbout(c, id)).length;
     };
     expect([await stillFor(3), await stillFor(5), await stillFor(6), await stillFor(11), await stillFor(12)]).toEqual([1, 1, 2, 2, 3]);
   });

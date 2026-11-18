@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { TaskLine } from '../src/types';
 import { TrackerList } from '../src/ui/TrackerViews';
+import { decl } from './css';
 import { taskRoute } from './task-route';
 
 const department = { id: 'marketing', name: 'Marketing' };
@@ -36,7 +37,9 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   expect(mark).toHaveAttribute('data-program', 'claude');
   expect(mark).toHaveAttribute('data-worker-kind', 'generalist');
   expect(mark).toHaveAccessibleDescription('Generalist: does a task whole');
-  expect(within(row).getByRole('img', { name: 'Ghost: a one-shot call, appears for one task and is gone' })).toHaveAttribute('data-worker-kind', 'ghost');
+  expect(mark.querySelector('svg rect')).toBeInTheDocument();
+  const call = within(row).getByRole('img', { name: 'One-shot call: starts from zero each time, no memory' });
+  expect(call.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
 });
 
 it('reads each task across one line, opens its goal and shows a late date', async () => {
@@ -118,11 +121,77 @@ it('expands under the parent title and keeps child facts in their columns', asyn
   const inline = within(parent).getByRole('listitem', { name: '#268 Pick the recipients' });
   expect(inline).toHaveTextContent('Low');
   expect(within(inline).getByRole('img', { name: 'Max' })).toBeInTheDocument();
-  expect(inline.querySelector('.tr-task-name')).toHaveStyle('--tr-depth: 1');
+  expect(inline.querySelector('.tr-row-line')).toHaveStyle('--tr-depth: 1');
   rerender(view(false));
   expect(within(parent).queryByRole('listitem', { name: '#268 Pick the recipients' })).toBeNull();
   rerender(view(true));
   expect(within(parent).getByRole('listitem', { name: '#268 Pick the recipients' })).toBeInTheDocument();
+});
+
+it('puts the caret, status and title in one line and reserves the caret position on leaf rows', () => {
+  const child = task({ id: 'child', parentId: 'plan', number: 268 });
+  const leaf = task({ id: 'leaf', number: 269, title: 'Write the copy' });
+  list([task(), child, leaf]);
+  const parent = within(screen.getByRole('listitem', { name: '#267 Plan the mailing' }));
+  const title = parent.getByRole('button', { name: 'Plan the mailing' });
+  const line = title.parentElement!;
+  expect.soft([...line.children]).toEqual([
+    parent.getByRole('button', { name: 'Subtasks: 0 of 1 done' }), parent.getByRole('img', { name: 'In work' }), title,
+  ]);
+  const single = within(screen.getByRole('listitem', { name: '#269 Write the copy' }));
+  const singleTitle = single.getByRole('button', { name: leaf.title });
+  const [space, ...rest] = singleTitle.parentElement!.children;
+  expect.soft(space).toHaveAttribute('aria-hidden', 'true');
+  expect.soft(space).toBeEmptyDOMElement();
+  expect.soft(rest).toEqual([single.getByRole('img', { name: 'In work' }), singleTitle]);
+  expect.soft(single.queryByRole('button', { name: /Subtasks/ })).toBeNull();
+});
+
+it('puts the count, number and wait note together below the title', () => {
+  const parent = task({ time: { inStatusSince: since, workSeconds: 0, waitsOn: [
+    { kind: 'review', who: { kind: 'agent', id: executor.id, name: executor.name }, reason: 'Check the mailing', since },
+  ] } });
+  list([parent, task({ id: 'child', parentId: parent.id, number: 268 })]);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const title = within(row).getByRole('button', { name: parent.title });
+  const count = within(row).getByText('1', { selector: '.tr-branch-count' });
+  const number = within(row).getByText('#267');
+  const note = row.querySelector('.tr-wait');
+  expect.soft([...count.parentElement!.children]).toEqual([count, number, note]);
+  expect.soft(title.closest('.tr-name')).not.toContainElement(number);
+  expect.soft(title.closest('.tr-name')!.compareDocumentPosition(count) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('shares compact desktop columns with the heading and places the first line above the stacked facts', () => {
+  const desktop = 'tr-list (width > 640px)';
+  const phone = 'tr-list (max-width: 640px)';
+  expect.soft(decl('.tr-list-grid', 'grid-template-columns', desktop) ?? '').toMatch(/^minmax\(0, 1fr\).*fit-content/);
+  expect.soft(decl('.tr-cells', 'grid-template-columns', desktop)).toBe('subgrid');
+  expect.soft(decl('.tr-cells', 'align-items')).toBe('start');
+  expect.soft(decl('.tr-name', 'grid-template-columns')).toBe('subgrid');
+  expect.soft(decl('.tr-head-name > span', 'grid-column')).toBe('3');
+  expect.soft(decl('.tr-status-dot', 'margin-block-start') ?? '').toContain('1lh');
+  expect.soft(decl('.tr-meta', 'font-size')).toBe('12px');
+  expect.soft(decl('.tr-cell', 'grid-column', phone)).toBe('3');
+  expect.soft(decl('.tr-title', 'overflow-wrap')).toBe('anywhere');
+});
+
+it.each([null, 'plan'])('sizes the people columns to their badges with selection %s', selected => {
+  const example = task();
+  const rows = { selected, onOpenTask: vi.fn() };
+  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const desktop = 'tr-list (width > 640px)';
+  const people = '.tr-cell.tr-cell-person';
+  for (const name of [executor.name, responsible.name]) {
+    expect.soft(within(row).getByRole('img', { name }).closest(people)).toBeInTheDocument();
+  }
+  expect.soft(decl('.tr-list-grid', 'grid-template-columns', desktop)).toBe(
+    'minmax(0, 1fr) repeat(2, fit-content(var(--tracker-target-fine))) fit-content(12%) fit-content(20%) fit-content(12%)',
+  );
+  expect.soft(decl(people, 'min-inline-size', desktop)).toBe('min-content');
+  expect.soft(decl('.tr-cell-person .tr-mark', 'white-space', desktop)).toBe('nowrap');
+  expect(row.firstElementChild?.classList.contains('on')).toBe(Boolean(selected));
 });
 
 it('keeps complete names and labels with long task text in the stacked row', () => {
@@ -132,7 +201,9 @@ it('keeps complete names and labels with long task text in the stacked row', () 
   expect(within(row).getByRole('button', { name: longTitle })).toBeInTheDocument();
   expect(within(row).getByText('Luisa Rivera')).toHaveClass('tr-id-name');
   expect(within(row).getByText('Max')).toHaveClass('tr-id-name');
-  expect([...row.querySelectorAll('.tr-k')].map(label => label.textContent)).toEqual(['Executor', 'Responsible', 'Priority', 'Goal', 'Due']);
+  const facts = [...row.querySelectorAll('.tr-k')].map(label => label.textContent);
+  expect(facts).toEqual(['Executor', 'Responsible', 'Priority', 'Goal', 'Due']);
+  expect([...document.querySelectorAll('.tr-head > span')].map(label => label.textContent)).toEqual(['Name', ...facts]);
   expect(within(row).getByRole('link', { name: goal.title })).toBeInTheDocument();
 });
 

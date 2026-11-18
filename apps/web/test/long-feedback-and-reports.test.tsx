@@ -8,6 +8,7 @@ import { Requests } from '../src/ui/Requests';
 import { formatFileSize, fullTextOf } from '../src/ui/TaskAttachments';
 import { TaskPanel } from '../src/ui/TaskPanel';
 import { DEV_ORG, mockApi, REQUESTS, TASK_DETAIL } from './api-mock';
+import { openTaskAction } from './open-task';
 import { decl } from './css';
 import { renderIn, requestProps } from './request-feedback-fixture';
 
@@ -223,8 +224,8 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
   });
 
   it.each([
-    ['en', { readFull: 'Read in full', showLess: 'Show less', files: 'Files', questions: 'Questions', log: 'Log', evidence: 'Evidence', verdictLink: 'Open file (verdict-comment.txt, 14 KB)', evLink: 'Open file (submit-evidence.txt, 13 KB)', smallSize: '512 B', mbSize: '2.5 MB' }],
-    ['ru', { readFull: 'Показать полностью', showLess: 'Свернуть', files: 'Файлы', questions: 'Вопросы', log: 'Журнал', evidence: 'Доказательства', verdictLink: 'Открыть файл (verdict-comment.txt, 14 КБ)', evLink: 'Открыть файл (submit-evidence.txt, 13 КБ)', smallSize: '512 Б', mbSize: '2.5 МБ' }],
+    ['en', { readFull: 'Read in full', showLess: 'Show less', files: 'Files', questions: 'Questions', evidence: 'Evidence', verdictLink: 'Open file (verdict-comment.txt, 14 KB)', evLink: 'Open file (submit-evidence.txt, 13 KB)', smallSize: '512 B', mbSize: '2.5 MB' }],
+    ['ru', { readFull: 'Показать полностью', showLess: 'Свернуть', files: 'Файлы', questions: 'Вопросы', evidence: 'Доказательства', verdictLink: 'Открыть файл (verdict-comment.txt, 14 КБ)', evLink: 'Открыть файл (submit-evidence.txt, 13 КБ)', smallSize: '512 Б', mbSize: '2.5 МБ' }],
   ] as const)(
     'reads full 12,000-char verdict text, submit evidence, task files, and inline choice answer in TaskPanel (%s) without technical noise',
     async (lang, words) => {
@@ -306,12 +307,15 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
 
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
 
+      const t = lang === 'ru' ? ru : en;
+      await openTaskAction(user, panel, t.tasks.details);
       /* 1. Inline 12,000+ char request answer renders completely without truncation. */
       const questionsSection = within(panel).getByRole('heading', { name: words.questions }).closest('section')!;
       expect(questionsSection.textContent).toContain('[ANSWER-INLINE:HEAD]');
       expect(questionsSection.textContent).toContain('[ANSWER-INLINE:TAIL]');
 
       /* 2. Task files section shows plain file names, links, and formatted sizes. */
+      await openTaskAction(user, panel, t.tracker.card.materials);
       const filesRegion = within(panel).getByRole('region', { name: words.files });
       const noteLink = within(filesRegion).getByRole('link', { name: 'summary-note.txt' });
       expect(noteLink).toHaveAttribute('href', '/api/attachments/att%2Fnote%201');
@@ -319,13 +323,14 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
       expect(filesRegion).toHaveTextContent(words.smallSize);
       expect(filesRegion).toHaveTextContent(words.mbSize);
 
+      await openTaskAction(user, panel, t.tasks.fullLog);
       /* 3. Before expanding: preview and plain links show, with zero sha256 or hh-fetch noise. */
       expect(panel.textContent).toContain('[VERDICT-PREVIEW] Beginning of reviewer findings...');
       expect(panel.textContent).not.toContain(verdictSha);
       expect(panel.textContent).not.toContain(evidenceSha);
       expect(panel.textContent).not.toContain('hh-fetch');
 
-      const logList = within(panel).getByRole('list', { name: words.log });
+      const logList = within(panel).getByRole('list', { name: t.tasks.fullLog });
       const [subItem, verdictItem] = within(logList).getAllByRole('listitem');
 
       const verdictFileLink = within(verdictItem!).getByRole('link', { name: words.verdictLink });
@@ -415,7 +420,8 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     );
 
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    const logItem = within(within(panel).getByRole('list', { name: 'Log' })).getByRole('listitem');
+    await openTaskAction(user, panel, en.tasks.fullLog);
+    const logItem = within(within(panel).getByRole('list', { name: en.tasks.fullLog })).getByRole('listitem');
     const readBtn = within(logItem).getByRole('button', { name: 'Read in full' });
 
     /* Rapid double-click triggers only a single fetch and disables button while loading. */
@@ -477,6 +483,7 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     /* TASK_DETAIL has no files, so Files section stays hidden. */
     expect(within(panel).queryByRole('region', { name: 'Файлы' })).not.toBeInTheDocument();
 
+    await openTaskAction(user, panel, ru.tasks.comment);
     const box = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.click(box);
     await user.paste(comment12k);
@@ -496,7 +503,9 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     expect(calls.filter(c => c.path === '/api/tasks/t12/comments')).toHaveLength(2);
 
     resolveSecond({ kind: 'json', status: 201, data: { task: TASK_DETAIL } });
-    await waitFor(() => expect(box.value).toBe(''));
+    await waitFor(() => expect(box).not.toBeInTheDocument());
+    await openTaskAction(user, panel, ru.tasks.comment);
+    expect(within(panel).getByRole('textbox', { name: ru.tasks.comment })).toHaveValue('');
     expect(calls.filter(c => c.path === '/api/tasks/t12/comments')[1]?.body).toEqual({ text: comment12k });
   });
 
@@ -610,15 +619,17 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     );
 
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    expect(panel.textContent).toContain('Начало полного вердикта по задаче…');
-    expect(panel.textContent).not.toContain('[Full text](/api/attachments/att-hash)');
-    expect(panel.textContent).not.toContain(sha);
-
+    await openTaskAction(user, panel, ru.tracker.card.materials);
     const filesSection = within(panel).getByRole('region', { name: 'Файлы' });
     expect(within(filesSection).getByRole('link', { name: 'verdict-text.txt' })).toHaveAttribute('href', '/api/attachments/att-hash');
     expect(within(filesSection).getByRole('link', { name: 'audit-notes.txt' })).toHaveAttribute('href', '/api/attachments/att-notes');
 
-    const logItem = within(within(panel).getByRole('list', { name: 'Журнал' })).getByRole('listitem');
+    await openTaskAction(user, panel, ru.tasks.fullLog);
+    expect(panel.textContent).toContain('Начало полного вердикта по задаче…');
+    expect(panel.textContent).not.toContain('[Full text](/api/attachments/att-hash)');
+    expect(panel.textContent).not.toContain(sha);
+
+    const logItem = within(within(panel).getByRole('list', { name: ru.tasks.fullLog })).getByRole('listitem');
     expect(within(logItem).getByRole('link', { name: 'Открыть файл (verdict-text.txt, 12 КБ)' })).toHaveAttribute('href', '/api/attachments/att-hash');
 
     await user.click(within(logItem).getByRole('button', { name: 'Показать полностью' }));
@@ -626,6 +637,7 @@ describe('long 12,000-character feedback, answers, and full report reading', () 
     expect(fileAlert).toHaveTextContent('Файл недоступен.');
     expect(fileAlert.textContent).not.toMatch(/картин/i);
 
+    await openTaskAction(user, panel, ru.tasks.comment);
     const commentBox = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.type(commentBox, 'Очень большой текст');
     await user.click(within(panel).getByRole('button', { name: 'Добавить комментарий' }));

@@ -64,7 +64,7 @@ describe('Setup', () => {
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
     /* A template brings its people, who wait only for a subscription; the card counts the turnkey teams among them. */
     expect(screen.getByText(/departments and their employees right away/)).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('13 employees'));
+    expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('21 employees'));
     /* The eight ready-made companies, named by the template, not by the scheme picture. */
     expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
     /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */

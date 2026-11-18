@@ -4,7 +4,7 @@ import { ru } from '../src/i18n/ru';
 import { openCompany } from './agent-windows-api';
 import { SETTINGS } from './computer-strip-api';
 import { serveRoutes } from './routes-api';
-import { TASKS } from './api';
+import { openTaskAction, TASKS } from './api';
 
 /* History keeps agent windows and task panels with their drafts, in each language, theme and width. */
 test.use({ reducedMotion: 'reduce' });
@@ -49,6 +49,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/tasks\/t3$/);
     await expect(task).toBeVisible();
     await expect(improvement).toBeVisible();
+    await openTaskAction(task, t, t.tasks.comment);
     const comment = task.getByRole('textbox', { name: t.tasks.comment, exact: true });
     await comment.fill('Keep this task draft');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
@@ -78,6 +79,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/tasks\/t1$/);
     await expect(departmentTask).toBeVisible();
     await expect(department).toBeVisible();
+    await openTaskAction(departmentTask, t, t.tasks.comment);
     const departmentComment = departmentTask.getByRole('textbox', { name: t.tasks.comment, exact: true });
     await departmentComment.fill('Keep this department task draft');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();

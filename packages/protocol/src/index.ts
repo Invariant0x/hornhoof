@@ -371,6 +371,13 @@ export const MCP_CONNECTING: readonly string[] = ['server/discover', 'initialize
 /* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
    the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
 export const HELLO_IDS_MAX = 20_000;
+/* This belongs to the node's check queue, outside public machine load. A sequence starts over on each socket. */
+const CheckLeaseSnapshot = z.object({
+  sequence: z.number().int().positive(),
+  ids: z.array(z.uuid()).max(HELLO_IDS_MAX),
+});
+export type CheckLeaseSnapshot = z.infer<typeof CheckLeaseSnapshot>;
+const CheckLeases = CheckLeaseSnapshot.optional().catch(undefined);
 /* A server that sends no ack drops a hello that lists more than this. */
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
@@ -407,6 +414,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     browserError: BrowserError.nullable().optional(),
     workError: WorkError,
     load: Load.optional(),
+    checkLeases: CheckLeases,
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
@@ -424,7 +432,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
-  z.object({ type: z.literal('load'), ...Load.shape, live: Live }),
+  z.object({ type: z.literal('load'), ...Load.shape, checkLeases: CheckLeases, live: Live }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string(), n: MessageNumber }),
   z.object({ type: z.literal('tests.silent'), partId: Id, n: MessageNumber }),

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 're
 import { api } from '../api';
 import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import type { SettingsGroup } from '../routes';
+import { useLive } from '../tasks';
 import type { Me, PersonView, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { takeEscape } from '../ui/escape';
@@ -9,6 +10,7 @@ import { Field } from '../ui/Field';
 import { INTEGRATIONS, Integrations } from '../ui/Integrations';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { LoadFailure } from '../ui/LoadFailure';
 import { useScrollbarRoom } from '../ui/scrollbar-room';
 import { Themes } from '../ui/Themes';
 import { Vault, VAULT_PATH } from '../ui/Vault';
@@ -136,9 +138,10 @@ function CompanyLink() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
 
+  const { data, failure: loadFailure } = useLive(loaded ? null : '/api/link', (answer: Loaded) => answer, () => false);
   useEffect(() => {
-    api.get<Loaded>('/api/link').then(setLoaded).catch(setFailure);
-  }, []);
+    if (data) setLoaded(data);
+  }, [data]);
 
   async function run(change: () => Promise<Link | null>) {
     setBusy(true);
@@ -160,7 +163,7 @@ function CompanyLink() {
   const remove = () => run(async () => (await api.del('/api/link'), null));
   const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
   const link = loaded?.link ?? null;
-  if (unavailableFailure(failure)) return null;
+  if (unavailableFailure(loadFailure) || unavailableFailure(failure)) return null;
 
   return (
     <>
@@ -219,6 +222,7 @@ function CompanyLink() {
           )}
         </section>
       )}
+      <LoadFailure failure={loadFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </>
   );

@@ -1,7 +1,9 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import type { ExternalWait, TaskDetail } from '../src/types';
-import { openTaskCard, serveApi, streamEndedByPage, TASKS } from './api';
+import { openTaskAction, openTaskCard, serveApi, streamEndedByPage, TASKS } from './api';
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`named task wait ${language} ${theme} ${width}`, async ({ page }, info) => {
@@ -31,12 +33,14 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
     await openTaskCard(page, 1);
     const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-    const text = panel.getByText('Acceptance on node-a');
+    const t = language === 'en' ? en : ru;
+    const text = panel.getByRole('list', { name: t.tasks.log }).getByRole('listitem').filter({ hasText: 'Acceptance on node-a' });
     await expect(text).toContainText(employee);
-    await expect(panel.getByText(language === 'en' ? 'set by Bruno, until 16:30' : 'ожидание поставил Bruno, до 16:30', { exact: true })).toBeVisible();
+    await expect(text).toContainText(language === 'en' ? 'set by Bruno, until 16:30' : 'ожидание поставил Bruno, до 16:30');
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`task-wait-${language}-${theme}-${width}.png`), fullPage: true });
+    await openTaskAction(panel, t, t.tasks.comment);
     await panel.getByLabel(language === 'en' ? 'Comment' : 'Комментарий', { exact: true }).fill('Acceptance is available.');
     await panel.getByRole('button', { name: language === 'en' ? 'Add comment' : 'Добавить комментарий', exact: true }).click();
     await expect(text).toHaveCount(0);

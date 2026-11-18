@@ -18,7 +18,7 @@ pipelines:
       - { name: "Draft several versions", ownerRole: "MKT-WRITE", echelon: "development", oneShot: {"fanOut": 3, "judge": "Choose a draft in the author’s voice that serves the series and uses supported facts."} }
       - { name: "Review voice and facts", ownerRole: "MKT-EDIT", echelon: "review", brief: "Read the draft in the author’s voice and check every factual claim against its source." }
       - { name: "Publish from the phone", ownerRole: "MKT-SOCIAL", brief: "Use the channel’s own app on a company phone. Sign in from the vault. Read before acting and space actions out at a human pace." }
-      - { name: "Measure the series", ownerRole: "MKT-PM" }
+      - { name: "Measure the series", ownerRole: "MKT-PM", handoffTo: [sales] }
   - key: marketing-news-videos
     name: "Short news videos"
     why: "For making short videos from verified news or product updates."

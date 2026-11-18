@@ -345,13 +345,19 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
   if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
 }
 
-/* Whoever hears of a quiet program must see its screen: a free program operator, or else the head of Operations, or else
-   an operator at work. Never the employee whose program it is. */
+/* Let free Operations staff hear first, then the orchestrator, then the employee's department head. */
 export async function screenReader(ctx: Ctx, companyId: string, of: string, unavailable: ReadonlySet<string>): Promise<Agent | null> {
-  const staff: Agent[] = [];
-  for (const a of await operationsStaff(ctx, companyId)) if (a.id !== of && await liveSubscription(ctx, a.id)) staff.push(a);
-  const operators = staff.filter(a => a.kind === 'worker');
-  return operators.find(a => !unavailable.has(a.id)) ?? staff.find(a => a.kind === 'head') ?? operators[0] ?? null;
+  const canHear = async (agent: Agent) => agent.companyId === companyId && agent.id !== of && !agent.switchedOffAt
+    && !unavailable.has(agent.id) && Boolean(await liveSubscription(ctx, agent.id));
+  for (const agent of await operationsStaff(ctx, companyId)) if (await canHear(agent)) return agent;
+
+  const [orchestrator] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  if (orchestrator && await canHear(orchestrator)) return orchestrator;
+  if (!of) return null;
+
+  const [employee] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.id, of)));
+  const head = employee && await headOf(ctx, employee);
+  return head && await canHear(head) ? head : null;
 }
 
 /* One call when the quiet begins and one more each time it doubles, so a program nobody brought back is looked at again.

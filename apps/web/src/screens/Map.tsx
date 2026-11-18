@@ -2,7 +2,6 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
-import { ghostSlots } from '../ghost-slots';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
@@ -16,6 +15,7 @@ import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
 import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
+import { useLoadFailure } from '../ui/LoadFailure';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -24,7 +24,6 @@ import { FrameBreathe, MapPulse, MapWayOverlay, pauseMapAnimations } from '../ui
 import { motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
-import { employeeKind, WorkerLegend, WorkerMark } from '../ui/WorkerMark';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
 
@@ -231,7 +230,7 @@ function deptDetail(t: Messages, d: Department): string {
   return d.teams.length ? t.map.teams(d.teams.length) : '';
 }
 
-/* One mark per employee on a department's card, colored by what it does. */
+/* One square per employee on a department's card, colored by what it does. */
 const CELL: Record<EmployeeStatus, string> = { working: 'w', queued: 'q', handed: 'r', waiting: 'h', idle: '', off: 'o' };
 
 /* onChange: someone's status changed since the last look. */
@@ -255,36 +254,10 @@ function Cells({ employees, onChange }: { employees: Employee[]; onChange?(): vo
   }, [employees]);
   if (!employees.length) return null;
   return (
-    <span className="cells" role="group" aria-label={t.dept.statusSummary(employees.reduce<Partial<Record<EmployeeStatus, number>>>((n, e) => ({ ...n, [e.status]: (n[e.status] ?? 0) + 1 }), {}))}>
+    <span className="cells" role="img" aria-label={t.dept.statusSummary(employees.reduce<Partial<Record<EmployeeStatus, number>>>((n, e) => ({ ...n, [e.status]: (n[e.status] ?? 0) + 1 }), {}))}>
       {employees.map((e, k) => (
-        <WorkerMark key={e.id} kind={employeeKind(e.turnkey)} detail={`${e.name}. ${t.dept.status[e.status]}`}
-          className={`cell ${CELL[e.status]}${pinged.has(e.id) ? ' ping' : ''}`.trim()} style={{ animationDelay: `${-((k * 37) % 220) / 100}s` }} />
+        <i key={e.id} className={`cell ${CELL[e.status]}${pinged.has(e.id) ? ' ping' : ''}`.trim()} style={{ animationDelay: `${-((k * 37) % 220) / 100}s` }} />
       ))}
-    </span>
-  );
-}
-
-/* The route's ghost places stay visible between tasks. A live call gives its place a running or waiting state. */
-function CallMarks({ d }: { d: Department }) {
-  const t = useT();
-  const slots = ghostSlots(d);
-  if (!slots.length) return null;
-  const calls = d.calls ?? [];
-  const running = calls.filter(c => c.startedAt).length;
-  const by = (id: string) => d.employees.find(e => e.id === id)?.name ?? '';
-  return (
-    <span className="cells calls" role="group" aria-label={calls.length ? t.map.calls(running, calls.length - running) : t.workers.ghost}>
-      {slots.map(slot => {
-        const { key, call } = slot;
-        if (!call) {
-          const stage = t.tasks.echelons.stages[slot.stage];
-          const name = slot.judge ? t.workers.judge(stage) : t.workers.slot(stage, slot.number);
-          return <WorkerMark key={key} kind="ghost" detail={`${name}. ${t.workers.idle}`} className="cell" />;
-        }
-        const name = call.judge ? t.map.judgeCall(call.task, by(call.by)) : t.map.call(call.number, call.task, by(call.by));
-        const state = call.startedAt ? t.workers.running : t.workers.waiting;
-        return <WorkerMark key={key} kind="ghost" detail={`${name}. ${state}`} className={`cell ${call.startedAt ? 'w' : 'q'}`} />;
-      })}
     </span>
   );
 }
@@ -576,7 +549,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const still = useReducedMotion();
   const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
-  const { org, failure } = useOrg();
+  const { org, failure: loadFailure } = useOrg();
+  /* While the update panel says the server takes no changes, the map keeps what it last showed. */
+  const failure = useLoadFailure(loadFailure);
   const [shots, setShots] = useState<Shot[]>([]);
   const key = viewKey(me);
   const [kept] = useState(() => keptView(key));
@@ -683,7 +658,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     if (!el || !el.clientWidth || !org || !shown || inside) return;
     const { x0, y0, x1, y1 } = arrangedBounds(shown, org);
     /* The header floats over the top of the map and the zoom over the bottom. */
-    const padX = 32, padTop = 76, padBottom = el.clientWidth <= 720 ? 124 : 72;
+    const padX = 32, padTop = 76, padBottom = 72;
     const { left, width } = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
     const room = Math.max(1, el.clientHeight - padTop - padBottom);
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
@@ -746,7 +721,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
+  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   if (!org || !arr) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
@@ -837,8 +812,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     </>
   );
 
-  const canvas = (
-    <div className="map" ref={box} inert={inside} {...handlers}>
+  return (
+    <div className="map" ref={box} inert={inside} aria-hidden={inside || undefined} {...handlers}>
       <div
         className="world"
         style={{
@@ -924,7 +899,6 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
                 {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
               </span>
               <Cells employees={d.employees} onChange={() => flash(d.id)} />
-              <CallMarks d={d} />
               {d.current ? (
                 <span className="now task">
                   <i />
@@ -1019,13 +993,6 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           )}
         </div>
       )}
-    </div>
-  );
-
-  return (
-    <div className="map-workspace" inert={inside} aria-hidden={inside || undefined}>
-      {canvas}
-      <WorkerLegend />
     </div>
   );
 }

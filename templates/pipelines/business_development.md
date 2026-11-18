@@ -9,7 +9,7 @@ pipelines:
       - { name: "Set the question", ownerRole: "BIZ-HEAD" }
       - { name: "Find options", ownerRole: "BIZ-ANALYST", echelon: "development" }
       - { name: "Check the evidence", ownerRole: "BIZ-REV", echelon: "review" }
-      - { name: "Recommend a next step", ownerRole: "BIZ-PM" }
+      - { name: "Recommend a next step", ownerRole: "BIZ-PM", handoffTo: [development, sales] }
   - key: business-development-market-scan
     name: "Market scan"
     why: "For comparing demand, competing offers and gaps in a market."

@@ -1,3 +1,4 @@
+import { openTaskAction } from './open-task';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -5,6 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
+import { decl } from './css';
 import { taskRoute } from './task-route';
 
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
@@ -103,6 +105,19 @@ it('marks the whole department row and keeps its pipeline disclosure independent
   await user.click(department);
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(side.getByRole('button', { name: pipeline })).toBeInTheDocument();
+});
+
+it('keeps a pipeline chevron beside the first line of its full name', async () => {
+  const name = 'Beta build way';
+  shell('/tasks?department=d2', { 'GET /api/pipelines': [200, { pipelines: [{ ...PIPELINE, name, isDefault: true }] }] });
+  const label = `${name} (default)`;
+  const pipeline = await screen.findByRole('button', { name: label });
+  const text = within(pipeline).getByText(label);
+  expect(text.previousElementSibling).toHaveClass('ic');
+  expect(text.parentElement).toHaveClass('tr-item-name');
+  expect(text.closest('.tr-pipelines')).toBeInTheDocument();
+  expect.soft(decl('.tr-pipelines .tr-item-name > .ic', 'align-self')).toBe('start');
+  expect(decl('.tr-pipelines .tr-item-name > .ic', 'margin-block-start') ?? '').toContain('1lh');
 });
 
 describe('My tasks and View as', () => {
@@ -241,7 +256,9 @@ describe('the views and the card', () => {
     expect(rowOf(list, '#21 Take card payments')).toHaveTextContent('High');
     expect(rowOf(list, '#25 Later task')).toHaveTextContent('Normal');
     await user.click(within(list).getByRole('button', { name: 'Take card payments' }));
-    expect(within(await card('#21 Take card payments')).getByRole('definition', { name: 'Priority' })).toHaveTextContent('High');
+    const panel = await card('#21 Take card payments');
+    await openTaskAction(user, panel, 'Details');
+    expect(within(panel).getByRole('definition', { name: 'Priority' })).toHaveTextContent('High');
   });
 
   it('shows the run in the list and the person who set the wait and its deadline on the card', async () => {
@@ -293,25 +310,25 @@ describe('the views and the card', () => {
     const user = userEvent.setup();
     shell('/tasks/t21');
     const panel = await card('#21 Take card payments');
+    await openTaskAction(user, panel, 'Details');
     const path = await within(panel).findByRole('navigation', { name: 'Where it belongs' });
     expect(path).toHaveTextContent('500 subscribers');
     expect(path).toHaveTextContent('Card payments');
     expect(panel).toHaveTextContent('Shops sell online.');
-    const facts = within(panel).getByRole('definition', { name: 'Responsible' });
-    expect(facts).toHaveTextContent('Maria');
+    const facts = within(within(panel).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByText('Maria')).toBeInTheDocument();
     expect(within(panel).getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way: Build');
-    expect(within(panel).getByRole('region', { name: 'Needed for' })).toHaveTextContent('#23 Refund button');
-    await user.click(within(within(panel).getByRole('region', { name: 'Subtasks' })).getByRole('button', { name: '#22 Card form' }));
+    expect(facts.getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
+    await user.click(facts.getByRole('link', { name: '#22 Card form' }));
     const sub = await card('#22 Card form');
-    expect(within(sub).getByText('Subtask')).toBeInTheDocument();
-    expect(within(sub).getByRole('navigation', { name: 'Where it belongs' })).toHaveTextContent('#21 Take card payments');
+    expect(within(within(sub).getByRole('group', { name: 'Facts' })).getByRole('link', { name: '#21 Take card payments' })).toBeInTheDocument();
   });
 
   it('re-roots the graph from a card, with a breadcrumb back up to every goal', async () => {
     const user = userEvent.setup();
     shell('/tasks/t21');
     const panel = await card('#21 Take card payments');
-    await user.click(within(panel).getByRole('button', { name: 'Graph from here' }));
+    await openTaskAction(user, panel, 'Graph from here');
     expect(location.search).toBe('?root=t21&view=graph');
     const graph = await main();
     const crumbs = within(graph).getByRole('navigation', { name: 'Graph from' });
@@ -362,7 +379,7 @@ describe('the views and the card', () => {
       'PATCH /api/tasks/t21': () => (refuse ? [409, { error: { code: 'conflict', message: 'changed', reason: 'task_changed' } }] : [200, { task: detail(PAY, { title: 'Take cards and wallets' }) }]),
     });
     const panel = await card('#21 Take card payments');
-    await user.click(within(panel).getByRole('button', { name: 'Edit' }));
+    await openTaskAction(user, panel, 'Edit');
     const form = within(panel).getByRole('form', { name: 'Edit the task' });
     await user.clear(within(form).getByLabelText('Title'));
     await user.type(within(form).getByLabelText('Title'), 'Take cards and wallets');
@@ -370,7 +387,8 @@ describe('the views and the card', () => {
     await user.click(within(form).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ version: 4, revision: 1, title: 'Take cards and wallets', responsible: 'p1' }));
     refuse = true;
-    await user.click(await within(panel).findByRole('button', { name: 'Edit' }));
+    await waitFor(() => expect(form).not.toBeInTheDocument());
+    await openTaskAction(user, panel, 'Edit');
     const again = within(panel).getByRole('form', { name: 'Edit the task' });
     await user.type(within(again).getByLabelText('Why'), ' Fast.');
     await user.click(within(again).getByRole('button', { name: 'Save' }));
@@ -380,6 +398,7 @@ describe('the views and the card', () => {
   it('offers no edit to a person who does not act on the task', async () => {
     shell('/tasks/t21', { 'GET /api/tasks/t21': [200, { task: detail(PAY, { mayEdit: false }) }] });
     const panel = await card('#21 Take card payments');
+    await openTaskAction(userEvent.setup(), panel);
     expect(within(panel).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 

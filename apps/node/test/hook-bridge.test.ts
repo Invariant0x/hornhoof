@@ -1,8 +1,12 @@
 import { spawn } from 'node:child_process';
-import { request } from 'node:http';
+import { once } from 'node:events';
+import { symlinkSync } from 'node:fs';
+import { Agent, request } from 'node:http';
+import { connect, type Socket } from 'node:net';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
-import { fromAgent, socketOf, type Peer } from '../src/terminal/peer.js';
+import { fromAgent, OwnerUnknown, socketOf, type Peer } from '../src/terminal/peer.js';
 import { procFixture } from './terminal-proc-fixture.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
@@ -11,9 +15,9 @@ const close: (() => void)[] = [];
 afterEach(() => { close.splice(0).forEach(fn => fn()); vi.restoreAllMocks(); });
 const post = (url: string, id = 'one-call', pid = String(process.pid)) => fetch(url + '/stop', { method: 'POST', headers: { 'x-hh-call': id, 'x-hh-pid': pid }, body: '{"last_assistant_message":"Done."}' });
 
-async function opened(onHook: ConstructorParameters<typeof Bridge>[1], owns: ConstructorParameters<typeof Bridge>[2] = null, fixture?: ReturnType<typeof procFixture>) {
+async function opened(onHook: ConstructorParameters<typeof Bridge>[1], owns: ConstructorParameters<typeof Bridge>[2] = null, fixture?: ReturnType<typeof procFixture>, proc = fixture?.proc) {
   const rejected: Rejection[] = [];
-  const bridge = new Bridge('http://127.0.0.1:9', onHook, owns, { proc: fixture?.proc, rejected: (key, event, reason) => rejected.push({ key, event, reason }) });
+  const bridge = new Bridge('http://127.0.0.1:9', onHook, owns, { proc, rejected: (key, event, reason) => rejected.push({ key, event, reason }) });
   await bridge.start();close.push(() => bridge.stop());
   fixture?.listen(bridge, () => process.pid, () => process.pid);
   return { bridge, url: bridge.agent('agent-1').hookUrl, rejected };
@@ -122,6 +126,128 @@ describe('hook delivery through the bridge', () => {
     now += 60_000;
     expect((await post(b.url)).status).toBe(403);
     expect(b.rejected).toHaveLength(2);
+  });
+
+  it('answers a lookup that gave no answer with a retryable 502, keeps nothing of it and says why', async () => {
+    const answers: (() => boolean)[] = [() => { throw new OwnerUnknown('lsof timed out'); }, () => true];
+    const heard: string[] = [];
+    const b = await opened((_key, event) => void heard.push(event), async () => answers.shift()!());
+    expect((await post(b.url, 'slow-call')).status).toBe(502);
+    expect(heard).toEqual([]);
+    expect((await post(b.url, 'slow-call')).status).toBe(200);
+    expect(heard).toEqual(['stop']);
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'stop', reason: 'owner check unavailable: lsof timed out' }]);
+  });
+
+  it("captures the caller's end as its connection opens, before any call comes", async () => {
+    let record!: (peer: Peer) => void;
+    const captured = new Promise<Peer>(resolve => { record = resolve; });
+    const bridge = new Bridge('http://127.0.0.1:9', () => {}, async () => true, {
+      capture: async peer => { record(peer);return { acceptedInode: '7' }; },
+    });
+    await bridge.start();close.push(() => bridge.stop());
+    const port = Number(new URL(bridge.agent('agent-1').hookUrl).port);
+    const socket = connect(port, '127.0.0.1');close.push(() => void socket.destroy());
+    await once(socket, 'connect');
+    expect(await captured).toEqual({ port: socket.localPort, bridgePort: port });
+  });
+
+  it('retries the Linux socket capture on a kept connection after a failed table read', async () => {
+    const fixture = procFixture('agent-1');
+    const proc = join(fixture.proc, 'readable');
+    const heard: string[] = [];
+    const b = await opened((_key, event) => void heard.push(event), fromAgent(async () => [process.pid], proc), fixture, proc);
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    close.push(() => agent.destroy());
+    const sockets = new Set<Socket>();
+    b.bridge['server']!.on('connection', socket => sockets.add(socket));
+    const send = () => new Promise<number>((resolve, reject) => {
+      const call = request(b.url + '/tool', { agent, method: 'POST', headers: { 'x-hh-pid': String(process.pid) } }, res => {
+        res.resume().on('end', () => resolve(res.statusCode!));
+      });
+      call.on('error', reject).end('{}');
+    });
+    expect(await send()).toBe(502);
+    expect(heard).toEqual([]);
+    expect(b.rejected).toEqual([{ key: 'agent-1', event: 'tool', reason: 'owner check unavailable: Linux TCP table read failed' }]);
+    symlinkSync(fixture.proc, proc);
+    expect(await send()).toBe(200);
+    expect(sockets.size).toBe(1);
+    expect(heard).toEqual(['tool']);
+  });
+
+  it('refreshes a missing Linux capture and logs each owner decision on a kept connection', async () => {
+    let inode: string | null = null;
+    let adopted = false;
+    let unavailable = false;
+    const handled = vi.fn();
+    const local = vi.fn();
+    const reported = vi.fn();
+    const bridge = new Bridge('http://127.0.0.1:9', handled, async (_key, peer, why) => {
+      if (unavailable) throw new OwnerUnknown('tmux pane lookup failed');
+      if (peer.acceptedInode === null) why?.('the connection is not in the socket table');
+      else if (!adopted) why?.("the caller is not under the agent's pane");
+      return peer.acceptedInode === '7' && adopted;
+    }, { capture: async () => ({ acceptedInode: inode }), ownerRejected: local, ownerReported: reported });
+    await bridge.start();close.push(() => bridge.stop());
+    const { hookUrl } = bridge.agent('agent-1');
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    close.push(() => agent.destroy());
+    const sockets = new Set<Socket>();
+    bridge['server']!.on('connection', socket => sockets.add(socket));
+    const send = () => new Promise<number>((resolve, reject) => {
+      const call = request(hookUrl + '/tool', { agent, method: 'POST' }, res => {
+        res.resume().on('end', () => resolve(res.statusCode!));
+      });
+      call.on('error', reject).end('{}');
+    });
+    expect(await send()).toBe(403);
+    expect(await send()).toBe(403);
+    const absent = ['agent-1', 'tool', 'owner check failed: the connection is not in the socket table'];
+    const unowned = ['agent-1', 'tool', "owner check failed: the caller is not under the agent's pane"];
+    const retry = ['agent-1', 'tool', 'owner check unavailable: tmux pane lookup failed'];
+    expect(local.mock.calls).toEqual([absent, absent]);
+    expect(reported.mock.calls).toEqual([absent]);
+    inode = '7';
+    expect(await send()).toBe(403);
+    unavailable = true;
+    expect(await send()).toBe(502);
+    expect(await send()).toBe(502);
+    unavailable = false;
+    adopted = true;
+    expect(await send()).toBe(200);
+    expect(sockets.size).toBe(1);
+    expect(local.mock.calls).toEqual([absent, absent, unowned, retry, retry]);
+    expect(reported.mock.calls).toEqual([absent, unowned, retry]);
+    expect(handled).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a refused check command and tools call with the check's reason, as it does a hook", async () => {
+    const b = await opened(() => { throw Error('must not run'); }, async (_key, _peer, why) => { why?.("the caller is not under the agent's pane");return false; });
+    const check = b.url.replace('/hook/', '/check/');
+    expect((await fetch(check, { method: 'POST', headers: { 'x-hh-pid': String(process.pid) }, body: '{}' })).status).toBe(403);
+    expect((await fetch(b.bridge.agent('agent-1').mcpUrl, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await post(b.url)).status).toBe(403);
+    expect((await fetch(b.url.replace('/hook/', '/unrecognized/'), { method: 'POST', body: '{}' })).status).toBe(403);
+    const reason = "owner check failed: the caller is not under the agent's pane";
+    expect(b.rejected).toEqual([
+      { key: 'agent-1', event: 'check', reason },
+      { key: 'agent-1', event: 'mcp', reason },
+      { key: 'agent-1', event: 'stop', reason },
+      { key: 'agent-1', event: 'unknown', reason },
+    ]);
+    expect(JSON.stringify(b.rejected)).not.toContain(b.url.split('/').at(-1)!);
+  });
+
+  it('tells the host of a refused hook by its event, and never of a refused call of another kind or of no event', async () => {
+    const unowned: [string, string][] = [];
+    const bridge = new Bridge('http://127.0.0.1:9', () => { throw Error('must not run'); }, async () => false, { unowned: (key, event) => void unowned.push([key, event]) });
+    await bridge.start();close.push(() => bridge.stop());
+    const { hookUrl, attachUrl } = bridge.agent('agent-1');
+    expect((await fetch(hookUrl + '/start', { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await fetch(hookUrl, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await fetch(attachUrl + '/file')).status).toBe(403);
+    expect(unowned).toEqual([['agent-1', 'start']]);
   });
 
   it('does not trust a borrowed pid or a cached successful stop before checking the caller', async () => {

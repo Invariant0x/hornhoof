@@ -3,6 +3,7 @@ import type { Department, Employee, EmployeeStatus, EmployeeTask, Org, WorkLine 
 import { MOONFERN_ORG } from '../moonfern/agents';
 import { BASE_MS, isoMinutes } from '../moonfern/clock';
 import { createSceneRecorder, smoothDrag } from '../moonfern/record';
+import { mapDepartment } from '../moonfern/scene-locators';
 import { serveMoonfern } from '../moonfern/serve';
 import { employeeTask } from '../moonfern/route';
 import { prepareScenePage, pushStream } from '../moonfern/stream';
@@ -77,25 +78,26 @@ function buildDevSnapshot(minutesOffset: number, patches: Record<string, Patch>)
   };
 }
 
-test('development.gif: live Development schema at ~74% zoom, task #221 advancing across gates and smooth pan', async ({ page }) => {
+test('development.gif: Development structure and staff map, with task #221 advancing across gates', async ({ page }) => {
   const recorder = createSceneRecorder(page);
   const watcher = await prepareScenePage(page);
   const api = await serveMoonfern(page);
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
-  await expect(page.locator('.dview')).toBeVisible();
-  await expect(page.getByText('Performance', { exact: true })).toBeVisible();
+  await mapDepartment(page, 'Development').click();
+  const structure = page.getByRole('region', { name: 'Department structure', exact: true });
+  await expect(structure.getByRole('region', { name: 'Beta build way', exact: true })).toBeVisible();
+  await recorder.markReady();
+  await page.waitForTimeout(1100);
 
-  /* Wait for the initial fly-in (62%), click Zoom in once (62% * 1.2 = 74.4%) and frame left-to-center cleanly. */
-  await page.waitForTimeout(850);
-  await page.locator('.dview').getByRole('button', { name: 'Zoom in', exact: true }).click();
-  await expect(page.locator('.dview .zv')).toHaveText('74%');
-  const canvas = page.locator('.dcanvas');
+  /* The staff map shows the live handoff lines and the people at each gate. */
+  await page.getByRole('button', { name: 'Staff map', exact: true }).click();
+  const canvas = page.getByRole('region', { name: 'Department schema', exact: true });
+  await expect(canvas.getByRole('group', { name: 'Performance', exact: true })).toBeVisible();
+  await page.waitForTimeout(450);
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await smoothDrag(page, canvas, 90, 48, 4, 25);
   await page.waitForTimeout(200);
-
-  await recorder.markReady();
 
   const agent = (id: string) => ({ kind: 'agent' as const, id, departmentId: 'dept-dev' });
 
@@ -158,6 +160,8 @@ test('development.gif: live Development schema at ~74% zoom, task #221 advancing
   api.setOrg(MOONFERN_ORG);
   await pushStream(page, { type: 'org' });
   await smoothDrag(page, canvas, 420, 0, 9, 36);
+  await page.getByRole('button', { name: 'Department structure', exact: true }).click();
+  await expect(structure).toBeVisible();
   await page.waitForTimeout(1150);
 
   watcher.assertClean();

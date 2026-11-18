@@ -17,6 +17,7 @@ import type {
 import { BASE_ISO, BASE_MS, isoMinutes } from './clock';
 import { attachRunningAgents, BASE_MACHINES } from './machines';
 import { LEO_VIEW, MAYA_VIEW, MOONFERN_COMPANY, SAM_VIEW } from './people';
+import { CARE_PIPELINE, MOONFERN_PIPELINE } from './pipelines';
 import { BASE_SUBSCRIPTIONS, subById } from './plans';
 import { employeeTask } from './route';
 
@@ -418,6 +419,7 @@ function buildDept(
     about,
     agents: { total: employees.length, working },
     products: [],
+    pipelines: [],
     teams: [],
     people: [],
     employees,
@@ -458,6 +460,7 @@ export const MOONFERN_DEPARTMENTS: Department[] = [
     ]),
     {
       people: [SAM_VIEW],
+      pipelines: [MOONFERN_PIPELINE],
       reworkAt: isoMinutes(-2),
       teams: [
         {
@@ -499,6 +502,7 @@ export const MOONFERN_DEPARTMENTS: Department[] = [
       ['MKT-SEO', 'SEO specialist', 'member', null],
       ['MKT-SOCIAL', 'Social media', 'member', null],
     ]),
+    { pipelines: [CARE_PIPELINE] },
   ),
   buildDept(
     'dept-biz',

@@ -257,9 +257,9 @@ describe("what employees wrote, in another agent's turn", () => {
 
 describe('a person who wrote through Telegram', () => {
   it('is named with what they are in the company, so the agent weighs their words by it', () => {
-    expect(answerInTelegram({ name: 'Alex' }, { owner: true, delegate: false, department: null })).toMatch(/^Alex wrote this in Telegram\. Alex is the company's owner \(the CEO\)\. .*plain text/);
-    expect(answerInTelegram({ name: 'Rita' }, { owner: false, delegate: false, department: true })).toContain('Rita is responsible for your department.');
-    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: false })).toContain("Bob is neither the company's owner nor the CEO's delegate, nor responsible for your department.");
-    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: null })).toContain("Bob is neither the company's owner nor the CEO's delegate.");
+    expect(answerInTelegram({ name: 'Alex' }, { owner: true, delegate: false, department: null }, 'en')).toContain("This is Alex writing to you directly in Telegram. Alex is the company's owner (the CEO).");
+    expect(answerInTelegram({ name: 'Rita' }, { owner: false, delegate: false, department: true }, 'ru')).toContain('Rita is responsible for your department.');
+    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: false }, 'en')).toContain("Bob is neither the company's owner nor the CEO's delegate, nor responsible for your department.");
+    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: null }, 'en')).toContain("Bob is neither the company's owner nor the CEO's delegate.");
   });
 });

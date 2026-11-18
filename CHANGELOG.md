@@ -7,6 +7,47 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Changed
+
+- A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
+- Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
+
+## [0.34.1] - 2026-11-18
+
+### Fixed
+
+- A Mac node checks a hook caller's owner with lsof and ps, answers a slow owner lookup with a retry, and logs why it refused a call.
+- On a phone, the tracker's lists drawer reaches the right edge with no empty scrollbar room beside it.
+- Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
+- The README animations show the current map, department routes, tracker, task cards and agent windows.
+- Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
+- Task lists give titles more room by sizing the other columns to their content and using smaller text on desktop.
+- On phones, task details stack under the title and long text wraps within the list.
+- Removed computer access details from agent windows, including the orchestrator's window.
+- The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
+- Telegram sends only the finished answer and its files, in the language you write to the bot.
+
+### Added
+
+- The Media workflow captures the current map, Startup department, tracker list, task card and agent window at desktop and phone widths in light and dark.
+- Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
+- Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
+
+### Changed
+
+- The company map shows only employee squares again, in their original status colors and with their usual blinking.
+- The company map has no worker kinds legend.
+- The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.
+- One-shot stages use diamonds in the tracker and task routes.
+- Generalists use squares and keep their label.
+- Task cards show the title, key facts and links to related tasks together at the top.
+- The long task description opens with More when it is too long to show at once.
+- The task log shows the latest four steps, including waits, and lets you open earlier steps.
+- A question appears below the log when you can answer it from the card.
+- The title menu holds task actions, details, materials and the full log.
+
+## [0.34.0] - 2026-11-18
+
 ### Fixed
 
 - Checks launched within a run part share its machine slot, cancelled parts clear their waiting checks, and a part that stops producing output or making progress alerts Operations once.
@@ -81,8 +122,6 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
 - Connected machines give the orchestrator standing computer access, including machines that already hold their owner's key.
-- A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
-- Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
 - The orchestrator can give computer access to all company employees or to a named employee for a task and withdraw it when the work ends.
 - Each machine owner can close or reopen computer access from the machine card.
 - The update clears old computer access requests and removes the approval cards.

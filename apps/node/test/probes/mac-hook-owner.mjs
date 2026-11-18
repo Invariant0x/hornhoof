@@ -1,11 +1,24 @@
 /* From the repository root on macOS: npm run build -w apps/node && node apps/node/test/probes/mac-hook-owner.mjs */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { request } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { Bridge } from '../../dist/terminal/bridge.js';
 import { terminalOwner } from '../../dist/main.js';
+import { answered } from '../../dist/terminal/mac-peer.js';
+
+/* The node's own lookup commands, timed: how long lsof and ps take on this Mac is what a hook waits for. */
+const took = { hinted: [], confirmed: [], ps: [] };
+function timed(file, args, options) {
+  const started = performance.now();
+  return new Promise((resolve, reject) => execFile(file, args, options, (error, output, diagnostic) => {
+    const phase = file.endsWith('lsof') ? (args.includes('-p') ? 'hinted' : 'confirmed') : 'ps';
+    took[phase].push(performance.now() - started);
+    try { resolve(answered(error, output, file, diagnostic)); } catch (failed) { reject(failed); }
+  }));
+}
+const slowest = times => `${Math.round(Math.max(...times))} ms`;
 
 function send(url) {
   return new Promise((resolve, reject) => {
@@ -42,19 +55,19 @@ async function main() {
   assert.equal(process.platform, 'darwin', 'Run this probe on a real Mac.');
   const own = await child();
   const foreign = await child();
-  const owner = terminalOwner('darwin')(async () => [own.pid]);
-  let lookups = 0;
-  const bridge = new Bridge('http://127.0.0.1:9', () => {}, owner.owns, { capture: peer => {
-    lookups++;
-    return owner.capture(peer);
-  } });
+  const owner = terminalOwner('darwin', timed)(async () => [own.pid]);
+  const rejected = [];
+  const bridge = new Bridge('http://127.0.0.1:9', () => {}, owner.owns, { capture: owner.capture, rejected: (_key, _event, reason) => rejected.push(reason) });
   try {
     await bridge.start();
     const url = bridge.agent('probe').hookUrl;
     for (let n = 0; n < 20; n++) assert.equal(await call(own, url), 200, 'own agent hook must be accepted');
     assert.equal(await call(foreign, url), 403, 'foreign process hook must be rejected');
-    assert.equal(lookups, 21, 'every connection must run its own lookup');
-    console.log('Own hooks: 20/20 accepted. Foreign hook: 403. Every connection ran its own lsof lookup.');
+    assert.equal(took.hinted.length, 21, 'every connection must check its PID hint');
+    assert.equal(took.confirmed.length, 21, 'every matching PID hint must have an independent confirmation');
+    assert.equal(took.ps.length, 21, 'every confirmed connection must read one process table');
+    assert.deepEqual(rejected, ["owner check failed: the caller is not under the agent's pane"]);
+    console.log(`Own hooks: 20/20 accepted. Foreign hook: 403, refused as not under the pane. Slowest hinted lsof ${slowest(took.hinted)}, all-holder confirmation ${slowest(took.confirmed)}, and ps ${slowest(took.ps)}.`);
   } finally {
     bridge.stop();
     own.kill();

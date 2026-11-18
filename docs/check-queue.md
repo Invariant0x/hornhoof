@@ -4,6 +4,8 @@ Heavy checks share one FIFO queue across the subscription nodes on a physical ma
 
 The queue stores its metadata on the server, outside the users and folders of jobs. Job cleanup and killing a job user do not delete the queue. No command environment or output is sent to the server coordinator.
 
+Nodes report their tracked check IDs in hello and load frames. The server applies snapshots in sequence on the current socket. A running lease omitted by its own node frees its slot once the grant predates the server's frame receipt by more than one load interval. Pending local claims and holders still cleaning up stay on the list. Reports without the list leave leases alone.
+
 ## Local commands
 
 An agent runs noninteractive checks of its change in its own workspace. Install dependencies from the lockfile once per workspace and again when the lockfile changes. Name one or more regular test files, including browser tests when the browser is installed there. Browser installation is allowed. Types, lint, format, builds, coverage, quality and changed-code mutation also run there.

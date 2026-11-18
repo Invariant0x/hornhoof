@@ -3,7 +3,7 @@ import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
-import { detail, serveApi, TASKS } from './api';
+import { openTaskAction, detail, serveApi, TASKS } from './api';
 import { captureWith } from './capture';
 
 const capture = captureWith('hide-secret', undefined);
@@ -15,7 +15,8 @@ const marker = 'OldBrowserMarker1077!';
 
 for (const language of locales) for (const skin of BUILTIN_SKINS) for (const width of [375, 1440]) {
   test(`hides a selected secret, ${language}, ${skin.id}, ${width}px`, async ({ page }, info) => {
-    const words = messages[language].tasks.hideSecret;
+    const t = messages[language];
+    const words = t.tasks.hideSecret;
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(({ language, skin }) => {
       localStorage.setItem('hh-lang', language);
@@ -40,7 +41,7 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
       window.getSelection()!.removeAllRanges();
       window.getSelection()!.addRange(range);
     });
-    await panel.getByRole('button', { name: words.action, exact: true }).click();
+    await openTaskAction(panel, t, words.action);
     const input = panel.getByLabel(words.value);
     await expect(input).toHaveValue(marker);
     const form = panel.getByRole('form', { name: words.action });
@@ -79,8 +80,10 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
       expect(input).toHaveCount(0),
       expect(panel.getByText(marker, { exact: true })).toHaveCount(0),
       expect(panel.getByText('[hidden]', { exact: true })).toBeVisible(),
-      expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords'),
+      expect(panel.getByRole('button', { name: t.tasks.details, exact: true })).toBeVisible(),
     ]);
+    await openTaskAction(panel, t, t.tasks.details);
+    await expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords');
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     expect(failures).toEqual([]);
   });

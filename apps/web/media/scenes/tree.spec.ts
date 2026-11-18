@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createSceneRecorder, smoothDrag } from '../moonfern/record';
+import { mapDepartment } from '../moonfern/scene-locators';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage, pushStream } from '../moonfern/stream';
 import { buildDevelopmentTreeSnapshots } from '../moonfern/tree';
@@ -13,10 +14,10 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
   const api = await serveMoonfern(page, { initialOrg: first.org, initialTree: first.tree });
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
-  await expect(page.locator('.dview')).toBeVisible();
+  await mapDepartment(page, 'Development').click();
+  await expect(page.getByRole('region', { name: 'Department structure' })).toBeVisible();
   await page.getByRole('button', { name: 'Tree', exact: true }).click();
-  const scroll = page.locator('.tv-scroll');
+  const scroll = page.getByRole('region', { name: 'Work tree', exact: true });
   await expect(scroll).toBeVisible();
   await page.waitForTimeout(250);
 
@@ -61,14 +62,15 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
   await smoothDrag(page, scroll, 0, 260, 6, 32, dragAnchor);
   await page.mouse.move(8, 8);
   await page.locator('.tv-labs').getByRole('button', { name: /Iris/ }).click();
-  const agentWin = page.getByRole('complementary', { name: /Iris/ });
+  await page.getByRole('dialog', { name: /^Iris/ }).getByRole('button', { name: 'Iris', exact: true }).click();
+  const agentWin = page.getByRole('complementary', { name: /^Iris/ });
   await expect(agentWin).toBeVisible();
   await agentWin.getByRole('button', { name: 'Card', exact: true }).click();
   await expect(agentWin.getByRole('complementary', { name: 'Card: Iris', exact: true })).toBeVisible();
   await page.waitForTimeout(1100);
 
   /* Close Iris's window and restore Snapshot 0 so the first and last frames match cleanly. */
-  await agentWin.locator('button.window-close').click();
+  await agentWin.getByRole('button', { name: 'Close', exact: true }).and(agentWin.locator('.window-close')).click();
   await expect(agentWin).toHaveCount(0);
   await page.evaluate(() => (document.activeElement as HTMLElement | SVGElement | null)?.blur?.());
   await page.mouse.move(8, 8);

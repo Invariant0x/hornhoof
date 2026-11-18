@@ -1,3 +1,5 @@
+import type { TemplateKey } from '@hornhoof/protocol';
+import type { EchelonStage } from '@hornhoof/protocol/echelons';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
@@ -19,7 +21,7 @@ type PipelineInput = { name: string; why: string; stages: StageInput[] };
 export type PipelineGuard = (spot: Spot) => Promise<void>;
 type Live = Pick<Ctx, 'db' | 'bus' | 'templates'>;
 
-type StageView = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: { id: string; name: string } | null; position: number; brief?: string; oneShot?: { fanOut: number; judge: boolean } };
+type StageView = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: { id: string; name: string } | null; position: number; echelon?: EchelonStage; brief?: string; oneShot?: { fanOut: number; judge: boolean }; handoffTo?: TemplateKey[] };
 type PipelineView = { id: string; department: { id: string; name: string }; name: string; why: string; catalogKey: string | null; isDefault: boolean; archived: boolean; version: number; stages: StageView[] };
 
 export const MAX_STAGES = 40;
@@ -124,7 +126,10 @@ async function writeStages(tx: Tx, pipeline: Pipeline, stages: StageInput[]): Pr
   return moved;
 }
 
-const publish = (ctx: Live, companyId: string) => ctx.bus.publish(companyId, { type: 'tracker' });
+function publish(ctx: Live, companyId: string) {
+  ctx.bus.publish(companyId, { type: 'tracker' });
+  ctx.bus.publish(companyId, { type: 'org' });
+}
 
 async function insertPipeline(tx: Tx, dept: Department, actor: Actor | null, input: PipelineInput, stages: StageInput[], stock?: { key: string; isDefault: boolean }): Promise<Pipeline> {
   const [last] = await tx.select({ n: sql<number>`coalesce(max(${pipelines.position}), -1)` }).from(pipelines).where(eq(pipelines.departmentId, dept.id));
@@ -142,10 +147,10 @@ function insertCatalogPipeline(tx: Tx, dept: Department, actor: Actor | null, st
   return insertPipeline(tx, dept, actor, { name: stock.name, why: stock.why, stages }, stages, { key: stock.key, isDefault });
 }
 
-export async function seedDefaultPipeline(ctx: Pick<Ctx, 'templates'>, tx: Tx, dept: Department, actor: Actor | null): Promise<void> {
+export async function seedCatalogPipelines(ctx: Pick<Ctx, 'templates'>, tx: Tx, dept: Department, actor: Actor | null): Promise<void> {
   const catalog = dept.templateKey && ctx.templates.catalogs.get(dept.templateKey);
-  const stock = catalog ? catalog.pipelines.find(p => p.key === catalog.default) : undefined;
-  if (stock) await insertCatalogPipeline(tx, dept, actor, stock, true);
+  if (!catalog) return;
+  for (const stock of catalog.pipelines) await insertCatalogPipeline(tx, dept, actor, stock, stock.key === catalog.default);
 }
 
 /* Switching a default leaves the earlier pipeline and all its tasks in place. Applying a pipeline twice reuses it. */
@@ -166,7 +171,6 @@ export async function applyCatalogPipeline(ctx: Live, companyId: string, actor: 
     return saved!;
   });
   publish(ctx, companyId);
-  ctx.bus.publish(companyId, { type: 'org' });
   return selected;
 }
 
@@ -236,6 +240,8 @@ export async function pipelineViews(ctx: Pick<Ctx, 'db' | 'templates'>, companyI
           id: s.id, parentId: s.parentStageId, name: s.name, ownerRole: s.ownerRole,
           owner: s.ownerAgentId ? { id: s.ownerAgentId, name: named.get(s.ownerAgentId) ?? '' } : null, position: s.position,
           ...(step?.brief ? { brief: step.brief } : {}),
+          ...(step?.echelon ? { echelon: step.echelon } : {}),
+          ...(step?.handoffTo ? { handoffTo: step.handoffTo } : {}),
           ...(oneShot ? { oneShot: { fanOut: oneShot.fanOut, judge: oneShot.judge !== null } } : {}),
         };
       }),

@@ -9,7 +9,7 @@ pipelines:
       - { name: "Identify the device", ownerRole: "HOM-PM" }
       - { name: "Check what is wrong", ownerRole: "HOM-SMART" }
       - { name: "Fix and verify", ownerRole: "HOM-SMART", echelon: "development" }
-      - { name: "Tell the household", ownerRole: "HOM-HEAD" }
+      - { name: "Tell the household", ownerRole: "HOM-HEAD", handoffTo: [household] }
   - key: devices-cleanup
     name: "Device cleanup"
     why: "For freeing space and clearing junk on a TV or other home device."
@@ -22,7 +22,7 @@ pipelines:
     why: "For slow Wi-Fi or devices dropping off the home network."
     stages:
       - { name: "List affected devices", ownerRole: "HOM-PM" }
-      - { name: "Check connections and settings", ownerRole: "HOM-NET", echelon: "development" }
+      - { name: "Check connections and settings", ownerRole: "HOM-NET", echelon: "development", oneShot: {fanOut: 3, judge: "Compare likely causes from the connection notes and suggest checks that leave settings as they are."} }
       - { name: "Try the fix from each room", ownerRole: "HOM-NET" }
       - { name: "Record what changed", ownerRole: "HOM-HEAD" }
 ---

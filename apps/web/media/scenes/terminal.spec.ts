@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createSceneRecorder } from '../moonfern/record';
+import { mapDepartment } from '../moonfern/scene-locators';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage } from '../moonfern/stream';
 import { routeTerminalReplay } from '../moonfern/terminal';
@@ -17,13 +18,14 @@ test('terminal.gif: developer window replaying terminal.rec with side panels vis
   await serveMoonfern(page, { terminalAgentIds: ['dev-1'] });
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
-  await expect(page.locator('.dview')).toBeVisible();
+  await mapDepartment(page, 'Development').click();
+  const structure = page.getByRole('region', { name: 'Department structure' });
+  await expect(structure).toBeVisible();
   await page.waitForTimeout(850);
 
   /* Open Card: Iris first so the left 400px panel sits clear of .xterm while terminal.rec streams. */
-  await page.locator('.dview').getByRole('button', { name: /Iris/ }).click();
-  const win = page.getByRole('complementary', { name: /Iris/ });
+  await structure.getByRole('button', { name: 'Iris', exact: true }).click();
+  const win = page.getByRole('complementary', { name: /^Iris/ });
   await expect(win).toBeVisible();
   await expect(win.locator('.xterm')).toBeVisible();
 

@@ -1,11 +1,13 @@
 import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
-import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, fitsCheck, type CheckQueueReply, type CheckQueueRequest } from '@hornhoof/protocol';
+import { CHECK_LEASE_MS, LOAD_MS, CheckSlotQueue, checkCapacity, fitsCheck, type CheckLeaseSnapshot, type CheckQueueReply, type CheckQueueRequest } from '@hornhoof/protocol';
 import { z } from 'zod';
 import { latestReport } from './host-load.js';
 
 type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
-type Sample = { cpus: number; load: number; at?: number };
-type Member = { host: string; sample: Sample; online: boolean; at: number };
+type Report = CheckLeaseSnapshot & { receivedAt: number; linkId?: string };
+type Order = Pick<Report, 'linkId' | 'sequence'>;
+type Sample = { cpus: number; load: number; at?: number; checkLeases?: Report };
+type Member = { host: string; sample: Sample; online: boolean; at: number; lastReport?: Order };
 export type CheckClaim = { node: string; request: Acquire; position: number; queuedAt: number; startedAt: number | null; retired: boolean };
 export type CheckSnapshot = { capacity: number; holders: CheckClaim[]; queue: CheckClaim[] };
 type Entry = CheckClaim & { state: CheckQueueReply['state']; stop: AbortController; finish(): void };
@@ -35,12 +37,28 @@ export class CheckCoordinator {
     this.later(() => this.refresh(), options.warmupMs ?? CHECK_LEASE_MS);
   }
 
-  node(node: string, host: string, sample: Sample): void {
-    const at = sample.at ?? this.now();
+  node(node: string, host: string, { at = this.now(), checkLeases, ...sample }: Sample): void {
     if (this.now() - this.heardSince(node, at) >= CHECK_LEASE_MS) { this.lost(node); return; }
-    this.nodes.set(node, { host, sample, online: true, at });
+    const member: Member = { host, sample, online: true, at, lastReport: this.nodes.get(node)?.lastReport };
+    this.nodes.set(node, member);
     if (!this.pools.has(host)) this.pools.set(host, new CheckSlotQueue(() => Infinity, (held, cores) => this.fits(host, held, cores)));
+    if (checkLeases) this.reconcile(node, member, checkLeases);
     this.refresh();
+  }
+
+  private reconcile(node: string, member: Member, { linkId, sequence, receivedAt, ids }: Report): void {
+    const last = member.lastReport;
+    if (last && last.linkId === linkId && last.sequence >= sequence) return;
+    member.lastReport = { linkId, sequence };
+    const held = new Set(ids);
+    const cutoff = receivedAt - LOAD_MS;
+    for (const entry of this.entries.values()) {
+      if (entry.node !== node) continue;
+      if (entry.startedAt === null) continue;
+      if (entry.startedAt >= cutoff) continue;
+      if (held.has(entry.request.id)) continue;
+      this.releaseEntry(entry);
+    }
   }
 
   acquire(node: string, request: Acquire, cores = 0): void {

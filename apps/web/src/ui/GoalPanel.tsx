@@ -7,6 +7,7 @@ import { useGoal, useGoals, useTasks } from '../tasks';
 import { humanStatus } from '../task-tree';
 import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
+import { useLoadFailure } from './LoadFailure';
 import { Progress } from './TaskBoard';
 import { WaitLine } from './TaskActivity';
 import { CardPath, DueDay, Fact, goalChain, useEscapeCloses } from './TaskPanel';
@@ -175,7 +176,8 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
 /* A goal in the same side panel as a task: where it belongs, why, how far it is, its smaller goals and its tasks. */
 export function GoalPanel({ goalId, kind, active = true, onClose, onHome, ...rest }: Props) {
   const t = useT();
-  const { goal, log, failure, load } = useGoal(goalId);
+  const { goal, log, failure: readFailure, load } = useGoal(goalId);
+  const failure = useLoadFailure(readFailure);
   useEscapeCloses(onClose, active);
   return (
     <PanelFrame label={goal?.title ?? t.tracker.graph.goal} heading={t.tracker.graph.goal} busy={!goal && failure === null} kind={kind} onClose={onClose}>

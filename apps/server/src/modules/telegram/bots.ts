@@ -11,7 +11,7 @@ import { fileLink } from '../assistants/files.js';
 import { turnGoingOn } from '../conversation/turn-records.js';
 import { publicUrl } from '../link/link.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
-import { downloadFile, getUpdates, sendDocument, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
+import { downloadFile, getUpdates, sendDocument, sendText, sendTyping, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
 import { agentName, WORDS } from './words.js';
@@ -23,7 +23,8 @@ type ReplyRow = typeof telegramReplies.$inferSelect;
    asks; one poll that works starts it over. */
 const FIRST_PAUSE_MS = 1_000;
 const LONGEST_PAUSE_MS = 60_000;
-const OPEN = ['queued', 'running'] as const;
+/* Telegram clears a typing action after five seconds. */
+const TYPING_MS = 4_000;
 
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
 const picturesOfEvent = (data: unknown): { id: string }[] => {
@@ -77,6 +78,7 @@ class Listener {
   private readonly token: string;
   private readonly loop: Promise<void>;
   private readonly unsubscribe: () => void;
+  private readonly typing = new Map<string, NodeJS.Timeout>();
   private sending: Promise<void> = Promise.resolve();
   private sendingAgain = false;
   private settleNext = false;
@@ -90,7 +92,7 @@ class Listener {
   ) {
     this.token = decryptSecret(bot.tokenEnc, ctx.config.secret);
     this.unsubscribe = ctx.bus.subscribe(bot.companyId, m => {
-      if (m.type === 'agent_event' && m.agentId === bot.agentId) this.answer();
+      if (m.type === 'working' || (m.type === 'agent_event' && m.agentId === bot.agentId)) this.answer();
     });
     this.loop = this.listen();
     this.answer();
@@ -98,6 +100,8 @@ class Listener {
 
   async stop(): Promise<void> {
     this.abort.abort();
+    for (const timer of this.typing.values()) clearTimeout(timer);
+    this.typing.clear();
     this.unsubscribe();
     await this.loop;
     await this.sending;
@@ -159,7 +163,7 @@ class Listener {
     }
   }
 
-  /* Sends what the agent said since, one pass at a time. settle: the pass comes after a poll, and may close what ended. */
+  /* Checks for finished answers one pass at a time. settle: the pass comes after a poll, and may close a failed turn. */
   private answer(settle = false): void {
     this.settleNext ||= settle;
     if (this.sendingAgain) return;
@@ -178,13 +182,9 @@ class Listener {
     });
   }
 
-  private async sendEventFiles(person: Person, row: ReplyRow, data: unknown): Promise<boolean> {
-    let sent = false;
+  private async sendEventFiles(person: Person, row: ReplyRow, data: unknown): Promise<void> {
     for (const pic of picturesOfEvent(data)) {
-      if (wasTelegramFileSent(row.jobId, row.chatId, pic.id)) {
-        sent = true;
-        continue;
-      }
+      if (wasTelegramFileSent(row.jobId, row.chatId, pic.id)) continue;
       const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
       if (!file) continue;
       /* A bot sends no file over 50 MB: a big one goes as its link. */
@@ -198,66 +198,76 @@ class Listener {
         this.abort.signal,
       );
       markTelegramFileSent(row.jobId, row.chatId, pic.id);
-      sent = true;
     }
-    return sent;
   }
 
-  /* Sends what the turn said since the last of it sent, with the files it attached, and keeps how far it got and whether
-     anything reached the person. Null when the chat is gone: it takes nothing from the bot any more. */
-  private async sayWords(person: Person, row: ReplyRow): Promise<boolean | null> {
+  /* The last nonempty text is the answer. Files of the whole turn go with it, including separate attachment events.
+     Remember delivered events so a later file that needs a retry does not send the answer again. */
+  private async sayAnswer(person: Person, row: ReplyRow): Promise<void> {
     const { db } = this.ctx;
     const said = await db
       .select({ seq: agentEvents.seq, data: agentEvents.data })
       .from(agentEvents)
       .where(and(eq(agentEvents.jobId, row.jobId), eq(agentEvents.kind, 'text'), gt(agentEvents.seq, row.afterSeq)))
       .orderBy(asc(agentEvents.seq));
-    let answered = row.answered;
+    const last = said.findLast(words => textOf(words.data).trim());
     for (const words of said) {
-      const text = textOf(words.data);
-      let fileSent = false;
-      try {
-        await this.say(row.chatId, text);
-        fileSent = await this.sendEventFiles(person, row, words.data);
-      } catch (err) {
-        if (!chatGone(err)) throw err;
-        await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
-        return null;
-      }
-      if (text.trim() || fileSent) answered = true;
-      await db.update(telegramReplies).set({ afterSeq: words.seq, answered }).where(eq(telegramReplies.id, row.id));
+      await this.sendEventFiles(person, row, words.data);
+      if (words === last) await this.say(row.chatId, textOf(words.data));
+      await db.update(telegramReplies).set({ afterSeq: words.seq }).where(eq(telegramReplies.id, row.id));
     }
-    return answered;
+  }
+
+  private async showTyping(row: ReplyRow): Promise<void> {
+    if (this.typing.has(row.id)) return;
+    this.typing.set(row.id, setTimeout(() => {
+      this.typing.delete(row.id);
+      this.answer();
+    }, TYPING_MS));
+    await sendTyping(this.ctx.config.telegramApiUrl, this.token, row.chatId, this.abort.signal)
+      .catch(err => { if (!this.stopped && !chatGone(err)) this.warn(err, 'Could not show typing in Telegram.'); });
+  }
+
+  private stopTyping(id: string): void {
+    clearTimeout(this.typing.get(id));
+    this.typing.delete(id);
   }
 
   private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
     const { db } = this.ctx;
     const person = await authorizedRecipient(db, this.bot, row.chatId);
     if (!person) {
+      this.stopTyping(row.id);
       this.ended.delete(row.id);
       await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
       return;
     }
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
     const [job] = await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
-    const over = !job || !(OPEN as readonly string[]).includes(job.status);
-    const answered = await this.sayWords(person, row);
-    if (answered === null || !over) return;
+    if (job?.status === 'running') return this.showTyping(row);
+    this.stopTyping(row.id);
+    if (job?.status === 'queued') return;
     const next = await turnGoingOn(this.ctx, row.jobId);
     if (next) {
       this.ended.delete(row.id);
       await db.update(telegramReplies).set({ jobId: next.id }).where(eq(telegramReplies.id, row.id)).catch(() => db.delete(telegramReplies).where(eq(telegramReplies.id, row.id)));
+      this.answer();
       return;
     }
-    if (!settling || !this.ended.has(row.id)) {
+    if (job?.status === 'failed' && (!settling || !this.ended.has(row.id))) {
       this.ended.add(row.id);
       return;
     }
-    this.ended.delete(row.id);
-    if (!answered && job?.status === 'failed') {
-      const [agent] = await db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
-      if (agent) await this.say(row.chatId, WORDS[row.lang].noAnswer(agentName(agent, row.lang))).catch(err => { if (!chatGone(err)) throw err; });
+    try {
+      if (job?.status === 'done') await this.sayAnswer(person, row);
+      if (job?.status === 'failed') {
+        const [agent] = await db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
+        if (agent) await this.say(row.chatId, WORDS[row.lang].noAnswer(agentName(agent, row.lang)));
+      }
+    } catch (err) {
+      if (!chatGone(err)) throw err;
     }
+    this.ended.delete(row.id);
     await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
   }
 }

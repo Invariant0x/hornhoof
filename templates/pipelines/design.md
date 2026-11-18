@@ -9,7 +9,7 @@ pipelines:
       - { name: "Write the brief", ownerRole: "DSN-PM" }
       - { name: "Explore directions", ownerRole: "DSN-UI", echelon: "development" }
       - { name: "Check the design", ownerRole: "DSN-QA", echelon: "review" }
-      - { name: "Hand over the files", ownerRole: "DSN-HEAD" }
+      - { name: "Hand over the files", ownerRole: "DSN-HEAD", handoffTo: [development, marketing] }
   - key: design-brand-assets
     name: "Brand assets"
     why: "For illustrations, presentation pieces or other reusable brand material."

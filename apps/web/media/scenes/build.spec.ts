@@ -4,6 +4,7 @@ import { MOONFERN_DEPARTMENTS, MOONFERN_ORG } from '../moonfern/agents';
 import { isoMinutes } from '../moonfern/clock';
 import { MAYA_VIEW } from '../moonfern/people';
 import { createSceneRecorder } from '../moonfern/record';
+import { mapDepartment } from '../moonfern/scene-locators';
 import { serveMoonfern } from '../moonfern/serve';
 import { prepareScenePage, pushStream } from '../moonfern/stream';
 
@@ -98,7 +99,7 @@ test('build.gif: CEO writes to orchestrator, ticks structure card, clicks Build,
 
   await page.goto('/');
   await expect(page.locator('.hub')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Operations/ })).toBeVisible();
+  await expect(mapDepartment(page, 'Operations')).toBeVisible();
   /* Wait for the initial map centering transition to settle before starting the loop. */
   await page.waitForTimeout(850);
   await recorder.markReady();
@@ -131,27 +132,21 @@ test('build.gif: CEO writes to orchestrator, ticks structure card, clicks Build,
   await page.waitForTimeout(450);
 
   await buildBtn.click();
-  const doneList = page.locator('.t-done');
-  await expect(doneList).toBeVisible();
-  await expect(doneList).toContainText('Created: Development');
-  await expect(doneList).toContainText('Created: Design');
-  await expect(doneList).toContainText('Created: Marketing');
-  await expect(doneList).toContainText('Created: Business development');
+  const window = page.getByRole('complementary', { name: 'Orchestrator', exact: true });
+  const created = ['Development', 'Design', 'Marketing', 'Business development'];
+  for (const name of created) await expect(window.getByText(`Created: ${name}`, { exact: true })).toBeVisible();
   await page.waitForTimeout(1050);
 
   /* Close the orchestrator window so all five departments stand clearly around the hub. */
-  await page.getByRole('complementary', { name: 'Orchestrator' }).getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByRole('button', { name: /Development/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Design/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Marketing/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Business development/ })).toBeVisible();
+  await window.getByRole('button', { name: 'Close', exact: true }).click();
+  for (const name of created) await expect(mapDepartment(page, name)).toBeVisible();
   await page.waitForTimeout(1550);
 
   /* Reset back to the initial centered Operations map so the first and last frames match cleanly. */
   api.setOrg(initialOrg);
   api.setOrchestratorEvents([], { busy: false, runningJobId: null });
   await pushStream(page, { type: 'org' });
-  await expect(page.getByRole('button', { name: /Development/ })).toHaveCount(0);
+  await expect(mapDepartment(page, 'Development')).toHaveCount(0);
   await page.waitForTimeout(950);
 
   watcher.assertClean();

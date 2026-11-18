@@ -1,7 +1,10 @@
 import { expect, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test';
 
-import { LANGUAGES, type Language, type Messages } from '../../src/i18n';
-import { BASE_ISO } from './clock';
+import type { Messages } from '../../src/i18n';
+import { BASE_ISO, isoMinutes } from './clock';
+import { FRAME_SIZES, FRAME_THEMES, frameLanguages } from './frame-languages';
+import { MOONFERN_PIPELINE } from './pipelines';
+import { expectBetaBoard } from './scene-locators';
 import { serveMoonfern } from './serve';
 import { prepareScenePage } from './stream';
 import { MOONFERN_TASKS } from './tasks';
@@ -42,8 +45,14 @@ export function reportUnmocked(errors: string[]): void {
   if (errors.length) console.log(`[media] unanswered or failed while recording:\n${errors.join('\n')}`);
 }
 
-const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
-const THEMES = ['cyberpunk', 'light'] as const;
+const LIST_PARENT = 'Plant identification camera flow with an indoor lighting guide, a preview that explains what the camera found, and care tips for the three plants that look most like the photo';
+const LIST_NOTE = 'Check the camera preview with the new lighting guide before it goes to the beta testers.';
+
+const listTasks = MOONFERN_TASKS.map(task => task.number === 221 ? {
+  ...task, title: LIST_PARENT, priority: 'urgent' as const, externalWait: {
+    since: BASE_ISO, until: isoMinutes(60), reason: LIST_NOTE, on: { kind: 'employee' as const, employee: 'dev-head', name: 'Dana' },
+  },
+} : task.number === 224 ? { ...task, priority: 'high' as const, goal: null } : task);
 
 /* Count the translated parts shown in each tracker view. A blank argument removes fixture data from a phrase. */
 function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] {
@@ -57,35 +66,39 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
   }
   const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, filters.goal, ...Object.values(statuses)];
   return view === 'tasks'
-    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, t.tracker.priority.label, list.goal, list.due, list.addTask]
+    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due, list.addTask,
+      list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', ''),
+      t.tracker.card.executor, t.tracker.card.responsible, t.tracker.card.due, t.tasks.taskActions, t.tasks.log]
     : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
       t.tracker.groups.waitingYou, t.tracker.time.minutes(49), t.tracker.wait.failedRun('17', false)];
 }
 
-const RTL = new Set(['ar', 'fa', 'he', 'ur']);
-async function frameLanguages(view: 'tasks' | 'board' | 'turns'): Promise<{ id: Language; t: Messages }[]> {
-  const ranked = await Promise.all(LANGUAGES.map(async ({ id }) => {
-    const dictionary = await import(`../../src/i18n/${id}.ts`) as Record<Language, Messages>;
-    const t = dictionary[id];
-    return { id, t, length: trackerWords(t, view).join('').length };
-  }));
-  ranked.sort((a, b) => a.length - b.length);
-  const picked = [ranked[0]!, ranked.at(-1)!, ranked.find(({ id }) => RTL.has(id))];
-  return [...new Map(picked.flatMap(item => item ? [[item.id, item] as const] : [])).values()];
+export async function expectTaskCard(page: Page, t: Messages, title: string): Promise<Locator> {
+  const card = page.getByRole('complementary', { name: `#221 ${title}`, exact: true });
+  await expect(card.getByRole('heading', { name: title, exact: true })).toBeVisible();
+  const facts = card.getByRole('group', { name: t.tracker.card.facts });
+  await expect(facts).toContainText('Sam Rivera');
+  await expect(facts.getByRole('link', { name: '#244 Frame guide overlay for the leaf', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: t.tasks.taskActions, exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(card.locator('.tp-brief')).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Done when', exact: true })).toBeVisible();
+  await expect(card.getByRole('region', { name: t.tasks.log })).toBeVisible();
+  return card;
 }
 
 /* Real geometry checks run alongside the still pictures in each browser engine. */
 export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tasks' | 'board' | 'turns'): Promise<void> {
   const paths = { tasks: '/tasks?department=dept-dev', board: '/tasks?department=dept-dev&view=board', turns: '/tasks?show=turns' };
-  for (const { id, t } of await frameLanguages(view)) {
-    for (const theme of THEMES) {
-      for (const size of SIZES) {
+  for (const { id, t } of await frameLanguages(t => trackerWords(t, view))) {
+    for (const theme of FRAME_THEMES) {
+      for (const size of FRAME_SIZES) {
         const context = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: size, timezoneId: 'UTC' });
         try {
           const frame = await context.newPage();
           const watcher = await prepareScenePage(frame, undefined, id, theme);
           await frame.clock.setFixedTime(new Date(BASE_ISO));
           const fixture = await serveMoonfern(frame);
+          if (view === 'tasks') fixture.setTasks(listTasks);
           await frame.goto(paths[view]);
           const region = frame.getByRole('region', { name: view === 'turns' ? t.tracker.side.turns : t.tracker.views[view === 'board' ? 'board' : 'list'], exact: true });
           await expect(region).toBeVisible();
@@ -117,6 +130,17 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
           await assertTrackerFit(frame);
           await assertTrackerEdges(frame, size.width);
           await frame.screenshot({ path: info.outputPath(`${view}-${id}-${theme}-${size.width}.png`) });
+          if (view === 'tasks') {
+            const group = region.getByRole('region', { name: new RegExp(`^${t.tracker.groups.working}:`) });
+            const parent = group.getByRole('listitem', { name: `#221 ${LIST_PARENT}`, exact: true });
+            const leaf = group.getByRole('listitem', { name: '#224 Sunlight meter calibration on iPhone', exact: true });
+            await assertListRows(region, parent, leaf, wide);
+            await parent.getByRole('button', { name: t.tracker.list.subtasks(1, 3) }).click();
+            await expect(parent.getByRole('listitem', { name: '#244 Frame guide overlay for the leaf' })).toBeVisible();
+            await assertTrackerFit(frame);
+            await parent.locator('.tr-row-line').first().evaluate(row => row.scrollIntoView({ block: 'start', inline: 'nearest' }));
+            await frame.screenshot({ path: info.outputPath(`tasks-expanded-${id}-${theme}-${size.width}.png`) });
+          }
           if (view === 'board') {
             const last = region.getByRole('region', { name: t.tracker.statuses.done, exact: true }).locator('.tr-card').last();
             await last.evaluate(card => card.scrollIntoView({ block: 'end', inline: 'nearest' }));
@@ -126,22 +150,34 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
           }
           if (view !== 'turns') {
             if (!wide) await frame.getByRole('button', { name: t.tracker.side.open }).click();
-            await assertSelectedDepartment(sidebar);
+            await assertSelectedDepartment(sidebar, t);
             if (view === 'board') await expect(sidebar.getByRole('button', { name: `${t.tracker.side.failures} 0` })).toBeVisible();
             await assertTrackerFit(frame);
             if (!wide) await sidebar.getByRole('button', { name: t.tracker.side.close }).click();
+          }
+          if (view === 'tasks') {
+            const parent = region.getByRole('listitem', { name: `#221 ${LIST_PARENT}`, exact: true });
+            await parent.getByRole('button', { name: LIST_PARENT, exact: true }).click();
+            const card = await expectTaskCard(frame, t, LIST_PARENT);
+            await expect(card.getByRole('region', { name: t.tasks.log })).toContainText(LIST_NOTE);
+            const body = card.locator('.ac-body');
+            expect(await body.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+            await frame.screenshot({ path: info.outputPath(`task-card-${id}-${theme}-${size.width}.png`) });
           }
           if (view === 'board') {
             if (!wide) {
               await region.getByRole('region', { name: t.tracker.statuses.waits }).locator('.tr-card').first().scrollIntoViewIfNeeded();
               await frame.screenshot({ path: info.outputPath(`board-person-${id}-${theme}-${size.width}.png`) });
             }
-            await frame.goto('/tasks?department=dept-dev&pipeline=pl-beta&view=board');
-            await expect(region.locator('.tr-col').nth(1)).toBeVisible();
-            await expect(region.getByRole('region', { name: 'TestFlight smoke test' })).toBeVisible();
+            await frame.goto(`/tasks?department=dept-dev&pipeline=${MOONFERN_PIPELINE.id}&view=board`);
+            const smoke = await expectBetaBoard(region, t);
             await assertBoard(region, wide, t);
             await assertTrackerFit(frame);
             await frame.screenshot({ path: info.outputPath(`pipeline-${id}-${theme}-${size.width}.png`) });
+            if (!wide) {
+              await smoke.scrollIntoViewIfNeeded();
+              await frame.screenshot({ path: info.outputPath(`pipeline-smoke-${id}-${theme}-${size.width}.png`) });
+            }
 
             fixture.setTasks(MOONFERN_TASKS.map(task => task.number === 224 ? {
               ...task, time: { ...task.time!, waitsOn: [{ kind: 'run', who: null, since: BASE_ISO, reason: '17', failure: 'run' }] },
@@ -202,12 +238,12 @@ async function expectOneLine(label: Locator): Promise<void> {
   expect(lines).toBe(1);
 }
 
-async function assertSelectedDepartment(sidebar: Locator): Promise<void> {
+async function assertSelectedDepartment(sidebar: Locator, t: Messages): Promise<void> {
   const head = sidebar.locator('.tr-dept-head.on');
   await expect(head.getByRole('button', { name: 'Development', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(head.getByRole('button', { expanded: true })).toBeVisible();
   await expectOneLine(head.getByText('Development', { exact: true }));
-  const pipeline = sidebar.getByText('Beta build way', { exact: true });
+  const pipeline = sidebar.getByText(t.tracker.side.defaultPipeline(MOONFERN_PIPELINE.name), { exact: true });
   await expect(pipeline).toHaveCSS('overflow-wrap', 'break-word');
   const widths = await head.evaluate(row => [row.getBoundingClientRect().width, row.parentElement!.getBoundingClientRect().width]);
   expect(Math.abs(widths[0]! - widths[1]!)).toBeLessThanOrEqual(1);
@@ -227,6 +263,80 @@ async function assertTurnQuestion(region: Locator, t: Messages): Promise<void> {
   expect(button!.y).toBeGreaterThanOrEqual(duration!.y + duration!.height - 1);
   const other = region.getByRole('listitem', { name: '#230 Onboarding plant card layout' });
   await expect(other.locator('.tr-wait')).toHaveText(t.tracker.wait.person('Leo Park', t.tracker.time.minutes(40)));
+}
+
+async function listRowGeometry(row: Locator) {
+  return row.evaluate(element => {
+    const line = element.querySelector(':scope > .tr-row-line')!;
+    const name = line.querySelector('.tr-name')!;
+    const [caret, dot, title] = [...name.children] as [Element, Element, Element];
+    const meta = line.querySelector('.tr-meta')!;
+    const rtl = getComputedStyle(line).direction === 'rtl';
+    const start = (node: Element) => {
+      const box = node.getBoundingClientRect();
+      return rtl ? box.right : box.left;
+    };
+    const center = (node: Element) => {
+      const box = node.getBoundingClientRect();
+      return box.y + box.height / 2;
+    };
+    const firstLineCenter = (node: Element) => {
+      const style = getComputedStyle(node);
+      return node.getBoundingClientRect().top + parseFloat(style.paddingBlockStart) + parseFloat(style.lineHeight) / 2;
+    };
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    return {
+      titleStart: start(title), titleCenter: firstLineCenter(title), titleLines: range.getClientRects().length,
+      caretCenter: center(caret), caretWidth: caret.getBoundingClientRect().width, dotCenter: center(dot),
+      nameWidth: name.getBoundingClientRect().width, metaStart: start(meta), metaBottom: meta.getBoundingClientRect().bottom,
+      facts: [...line.querySelectorAll(':scope > .tr-cell')].filter(cell => cell.getClientRects().length > 0).map(cell => {
+        const value = cell.querySelector('.tr-v')!;
+        const mark = value.querySelector('.tr-mark');
+        return {
+          start: start(cell), width: cell.getBoundingClientRect().width, top: cell.getBoundingClientRect().top,
+          center: mark ? center(mark) : firstLineCenter(value.querySelector('.tr-goal-link') ?? value),
+        };
+      }),
+    };
+  });
+}
+
+async function assertListRows(list: Locator, parent: Locator, leaf: Locator, wide: boolean): Promise<void> {
+  await expect(parent.locator('.tr-wait')).toContainText(LIST_NOTE);
+  const [long, short] = await Promise.all([listRowGeometry(parent), listRowGeometry(leaf)]);
+  const aligns = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThanOrEqual(1);
+  expect(long.titleLines).toBeGreaterThan(1);
+  aligns(long.caretCenter, long.titleCenter);
+  aligns(long.dotCenter, long.titleCenter);
+  aligns(short.dotCenter, short.titleCenter);
+  aligns(long.caretWidth, short.caretWidth);
+  aligns(long.titleStart, short.titleStart);
+  aligns(long.titleStart, long.metaStart);
+  aligns(short.titleStart, short.metaStart);
+  if (wide) {
+    expect(short.titleLines).toBe(1);
+    const headings = await list.locator('.tr-head > span').evaluateAll(nodes => nodes.map(node => {
+      const heading = node.firstElementChild ?? node;
+      const box = heading.getBoundingClientRect();
+      return getComputedStyle(node).direction === 'rtl' ? box.right : box.left;
+    }));
+    aligns(long.titleStart, headings[0]!);
+    for (const [index, fact] of long.facts.entries()) {
+      aligns(fact.start, headings[index + 1]!);
+      aligns(fact.start, short.facts[index]!.start);
+      aligns(fact.center, long.titleCenter);
+    }
+    expect(long.nameWidth).toBeGreaterThan(long.facts.reduce((width, fact) => width + fact.width, 0));
+  } else {
+    await expect(list.locator('.tr-head')).toBeHidden();
+    for (const row of [long, short]) {
+      for (const fact of row.facts) {
+        aligns(fact.start, row.titleStart);
+        expect(fact.top).toBeGreaterThanOrEqual(row.metaBottom);
+      }
+    }
+  }
 }
 
 async function assertBoard(board: Locator, wide: boolean, t: Messages): Promise<void> {

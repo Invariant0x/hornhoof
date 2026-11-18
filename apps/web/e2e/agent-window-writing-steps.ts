@@ -1,15 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { ComputerAccessView } from '../src/types';
 import { AGENT_HIDDEN, chooseTerminal } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 import { ORCHESTRATOR, ORCHESTRATOR_CARD, VIEWERS, type Agent, type Settings, type Viewer } from './agent-window-steps';
-
-export const STANDING: ComputerAccessView = {
-  machine: { id: 'node-a', networkId: 'n-node-a', name: 'node-a', hostname: 'node-a', personId: 'p1', role: 'worker', os: 'linux', data: false },
-  reachable: true, open: true, scope: 'orchestrator', employees: [], canOpen: false, canClose: false,
-};
 
 /* What reached the server from this person, and the keys that reached the terminal. */
 type Sent = { messages: { agent: string; text: string }[]; keys: string[] };
@@ -34,7 +28,6 @@ export async function serve(page: Page, viewer: Viewer, settings: Settings): Pro
     }
     if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
     if (url.pathname === '/api/me') return route.fulfill({ json: me });
-    if (url.pathname === '/api/machines/access') return route.fulfill({ json: { views: [] } });
     if (url.pathname === '/api/agents/orchestrator') return route.fulfill({ json: ORCHESTRATOR_CARD });
     if (url.pathname === '/api/agents/orchestrator/start') return route.fulfill({ json: { started: false } });
     if (url.pathname === '/api/agents/orchestrator/events') return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: true, canType: types } } });

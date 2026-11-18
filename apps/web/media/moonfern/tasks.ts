@@ -1,8 +1,9 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
-import type { AgentRef, Decisions, GoalView, PersonRef, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskStatus, TurnView, WaitingRequest } from '../../src/types';
+import type { AgentRef, Decisions, GoalView, PersonRef, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskStatus, TurnView, WaitingRequest } from '../../src/types';
 import { PLACEMENTS } from './agents';
 import { BASE_ISO, isoMinutes } from './clock';
 import { LEO_VIEW, MAYA_VIEW, SAM_VIEW } from './people';
+import { CARE_PIPELINE, MOONFERN_PIPELINE } from './pipelines';
 import { routeAt } from './route';
 
 const refOf = (agentId: string): AgentRef => {
@@ -131,19 +132,7 @@ const WHY: Partial<Record<number, string>> = {
   230: 'The first card decides whether a tester adds a second plant.',
 };
 
-/* The way every Development change goes: built, reviewed by another maker, checked for security and smoke-tested on
-   TestFlight. */
-export const MOONFERN_PIPELINE: Pipeline = {
-  id: 'pl-beta', department: PLACES.dev, name: 'Beta build way', archived: false, version: 1, mayEdit: true,
-  why: 'Every change is built, reviewed by another maker, checked for security and smoke-tested on TestFlight.',
-  stages: [
-    { id: 's-build', parentId: null, name: 'Build', ownerRole: null, owner: null, position: 0 },
-    { id: 's-review', parentId: 's-build', name: 'Review', ownerRole: null, owner: { id: 'rev-codex', name: 'Marcus' }, position: 0 },
-    { id: 's-security', parentId: 's-review', name: 'Security', ownerRole: null, owner: { id: 'dev-sec', name: 'Petra' }, position: 0 },
-    { id: 's-smoke', parentId: 's-security', name: 'TestFlight smoke test', ownerRole: null, owner: { id: 'dev-test', name: 'Gideon' }, position: 0 },
-  ],
-};
-const STAGE_IDS = ['s-build', 's-review', 's-security', 's-smoke'];
+const STAGE_IDS = MOONFERN_PIPELINE.stages.map(stage => stage.id);
 
 function line(s: TaskSeed, idx: number, turn: number | null, parentId: string | null = null): TaskLine {
   const [number, title, brief, dept, agentId, status, stage = 0, waitsFor = []] = s;
@@ -170,8 +159,8 @@ function line(s: TaskSeed, idx: number, turn: number | null, parentId: string | 
     why: WHY[number] ?? '',
     dueAt: number === 218 || number === 221 ? '2026-11-20T00:00:00.000Z' : number === 230 ? '2026-11-19T00:00:00.000Z' : null,
     time: { inStatusSince: status === 'done' ? updatedAt : since, workSeconds: 600 + ((number * 977) % 9000), waitsOn: waiting },
-    pipelineId: onWay ? MOONFERN_PIPELINE.id : null,
-    pipelineStageId: onWay && status !== 'open' ? STAGE_IDS[Math.min(stage, 3)]! : null,
+    pipelineId: onWay ? MOONFERN_PIPELINE.id : number === 237 ? CARE_PIPELINE.id : null,
+    pipelineStageId: onWay && status !== 'open' ? STAGE_IDS[Math.min(stage, 3)]! : number === 237 ? 's-care-draft' : null,
     createdAt: isoMinutes(-300 + idx * 4),
     updatedAt,
   };
@@ -331,11 +320,43 @@ export const CARE_PLANTS = [
   'Parlor palm', 'Hoya', 'Peperomia', 'Begonia', 'Anthurium', 'Croton', 'Areca palm', 'Cast iron plant', 'Haworthia', 'Orchid',
 ] as const;
 const CARE_BRIEF = 'Write one care page for the plant in your input, in the format of moonfern.app/care/pothos: light, water, soil, pets, and the one mistake new growers make. Return Markdown only.';
+const CARE_NOTES = [
+  'Bright, indirect light. Water when the top 2 cm are dry. Keep away from pets.',
+  'Give it bright, indirect light and a moss pole as it climbs.',
+  'Let the soil dry between waterings, especially in winter.',
+  'Use a loose potting mix and let it dry before watering again.',
+  'Keep the soil lightly moist. Check it when the leaves droop.',
+  'Use a pot with drainage and trim brown tips with clean scissors.',
+  'Wipe the large leaves gently so dust does not build up.',
+  'Give it bright, filtered light and avoid moving the pot often.',
+  'Keep it away from drafts and use water low in minerals.',
+  'Let its vines trail or give them a pole in bright, filtered light.',
+  'Give it direct light after allowing it to adjust gradually.',
+  'Let the mix dry out and rotate the pot for even growth.',
+  'Keep the soil evenly moist and raise humidity around the leaves.',
+  'Use filtered light and let the top of the soil dry first.',
+  'Keep it in medium light and water less in winter.',
+  'Give it cool, bright conditions and check the leaves for mites.',
+  'Use a bright spot and leave room for new leaves to open.',
+  'Keep it in filtered light and avoid letting the pot dry completely.',
+  'Choose gritty soil and let the pearls start to soften before watering.',
+  'Water sparingly. The swollen trunk stores water.',
+  'Give it filtered light and avoid leaving water in the saucer.',
+  'Use an airy mix and leave the old flower stalks in place.',
+  'Let the soil dry partly and keep water off the crown.',
+  'Give it gentle light and water the soil around the leaves.',
+  'Use an airy mix in bright, indirect light.',
+  'Keep it in a warm, bright spot for stronger leaf color.',
+  'Water when the top of the mix dries and empty the saucer.',
+  'Use a draining pot and give it time to dry between waterings.',
+  'Choose a gritty mix and use filtered light.',
+  'Use orchid bark. Soak the roots briefly, then let the pot drain fully.',
+];
 
 const call = (number: number, input: string | null, startMin: number, minutes: number, result: string, over: Record<string, unknown> = {}): TaskLogLine => ({
   kind: 'call',
   text: '',
-  data: { batch: 'b1d2c3e4-0000-4000-8000-000000000237', number, judge: false, brief: CARE_BRIEF, input, stage: null, status: 'done', error: null, verdict: null, result,
+  data: { batch: 'b1d2c3e4-0000-4000-8000-000000000237', number, judge: false, brief: CARE_BRIEF, input, stage: 'development', status: 'done', error: null, verdict: null, result,
     startedAt: isoMinutes(startMin), finishedAt: isoMinutes(startMin + minutes), ...over },
   by: { kind: 'agent', id: 'mkt-seo', name: 'Jonah' },
   at: isoMinutes(startMin + minutes),
@@ -345,10 +366,7 @@ const call = (number: number, input: string | null, startMin: number, minutes: n
 const CARE_LOG: TaskLogLine[] = [
   { kind: 'created', text: '', data: null, by: { kind: 'agent', id: 'mkt-head', name: 'Robin' }, at: isoMinutes(-70) },
   { kind: 'assigned', text: '', data: null, by: { kind: 'agent', id: 'mkt-head', name: 'Robin' }, at: isoMinutes(-70) },
-  call(1, 'Pothos', -24, 3, '## Pothos\nBright, indirect light. Water when the top 2 cm are dry. Toxic to cats and dogs.'),
-  call(2, 'Monstera', -24, 4, '## Monstera\nBright, indirect light, a moss pole as it climbs. Water every 1 to 2 weeks.'),
-  call(3, 'Snake plant', -24, 2, '## Snake plant\nAny light. Water once a month in winter: the usual mistake is too much water.'),
-  call(30, 'Orchid', -21, 3, '## Orchid\nEast window, water by soaking for 10 minutes, let it drain fully.'),
+  ...CARE_PLANTS.map((plant, i) => call(i + 1, plant, -24 + Math.floor(i / 10), 3, `## ${plant}\n${CARE_NOTES[i]}`)),
   {
     ...call(31, null, -17, 2, 'All 30 pages follow the format and give the pet warning. Calls 7 and 19 named the same mistake for different plants; both are fixed.', {
       judge: true, brief: 'Read the 30 pages. Check the format, the pet warning and that no two pages repeat each other. Fix what you find.', verdict: { pass: true, reason: 'All 30 pages are ready to publish.' },
@@ -356,13 +374,13 @@ const CARE_LOG: TaskLogLine[] = [
   },
 ];
 
-export function moonfernTaskDetail(taskId: string): TaskDetail | null {
-  const found = MOONFERN_TASKS.find(t => t.id === taskId);
+export function moonfernTaskDetail(taskId: string, tasks: TaskLine[]): TaskDetail | null {
+  const found = tasks.find(t => t.id === taskId);
   if (!found) return null;
   const head = found.department?.id === 'dept-dev' ? 'dev-head' : found.department?.id === 'dept-mkt' ? 'mkt-head' : 'dsn-head';
   const headName = PLACEMENTS.find(p => p.employee.id === head)?.employee.name ?? 'Dana';
   const by = { kind: 'agent' as const, id: head, name: headName };
-  const subtasks = MOONFERN_TASKS.filter(t => t.parentId === found.id);
+  const subtasks = tasks.filter(t => t.parentId === found.id);
   const log: TaskLogLine[] = found.id === 't-237' ? CARE_LOG : [
     { kind: 'created', text: '', data: null, by, at: found.createdAt },
     { kind: 'assigned', text: '', data: null, by, at: found.createdAt },
@@ -371,13 +389,14 @@ export function moonfernTaskDetail(taskId: string): TaskDetail | null {
   return {
     ...found,
     echelonFindings: emptyEchelonFindings(),
-    body: `${found.brief}\n\n### Done when\n- It works offline and never blocks the main thread.\n- Its tests pass on the Turn 6 branch.\n- It reads well in light and dark on iPhone.`,
-    parent: found.parentId ? { id: found.parentId, number: Number(found.parentId.slice(2)), title: MOONFERN_TASKS.find(t => t.id === found.parentId)?.title ?? '' } : null,
+    body: found.id === 't-237' ? 'Draft the pages in parallel and have the judge read all thirty before publishing.'
+      : '### Done when\n- It works offline and never blocks the main thread.\n- Its tests pass on the Turn 6 branch.\n- It reads well in light and dark on iPhone.',
+    parent: found.parentId ? { id: found.parentId, number: Number(found.parentId.slice(2)), title: tasks.find(t => t.id === found.parentId)?.title ?? '' } : null,
     after: found.waitsFor.map(num => {
-      const dep = MOONFERN_TASKS.find(x => x.number === num);
+      const dep = tasks.find(x => x.number === num);
       return { id: dep?.id ?? `t-${num}`, number: num, title: dep?.title ?? `Task #${num}`, status: dep?.status ?? 'working' };
     }),
-    neededFor: MOONFERN_TASKS.filter(x => x.waitsFor.includes(found.number)).map(x => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
+    neededFor: tasks.filter(x => x.waitsFor.includes(found.number)).map(x => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
     mayEdit: true,
     version: 1,
     revision: 1,

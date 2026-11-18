@@ -1,13 +1,10 @@
 /* A note at the foot of an agent's window (#1115). tone: quiet for what only tells, wait for what holds the agent
-   back, bad for what was not done, access for a machine opened or asked for. alert: said at once to whoever hears the
-   screen. link: the place where the note is answered. Its words are the screen's language, set apart from the page's
-   direction so that a page drawn right to left keeps their order and their full stop at the end. */
-export type NoteTone = 'quiet' | 'wait' | 'bad' | 'access';
-export type NoteLink = { label: string; href: string; onOpen(): void };
-export type WindowNote = { id: string; word: string; text: string; tone: NoteTone; alert?: boolean; link?: NoteLink };
+   back, bad for what was not done. alert: said at once to whoever hears the screen. The words are in the screen's
+   language, set apart from the page's direction so a page drawn right to left keeps their order and final full stop. */
+export type NoteTone = 'quiet' | 'wait' | 'bad';
+export type WindowNote = { id: string; word: string; text: string; tone: NoteTone; alert?: boolean };
 
 function Note({ note }: { note: WindowNote }) {
-  const { link } = note;
   return (
     <div className={`t-note ${note.tone}`} role={note.alert ? 'alert' : 'status'}>
       <span className="t-note-word" dir="ltr">
@@ -16,22 +13,6 @@ function Note({ note }: { note: WindowNote }) {
       <span className="t-note-text" dir="ltr">
         {note.text}
       </span>
-      {link && (
-        <>
-          {' '}
-          <a
-            className="t-note-link"
-            dir="ltr"
-            href={link.href}
-            onClick={e => {
-              e.preventDefault();
-              link.onOpen();
-            }}
-          >
-            {link.label}
-          </a>
-        </>
-      )}
     </div>
   );
 }

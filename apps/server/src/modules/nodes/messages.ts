@@ -28,7 +28,7 @@ import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } fro
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { alertSilentPart } from '../testruns/part-silence.js';
-import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
+import { ownMachine, sameNode, type NodeIdentity, type NodeTransport } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
@@ -324,7 +324,7 @@ async function privateIncoming(ctx: Pick<Ctx, 'db'>, msg: NodeMessage): Promise<
   return msg;
 }
 
-export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
+export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date(), transport?: NodeTransport): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
   msg = await privateIncoming(ctx, msg);
   if (await parkUnknown(ctx, id, msg)) return;
@@ -365,7 +365,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       releaseRestartedChecks(ctx, id, cut?.cause);
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
-      if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
+      if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id, msg.checkLeases, transport); }
       /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
       programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
@@ -393,10 +393,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     case 'load': {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
-      const { type: _, live, ...load } = msg;
+      const { type: _, live, checkLeases, ...load } = msg;
       ctx.hub.report(id, load);
       await touchNodeSeen(ctx, id, now);
-      await checkQueueLoad(ctx, id);
+      await checkQueueLoad(ctx, id, checkLeases, transport);
       /* A machine that freed up takes a part that waits, and one whose kernel killed nothing more for want of memory starts
          the programs that waited. */
       await pumpTests(ctx);

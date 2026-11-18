@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fromAgent } from '../src/terminal/peer.js';
+import { fromAgent, OwnerUnknown, socketOf } from '../src/terminal/peer.js';
 
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
 const folders: string[] = [];
@@ -78,5 +78,53 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', socket)).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, port: 41235 })).toBe(false);
     expect(await fromAgent(panes, fakeProc(socket, 1))('agent-1', socket)).toBe(false);
+  });
+
+  it('says why it refuses a connection, and a pane lookup that fails gives no answer instead of a refusal', async () => {
+    const reasons: string[] = [];
+    const why = (reason: string) => void reasons.push(reason);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 0 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, pid: 99 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', { ...socket, pid: 21 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-1', { ...socket, port: 41235 }, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 21))('agent-1', socket, why)).toBe(false);
+    expect(await fromAgent(panes, fakeProc(socket, 12))('agent-3', socket, why)).toBe(false);
+    expect(reasons).toEqual([
+      'malformed pid hint',
+      'the hinted process does not hold the connection',
+      'the hinted process is gone, as a caller that gave up before its check is',
+      "the caller is not under the agent's pane",
+      'the connection is not in the socket table',
+      "no process under the agent's pane holds the connection",
+      'the agent has no pane',
+    ]);
+    const lost = fromAgent(async () => { throw new Error('no server running on /tmp/tmux-0/hh'); }, fakeProc(socket, 12));
+    await expect(lost('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
+    await expect(lost('agent-1', socket)).rejects.toThrow('tmux pane lookup failed');
+  });
+
+  it('gives no answer when the socket table cannot be read, rather than taking it for an empty one', async () => {
+    const proc = fakeProc(socket, 12);
+    rmSync(join(proc, 'net', 'tcp'));
+    await expect(socketOf(proc, socket)).rejects.toThrow(new OwnerUnknown('Linux TCP table read failed'));
+    await expect(fromAgent(panes, proc)('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
+  });
+
+  it('distinguishes an unavailable Linux process lookup from a process that disappeared', async () => {
+    const proc = fakeProc(socket, 12);
+    const owns = fromAgent(panes, proc);
+    await expect(owns('agent-1', { ...socket, pid: 12 })).resolves.toBe(true);
+
+    const stat = join(proc, '12', 'stat');
+    rmSync(stat);
+    mkdirSync(stat);
+    await expect(owns('agent-1', { ...socket, pid: 12 })).rejects.toThrow(new OwnerUnknown('Linux process ancestry lookup failed'));
+    await expect(owns('agent-1', socket)).rejects.toThrow(new OwnerUnknown('Linux process tree lookup failed'));
+
+    rmSync(join(proc, '12'), { recursive: true });
+    await expect(owns('agent-1', { ...socket, pid: 12 })).resolves.toBe(false);
+    symlinkSync('12', join(proc, '12'));
+    await expect(owns('agent-1', { ...socket, pid: 12 })).rejects.toThrow(new OwnerUnknown('Linux hinted process lookup failed'));
   });
 });

@@ -43,9 +43,9 @@ test('subscriptions.gif: seven plans with live 5h/7d bars, Sam Rivera filter, Ma
   const api = await serveMoonfern(page);
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Subscriptions', exact: true }).click();
+  await page.getByRole('button', { name: 'Subscriptions & API', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'Subscriptions', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Subscriptions & API', exact: true })).toBeVisible();
   await expect(page.locator('table.dt tbody tr.rm')).toHaveCount(7);
   await expect(page.locator('table.dt')).toContainText('Maya Chen');
   await expect(page.locator('table.dt')).toContainText('Leo Park');

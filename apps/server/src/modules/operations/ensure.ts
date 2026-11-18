@@ -1,5 +1,5 @@
 import { idOnly } from '../../db/selections.js';
-import { seedDefaultPipeline } from '../tracker/pipelines.js';
+import { seedCatalogPipelines } from '../tracker/pipelines.js';
 import { ensureOpenTurn } from '../tasks/turn-department.js';
 import { and, asc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -32,7 +32,7 @@ async function createOperations(ctx: Ctx, tx: Tx, companyId: string) {
   const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, companyId));
   const [dept] = await tx.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS', position: (last?.n ?? -1) + 1 }).returning();
   await ensureOpenTurn(tx, companyId, dept!.id);
-  await seedDefaultPipeline(ctx, tx, dept!, null);
+  await seedCatalogPipelines(ctx, tx, dept!, null);
   return dept!;
 }
 

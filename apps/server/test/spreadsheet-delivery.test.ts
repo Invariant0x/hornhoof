@@ -301,13 +301,13 @@ describe('1b. Telegram sendDocument delivery and recipient access boundaries', (
     });
     expect(attached.statusCode).toBe(201);
     c.node.send({ type: 'job.event', jobId: first.jobId, seq: 0, event: { kind: 'text', text: 'Отправляю таблицу контактов.' } });
+    c.node.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
 
     await until(() => c.tg.sentDocuments.filter(d => d.chat_id === CEO_TG.id).length === 1);
     await until(() => c.tg.sent.filter(s => s.chat_id === CEO_TG.id).length === 1);
     expect(c.tg.sentDocuments.filter(d => d.chat_id === MKT_TG.id)).toHaveLength(0);
     expect(c.tg.sentDocuments[0]!.file_name).toBe('contacts.xlsx');
     expect(Buffer.compare(c.tg.sentDocuments[0]!.bytes, SAMPLE_XLSX)).toBe(0);
-    c.node.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.node.acks.includes(first.jobId));
 
     /* Clara writes to Marketing Head, then her Marketing access is revoked before the agent replies with a file: she gets nothing. */
@@ -696,7 +696,13 @@ describe('the edges of a table delivered to a person', () => {
       headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${run.toolToken}` },
     });
     expect(up.statusCode).toBe(201);
+    /* A bot sends no file that big, so the agent gets its link to pass on. */
+    const client = await mcp(c.app, run.toolToken!);
+    const tool = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment: up.json().id } })) as ToolReply;
+    expect(tool.isError).toBe(true);
+    expect(tool.content[0]!.text).toMatch(/^archive\.zip is over 50 MB, more than a Telegram bot sends\. Give Ivan its link instead, which opens it for 7 days with no sign-in, and say that a big file lives 30 days on one machine and is lost if that machine goes: http\S+\/api\/files\/\S+$/);
     c.node.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Вот архив.' } });
+    c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.tg.sent.filter(s => s.chat_id === CEO_TG.id).length === 2);
     expect(c.tg.sentDocuments).toHaveLength(0);
     const said = c.tg.sent.filter(s => s.chat_id === CEO_TG.id).map(s => s.text);
@@ -705,12 +711,6 @@ describe('the edges of a table delivered to a person', () => {
     const opened = await c.app.inject({ url: new URL(link!).pathname });
     expect(opened.rawPayload.equals(big)).toBe(true);
 
-    /* A bot sends no file that big, so the agent gets its link to pass on. */
-    const client = await mcp(c.app, run.toolToken!);
-    const tool = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment: up.json().id } })) as ToolReply;
-    expect(tool.isError).toBe(true);
-    expect(tool.content[0]!.text).toMatch(/^archive\.zip is over 50 MB, more than a Telegram bot sends\. Give Ivan its link instead, which opens it for 7 days with no sign-in, and say that a big file lives 30 days on one machine and is lost if that machine goes: http\S+\/api\/files\/\S+$/);
-    expect(c.tg.sentDocuments).toHaveLength(0);
   });
 
   it('shows a picture an agent attached to its chat as a picture, and gives every other chat file to save', async () => {
