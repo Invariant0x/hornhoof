@@ -468,7 +468,8 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   await emitLive(page, { type: 'task' });
   await emitLive(page, { type: 'org' });
   await expect(windowBox.locator('.req-question')).toHaveCount(0);
-  await expect(windowBox.locator('.tstate.working')).toBeVisible();
+  /* The task card names its state as the first of its facts. */
+  await expect(windowBox.locator('.tp-facts > span').first()).toHaveText('In work');
 
   /* 4. Type and send a message in Chat under live SSE events without losing focus or remounting. */
   await chatInput.focus();

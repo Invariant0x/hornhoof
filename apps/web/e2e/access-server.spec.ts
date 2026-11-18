@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { expect, test as base, type Browser, type Page } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -121,13 +123,12 @@ async function signedIn(browser: Browser, server: Server, who: keyof Boot['token
 }
 
 const errorsOf = (page: Page) => (page as Page & { __errors?: string[] }).__errors ?? [];
+const structure = (page: Page, name = en.dept.structure) => page.getByRole('region', { name, exact: true });
 
 async function openAgent(page: Page, name: string) {
   await page.goto('/');
   await page.getByRole('button', { name: /^Development/ }).click();
-  const chip = page.locator('.dept-chip').filter({ hasText: name });
-  await expect(chip).toBeVisible();
-  await chip.locator('.schip').click();
+  await structure(page).getByRole('button', { name, exact: true }).click();
   return page.getByRole('complementary', { name: new RegExp(name) });
 }
 
@@ -143,7 +144,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
           await page.screenshot({ path: info.outputPath(`real-open-task-${lang}-${theme}-${width}.png`) });
           await page.goto(`/departments/${server.sales.id}`);
-          await expect(page.locator('.dcanvas')).toContainText('Awa');
+          await expect(structure(page, (lang === 'en' ? en : ru).dept.structure).getByText('Awa', { exact: true })).toBeVisible();
           await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
           await page.goto(`/agents/${server.crew.other.id}`);
           await expect(page.locator('body')).not.toContainText('Otto');
@@ -165,7 +166,7 @@ test('real server shows everyone the whole department and its work, and opens on
     await expect(ann.locator('.map')).toContainText('Own work');
     await expect(ann.locator('.map')).toContainText('Away work');
     await ann.getByRole('button', { name: /^Development/ }).click();
-    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).toContainText(name);
+    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(structure(ann).getByText(name, { exact: true })).toBeVisible();
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
     for (const name of ['Mina', 'Otto']) await expect(ann.locator('.tv-labs')).toContainText(name);
     await expect(ann.locator('.tv-in')).toContainText('Hidden work');
@@ -175,9 +176,14 @@ test('real server shows everyone the whole department and its work, and opens on
     await expect(ann.getByRole('heading', { level: 1, name: 'Development' })).toBeVisible();
     await expect(ann.locator('.tr-main')).toContainText('Own work');
     await expect(ann.locator('.tr-main')).toContainText('Hidden work');
-    const closed = await openAgent(ann, 'Otto');
-    await expect(ann.getByText('Otto: everyone sees the work, and only the people of this department open the window.').first()).toBeVisible();
-    await expect(closed).toHaveCount(0);
+    await ann.goto(`/departments/${server.dev.id}`);
+    await expect(structure(ann).getByText('Otto', { exact: true })).toBeVisible();
+    await expect(structure(ann).getByRole('button', { name: 'Otto', exact: true })).toHaveCount(0);
+    /* The staff map still explains why Otto's window stays closed. */
+    await ann.getByRole('button', { name: en.dept.staffMap, exact: true }).click();
+    await ann.getByRole('region', { name: en.dept.schema, exact: true }).locator('.dept-chip', { hasText: 'Otto' }).locator('.schip').click();
+    await expect(ann.getByText(en.dept.closedAgent('Otto')).first()).toBeVisible();
+    await expect(ann.getByRole('complementary', { name: /Otto/ })).toHaveCount(0);
     const window = await openAgent(ann, 'Mina');
     await expect(window).toBeVisible();
     expect(errorsOf(ann)).toEqual([]);
@@ -190,13 +196,13 @@ test('real server lets the department owner see every agent of their department 
   try {
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
     await olga.goto(`/departments/${server.dev.id}`);
-    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(olga.locator('.dcanvas')).toContainText(name);
+    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(structure(olga).getByText(name, { exact: true })).toBeVisible();
     for (const who of ['ceo', 'clara'] as const) {
       const viewer = await signedIn(browser, server, who, 'en', 'light', 1440);
       await viewer.goto(`/departments/${server.dev.id}`);
-      for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(viewer.locator('.dcanvas')).toContainText(name);
+      for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(structure(viewer).getByText(name, { exact: true })).toBeVisible();
       await viewer.goto(`/departments/${server.sales.id}`);
-      for (const name of ['Awa', 'Fara', 'Wanda', 'Lena']) await expect(viewer.locator('.dcanvas')).toContainText(name);
+      for (const name of ['Awa', 'Fara', 'Wanda', 'Lena']) await expect(structure(viewer).getByText(name, { exact: true })).toBeVisible();
       await viewer.close();
     }
   } finally {

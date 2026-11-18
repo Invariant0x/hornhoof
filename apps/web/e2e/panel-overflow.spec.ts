@@ -12,6 +12,7 @@ const PHASE = process.env.HH_PANEL_PHASE ?? 'after';
 const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
 const LONG_URL = `https://example.invalid/reports/${'Evidence'.repeat(20)}`;
 const LONG_TEXT = `Keep the full delivery report at ${LONG_URL}`;
+const LONG_BRIEF = `Keep the full delivery report at\n${LONG_URL}`;
 const NOTES: NoteView[] = [
   { number: 1, text: LONG_TEXT, by: { kind: 'person', id: 'p-long', name: 'Alexandria Example Long Display Name' }, updatedAt: '2026-11-04T00:00:00.000Z' },
   { number: 2, text: 'Short note.', by: { kind: 'orchestrator' }, updatedAt: '2026-11-04T00:00:00.000Z' },
@@ -32,10 +33,10 @@ async function expectInside(container: Locator, elements: Locator[]) {
   }
 }
 
-async function expectWrappedText(element: Locator) {
-  await expect(element).toHaveCSS('white-space', 'normal');
+async function expectWrappedText(element: Locator, whitespace = 'normal') {
+  await expect(element).toHaveCSS('white-space', whitespace);
   await expect(element).toHaveCSS('overflow-wrap', 'anywhere');
-  expect(await element.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await element.evaluate(el => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
 }
 
 /* The orchestrator's notebook, open on its two notes, the first one long; a removed note is counted. The two notebook
@@ -128,7 +129,7 @@ for (const lang of ['en', 'ru'] as const) {
         const errors: string[] = [];
         page.on('pageerror', error => errors.push(error.message));
         page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
-        const task = { ...TASKS[0]!, brief: LONG_TEXT };
+        const task = { ...TASKS[0]!, brief: LONG_BRIEF };
         await serveApi(page);
         const current = { version: '0.7.0', commit: 'panel-overflow-test' };
         await page.route('**/api/version', route => route.fulfill({ json: current }));
@@ -143,13 +144,13 @@ for (const lang of ['en', 'ru'] as const) {
         await expectInside(row, [title]);
         await title.click();
         const detail = page.getByRole('complementary', { name: /#1 Checkout step 1/ });
-        await expect(detail.locator('.tp-brief')).toHaveText(LONG_TEXT);
+        await expect(detail.locator('.tp-brief')).toHaveJSProperty('textContent', LONG_BRIEF);
         const words = MESSAGES[lang].tasks;
         await expect(detail.getByRole('button', { name: words.taskActions })).toHaveCSS('block-size', '44px');
         await detail.getByRole('button', { name: words.moreDescription }).click();
         await expectWrappedText(detail.locator('.tp-body .md > p'));
         await capture(page, info, `task-detail-${look}`);
-        await expectWrappedText(detail.locator('.tp-brief'));
+        await expectWrappedText(detail.locator('.tp-brief'), 'pre-wrap');
         await expectInside(detail.locator('.ac-body'), [detail.locator('.tp-brief')]);
         expect(errors).toEqual([]);
       });
