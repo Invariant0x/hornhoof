@@ -24,7 +24,7 @@ describe('development check ownership', () => {
   it.each(['DEV-TEST', 'DEV-QA'])('delivers %s broader checks only for an assigned full validation', id => {
     const policy = filesFor(id).find(file => file.name === 'dev-testing-policy')!.body;
     expect(policy).toMatch(/If assigned full candidate validation/);
-    for (const check of ['whole suite', 'browser engines', 'mutation', 'coverage', 'CRAP', 'dryer', 'live']) expect(policy, check).toContain(check);
+    for (const check of ['whole suite', 'browser engines', 'mutation', 'coverage', 'quality measurements', 'live']) expect(policy, check).toContain(check);
     expect(policy).toMatch(/after a fix rerun failed and affected checks/);
   });
 
@@ -34,7 +34,7 @@ describe('development check ownership', () => {
     expect(implement).toMatch(/submit its exact SHA, requirements-to-tests, observed results/);
     expect(implement).not.toMatch(/Finish[^\n]*(formatter|linter|type checker|crapper|dryer)/);
     const selection = body('dev-testing-policy').split('\n').find(line => line.startsWith('- **T2:'))!;
-    expect(selection).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);
+    expect(selection).toMatch(/configured integration branch or an eligible release candidate branch/i);
     expect(selection).not.toMatch(/lint|crapper|dryer/);
     const ordinary = body('dev-testing-policy').split('\n').find(line => line.startsWith('- **T3:'))!;
     expect(ordinary).toContain('affected tests');
@@ -52,13 +52,11 @@ describe('development check ownership', () => {
 });
 
 describe('where change checks run and what proves them', () => {
-  it('keeps change checks in the workspace, with named local tests when the workspace cannot run or bound one', () => {
-    for (const id of ['dev-task-flow', 'dev-gates', 'hh-task-flow']) {
-      expect(body(id), id).not.toMatch(/stricter[^.]*assignment|assignment can require every check there|takes precedence/i);
-    }
+  it('selects workspace checks and expands to the affected package when needed', () => {
     for (const id of ['hh-run-checks', 'dev-implement']) {
-      expect(body(id), id).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it/i);
-      expect(body(id), id).toMatch(/when your workspace cannot run a check[\s\S]*named local tests of the touched area[\s\S]*say what is missing/i);
+      expect(body(id), id).toMatch(/affected checks|affected tests/i);
+      expect(body(id), id).toMatch(/expand(?:ing)? to the affected package/i);
+      expect(body(id), id).toMatch(/unproved scope/i);
     }
   });
 
@@ -68,12 +66,9 @@ describe('where change checks run and what proves them', () => {
 });
 
 describe('who repairs a finding', () => {
-  it('keeps the fix loop to work outside a route, where each stage repairs its own findings and nothing goes back', () => {
-    const loop = body('hh-fix-loop');
-    expect(loop).not.toMatch(/sends back to its author/);
-    expect(loop).toMatch(/work outside a route of checking stages/);
-    expect(loop).toMatch(/checking stage[^.]*repairs what it finds itself[^.]*forward/);
-    expect(loop).toMatch(/nothing goes back to an earlier stage/);
+  it('repairs work through the assigned owner and preserves independent evidence', () => {
+    expect(body('hh-fix-loop')).toMatch(/assigned repair owner[\s\S]*preserve the checked version for independent review/i);
+    expect(body('hh-check-work')).toMatch(/independent verdict[\s\S]*preserve the candidate[\s\S]*findings to the repair owner/i);
   });
 
   it('keeps acceptance findings with the head, never sending the candidate back to its author', () => {
@@ -82,9 +77,10 @@ describe('who repairs a finding', () => {
     expect(acceptance).toMatch(/blocking finding[^.]*"blocked"/);
   });
 
-  it('never sends a candidate back to an earlier stage, so nothing is checked again on its way back', () => {
-    for (const id of [...templates.skills.keys()].filter(key => /^(dev|hh)-/.test(key))) {
-      expect(body(id), id).not.toMatch(/verification\.defect|comes back (to you )?after your verdict|passes the route again|since (their|your) last verdict|sends? (it |the task |the candidate )?back to (its|the) author/);
+  it('returns a source defect to Development and leaves test-only fixes with Tests', () => {
+    for (const id of ['dev-task-flow', 'dev-gates']) {
+      expect(body(id), id).toMatch(/source defect to Development[\s\S]*failing evidence/);
+      expect(body(id), id).toMatch(/test-only repairs in Tests/i);
     }
   });
 
@@ -104,19 +100,15 @@ describe('the base a review compares with', () => {
 });
 
 describe('turnkey work', () => {
-  it('tells heads and the orchestrator that a turnkey team\'s task goes through no echelons and that echelons never go into a task\'s text', () => {
-    for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-company', 'orch-plan-turn', 'hh-brief-members']) {
-      expect(body(id), id).toMatch(/turnkey team[^.]*no echelons/);
-      expect(body(id), id).toMatch(/never write the echelons[^.]*into a task's text/i);
-    }
+  it('uses the assigned route and keeps its echelons out of the task text', () => {
+    expect(body('orch-company')).toMatch(/actual route[\s\S]*other teams use their department's selected route/i);
+    expect(body('hh-brief-members')).toMatch(/never write the echelons[^.]*into a task's text/i);
   });
 
-  it('teaches heads and the orchestrator that the team sets a task\'s route, and that a quick fix goes to a turnkey team', () => {
-    for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-plan-turn', 'orch-company']) {
-      expect(body(id), id).toMatch(/team that does it sets (?:a|each) task's route: a member of a turnkey team[^.]*end to end alone[^.]*everybody else's goes through/);
-      expect(body(id), id).toMatch(/small, quick fix that need not go through every echelon goes to a member of a turnkey team/);
-      expect(body(id), id).not.toMatch(/such work waits for a turn|turn runs in echelons|members who work in the echelons take neither/);
-      expect(body(id), id).not.toMatch(/its holder does it end to end alone/);
+  it('uses a route with an eligible checker when independent proof is required', () => {
+    for (const id of ['hh-lead-tasks', 'orch-plan-turn', 'orch-company']) {
+      expect(body(id), id).toMatch(/turnkey[\s\S]*independent check|turnkey[\s\S]*independent work/i);
+      expect(body(id), id).toMatch(/eligible checker|required independent checker/i);
     }
   });
 

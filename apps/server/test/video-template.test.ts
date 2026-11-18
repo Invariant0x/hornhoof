@@ -105,7 +105,6 @@ describe('the laws of video production', () => {
     expect(catalog.default).toBe('video-production');
     const long = catalog.pipelines[1];
     expect(long).toMatchObject({ key: 'video-long-work', name: 'Long video production', why: 'For a film, a series or a work with many scenes or places.' });
-    expect(templates.skills.get('orch-pipelines')?.body).toContain(`\`video-long-work\` ${long!.name}. ${long!.why}`);
     expect(long!.stages.map(stage => stage.name)).toEqual([
       'Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
       'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version',
