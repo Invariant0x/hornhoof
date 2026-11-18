@@ -206,7 +206,6 @@ function buildNorthwindFixture() {
     skills: [],
     parts: [],
     raw: '',
-    instructions: { length: 1200, max: 200_000 },
     runsOn: [],
     changes: [],
     interrupted: [],

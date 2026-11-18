@@ -25,7 +25,9 @@ it('opens the running orchestrator task instead of a newer assigned task', async
     'POST /api/agents/orchestrator/start': [200, { started: false }],
   });
   const user = userEvent.setup();
-  render(<Shell me={ME} welcome onSignOut={() => {}} />);
+  render(<Shell me={ME} onSignOut={() => {}} />);
+  /* Setup's welcome now opens the first contact, so the window opens from the map as a person opens it. */
+  await user.click(await screen.findByRole('button', { name: 'Open the orchestrator' }));
   await until(() => screen.queryByTitle('Task'));
   await user.click(screen.getByRole('button', { name: 'Task' }));
   await until(() => screen.queryByRole('heading', { name: /Checkout API|Later work/ }));

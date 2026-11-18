@@ -1,13 +1,55 @@
+import type { TaskWaitFact, WaitRunError } from '@hornhoof/protocol/waits';
 import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { dueText } from '../src/ui/tracker-words';
+import type { TaskLine } from '../src/types';
+import { dueText, waitText } from '../src/ui/tracker-words';
 
 /* A due date is a day of the calendar, kept as its midnight in UTC. */
 const DUE = '2026-11-20T00:00:00.000Z';
 const zone = process.env.TZ;
 afterEach(() => {
   process.env.TZ = zone;
+});
+
+describe('why a task failed', () => {
+  const since = '2026-11-17T21:45:00.000Z';
+  const wordsOf = (fact: Pick<TaskWaitFact, 'kind' | 'failure' | 'reason' | 'runError'>) => {
+    const task = { status: 'working' as const, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ ...fact, who: null, since }] } };
+    return [waitText(en, task), waitText(ru, task)];
+  };
+
+  it.each([
+    ['run', '17', 'Test run\u00a0#17 failed', 'Упал прогон тестов\u00a0№17'],
+    ['run', null, 'Test run failed', 'Упал прогон тестов'],
+    ['work', '17', 'Work run\u00a0#17 failed', 'Упал прогон работы\u00a0№17'],
+    ['work', null, 'Work run failed', 'Упал прогон работы'],
+  ] as const)('keeps the number with its word in a %s failure (%s)', (kind, reason, english, russian) => {
+    expect(wordsOf({ kind, reason, failure: 'run' })).toEqual([english, russian]);
+  });
+
+  const causes = {
+    timeout: ['Time ran out', 'Время вышло'],
+    machine: ['Machine unavailable', 'Машина недоступна'],
+    repository: ['Could not open the repository', 'Не удалось открыть репозиторий'],
+    files: ['Could not load the task files', 'Не удалось загрузить файлы задачи'],
+    revision: ['Checked the wrong version', 'Проверили не ту версию'],
+    stopped: ['Stopped on the machine', 'Остановлено на машине'],
+  } satisfies Record<WaitRunError, string[]>;
+
+  it.each(Object.keys(causes) as WaitRunError[])('names the %s cause after the failed run in both languages', runError => {
+    const [english, russian] = causes[runError];
+    expect(wordsOf({ kind: 'run', reason: '17', failure: 'run', runError }))
+      .toEqual([`Test run\u00a0#17 failed: ${english}`, `Упал прогон тестов\u00a0№17: ${russian}`]);
+  });
+
+  it.each([
+    ['machine', 'Machine unavailable', 'Машина недоступна'],
+    ['expired', 'Time ran out', 'Время вышло'],
+    ['unavailable', 'Employee unavailable', 'Сотрудник недоступен'],
+  ] as const)('names the %s wait failure in both languages', (failure, english, russian) => {
+    expect(wordsOf({ kind: 'external', reason: null, failure })).toEqual([english, russian]);
+  });
 });
 
 describe('a due day', () => {
@@ -24,5 +66,30 @@ describe('a due day', () => {
     expect(dueText(en, 'en', { dueAt: DUE, status: 'working' }, Date.parse('2026-11-20T23:59:00.000Z'))).toEqual({ text: '20 Nov', late: false });
     expect(dueText(en, 'en', { dueAt: DUE, status: 'working' }, Date.parse('2026-11-21T00:00:00.000Z'))).toEqual({ text: '20 Nov, late', late: true });
     expect(dueText(en, 'en', { dueAt: DUE, status: 'done' }, Date.parse('2026-11-25T00:00:00.000Z'))).toEqual({ text: '20 Nov', late: false });
+  });
+});
+
+describe('what a task is waiting for', () => {
+  const since = '2026-11-17T21:45:00.000Z';
+  const now = Date.parse('2026-11-17T22:05:00.000Z');
+  const owner = { kind: 'agent', id: 'head', name: 'Head of development' } as const;
+  const executor = { ...owner, kind: 'head', role: null } as const;
+  const person = { kind: 'person', id: 'ivan', name: 'Иван Король' } as const;
+  const reviewer = { kind: 'agent', id: 'hana', name: 'Hana' } as const;
+
+  it.each([
+    ['person', person, null, 'Waits for Иван Король, 20 minutes', 'Ждет Иван Король 20 минут'],
+    ['after', owner, '#42', 'After #42', 'После #42'],
+    ['review', reviewer, null, 'Hana is reviewing', 'Идет проверка (Hana)'],
+    ['review', owner, null, 'Review in progress', 'Идет проверка'],
+    ['run', owner, '108', 'Test run 108 is running', 'Идет прогон тестов 108'],
+    ['run', owner, null, 'Test running', 'Идут тесты'],
+    ['external', null, 'Deployment', 'Deployment', 'Deployment'],
+    ['external', reviewer, 'Deployment', 'Hana is on it: Deployment', 'В работе (Hana): Deployment'],
+  ] as const)('names the target of a %s wait in both languages', (kind, who, reason, english, russian) => {
+    const status: TaskLine['status'] = 'working';
+    const task = { status, executor, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind, who, reason, since }] } };
+    expect(waitText(en, task, now)).toBe(english);
+    expect(waitText(ru, task, now)).toBe(russian);
   });
 });

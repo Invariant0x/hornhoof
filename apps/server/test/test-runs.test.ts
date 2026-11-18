@@ -467,14 +467,14 @@ async function productDescription(request: Extract<ServerMessage, { type: 'tests
   const manifest = {
     version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'npm', inputs: ['package-lock.json'], install: [], paths: ['node_modules'], cache: 'copy' as const }, services: [], prepare: [], reset: null,
-    suites: [{ id: 'unit', root: '.', files: ['test/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'], finalChecks: [{ program: 'node', args: ['final.js'], cwd: '.' }] }],
+    suites: [{ id: 'unit', root: '.', files: ['checks/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'], finalChecks: [{ program: 'node', args: ['final.js'], cwd: '.' }] }],
     impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported' as const, reason: 'Not applicable.' } }, mutation: { status: 'unsupported' as const, language: 'typescript', reason: 'Not configured.' },
   };
   const { hashTestEnvironment } = await import('@hornhoof/protocol');
   const manifestSource = JSON.stringify(manifest);
   return { type: 'tests.described' as const, requestId: request.requestId, commitSha: request.commitSha, result: { status: 'ready' as const, description: {
     version: 1 as const, repositoryScope: request.repositoryScope, commitSha: request.commitSha, manifestSource, manifestHash: await hashTestEnvironment(manifestSource), manifest,
-    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities,
+    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['checks/a.ts', 'checks/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities,
   } } };
 }
 
@@ -491,7 +491,7 @@ describe('pinned product environment runs', () => {
     await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
     expect((await c.db.select().from(testParts).orderBy(asc(testParts.part))).map(p => p.status)).toEqual(['running', 'queued']);
     const part = await nextOf(node, 'tests.run');
-    expect(part).toMatchObject({ command: '', environment: { snapshot: { description: reply.result.description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test/a.ts', 'test/b.ts'] } } });
+    expect(part).toMatchObject({ command: '', environment: { snapshot: { description: reply.result.description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['checks/a.ts', 'checks/b.ts'] } } });
     const [before] = await c.db.select().from(testRuns); expect(before!.environmentHash).toBe(reply.result.description.manifestHash);
     expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ mode: 'product', commitSha: TEST_COMMIT, environmentStatus: 'ready', environment: { profile: 'fast' }, parts: [{ selection: { kind: 'suite' } }, { selection: { kind: 'final' } }] });
     node.send({ ...reply, result: { ...reply.result, description: { ...reply.result.description, inventory: [] } } }); await pumpTests(c.app.ctx);
@@ -535,7 +535,7 @@ it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful prod
   if (kind === 'missing') delete (message as { environmentReceipt?: unknown }).environmentReceipt;
   if (kind === 'wrong-selection') {
     if (message.environmentReceipt.version !== 1) throw new Error('This fixture requires a legacy receipt.');
-    message.environmentReceipt.files = ['test/a.ts'];
+    message.environmentReceipt.files = ['checks/a.ts'];
   }
   if (kind === 'wrong-hash') message.environmentReceipt.manifestHash = 'f'.repeat(64);
   node.send(message);

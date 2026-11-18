@@ -42,6 +42,29 @@ describe('forward handoff and instructions 205/206', () => {
     expect(moved.task.assigneeAgentId).toBe(crossProvider.id);
   });
 
+  it.each(['gpt-6.2-sol', 'gpt-6.2-astra'])('lets an author on %s hand in and picks a reviewer on it', async model => {
+    const f = await fixture({ autoReviewer: true });
+    await f.db.update(agents).set({ model }).where(eq(agents.id, f.author.id));
+    await f.db.update(agents).set({ subscriptionId: f.codex.id, model }).where(eq(agents.id, f.reviewer.id));
+    const moved = await submit(f.ctx, f.author.id, f.task.id, submitted);
+    expect(moved.task).toMatchObject({ status: 'review', assigneeAgentId: f.reviewer.id });
+    expect(await f.detail()).toMatchObject({ echelons: { stage: 'review', phase: 'active', ownerAgentId: f.reviewer.id } });
+  });
+
+  it('picks a reviewer on gpt-6.2-sol over one of the same provider as the author', async () => {
+    const f = await fixture({ authorProvider: 'claude', autoReviewer: true });
+    const crossProvider = await f.hire('Other provider', 'worker', 'DEV-REV', f.codex.id, 'gpt-6.2-sol');
+    const moved = await submit(f.ctx, f.author.id, f.task.id, submitted);
+    expect(moved.task.assigneeAgentId).toBe(crossProvider.id);
+  });
+
+  it('still refuses a hand-in from an author on a model with no known capability', async () => {
+    const f = await fixture();
+    await f.db.update(agents).set({ model: 'gpt-6.2-unclassified' }).where(eq(agents.id, f.author.id));
+    await expect(submit(f.ctx, f.author.id, f.task.id, submitted)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('known capability policy') });
+    expect(await f.detail()).toMatchObject({ status: 'open', assignee: { id: f.author.id }, echelons: { stage: 'development', candidateId: null } });
+  });
+
   it('hands risky work to Security immediately after Review', async () => {
     const f = await fixture({ riskClass: 'security' });
     await submit(f.ctx, f.author.id, f.task.id, submitted);

@@ -481,12 +481,12 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
-  const plan = await departmentStages(ctx, input.departmentId);
-  const architect = await resolveArchitect(ctx, assignee, input, plan);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
   const tracker = await newTrackerFields(ctx, assignee.companyId, taskSpot({ departmentId: input.departmentId, productId: input.productId ?? null }), parent, input, assignee.id);
+  const plan = await departmentStages(ctx, input.departmentId, tracker.pipelineId);
+  const architect = await resolveArchitect(ctx, assignee, input, plan);
   return { assignee, architect, parent, declaration, plan, tracker };
 }
 
@@ -1067,7 +1067,7 @@ async function prepareIndependentChange(ctx: Ctx, task: Task, change: TaskChange
   const existing = await currentIndependent(ctx.db, task.id);
   const declaration = checkIndependent(change.after ?? task.after, change.independentPart, change.independentNone, existing);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  return { declaration, ...independentAddition(declaration, existing), plan: await departmentStages(ctx, task.departmentId) };
+  return { declaration, ...independentAddition(declaration, existing), plan: await departmentStages(ctx, task.departmentId, task.pipelineId) };
 }
 
 async function requireChangeUrgency(ctx: Ctx, agentId: string, task: Task, set: Partial<Task>, partOwner: string | null): Promise<void> {

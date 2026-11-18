@@ -1,4 +1,3 @@
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
@@ -607,18 +606,6 @@ describe('task messages reach their recipient', () => {
     const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(1);
     expect(queued[0]!.prompt).toContain('Add the changelog and submit both tasks.');
-  });
-
-  it('returns an error when the new turn fails before dispatch', async () => {
-    const c = await messaging();
-    const task = await c.task();
-    const head = await c.run(c.head.id);
-    await c.db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS + 1) } }).where(eq(agents.id, c.agent.id));
-    const result = (await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } })) as { isError?: boolean; content: { text: string }[] };
-    expect(result.isError).toBe(true);
-    /* The turn failed with its own reason, which the refusal names. */
-    expect(result.content[0]!.text).toContain(`\nNot delivered: reason instructions_too_long, recipient ${c.agent.id}, task #${task.number}.`);
-    expect((await c.turnsOf()).map(j => j.status)).toEqual(['failed']);
   });
 
   it('refuses to wait again before reading the queued comment that ended the previous wait', async () => {

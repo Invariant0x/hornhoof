@@ -11,6 +11,22 @@ export function AgentIcon({ label }: { label?: string }) {
   );
 }
 
+export function EmployeeMarkIcon() {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" /></svg>;
+}
+
+export function GeneralistMarkIcon() {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 8 8 15 1 8Z" /></svg>;
+}
+
+export function GhostMarkIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 14V7a6 6 0 0 1 12 0v7l-3-2-3 2-3-2zM6 7h.2m3.6 0h.2" />
+    </svg>
+  );
+}
+
 export function PersonIcon({ label }: { label?: string }) {
   return (
     <svg className="ic" viewBox="0 0 16 16" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
@@ -94,7 +110,7 @@ export function LogoMark({ className }: { className?: string }) {
   );
 }
 
-type Program = 'claude' | 'codex' | 'kimi' | 'glm' | 'antigravity';
+export type Program = 'claude' | 'codex' | 'kimi' | 'glm' | 'antigravity';
 type Protocol = 'anthropic' | 'openai';
 
 /* Company keys run in the program of their maker: Anthropic keys in Claude Code, OpenAI keys in Codex. */
@@ -104,7 +120,7 @@ const PROGRAM: Record<ProviderId, Program> = {
 /* OpenRouter and a compatible API run in the program of the protocol they were given. */
 const PROTOCOL_PROGRAM: Record<Protocol, Program> = { anthropic: 'claude', openai: 'codex' };
 const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' };
-const programOf = (provider: ProviderId, protocol?: Protocol | null): Program => (protocol ? PROTOCOL_PROGRAM[protocol] : PROGRAM[provider]);
+export const programOf = (provider: ProviderId, protocol?: Protocol | null): Program => (protocol ? PROTOCOL_PROGRAM[protocol] : PROGRAM[provider]);
 const MARKS: Record<Program, ReactNode> = {
   claude: <path d="M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5" />,
   codex: (
@@ -150,4 +166,26 @@ export function MapIcon() {
 
 export function SpeedIcon() {
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="gb" pathLength="4" d="M3 17A9 9 0 0 1 21 17"/><path className="gl" pathLength="3" d="M3 17A9 9 0 0 1 18.36 10.64"/><path d="M1.5 21H22.5M12 17l4.2-4.2"/><rect className="kf" x="10.2" y="15.2" width="3.6" height="3.6"/></svg>);
+}
+
+const TRACKER_ICONS = {
+  failure: <><path d="M8 2 15 14H1L8 2Z" /><path d="M8 6v3m0 2v1" /></>,
+  waits: <><rect x="2" y="4" width="12" height="8" /><path d="m2 4 6 5 6-5" /></>,
+  mine: <><circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="3.5" /></>,
+  dates: <><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8h3" /></>,
+  goals: <><circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="2.5" /><path d="m10 6 4-4" /></>,
+  pipeline: <path d="M2 4h10m-3-2 2 2-2 2M2 8h12m-3-2 2 2-2 2M2 12h10m-3-2 2 2-2 2" />,
+  list: <path d="M5 4h9M5 8h9M5 12h9M2 4h.2M2 8h.2M2 12h.2" />,
+  board: <path d="M2 3h3v10H2zM6.5 3h3v7h-3zM11 3h3v9h-3z" />,
+  branch: <path d="M4 2v5a3 3 0 0 0 3 3h5m-2-2 2 2-2 2M4 7v7" />,
+  add: <path d="M8 3v10M3 8h10" />,
+  chevron: <path d="m6 3 5 5-5 5" />,
+};
+
+export function TrackerIcon({ name }: { name: keyof typeof TRACKER_ICONS }) {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">{TRACKER_ICONS[name]}</svg>;
+}
+
+export function PriorityArrow() {
+  return <svg className="ic tr-priority-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 3 5 10H3z" /></svg>;
 }

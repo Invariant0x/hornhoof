@@ -198,6 +198,17 @@ it('masks known secrets in input reasons, encoded text and every question field'
   }
 });
 
+it('masks only the literal form of a short known secret and keeps existing masks in operator metadata', async () => {
+  const c = await fixture();
+  const secret = 'hidden';
+  const encoded = Buffer.from(secret).toString('base64');
+  await c.db.update(subscriptions).set({ secretEnc: encryptSecret(secret, c.ctx.config.secret) }).where(eq(subscriptions.id, c.sub.id));
+  c.screen.tool = secret;
+  c.screen.question = { id: randomUUID(), kind: 'protected', tool: secret, text: `Use ${secret} or [hidden], encoded ${encoded}`, callId: secret };
+  const view = await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id });
+  expect(view).toMatchObject({ tool: '[hidden]', question: { tool: '[hidden]', text: `Use [hidden] or [hidden], encoded ${encoded}`, callId: '[hidden]' } });
+});
+
 /* An agent signs in like a person, with a sign-in of the vault typed into the program: no node knows that password. */
 it('masks a vault password the operator types into a sign-in, on the screen and in the log', async () => {
   const c = await fixture();

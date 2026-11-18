@@ -122,7 +122,7 @@ describe('internal stuck routing', () => {
     expect((await c.app.inject({ url: '/api/requests', ...as(c.ceo) })).json().requests).toEqual([]);
   });
 
-  it('asks the orchestrator about a head and lets it answer without a person principal', async () => {
+  it.each(['named', 'generic', 'http'] as const)('lets the orchestrator answer its internal request through %s', async entry => {
     const c = await company();
     const task = await c.taskFor(c.head.id, c.orchestrator.id);
     await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why: 'assigned' }]);
@@ -135,12 +135,21 @@ describe('internal stuck routing', () => {
     expect((await c.app.inject({ url: '/api/requests', ...as(c.ceo) })).json().requests).toEqual([]);
 
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
-    const [answering] = await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, kind: 'conversation', prompt: 'Resolve the stuck request.', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) }).returning();
-    await listen(c.app);
-    const client = await mcp(c.app, TOKEN);
-    const result = await client.callTool({ name: 'answer_request', arguments: { request: request!.id, answer: 'Split the work and continue.' } });
+    const [answering] = await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, kind: entry === 'named' ? 'conversation' : 'tools', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) }).returning();
+    const path = `/api/requests/${request!.id}`;
+    const body = { answer: 'Split the work and continue.' };
+    if (entry === 'http') {
+      const result = await c.app.inject({ method: 'POST', url: path, payload: body, headers: { authorization: `Bearer ${TOKEN}` } });
+      expect(result.statusCode, result.body).toBe(200);
+    } else {
+      await listen(c.app);
+      const client = await mcp(c.app, TOKEN);
+      const result = entry === 'named'
+        ? await client.callTool({ name: 'answer_request', arguments: { request: request!.id, ...body } })
+        : await client.callTool({ name: 'api', arguments: { method: 'POST', path, body } });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+    }
 
-    expect(result.isError).toBeFalsy();
     expect((await c.db.select().from(requests).where(eq(requests.id, request!.id)))[0]).toMatchObject({ status: 'resolved_internal', answeredBy: null, answeredByAgentId: null, answeredAt: null });
     expect((await c.db.select().from(requestInternal).where(eq(requestInternal.requestId, request!.id)))[0]).toMatchObject({ resolvedByAgentId: c.orchestrator.id, resolvedByJobId: answering!.id, executorInstruction: 'Split the work and continue.' });
     expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'working', silent: 0 });

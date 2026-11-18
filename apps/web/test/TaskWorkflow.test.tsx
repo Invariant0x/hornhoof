@@ -1,5 +1,5 @@
 import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { TaskWorkflow, WorkflowStages } from '../src/ui/TaskWorkflow';
@@ -16,6 +16,15 @@ const workflow = (stages: EchelonStep[], phase: EchelonsSnapshot['phase'] = 'esc
 afterEach(cleanup);
 
 describe('task workflow', () => {
+  it('marks a one-shot stage in the pipeline before it runs', () => {
+    const route = workflow([step('development', 'active', null), step('review', 'pending', null)], 'active');
+    render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={{ ...route, oneShot: { review: { fanOut: 2, judge: null } } }} /></LanguageProvider>);
+    const ghost = 'Ghost: a one-shot call, appears for one task and is gone';
+    const [work, review] = screen.getAllByRole('listitem');
+    expect(within(work!).queryByRole('img', { name: ghost })).toBeNull();
+    expect(within(review!).getByRole('img', { name: ghost })).toHaveAttribute('data-worker-kind', 'ghost');
+  });
+
   it('names every reason a stage can carry in plain words', () => {
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={workflow([
       step('review', 'complete', 'wrong_goal'), step('cleanup', 'pending', 'requested_by_head'), step('tests', 'active', 'tests_failed'),

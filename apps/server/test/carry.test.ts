@@ -10,6 +10,20 @@ import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 const CARRY = readFileSync(new URL('../../updater/carry.sql', import.meta.url), 'utf8');
 
 describe('the carry of a restore', () => {
+  it('carries the permanent removal time from the old database', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { whole: true } });
+    const row = (await db.select().from(people).where(eq(people.name, 'Dana')))[0]!;
+    const removedAt = new Date('2026-11-10T08:00:00.000Z');
+    await db.update(people).set({ status: 'disabled', removedAt }).where(eq(people.id, row.id));
+
+    const result = (await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] };
+    const carry = Object.values(result.rows[0]!)[0] as Carry;
+    expect(carry.people.find(person => person.id === row.id)).toMatchObject({ removedName: 'Dana', removedAt: expect.any(String) });
+    expect(new Date(carry.people.find(person => person.id === row.id)!.removedAt!)).toEqual(removedAt);
+  });
+
   it('takes the carry when the old database closes', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

@@ -144,8 +144,9 @@ describe('turns become releases', () => {
     await expect(client.query(`INSERT INTO tasks(company_id, number, title, status) VALUES ('${ACME}', 99, 'Planned again', 'planned')`)).rejects.toThrow();
   });
 
-  it('keeps no release that nothing approved, or that a person and the autonomous log both approved', async () => {
+  it('allows releases without approval after upgrade and keeps prior approvals and their exclusivity', async () => {
     const client = await migrated();
+    await migrate(drizzle(client), { migrationsFolder: await migrationsBefore('release_approval_optional') });
     const [{ id: request }] = await rows<{ id: string }>(client, `INSERT INTO requests(company_id, task_id, agent_id, kind, text, status, commit) VALUES ('${ACME}', '${K(2)}', '${DEV_HEAD}', 'approval', 'Release?', 'approved', '${'c'.repeat(40)}') RETURNING id`) as [{ id: string }];
     const [{ id: logged }] = await rows<{ id: string }>(client, `INSERT INTO autonomous_releases(company_id, task_number, agent_name, commit_sha, base_commit_sha, test_run_number, reviewer_name, verdict_stage)
       VALUES ('${ACME}', 2, 'Sigma', '${'c'.repeat(40)}', '${'a'.repeat(40)}', 1, 'Rho', 'review') RETURNING id`) as [{ id: string }];
@@ -155,5 +156,15 @@ describe('turns become releases', () => {
     await expect(release(`'${request}'`, `'${logged}'`)).rejects.toThrow(/turn_releases_approved_once/);
     await release(`'${request}'`, 'null');
     await release('null', `'${logged}'`);
+    await migrate(drizzle(client), { migrationsFolder: await migrationsThrough('release_approval_optional') });
+    await release('null', 'null');
+    await expect(release(`'${request}'`, `'${logged}'`)).rejects.toThrow(/turn_releases_approved_once/);
+    const proofs = await rows(client, 'SELECT approval_request_id, autonomous_release_id FROM turn_releases');
+    expect(proofs).toHaveLength(3);
+    expect(proofs).toEqual(expect.arrayContaining([
+      { approval_request_id: request, autonomous_release_id: null },
+      { approval_request_id: null, autonomous_release_id: logged },
+      { approval_request_id: null, autonomous_release_id: null },
+    ]));
   });
 });

@@ -21,10 +21,13 @@ const allowed: Parameters<typeof mockApi>[0] = {
 };
 const refused: [number, unknown] = [403, { error: { code: 'forbidden', message: 'Hidden resource details.' } }];
 
+/* The windows open, by agent, beside them: a window that closes shows there as gone. */
 function Windows({ me = ME, org = DEV_ORG, id = 'b1' }: { me?: Me; org?: Org; id?: string }) {
   const windows = useAgentWindows(id);
-  return <LanguageProvider><AgentWindows windows={windows} onOpen={() => {}} me={me} org={org} staff={null} requests={[]} onRequestsChanged={() => {}} /></LanguageProvider>;
+  return <LanguageProvider><AgentWindows windows={windows} onOpen={() => {}} me={me} org={org} staff={null} requests={[]} onRequestsChanged={() => {}} /><div data-testid="open-windows">{windows.ids.join(' ')}</div></LanguageProvider>;
 }
+/* The window closed: nothing of it can ask the server or show anything after this. */
+const closed = () => waitFor(() => expect(screen.getByTestId('open-windows')).toBeEmptyDOMElement());
 
 describe('restricted access screens', () => {
   it('uses the plain access-denied wording', () => {
@@ -111,7 +114,7 @@ describe('restricted access screens', () => {
     const calls = mockApi(allowed);
     const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => ({ ...e, opens: e.id !== 'b1' })) })) };
     render(<Windows org={org} />);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await closed();
     expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
@@ -121,7 +124,7 @@ describe('restricted access screens', () => {
   it("closes the orchestrator's window for a person who does not open him, without asking the server", async () => {
     const calls = mockApi({});
     render(<Windows org={{ ...DEV_ORG, orchestrator: { ...DEV_ORG.orchestrator!, opens: false } }} id="orchestrator" />);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await closed();
     expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(calls.filter(c => c.path.startsWith('/api/agents/'))).toEqual([]);

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { taskRoute } from '../../test/task-route';
-import type { BacklogItem, Decisions, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TurnView } from '../../src/types';
+import type { BacklogItem, Decisions, Employee, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TurnView } from '../../src/types';
 import { detail, ME, serveApi } from '../api';
 
 /* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six pieces of
@@ -78,7 +78,7 @@ function company(): TaskLine[] {
     });
   }
   all.push(task('Fix the sign-in page', DEV, {
-    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] },
+    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...IVAN }, reason: null, since: '2026-11-13T08:00:00.000Z' }] },
   }));
   all.push(task('Rename the shop', DEV, { turn: null, status: 'done' }));
   all.push(task('Old checkout', DEV, { turn: 2, status: 'done' }));
@@ -132,4 +132,30 @@ export async function serveTasksBoard(page: Page, me: Me = ME) {
     return route.fallback();
   });
   return { reads };
+}
+
+/* The shortest words a link of the tracker holds: the goal Refunds and the task Gift cards are called QA, and Hana in
+   Development works on that task. Added after serveTasksBoard, so these answers come first. */
+export const SHORT = 'QA';
+export async function serveShortNames(page: Page) {
+  const gift = TASKS.find(x => x.title === 'Gift cards')!;
+  const shortGoal = (g: GoalView) => (g.id === 'g3' ? { ...g, title: SHORT } : g);
+  const shortTask = (x: TaskLine): TaskLine => ({ ...x, title: x.id === gift.id ? SHORT : x.title, goal: x.goal?.id === 'g3' ? { ...x.goal, title: SHORT } : x.goal });
+  const hana: Employee = {
+    id: HANA.id, name: HANA.name, roleId: null, title: HANA.role, kind: 'head', model: '', modelName: null, provider: null, effort: null,
+    state: 'working', status: 'working', on: true, timer: null, task: { id: gift.id, number: gift.number, title: SHORT, echelons: gift.echelons },
+    context: null, program: null, alarm: null, retry: null, failure: null,
+  };
+  const org: Org = { ...ORG, departments: ORG.departments.map(d => (d.id === DEV.id ? { ...d, employees: [hana] } : d)) };
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/org') return route.fulfill({ json: org });
+    if (path === '/api/goals') return route.fulfill({ json: { goals: GOALS.map(shortGoal) } });
+    const aim = GOALS.find(g => path === `/api/goals/${g.id}`);
+    if (aim) return route.fulfill({ json: { goal: shortGoal(aim), log: [] } });
+    if (path === '/api/tasks') return route.fulfill({ json: { tasks: TASKS.map(shortTask) } });
+    const shown = TASKS.find(x => path === `/api/tasks/${x.id}`);
+    if (shown) return route.fulfill({ json: { task: { ...detail(shortTask(shown)), neededFor: [], mayEdit: true, version: 1 } } });
+    return route.fallback();
+  });
 }

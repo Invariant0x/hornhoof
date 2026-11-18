@@ -17,6 +17,36 @@ export const WAIT_SOURCE_KINDS = ['after', 'review', 'person', 'run', 'external'
 export const WaitSourceKind = z.enum(WAIT_SOURCE_KINDS);
 export type WaitSourceKind = z.infer<typeof WaitSourceKind>;
 
+export type WaitWho = { kind: 'person' | 'agent'; id: string; name: string };
+export type WaitFailure = 'machine' | 'expired' | 'run' | 'unavailable';
+export type WaitRunError = 'timeout' | 'machine' | 'repository' | 'files' | 'revision' | 'stopped';
+export type TaskWaitFact = {
+  who: WaitWho | null;
+  since: string;
+  kind: WaitSourceKind | 'work';
+  reason: string | null;
+  until?: string;
+  event?: 'time' | 'ceo';
+  failure?: WaitFailure;
+  runError?: WaitRunError;
+};
+
+export function externalWaitFact(wait: ExternalWait, now: number, observed?: TaskWaitFact): TaskWaitFact {
+  const on = wait.on;
+  const event = on?.kind === 'external' ? on.event : undefined;
+  const who = observed?.who ?? (on?.kind === 'employee' ? { kind: 'agent', id: on.employee, name: on.name ?? '' } : null);
+  const kind = wait.run ? observed?.kind === 'work' ? 'work' : 'run' : observed?.kind ?? 'external';
+  const fact = { kind, who, since: wait.since, until: wait.until, reason: kind === 'run' || kind === 'work' ? observed?.reason ?? null : wait.reason };
+  if (observed?.failure === 'run') return { ...fact, failure: 'run', ...(observed.runError ? { runError: observed.runError } : {}) };
+  if (event === 'machine') return { ...fact, failure: 'machine' };
+  if (event === 'time') return { ...fact, event };
+  if (Date.parse(wait.until) <= now) return { ...fact, kind: 'external', reason: wait.reason, failure: 'expired' };
+  if (event === 'ceo') return { ...fact, kind: 'person', event };
+  return fact;
+}
+
+export const isPersonWait = (fact: TaskWaitFact): boolean => fact.kind === 'person' && !fact.failure;
+
 /* A record that has come to its end stays, as what happened to the wait. An old wait stays open with what is known of it, no
    date made up for it, until someone gives it an owner and a plan. */
 export const WAIT_STATES = ['active', 'resolved', 'cancelled', 'superseded', 'legacy_needs_plan'] as const;

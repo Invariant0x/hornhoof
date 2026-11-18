@@ -66,8 +66,7 @@ async function codeLines(db: Db, merge: MergeRow): Promise<string[]> {
 }
 
 /* What a merge brought back and what it left to settle, in plain words, from the leader's own records alone: the source
-   may be gone by now. Of a conflict of the CEO's, or of a table the orchestrator's SQL may not see, only that there is
-   one: no value, name or table of it. */
+   may be gone by now. The task summarizes work conflicts, with a count of the conflicts on the CEO's screen. */
 export async function bodyOf(db: Db, mergeIds: string[]): Promise<string> {
   const q = queryOf(db);
   const parts: string[] = [];

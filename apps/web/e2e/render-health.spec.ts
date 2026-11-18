@@ -27,7 +27,7 @@ const HEAD_CARD: AgentCardView = {
   role: { id: HEAD.roleId ?? 'r0-head', title: { en: 'Head', ru: 'Глава' }, description: { en: '', ru: '' } },
   department: { id: DEPT.id, name: DEPT.name ?? 'Department 1' }, product: null, team: null, teams: [],
   model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'working', retry: null, failure: null,
-  skills: [], parts: [], raw: '', instructions: { length: 1200, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null,
+  skills: [], parts: [], raw: '', runsOn: [], changes: [], interrupted: [], timer: null,
   canEdit: true, canRemove: false,
 };
 const HEAD_EVENTS: EventView[] = [{ seq: 1, kind: 'text', data: { text: 'Working on it.' }, jobId: 'j1', person: null, at: AT }];

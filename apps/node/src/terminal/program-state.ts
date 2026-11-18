@@ -1,4 +1,4 @@
-import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
+import { PROGRAM_SCREEN_MAX, type NodeMessage, type PrivateValues, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { redact } from '../redact.js';
 import { agyPrompt, atEmptyPrompt } from './input.js';
@@ -117,8 +117,8 @@ type Diagnostics = Pick<Extract<NodeMessage, { type: 'job.program' }>, 'tool' | 
 
 /* Diagnostic strings are untrusted, including tool names. Mask every field before applying the wire limits; clipping
    first could leave part of a known secret that no longer matches the whole value. */
-function diagnostics(fields: Diagnostics, secrets: string[]): Diagnostics {
-  const clean = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, typeof value === 'string' ? redact(value, secrets) : value])) as Diagnostics;
+function diagnostics(fields: Diagnostics, secrets: string[], values?: PrivateValues): Diagnostics {
+  const clean = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, typeof value === 'string' ? redact(values?.text(value) ?? value, secrets) : value])) as Diagnostics;
   if (clean.tool !== undefined) clean.tool = clean.tool.slice(0, 100);
   if (clean.screen !== undefined) clean.screen = lastScreen(clean.screen);
   return clean;
@@ -142,6 +142,7 @@ export class ProgramWatch {
     private readonly send: (m: NodeMessage) => void,
     private readonly reportMs = REPORT_MS,
     private readonly secrets: () => string[] = () => [],
+    private readonly values?: PrivateValues,
   ) {}
 
   /* A typed turn may have changed state or ended before the server named its job. Only that confirmed id goes out,
@@ -189,7 +190,7 @@ export class ProgramWatch {
   private tell(now: number): void {
     this.toldAt = now;
     if (!this.jobId || !this.state) return;
-    const detail = diagnostics({ ...(this.tool ? { tool: this.tool } : {}), ...this.ended }, this.secrets());
+    const detail = diagnostics({ ...(this.tool ? { tool: this.tool } : {}), ...this.ended }, this.secrets(), this.values);
     this.send({ type: 'job.program', jobId: this.jobId, state: this.state, since: this.since, screenAt: this.screenAt, ...(this.signAt !== undefined ? { signAt: this.signAt } : {}), ...(this.state === 'retrying' && this.retry ? { retry: this.retry } : {}), ...detail });
   }
 }

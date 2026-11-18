@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
-import { PRIVATE_TOOL_NOTE, ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
+import { MAX_JOB_TIMEOUT_MS, cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
+import { ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
@@ -45,7 +45,7 @@ export type RunInput = {
 };
 /* tokens: what the turn used, as its program reported it; none when it reports nothing. unstarted: the turn ended before its
    program started. */
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues; unstarted?: boolean };
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; privateValues?: PrivateValues; unstarted?: boolean };
 
 /* What kept an adapter from launching the turn's program at all, so the turn ended before its program started. */
 export class ProgramNotStarted extends Error {
@@ -92,15 +92,16 @@ const failed = (output: string, error: JobError): RunResult => ({ ok: false, ses
 /* Both dispatched and typed turns use the same redaction and tail boundary. */
 export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDone {
   const program = res.programOutput;
+  const mask = (text: string) => redact(res.privateValues?.text(text) ?? text, secrets);
   /* A terminal inserts carriage returns; hide both the raw and normalized forms before any line is removed. */
-  const text = program ? redact(plainOutput(redact(program.text, secrets)), secrets) : res.output;
+  const text = program ? mask(plainOutput(mask(program.text))) : mask(res.output);
   const output = program ? programEnded(text, program, program.complete) : text;
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
-    result: privateText(res.result, res, secrets), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
+    result: mask(res.result), tail: lastBytes(output), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
     ...(res.unstarted && res.error !== 'cancelled' ? { unstarted: true as const } : {}),
-    ...(res.failure ? { failure: { ...res.failure, text: privateText(res.failure.text, res, secrets).slice(0, 2000) } } : {}),
+    ...(res.failure ? { failure: { ...res.failure, text: mask(res.failure.text).slice(0, 2000) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
 }
@@ -110,7 +111,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
 function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<RunResult>(done => {
-    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms + Math.min(30_000, ms / 10));
+    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), Math.min(MAX_JOB_TIMEOUT_MS, ms + Math.min(30_000, ms / 10)));
   });
   return Promise.race([run, timeout]).finally(() => clearTimeout(timer));
 }
@@ -319,7 +320,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     await beforeRun();
     started = true;
     const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => err instanceof ProgramNotStarted ? notStarted(err) : failed(message(err), 'agent_failed'));
-    res = await (untimed && !call ? run : withTimeout(run, msg.timeoutMs));
+    res = await (msg.timeoutMs === 0 || (untimed && !call) ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId && !call) rememberSession(dir, res.sessionId, place.workDir);
   } catch (err) {
     res = started ? failed(message(err), 'agent_failed') : notStarted(err);
@@ -331,13 +332,5 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   /* Everything the program held at any point of the run, so a token it had only in between is hidden too. */
   for (const s of await adapter.secrets().catch(() => [])) known.add(s);
-  return jobDone(msg.jobId, { ...withPrivacy(res, privacy), tokens: withModel(res.tokens, msg.model) }, [...known]);
-}
-
-function privateText(text: string, result: RunResult, secrets: string[]): string {
-  return result.privateValues?.text(redact(text, secrets)) ?? (result.sensitive ? PRIVATE_TOOL_NOTE : redact(text, secrets));
-}
-
-function withPrivacy(result: RunResult, privacy: ToolPrivacy): RunResult {
-  return { ...result, sensitive: result.sensitive || privacy.sensitive, privateValues: result.privateValues ?? privacy.values };
+  return jobDone(msg.jobId, { ...res, privateValues: res.privateValues ?? privacy.values, tokens: withModel(res.tokens, msg.model) }, [...known]);
 }

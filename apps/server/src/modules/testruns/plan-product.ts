@@ -58,7 +58,15 @@ function remainingWork(input: ReusingInput) {
     remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
   };
 }
-/* A full run's parts share the part count with its preparation and final checks. */
+/* A part may take three quarters of its limit by its plan, so a slower machine or a file that grew still ends within it: a part that
+   runs into its limit leaves every file it had unproved. */
+export const PART_SHARE = 0.75;
+/* Every run goes out in as many parts as keep each within that share of its limit, at once on the free machines and one after another
+   on one; the first run of a release in two at least. */
+export function partSpread(full: boolean, limitMs: number): { spread: PartSpread } {
+  return { spread: { min: full ? 2 : 1, max: MAX_TEST_PARTS, ceilingMs: Math.floor(limitMs * PART_SHARE) } };
+}
+/* A run's parts share the part count with its preparation and final checks. */
 function spreadWithin(spread: PartSpread | undefined, budget: number): { spread?: PartSpread } {
   if (!spread) return {};
   const max = Math.max(1, Math.min(spread.max, budget));
