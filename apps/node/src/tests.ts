@@ -416,6 +416,17 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
   return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
 }
 
+function partStopReporter(msg: TestRun, out: Output): (ended: Ended) => TestError | null {
+  return ended => {
+    if (ended.stopped === 'timeout') {
+      const kind = msg.kind === 'work' ? 'command' : 'tests';
+      out.line(`The ${kind} did not finish within ${within(msg.timeoutMs ?? GIT_TIMEOUT_MS)}.`);
+    }
+    if (ended.stopped === 'cancelled') out.line('Stopped.');
+    return ended.stopped;
+  };
+}
+
 /* One part of a run, which always ends with a tests.done: the commit Hornhoof pinned, or else the branch if there is one,
    comes into a fresh folder, a part of work gets the task's files it names, the command runs within the time with a home
    and a temporary folder of its own, what a part of work leaves in its output folder goes on the task, and the folder
@@ -439,11 +450,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
   let error: TestError | null = null;
   let ran = false;
   const harnessEnv: Record<string, string> = {};
-  const stoppedBy = (ended: Ended): TestError | null => {
-    if (ended.stopped === 'timeout') out.line(`The ${work ? 'command' : 'tests'} did not finish within ${within(msg.timeoutMs ?? GIT_TIMEOUT_MS)}.`);
-    if (ended.stopped === 'cancelled') out.line('Stopped.');
-    return ended.stopped;
-  };
+  const stoppedBy = partStopReporter(msg, out);
   try {
     mkdirSync(parts, { recursive: true });
     remove(root);

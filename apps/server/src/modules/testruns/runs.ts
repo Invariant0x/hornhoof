@@ -76,6 +76,7 @@ const took = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
 };
+const upperLimitMinutes = (ms: number): number | null => ms > 0 ? ms / 60_000 : null;
 
 /* Why a part ended other than by its command passing or failing. */
 function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable' | 'commitSha'>, p: Part): string {
@@ -791,7 +792,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     ...productRunView(run),
     ...reuseView(run.fileCache, parts),
     ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : { commitSha: run.commitSha }),
-    minutes: run.timeoutMs ? run.timeoutMs / 60_000 : null,
+    minutes: upperLimitMinutes(run.timeoutMs),
     status: stateOf(run, run.status),
     ...(stopper ? { stoppedBy: stopper.name } : {}),
     startedAt: run.createdAt.toISOString(),
