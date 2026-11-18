@@ -2115,7 +2115,9 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 }
 
 @media (max-width: 760px) {
-  .body.tracker-page { inset-block-start: 68px; }
+  /* No room is kept for a scrollbar beside the lists drawer: where none is drawn, as with hidden scrollbars, that room was
+     an empty strip of the page beside the drawer, past the room the drawer leaves at its end. */
+  .body.tracker-page { inset-block-start: 68px; scrollbar-gutter: auto; }
   .tracker { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
   .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
   .tr-where { flex: 1 1 200px; }
