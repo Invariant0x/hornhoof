@@ -1245,23 +1245,9 @@ export const en = {
     commandPlans: (names: string) => `Command to connect ${names}`,
     commandAdd: (name: string, host: string) => `Command to add ${name} to ${host}`,
     commandOnly: 'The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.',
-    /* A computer event names its machine when the keeper reported a name. */
-    computerServer: "the server's computer",
     machineAccess: (machine: string) => `Access to ${machine}`,
     computerMac: "On a Mac this reaches Docker's Linux system, not macOS itself.",
     computerClose: 'Close access',
-    computerAsked: (reason: string, machine: string) => `Asked for access to ${machine}: ${reason}`,
-    computerOpened: (who: string, at: string, machine: string) => `${who} opened access to ${machine} until ${at}`,
-    computerStanding: (machine: string) => `Access to ${machine} is open.`,
-    computerReopened: (who: string, machine: string) => `${who} reopened access to ${machine}`,
-    computerDelegated: (machine: string) => `The orchestrator gave employees access to ${machine}`,
-    computerRevoked: (machine: string) => `The orchestrator withdrew employee access to ${machine}`,
-    computerClosed: (who: string, machine: string) => `${who} closed access to ${machine}`,
-    computerDeclined: (who: string, machine: string) => `${who} did not open access to ${machine}`,
-    /* Who opened it when no person did: the orchestrator, for its owner (#1119); and an access its time closed. */
-    computerByOrchestrator: 'The orchestrator',
-    computerExpired: (machine: string) => `Access to ${machine} closed: its time ran out`,
-    computerRefused: (machine: string) => `${machine} refused a signed access grant and stayed closed.`,
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
       not_logged_in: 'This employee\'s subscription is signed out on its machine. Sign in again, then write once more.',
@@ -1283,9 +1269,6 @@ export const en = {
       notSent: 'Not sent',
       file: 'File',
       heads: 'Note',
-      access: 'Access',
-      openOn: (n: number) => `Access is open on ${n} ${plural('en', n, { one: 'machine', other: 'machines' })}.`,
-      manage: 'Manage access in Machines',
     },
     inputLeft: {
       kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',

@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import type { ComputerAccessView, EventView, Me, Org, ShownCommand } from '../src/types';
+import type { EventView, Me, Org, ShownCommand } from '../src/types';
 import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
 import { fakeStream } from './fake-stream';
 import { commandCode } from './command-code';
@@ -19,9 +20,6 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 
 const EVENTS = '/api/agents/orchestrator/events';
 
-/* Computer access to the machine the server runs on, which told no name, as the CEO sees it. */
-const ofServer = (over: Parameters<typeof accessView>[1] = {}): ComputerAccessView => accessView('the company server', { ...over, machine: { id: 'm-server', hostname: '', role: 'data', data: true, ...over.machine } });
-const named = (view: ComputerAccessView, hostname: string): ComputerAccessView => ({ ...view, machine: { ...view.machine, hostname } });
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
 /* A person who last chose the terminal in this browser: the window opens with it. */
@@ -31,7 +29,6 @@ const ev = (seq: number, kind: EventView['kind'], data: unknown, extra: Partial<
 const line = (seq: number) => ev(seq, 'text', { kind: 'text', text: `Line ${seq}` });
 const lines = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => line(from + i));
 const IVAN = { id: 'p1', name: 'Ivan' };
-const STANDING = "Access to the server's computer is open.";
 
 const LOG: EventView[] = [
   ev(1, 'message', { text: 'We make characters for schools' }, { person: IVAN }),
@@ -45,21 +42,21 @@ const LOG: EventView[] = [
   ev(9, 'stopped', {}),
 ];
 
-function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
+function open(routes: Record<string, unknown> = {}, org: Org = ORG, agentId = 'orchestrator') {
   const calls = mockApi({
+    'GET /api/agents/b1': [200, CARD],
     'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
-    [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }],
+    [`GET /api/agents/${agentId}/events?last=300`]: [200, { events: [], state: READY }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     ...(routes as Record<string, [number, unknown]>),
   });
   const onClose = vi.fn();
-  const onOpenMachine = vi.fn();
   const view = render(
     <LanguageProvider>
-      <AgentWindow me={ME} org={org} agentId="orchestrator" onClose={onClose} onOpenMachine={onOpenMachine} />
+      <AgentWindow me={ME} org={org} agentId={agentId} onClose={onClose} />
     </LanguageProvider>,
   );
-  return { calls, onClose, onOpenMachine, ...view };
+  return { calls, onClose, ...view };
 }
 
 describe('AgentWindow', () => {
@@ -321,6 +318,7 @@ describe('AgentWindow', () => {
     });
     const card = await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' });
     expect(await within(card).findByText(commandCode(withKey(command)))).toBeInTheDocument();
+    expect(within(card).queryByText(en.machines.computerConsent)).not.toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
@@ -342,153 +340,65 @@ describe('AgentWindow', () => {
     }
   });
 
-  it('asks for no machine commands for someone who is not the CEO, and shows standing access as a note', async () => {
-    const standing = ofServer({ canOpen: false, canClose: false });
-    const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/machines/access': [200, { views: [standing] }] });
-    const zed: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false }, canDecideCompany: false };
-    render(<AgentWindow me={zed} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
-    expect(await screen.findByText(STANDING)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Open access|Not now/ })).not.toBeInTheDocument();
-    expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
-  });
-
-  it("asks the server which machines' access is theirs to see, whoever opens the window, and never for the CEO's commands", async () => {
-    const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/machines/access': [200, { views: [] }] });
-    const dana: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false, scopeKind: 'listed' }, canDecideCompany: false };
-    render(<AgentWindow me={dana} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
+  it.each(['company', 'listed'] as const)('asks for no CEO machine commands for a %s viewer who is not the owner', async scopeKind => {
+    const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
+    const viewer: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false, scopeKind }, canDecideCompany: false };
+    render(<AgentWindow me={viewer} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
     expect(await screen.findByRole('textbox')).toBeInTheDocument();
-    expect(calls.some(c => c.path === '/api/nodes/commands' || c.path === '/api/computer')).toBe(false);
-    expect(calls.some(c => c.path === '/api/machines/access')).toBe(true);
-    expect(screen.queryByRole('region', { name: /access to/i })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/nodes/commands' || c.path === '/api/computer' || c.path === '/api/machines/access')).toBe(false);
   });
 
-  describe('access to the computer', () => {
-    const NOW = new Date('2026-11-02T12:00:00Z');
-    const UNTIL = new Date(NOW.getTime() + 86_400_000).toISOString();
-    const OPEN = ofServer();
-    const CLOSED = ofServer({ open: false, scope: null });
+  describe.each(['orchestrator', 'b1'])('computer access in the %s window', agentId => {
+    const accessStates = [
+      { state: 'one open machine', views: [accessView('node-a')] },
+      { state: 'two open machines', views: [accessView('node-a'), accessView('node-b')] },
+      { state: 'one closed machine', views: [accessView('node-a', { open: false, scope: null })] },
+      { state: 'two closed machines', views: [accessView('node-a', { open: false, scope: null }), accessView('node-b', { open: false, scope: null })] },
+    ];
 
-    beforeEach(() => {
-      vi.useFakeTimers({ toFake: ['Date'] });
-      vi.setSystemTime(NOW);
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    const notes = () => screen.findByRole('group', { name: 'Notes' });
-
-    it('shows standing access in a note that leads to the machine card', async () => {
-      const user = userEvent.setup();
-      const { calls, onOpenMachine } = open({ 'GET /api/machines/access': [200, { views: [OPEN] }] });
-      const foot = await notes();
-      expect(await within(foot).findByText(STANDING)).toBeInTheDocument();
-      const manage = within(foot).getByRole('link', { name: 'Manage access in Machines' });
-      expect(manage).toHaveAttribute('href', '/machines/m-server');
-      await user.click(manage);
-      expect(onOpenMachine).toHaveBeenCalledWith('m-server');
-      expect(screen.queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
-      expect(calls.some(c => c.method === 'POST' && c.path.startsWith('/api/machines/'))).toBe(false);
-    });
-
-    it('counts the machines open at once in one note', async () => {
-      open({ 'GET /api/machines/access': [200, { views: [OPEN, named({ ...OPEN, machine: { ...OPEN.machine, id: 'm-box' } }, 'debian-box')] }] });
-      expect(await within(await notes()).findByText('Access is open on 2 machines.')).toBeInTheDocument();
-    });
-
-    it('follows the owner closing or reopening access on another screen', async () => {
-      const stream = fakeStream();
-      let view: ComputerAccessView = OPEN;
-      open({ 'GET /api/machines/access': () => [200, { views: [view] }] });
-      expect(await screen.findByText(STANDING)).toBeInTheDocument();
-      view = CLOSED;
-      stream.send({ type: 'computer' });
-      await vi.waitFor(() => expect(screen.queryByText(STANDING)).not.toBeInTheDocument());
-      view = OPEN;
-      stream.send({ type: 'computer' });
-      expect(await screen.findByText(STANDING)).toBeInTheDocument();
-    });
-
-    it('keeps the note below the conversation when the window shows the log', async () => {
-      open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }], 'GET /api/machines/access': [200, { views: [OPEN] }] });
-      const note = await screen.findByText(STANDING);
-      expect(screen.getByRole('log')).not.toContainElement(note);
-    });
-
-    it('writes each step in the log', async () => {
-      open({
-        [`GET ${EVENTS}?last=300`]: [
-          200,
-          {
-            events: [
-              ev(1, 'computer', { state: 'asked', reason: 'Clean Docker images.' }),
-              ev(2, 'computer', { state: 'opened', until: UNTIL }, { person: IVAN }),
-              ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
-              ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
-              ev(5, 'computer', { state: 'refused', machine: 'office-pc' }),
-            ],
-            state: READY,
-          },
-        ],
-      });
-      expect(await screen.findByText("Asked for access to the server's computer: Clean Docker images.")).toBeInTheDocument();
-      expect(screen.getByText(/^Ivan opened access to the server's computer until .+$/)).toBeInTheDocument();
-      expect(screen.getByText("Ivan closed access to the server's computer")).toBeInTheDocument();
-      expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
-      expect(screen.getByText('office-pc refused a signed access grant and stayed closed.')).toBeInTheDocument();
-    });
-
-    /* The server names no person when the orchestrator opened it for the owner, and none when its time ran out (#1119). */
-    it('says the orchestrator opened access when no person did, and that access ended when its time ran out', async () => {
-      open({
-        [`GET ${EVENTS}?last=300`]: [
-          200,
-          {
-            events: [ev(1, 'computer', { state: 'opened', until: UNTIL, machine: 'debian-box' }), ev(2, 'computer', { state: 'expired', machine: 'debian-box' })],
-            state: READY,
-          },
-        ],
-      });
-      expect(await screen.findByText(/^The orchestrator opened access to debian-box until .+$/)).toBeInTheDocument();
-      expect(screen.getByText('Access to debian-box closed: its time ran out')).toBeInTheDocument();
-      expect(screen.queryByText(/Hornhoof/)).not.toBeInTheDocument();
-    });
-
-    /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its note names it. */
-    it('names the machine the access is to, in its note and in the log', async () => {
-      open({
-        [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: UNTIL, machine: 'debian-box' }, { person: IVAN })], state: READY }],
-        'GET /api/machines/access': [200, { views: [named(OPEN, 'debian-box')] }],
-      });
-      expect(await screen.findByText('Access to debian-box is open.')).toBeInTheDocument();
-      expect(screen.getByText(/^Ivan opened access to debian-box until .+$/)).toBeInTheDocument();
-    });
-
-    it('shows standing access in Russian', async () => {
-      localStorage.setItem('hh-lang', 'ru');
-      try {
+    it.each(accessStates)('keeps the memory note without an access note or link in terminal and chat with $state', async ({ views }) => {
+      chooseTerminal();
+      await act(async () => {
         open({
-          [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: UNTIL }, { person: IVAN })], state: READY }],
-          'GET /api/machines/access': [200, { views: [OPEN] }],
-        });
-        const foot = await screen.findByRole('group', { name: 'Заметки' });
-        expect(await within(foot).findByText('Доступ к машине сервера открыт.')).toBeInTheDocument();
-        expect(screen.getByText(/^Ivan: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
-      } finally {
-        localStorage.removeItem('hh-lang');
-      }
+          [`GET /api/agents/${agentId}/events?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true, memoryWait: true } }],
+          'GET /api/machines/access': [200, { views }],
+        }, DEV_ORG, agentId);
+      });
+      const foot = () => within(screen.getByRole('group', { name: en.window.notes.label }));
+      expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+      expect(foot().getByText(en.window.memoryWait)).toBeInTheDocument();
+      expect(foot().queryByText('Access', { exact: true })).not.toBeInTheDocument();
+      expect(foot().queryByRole('link')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+      expect(screen.getByRole('log')).toBeInTheDocument();
+      expect(foot().getByText(en.window.memoryWait)).toBeInTheDocument();
+      expect(foot().queryByText('Access', { exact: true })).not.toBeInTheDocument();
+      expect(foot().queryByRole('link')).not.toBeInTheDocument();
     });
 
-    it('says in Russian that the orchestrator opened access and that its time ran out', async () => {
-      localStorage.setItem('hh-lang', 'ru');
-      try {
-        open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: UNTIL }), ev(2, 'computer', { state: 'expired' })], state: READY }] });
-        expect(await screen.findByText(/^Оркестратор: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
-        expect(screen.getByText('Доступ к машине сервера закрыт: срок истек')).toBeInTheDocument();
-      } finally {
-        localStorage.removeItem('hh-lang');
-      }
+    it.each(accessStates)('makes no computer access request on opening or when access changes with $state', async ({ views }) => {
+      const stream = fakeStream();
+      const { calls } = open({ 'GET /api/machines/access': [200, { views }] }, DEV_ORG, agentId);
+      await screen.findByRole('log');
+      await act(async () => {
+        stream.send({ type: 'computer' });
+      });
+      expect(calls.filter(c => /^\/api\/(?:machines\/(?:[^/]+\/)?access|computer)(?:$|[/?])/.test(c.path))).toEqual([]);
+    });
+
+    it('keeps the conversation without displaying historical or live computer access events', async () => {
+      const stream = fakeStream();
+      open({
+        [`GET /api/agents/${agentId}/events?last=300`]: [200, {
+          events: [line(1), ev(2, 'computer', { state: 'reopened', machine: 'node-a' }, { person: IVAN }), ev(3, 'computer', { state: 'closed', machine: 'node-b' }, { person: IVAN }), line(4)],
+          state: READY,
+        }],
+      }, DEV_ORG, agentId);
+      const log = await screen.findByRole('log');
+      expect(within(log).getByText('Line 1')).toBeInTheDocument();
+      expect(within(log).getByText('Line 4')).toBeInTheDocument();
+      stream.send({ type: 'agent_event', agentId: agentId === 'orchestrator' ? ORG.orchestrator!.id : agentId, event: ev(5, 'computer', { state: 'reopened', machine: 'live-node' }) });
+      expect(within(log).queryAllByText(/access to /i)).toHaveLength(0);
     });
   });
 

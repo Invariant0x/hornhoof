@@ -97,7 +97,7 @@ function CommandLine({ command, label }: { command: string; label?: string }) {
    it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
    the command shows without one, with a line that says so. Any other command
    shows as it is. */
-export function CommandBox({ command, trust, password }: { command: string; trust?: string; password?: string }) {
+export function CommandBox({ command, trust, password, showComputerConsent = true }: { command: string; trust?: string; password?: string; showComputerConsent?: boolean }) {
   const t = useT();
   const joins = command.includes(' --join ');
   const { publicKey, prompt } = useOwnerKey();
@@ -144,7 +144,7 @@ export function CommandBox({ command, trust, password }: { command: string; trus
         prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
       )}
       {keyless && <p className="muted">{t.subs.ownerKeyNotHere}</p>}
-      {joins && shown && <p className="muted">{t.machines.computerConsent}</p>}
+      {showComputerConsent && joins && shown && <p className="muted">{t.machines.computerConsent}</p>}
       {/* The stripe and the lines start where the page does; the words read whole in their own direction. */}
       <p className="trust"><bdi>{trust ?? t.subs.trust}</bdi></p>
     </div>

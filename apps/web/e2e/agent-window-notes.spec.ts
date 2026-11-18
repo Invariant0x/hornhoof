@@ -8,7 +8,7 @@ import { CLOSED, OPEN, openWindow } from './computer-strip-api';
 /* The agent's screen holds its terminal and short notes (#1115, Design #1102). A note of the program or of Hornhoof,
    such as the program sleeping until the agent's next task or the machine low on memory, stands at the foot of the
    window, under the terminal and the input line inside it, never over either; several stand one under another, each
-   led by a word in a frame. A note of standing access links to the machine in Machines. */
+   led by a word in a frame. */
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -87,20 +87,16 @@ for (const look of LOOKS) {
     expect(errors).toEqual([]);
   });
 
-  test(`standing access appears as a note that leads to Machines: ${named(look)}`, async ({ page }) => {
-    const { window, errors, posts } = await openNotes(page, look, { running: true }, OPEN);
+  test(`standing access stays off the window foot: ${named(look)}`, async ({ page }) => {
+    const { window, errors } = await openNotes(page, look, { running: true }, OPEN);
+    const foot = window.getByRole('group', { name: t.notes.label });
+    const memory = noteOf(window, t.memoryWait);
+    const limit = noteOf(window, t.limitUntil('').split(' ').slice(0, 4).join(' '));
+    await expectStacked(page, window, [memory, limit], look.width);
+    await expect(foot.getByRole('status')).toHaveCount(2);
+    await expect(foot.getByRole('link')).toHaveCount(0);
     await expect(window.getByRole('button', { name: t.computerClose, exact: true })).toHaveCount(0);
-    const open = noteOf(window, t.computerStanding('node-a'));
-    await expectStacked(page, window, [open], look.width);
-    await page.screenshot({ path: test.info().outputPath('agent-access-notes.png'), animations: 'disabled' });
-    await expect(open.getByText(t.notes.access, { exact: true })).toBeVisible();
-    await page.route(url => url.pathname === '/api/machines' || url.pathname === '/api/subscriptions', route =>
-      route.fulfill({ json: new URL(route.request().url()).pathname === '/api/machines' ? { machines: [], builtin: null } : { subscriptions: [] } }),
-    );
-    await open.getByRole('link', { name: t.notes.manage, exact: true }).click();
-    await expect(page).toHaveURL(/\/machines\/node-a$/);
-    await expect(window).toBeHidden();
-    expect(posts).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath('agent-notes-open-machine.png'), animations: 'disabled' });
     expect(errors).toEqual([]);
   });
 }

@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Language, type Messages }
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
-import type { AgentCardView, ComputerAccessView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ProviderId, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
+import type { AgentCardView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ProviderId, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
 import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
@@ -21,7 +21,6 @@ import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { WindowFoot, type WindowNote } from '../ui/WindowNotes';
-import { machineName } from '../ui/access';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
@@ -62,14 +61,14 @@ const field = (data: unknown, key: string): string => {
 
 /* Claude Code loading its own tools: plumbing, not something he did. */
 const LOADER = 'ToolSearch';
-type LogEvent = EventView & { kind: Exclude<EventView['kind'], 'program'> };
+type LogEvent = EventView & { kind: Exclude<EventView['kind'], 'program' | 'computer'> };
 
-/* The lines people read: no proposal (the one card shows below the log) and no tool loading, with its result. */
+/* Proposals have their own card and computer access is shown in Machines. Program state and tool loading are plumbing. */
 function visible(events: EventView[]): LogEvent[] {
   let call = '';
   return events.filter((e): e is LogEvent => {
     if (e.kind === 'tool') call = field(e.data, 'name');
-    if (['proposal', 'program'].includes(e.kind)) return false;
+    if (['proposal', 'program', 'computer'].includes(e.kind)) return false;
     if (e.kind === 'tool' || e.kind === 'tool_result') return call !== LOADER;
     return true;
   });
@@ -115,8 +114,7 @@ function windowTitle(t: Messages, language: Language, org: Org, agentId: string,
 }
 
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
-/* onOpenMachine: shows a machine's card in Machines, where its access is opened and closed. */
-type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void; onOpenMachine?(id: string): void };
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
 type CardRight = { id: string; canAnswer: boolean };
 
@@ -152,24 +150,6 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
   return { cardLock: cardRight ? undefined : CEO_DECIDES, handLock: decidesCompany ? undefined : CEO_DECIDES };
 }
 
-/* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
-   are the CEO's alone. The window shows a note about the machines with standing access. */
-const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator });
-
-/* Loads them; null for what this person does not get, or what did not load. */
-const loadCards = (ownsCommands: boolean, seesComputer: boolean) =>
-  Promise.all([
-    ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
-    seesComputer ? api.get<{ views: ComputerAccessView[] }>('/api/machines/access').catch(() => null) : null,
-  ]);
-
-/* Computer access changed, here or on another screen: what the window shows of it loads again. */
-function useComputerChanges(load: () => Promise<void>): void {
-  useStream(m => {
-    if (m.type === 'computer') void load();
-  });
-}
-
 /* A task takes Escape before the terminal; a minimized agent leaves the rest of the screen alone. */
 function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop: () => void): void {
   if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
@@ -184,28 +164,6 @@ function personWords(e: LogEvent): boolean {
 
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
-
-/* Who did a step of machine access: its person, else whoever acts without one. */
-const personOr = (e: EventView, other: string) => e.person?.name ?? other;
-type ComputerStep = (t: Messages, language: Language, e: EventView, machine: string) => string;
-
-/* Changes to standing access and older events kept in the window's history. */
-const COMPUTER_STEPS = new Map<string, ComputerStep>([
-  ['asked', (t, _, e, machine) => t.window.computerAsked(field(e.data, 'reason'), machine)],
-  ['opened', (t, language, e, machine) => t.window.computerOpened(personOr(e, t.window.computerByOrchestrator), clock(language, field(e.data, 'until')) ?? '', machine)],
-  ['expired', (t, _, __, machine) => t.window.computerExpired(machine)],
-  ['reopened', (t, _, e, machine) => t.window.computerReopened(personOr(e, t.window.hornhoof), machine)],
-  ['delegated', (t, _, __, machine) => t.window.computerDelegated(machine)],
-  ['revoked', (t, _, __, machine) => t.window.computerRevoked(machine)],
-  ['closed', (t, _, e, machine) => t.window.computerClosed(personOr(e, t.window.hornhoof), machine)],
-  ['refused', (t, _, __, machine) => t.window.computerRefused(machine)],
-]);
-const declinedStep: ComputerStep = (t, _, e, machine) => t.window.computerDeclined(personOr(e, t.window.hornhoof), machine);
-
-function computerLine(t: Messages, language: Language, e: EventView): string {
-  const machine = field(e.data, 'machine') || t.window.computerServer;
-  return (COMPUTER_STEPS.get(field(e.data, 'state')) ?? declinedStep)(t, language, e, machine);
-}
 
 /* What an agent said, and the files it attached: a file sent on its own comes without words. */
 function AgentWords({ data }: { data: unknown }) {
@@ -311,17 +269,6 @@ function stateNotes(t: Messages, language: Language, state: OrchestratorState, r
 const memoryNote = (t: Messages, state: OrchestratorState): WindowNote | null =>
   state.memoryWait ? { id: 'memory', word: t.window.notes.wait, text: t.window.memoryWait, tone: 'wait' } : null;
 
-/* The window links to the cards of connected machines with open access. */
-function accessNotes(t: Messages, views: ComputerAccessView[], open: (id: string) => void): WindowNote[] {
-  const w = t.window.notes;
-  const opened = views.filter(view => view.open);
-  const first = opened[0];
-  if (!first) return [];
-  const id = first.machine.id;
-  const text = opened.length === 1 ? t.window.computerStanding(machineName(t, first.machine)) : w.openOn(opened.length);
-  return [{ id: 'open', word: w.access, text, tone: 'access', link: { label: w.manage, href: `/machines/${id}`, onOpen: () => open(id) } }];
-}
-
 function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void): void {
   if (mounted && card) save(card);
 }
@@ -330,7 +277,7 @@ function readyEvents<T>(mounted: boolean, res: T | null): res is T {
   return mounted && res !== null;
 }
 
-export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {}, onOpenMachine = () => {} }: Props) {
+export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
   useRenderGuard('agent-window');
   const t = useT();
   const { language } = useLanguage();
@@ -358,8 +305,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
-  const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
-  const [computer, setComputer] = useState<ComputerAccessView[]>([]);
+  const ownsCommands = orchestrator && me.person.isOwner;
   /* What the terminal has to say, at the foot of the window with the other notes. */
   const [termNotes, setTermNotes] = useState<WindowNote[]>([]);
   const asked = useRef<number | null>(null);
@@ -405,11 +351,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   }, []);
 
   const loadCommands = useCallback(async () => {
-    const [res, access] = await loadCards(ownsCommands, seesComputer);
-    if (!mounted.current) return;
-    if (res) setCommands(res.commands.filter(commandBlockOpen));
-    if (access) setComputer(access.views);
-  }, [ownsCommands, seesComputer]);
+    if (!ownsCommands) return;
+    const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
+    if (mounted.current && res) setCommands(res.commands.filter(commandBlockOpen));
+  }, [ownsCommands]);
 
   const hideCommand = (id: string) =>
     api.post(`/api/nodes/commands/${id}/hide`).then(
@@ -515,8 +460,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     if (wasReady.current === false && canAnswer) void greet();
     wasReady.current = canAnswer;
   }, [canAnswer, greet]);
-
-  useComputerChanges(loadCommands);
 
   useStream(m => {
     if (m.type === 'agent_event' && m.agentId === liveId) {
@@ -742,8 +685,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         );
       case 'stopped':
         return note(t.window.stopped, true);
-      case 'computer':
-        return note(computerLine(t, language, e));
     }
   }
 
@@ -820,7 +761,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         <WindowFoot
           label={t.window.notes.label}
           memory={memoryNote(t, state)}
-          notes={[...(terminal ? termNotes : []), ...stateNotes(t, language, state, ready, sub), ...accessNotes(t, computer, onOpenMachine)]}
+          notes={[...(terminal ? termNotes : []), ...stateNotes(t, language, state, ready, sub)]}
         />
       )}
       {chat && (ready || state.busy) && <ChatState state={state} onStop={stop} />}

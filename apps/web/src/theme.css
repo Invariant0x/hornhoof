@@ -1083,14 +1083,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-notes { min-width: 0; display: grid; gap: 8px; align-content: start; }
 .t-note { min-width: 0; margin: 0; padding-inline-start: 10px; border-inline-start: 2px solid var(--line2); overflow-wrap: break-word; }
 .t-note-word { display: inline-block; margin-inline-end: 4px; padding: 0 6px; border: 1px solid currentColor; font-size: 12px; font-weight: 600; color: var(--muted); }
-.t-note.wait, .t-note.access { border-inline-start-color: var(--amber-ink); }
-.t-note.wait .t-note-word, .t-note.access .t-note-word, .t-note.wait .t-note-text { color: var(--amber-ink); }
+.t-note.wait { border-inline-start-color: var(--amber-ink); }
+.t-note.wait .t-note-word, .t-note.wait .t-note-text { color: var(--amber-ink); }
 .t-note.bad { border-inline-start-color: var(--pink-ink); color: var(--pink-ink); }
 .t-note.bad .t-note-word { color: var(--pink-ink); }
-/* The way to where the note is answered stands on its own line, a target of 44 px, so that it never splits the note's
-   words, right to left too. */
-.t-note-link { display: flex; align-items: center; inline-size: fit-content; max-inline-size: 100%; min-block-size: 44px; color: var(--cyan-ink); overflow-wrap: break-word; }
-.t-note-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* Computer access in a machine's card (#1115, Design #1102): its state in a framed word, then to whom it is open and
    until when; choosing how long and for whom, and saying yes once more for every agent, stand in the card's flow. */
 .acc { display: grid; gap: 8px; min-inline-size: 0; }
