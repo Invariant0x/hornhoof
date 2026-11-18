@@ -146,6 +146,17 @@ describe('hook delivery through the bridge', () => {
     expect(JSON.stringify(b.rejected)).not.toContain(b.url.split('/').at(-1)!);
   });
 
+  it('tells the host of a refused hook by its event, and never of a refused call of another kind or of no event', async () => {
+    const unowned: [string, string][] = [];
+    const bridge = new Bridge('http://127.0.0.1:9', () => { throw Error('must not run'); }, async () => false, { unowned: (key, event) => void unowned.push([key, event]) });
+    await bridge.start();close.push(() => bridge.stop());
+    const { hookUrl, attachUrl } = bridge.agent('agent-1');
+    expect((await fetch(hookUrl + '/start', { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await fetch(hookUrl, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect((await fetch(attachUrl + '/file')).status).toBe(403);
+    expect(unowned).toEqual([['agent-1', 'start']]);
+  });
+
   it('does not trust a borrowed pid or a cached successful stop before checking the caller', async () => {
     let allowed = true;let calls = 0;
     const b = await opened(() => { calls++; }, async () => allowed);
