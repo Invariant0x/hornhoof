@@ -56,6 +56,12 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
   );
 }
 
+/* Whether the banner shows an update on its way: asked for, or running, with the server in maintenance or restarting
+   meanwhile. */
+export function showsUpdate(updates: Updates): boolean {
+  return updates.view !== null && (updates.starting || updates.view.updater.status?.state === 'running');
+}
+
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
 export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetails: () => void }) {
   const t = useT();
@@ -81,7 +87,7 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   };
 
   let body: React.ReactNode = null;
-  if (updates.starting || status?.state === 'running') {
+  if (showsUpdate(updates)) {
     body = (
       <>
         <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />

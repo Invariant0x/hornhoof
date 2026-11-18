@@ -15,6 +15,7 @@ import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
 import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
+import { useLoadFailure } from '../ui/LoadFailure';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
@@ -548,7 +549,9 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const still = useReducedMotion();
   const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
-  const { org, failure } = useOrg();
+  const { org, failure: loadFailure } = useOrg();
+  /* While the update panel says the server takes no changes, the map keeps what it last showed. */
+  const failure = useLoadFailure(loadFailure);
   const [shots, setShots] = useState<Shot[]>([]);
   const key = viewKey(me);
   const [kept] = useState(() => keptView(key));
@@ -718,7 +721,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
-  if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
+  if (failure !== null) return <p className="alert" role="alert">{errorText(t, failure)}</p>;
   if (!org || !arr) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;

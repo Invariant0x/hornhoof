@@ -8,6 +8,8 @@ import { Ask } from '../ui/Ask';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
+import { LoadFailure } from '../ui/LoadFailure';
+import { useStream } from '../live';
 import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
@@ -686,6 +688,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [confirm, setConfirm] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const live = useRef(true);
   /* Each change the person makes to the shown commands counts here, so a look that began before it leaves them alone. */
   const commandChanges = useRef(0);
@@ -714,16 +717,21 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setPriority(hosts.priority === true);
       setMoving({ move: hosts.move ?? null, canMove: hosts.canMove === true });
       setSubs(list.subscriptions);
+      setLoadFailure(null);
     } catch (err) {
-      setFailure(err);
+      setLoadFailure(err);
     }
   }, []);
 
-  /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds. */
+  /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds, and at once
+     after a break, an update among them. */
   useEffect(() => {
     void load();
     return everyVisible(() => void load(), REFRESH_MS);
   }, [load]);
+  useStream(m => {
+    if (m.type === 'reconnected') void load();
+  });
 
   async function run(action: () => Promise<void>) {
     setFailure(null);
@@ -809,7 +817,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
-  if (unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
+  if (unavailableFailure(loadFailure) || unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people machines">
@@ -836,6 +844,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           onCancel={() => void cancelMachine(activeCommand.id)}
         />
       )}
+      <LoadFailure failure={loadFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
 

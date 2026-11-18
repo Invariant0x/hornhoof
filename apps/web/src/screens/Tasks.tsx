@@ -11,6 +11,7 @@ import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
+import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -141,9 +142,10 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
 
 function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () => void }) {
   const t = useT();
-  if (failure === undefined || failure === null) return null;
+  const shown = useLoadFailure(failure);
+  if (shown === null) return null;
   return <div className="notebook-unread">
-    <p className="alert" role="alert">{errorText(t, failure)}</p>
+    <p className="alert" role="alert">{errorText(t, shown)}</p>
     <button className="btn small ghost" type="button" onClick={onRetry}>{t.app.tryAgain}</button>
   </div>;
 }
@@ -340,6 +342,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
   const { tasks, failure } = useTasks({ status: 'all' });
+  const updateSaysIt = useUpdateSaysIt();
   const { goals: goalList, failure: goalsFailure } = useGoals();
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
@@ -458,7 +461,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
   const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
   if (unavailableFailure(placesFailure ?? failure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = placesFailure ?? failure ?? tracked(goalsFailure) ?? tracked(pipelinesFailure);
+  const broken = shownLoadFailure(placesFailure ?? failure ?? tracked(goalsFailure) ?? tracked(pipelinesFailure), updateSaysIt);
   const clearPerson = () => onPlace({ ...place, personId: undefined });
   const waiting = (
     <WaitingForYou

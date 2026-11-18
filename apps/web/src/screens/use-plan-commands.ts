@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { ShownCommand, SubView } from '../types';
 import { toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { everyVisible } from '../guard';
+import { useStream } from '../live';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type Controls = {
@@ -52,13 +53,16 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
       if (next.error) setFailure(next.error);
     } catch (err) {
       setReadFailure(err);
-      setFailure(err);
     }
   }, [live, setFailure]);
   useEffect(() => {
     void load();
     return everyVisible(() => void load(), 5000);
   }, [load]);
+  /* After a break, an update among them, the plans are read again at once. */
+  useStream(m => {
+    if (m.type === 'reconnected') void load();
+  });
 
   const connected = (shown: ActiveCommand, added: SubView[]) => {
     revision.current++;

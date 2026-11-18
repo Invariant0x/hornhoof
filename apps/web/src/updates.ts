@@ -4,6 +4,7 @@ import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
 import { everyVisible } from './guard';
+import { heardAgain } from './live';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -87,6 +88,7 @@ export function useUpdates(enabled: boolean): Updates {
   const boot = useRef<string | null>(null);
   const busyNow = useRef(false);
   const askingNow = useRef(false);
+  const outageNow = useRef<Outage>('none');
 
   const take = useCallback((next: UpdatesView) => {
     boot.current ??= next.current.commit;
@@ -99,10 +101,14 @@ export function useUpdates(enabled: boolean): Updates {
       take(await api.get<UpdatesView>('/api/updates'));
       setFailure(null);
       setOutage('none');
+      /* The update held the server and lets it go now: what the screens asked for meanwhile, they ask again. */
+      if (outageNow.current !== 'none') heardAgain();
+      outageNow.current = 'none';
     } catch (err) {
       setFailure(err);
       /* The server restarts during an update; the next poll asks again. */
-      setOutage(outageOf(err, busyNow.current));
+      outageNow.current = outageOf(err, busyNow.current);
+      setOutage(outageNow.current);
     }
   }, [take]);
 

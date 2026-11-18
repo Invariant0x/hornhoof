@@ -22,6 +22,7 @@ import { SortTable, type TableColumn } from '../ui/SortTable';
 import { ApiForm } from '../ui/ApiForm';
 import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
+import { LoadFailure } from '../ui/LoadFailure';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
 import { replaceSubscription } from './subscription-list';
@@ -571,6 +572,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
+      <LoadFailure failure={readFailure} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}

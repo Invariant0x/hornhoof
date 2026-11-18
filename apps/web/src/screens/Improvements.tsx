@@ -6,6 +6,7 @@ import { useOrg } from '../org';
 import { placeName } from '../tasks';
 import type { Improvement, ImprovementParts, Org, SentFate } from '../types';
 import { BusyLabel } from '../ui/BusyLabel';
+import { LoadFailure } from '../ui/LoadFailure';
 import { Markdown } from '../ui/Markdown';
 import { Feedback, type FeedbackStart } from './Feedback';
 
@@ -240,7 +241,7 @@ export function Improvements({ improvements, failure, inbox, onChanged, onTask, 
           <p className="muted">{t.improvements.intro}</p>
         </div>
       </header>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      <LoadFailure failure={failure} />
       {improvements && !improvements.length && <p className="muted">{t.improvements.empty}</p>}
       {!!improvements?.length && (
         <section className="waiting" aria-label={t.improvements.open}>
