@@ -723,14 +723,13 @@ describe('waking agents for their tasks', () => {
     expect(await turnsOf(orchestrator.id)).toEqual([]);
   });
 
-  it("tells the orchestrator to go on with a department's task that cannot by the tools he has", async () => {
+  it("tells the orchestrator how to unblock the department's existing task", async () => {
     const { ctx, dev, head, orchestrator } = await company();
     const { task } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const prompt = wakePrompt(orchestrator, task, { agentId: orchestrator.id, taskId: task.id, why: 'blocked', text: 'No designer.' });
-    expect(prompt).not.toContain('update_task');
-    expect(prompt).toContain('cancel_task');
-    expect(prompt).toContain('add_tasks');
-    expect(prompt).not.toContain('create_task');
+    expect(prompt).toContain('continue the existing task');
+    expect(prompt).toContain('update_task');
+    expect(prompt).toContain('Cancel only if the work is no longer needed.');
     expect(prompt).toContain('No designer.');
   });
 
