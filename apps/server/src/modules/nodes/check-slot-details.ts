@@ -1,12 +1,11 @@
 import { and, eq } from 'drizzle-orm';
-import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks, testParts, testRuns } from '../../db/schema.js';
 import { onTask } from '../tasks/file-policy.js';
 import type { ToolJob } from '../tools/job.js';
 import { builtinOf, keyOf, nodeIdentity, ownBuiltin, type NodeIdentity } from './hub.js';
 import { checkQueueSnapshot } from './check-slots.js';
-import type { CheckClaim, CheckSnapshot } from './check-slots-queue.js';
+import { checkPartId, type CheckClaim, type CheckSnapshot } from './check-slots-queue.js';
 
 type Part = typeof testParts.$inferSelect;
 type Task = typeof tasks.$inferSelect;
@@ -51,8 +50,8 @@ async function jobActor(ctx: Ctx, viewer: ToolJob, claim: CheckClaim, jobId: str
 async function actorOf(ctx: Ctx, viewer: ToolJob, claim: CheckClaim): Promise<Actor> {
   const hidden: Actor = { kind: 'unavailable' };
   if (claim.request.jobId) return await jobActor(ctx, viewer, claim, claim.request.jobId) ?? hidden;
-  const partId = /^Run part (.+)$/.exec(claim.request.label)?.[1];
-  if (!partId || !z.uuid().safeParse(partId).success) return hidden;
+  const partId = checkPartId(claim.request);
+  if (!partId) return hidden;
   return await runActor(ctx, viewer, claim, partId) ?? hidden;
 }
 
@@ -83,7 +82,7 @@ function waitingLine(slot: Slot, recorded: boolean): string {
 function partClaims(ctx: Ctx, part: Part) {
   const node = partNode(ctx, part);
   const snapshot = node ? checkQueueSnapshot(ctx, node) : null;
-  const mine = (claim: CheckClaim) => !claim.request.jobId && claim.node === (node && keyOf(node)) && claim.request.label === `Run part ${part.id}`;
+  const mine = (claim: CheckClaim) => claim.node === (node && keyOf(node)) && checkPartId(claim.request) === part.id;
   return { snapshot, waiting: snapshot?.queue.find(mine), running: snapshot?.holders.find(mine) };
 }
 

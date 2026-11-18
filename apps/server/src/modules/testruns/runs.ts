@@ -3,7 +3,7 @@ import { WORK_MEMORY_GB, TEST_MINUTES, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } fro
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -34,6 +34,7 @@ import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reu
 import { keepPartTimings } from './timings.js';
 import { heldMachines, holdsBuiltin, holdsMachine } from '../network/follow.js';
 import { builtinName } from '../nodes/builtin.js';
+import { endPartChecks, partsOfNode as ofNode, reconcilePartChecks } from '../nodes/check-slots.js';
 type Part = typeof testParts.$inferSelect;
 type Department = typeof departments.$inferSelect;
 type Repo = NonNullable<Workspace['repo']>;
@@ -52,13 +53,6 @@ const isId = (s: string) => z.uuid().safeParse(s).success;
 /* The node a part went to. */
 /* The node a part runs on: a plan's, or the built-in node of the machine named, this app's own where none is. */
 const nodeOf = (ctx: Ctx, p: Pick<Part, 'builtin' | 'builtinMachine' | 'nodeId'>): NodeIdentity | null => (p.builtin ? (p.builtinMachine ? builtinOf(p.builtinMachine) : ownBuiltin(ctx.config)) : p.nodeId ? nodeIdentity(p.nodeId) : null);
-/* The parts a node may touch: a plan's node those sent to it, a machine's built-in node those it was given. A part
-   from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
-const ofNode = (ctx: Ctx, id: NodeIdentity): SQL => {
-  if (id.kind === 'node') return eq(testParts.nodeId, id.nodeId);
-  const here = id.machine === ownMachine(ctx.config) ? or(eq(testParts.builtinMachine, id.machine), isNull(testParts.builtinMachine)) : eq(testParts.builtinMachine, id.machine);
-  return and(eq(testParts.builtin, true), here)!;
-};
 
 /* What a run is called where agents read of it, and its state there: a run of work that passed is done. */
 const named = (run: Pick<Run, 'kind' | 'number'>) => `${run.kind === 'work' ? 'Work run' : 'Test run'} ${run.number}`;
@@ -355,7 +349,14 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => (
   part: part.part,
   parts: run.parts,
   timeoutMs: run.timeoutMs,
+  silenceMs: partSilenceMs(run.timeoutMs, part.environmentSelection?.estimatedMs),
 });
+
+/* A part with no estimate (an ad hoc command or a final check) gets most of its allotted time. */
+function partSilenceMs(timeoutMs: number, estimatedMs: number | undefined): number {
+  const quiet = estimatedMs === undefined ? timeoutMs * 0.75 : estimatedMs * 1.5 + 60_000;
+  return Math.max(1, Math.min(2 ** 31 - 1, Math.ceil(quiet)));
+}
 
 /* Gives waiting parts out oldest first, keeping a shared count of reservations on each physical computer. */
 async function giveOut(ctx: Ctx): Promise<void> {
@@ -457,22 +458,22 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
 }
 
 /* Parts that end without a word from their node, and the runs they finish. */
-async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise<Part[]> {
+async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise<void> {
   const ended = await ctx.db
     .update(testParts)
     .set({ status: 'failed', error, finishedAt: new Date(), ...(tail ? { tail } : {}) })
     .where(and(which, inArray(testParts.status, ['queued', 'running'])))
     .returning();
+  cancelParts(ctx, ended);
   for (const p of ended) await stopWithPreparation(ctx, p);
   for (const runId of new Set(ended.map(p => p.runId))) await settleRun(ctx, runId);
-  return ended;
 }
 
 /* The batches of a run start beside its preparation, but a preparation that failed decides the run: none of them keeps a machine
    for it. What runs stops on its machine, and what waits never starts. */
 async function stopWithPreparation(ctx: Ctx, part: Part): Promise<void> {
   if (part.status !== 'failed' || part.environmentSelection?.selection.kind !== 'prepare') return;
-  cancelParts(ctx, await endParts(ctx, eq(testParts.runId, part.runId), 'prerequisite_failed', 'The preparation failed; this part was stopped.'));
+  await endParts(ctx, eq(testParts.runId, part.runId), 'prerequisite_failed', 'The preparation failed; this part was stopped.');
 }
 
 const lostAt = (ctx: Ctx, part: Part, why: string): LostRun => {
@@ -501,6 +502,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
       .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null, queuedAt: new Date() })
       .where(running)
       .returning({ id: testParts.id });
+    if (again) cancelParts(ctx, [p]);
     /* What the lost attempt put on the task goes: the part makes it again, and the old id takes no more. */
     if (again && run.kind === 'work') {
       await ctx.db.delete(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `${madeName(run, p.part, '')}%`)));
@@ -556,12 +558,13 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .set({ ...productPartEnd(ctx, id, found.run, found.part, msg), commit: msg.commit, exitCode: msg.exitCode, tail: tailOf(msg.log), finishedAt: new Date() })
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
+      endPartChecks(ctx, id, msg.partId, true);
       await keepLog(ctx, found.run, found.part, msg.log);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await stopWithPreparation(ctx, ended);
       /* Also when the part had ended: the end the node sends again ends the run the first one did not reach. */
       await settleRun(ctx, found.run.id);
-    }
+    } else endPartChecks(ctx, id, msg.partId, true);
   }
   /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
   ctx.hub.send(id, { type: 'tests.ack', partId: msg.partId });
@@ -572,11 +575,12 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
    meanwhile stop. A node of a build before test runs knows none. */
 export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = []): Promise<void> {
   const known = has.filter(isId);
+  reconcilePartChecks(ctx, id, new Set(known));
   await loseParts(ctx, and(ofNode(ctx, id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
     const open = await ctx.db.select(idOnly(testParts)).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
     const keep = new Set(open.map(p => p.id));
-    for (const partId of known) if (!keep.has(partId)) ctx.hub.send(id, { type: 'tests.cancel', partId });
+    for (const partId of known) if (!keep.has(partId)) cancelPart(ctx, id, partId);
   }
   await pumpTests(ctx);
 }
@@ -604,9 +608,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
     .where(inArray(testParts.status, ['queued', 'running']));
   for (const { part, run } of open) {
     if (part.status === 'running' && part.startedAt && part.startedAt.getTime() + run.timeoutMs + LATE_MS < now.getTime()) {
-      const [ended] = await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, 'timeout');
-      const node = ended && nodeOf(ctx, ended);
-      if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: part.id });
+      await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, 'timeout');
       continue;
     }
     const node = part.status === 'running' ? nodeOf(ctx, part) : null;
@@ -834,8 +836,13 @@ async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other
 function cancelParts(ctx: Ctx, parts: Part[]): void {
   for (const p of parts) {
     const node = nodeOf(ctx, p);
-    if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
+    if (node) cancelPart(ctx, node, p.id);
   }
+}
+
+function cancelPart(ctx: Ctx, node: NodeIdentity, partId: string): void {
+  endPartChecks(ctx, node, partId, false);
+  ctx.hub.send(node, { type: 'tests.cancel', partId });
 }
 
 /* Stops a run: its waiting parts end here, its running ones on their nodes too. Its agent hears of it when another one

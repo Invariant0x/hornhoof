@@ -3,15 +3,18 @@ import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type 
 import type { PartSpread, TestPartPlan } from './plan.js';
 import type { ReuseDecision } from './reuse.js';
 
-export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[]; computer?: string }[]; estimate: TestPartPlan | null; reason: string };
+export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[]; computer?: string; estimatedMs?: number }[]; estimate: TestPartPlan | null; reason: string };
 
 /* A batch needs nothing the preparation makes, so it starts at once; a preparation that fails stops it (runs.ts). */
 function batchLeaves(input: PreparedEnvironmentPlanInput, plan: EnvironmentPartPlan | null): ProductPlan['leaves'] {
-  return (plan?.parts ?? []).map(part => ({
+  if (!plan) return [];
+  const slowest = Math.max(1, ...(input.machines ?? []).map(machine => machine.pace));
+  return plan.parts.map((part, index) => ({
     selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha,
       selections: part.selections.map(selection => ({ ...selection, shard: part.suiteShards.find(shard => shard.suiteId === selection.suiteId)! })).map(selection => ({ ...selection, shard: { index: selection.shard.index, count: selection.shard.count } })),
     } }).selection,
     after: [],
+    estimatedMs: input.costs.setupMs + input.costs.collectMs + (part.machine?.ms ?? plan.testPlan.parts[index]!.testMs * slowest),
     ...(part.machine ? { computer: part.machine.key } : {}),
   }));
 }
@@ -42,7 +45,8 @@ function planReason(preparation: ReturnType<typeof preparationFor>, planned: Env
 function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>, planned: EnvironmentPartPlan | null): ProductPlan['leaves'] {
   if (!preparation) return [];
   const computer = planned?.testPlan.preparationMachine;
-  return [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [], ...(computer ? { computer } : {}) }];
+  return [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [], ...(computer ? { computer } : {}),
+    ...(input.preparationMs === undefined ? {} : { estimatedMs: input.preparationMs * (input.machines?.find(machine => machine.key === computer)?.pace ?? 1) }) }];
 }
 function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null {
   if (!planned) return null;

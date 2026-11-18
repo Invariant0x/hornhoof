@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { mutationResultMatches, CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser, playwrightVersionIn } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
@@ -18,6 +18,7 @@ import { machineLoad } from './load.js';
 import { namedWorkers, partShare, vitestWorkers } from './vitest-workers.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
+import { currentCheckLease } from './check-queue.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 export type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
@@ -40,6 +41,7 @@ type Options = {
   /* Values the log never shows, such as the node's key. */
   hidden: string[];
   signal?: AbortSignal;
+  activity?: (() => void) | undefined;
   proc?: string;
   cpus?: number;
   /* The machine's load average over the last minute and the memory a new program can get, in bytes, when a part starts. */
@@ -66,12 +68,13 @@ class Output {
   private readonly headMax: number;
   private readonly tailMax: number;
 
-  constructor(max = TEST_LOG_BYTES - 200) {
+  constructor(max = TEST_LOG_BYTES - 200, private readonly activity?: () => void) {
     this.headMax = Math.floor(max / 4);
     this.tailMax = max - this.headMax;
   }
 
   add(chunk: Buffer): void {
+    if (chunk.length) this.activity?.();
     if (this.headSize < this.headMax) {
       const take = chunk.subarray(0, this.headMax - this.headSize);
       this.head.push(take);
@@ -116,9 +119,11 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
 /* What a part's commands get of the machine: its programs, its browsers and the grammars its quality tools parse with, which
    the image keeps in place so that they fetch nothing. Nothing else of the node's own environment. */
 const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
-function partBase(root: string, dir: string): Record<string, string> {
+function partBase(root: string, dir: string, checkLease?: string): Record<string, string> {
   const tools = Object.fromEntries(MACHINE_TOOLS.flatMap(key => (process.env[key] ? [[key, process.env[key]]] : [])));
-  return { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools };
+  const path = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
+  const check: Record<string, string> = checkLease ? { PATH: [join(dir, 'tools', 'bin'), path].join(delimiter), HH_CHECK_SLOT: checkLease } : { PATH: path };
+  return { HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools, ...check };
 }
 
 /* Runs one program in a process group of its own, so a stop or the time limit ends everything it started. */
@@ -417,7 +422,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
   const repo = join(root, msg.repo ? 'repo' : 'work');
   const inbox = msg.repo ? join(root, 'in') : repo;
   const outbox = join(root, 'out');
-  const out = new Output();
+  const out = new Output(undefined, options.activity);
   /* Ends a wait on Hornhoof when the part is stopped or this moment passes. */
   const until = (end: number) => productSignal(signal, end);
   let commit: string | null = null;
@@ -438,7 +443,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     chmodSync(folders.own, 0o755);
     for (const folder of folders.user) prepareFolder(folder, user);
     if (user) ensurePasswd(user, parts);
-    const base = partBase(root, dir);
+    const base = partBase(root, dir, currentCheckLease());
     const source = msg.repo;
     /* Git reads no settings but its own here, and gets the token only through the helper, for the repository's host. */
     const git = (args: string[], cwd: string, into = out) =>
@@ -699,6 +704,12 @@ async function timedPhase<T>(receipt: TestEnvironmentReceipt, phase: keyof TestE
   const start = performance.now();
   try { return await run(); } finally { receipt.phases[phase] += performance.now() - start; }
 }
+
+async function productPhase<T>(state: ProductState, phase: keyof TestEnvironmentReceipt['phases'], run: () => Promise<T>): Promise<T> {
+  const result = await timedPhase(state.receipt, phase, run);
+  state.options.activity?.();
+  return result;
+}
 async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
   killUser(user.uid, proc);
   while (productUserAlive(user.uid, proc)) {
@@ -930,16 +941,16 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
   const execution = TestExecution.parse(msg.environment), context = preparationContext(state, execution.snapshot.profile, hidden);
   let services: Awaited<ReturnType<typeof openEnvironment>> | undefined;
   try {
-    const description = await timedPhase(state.receipt, 'checkoutMs', () => productCheckout(msg, state, context));
+    const description = await productPhase(state, 'checkoutMs', () => productCheckout(msg, state, context));
     restoreProductKept(msg, execution, state);
     /* The job user gets its checkout with what a suite kept, and before anything else is restored into it: a handover afterwards
        would reach through shared links into the files every part reads. */
     prepareFolder(state.repo, state.user);
-    const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
-    await timedPhase(state.receipt, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
-    const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
-    services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
-    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: partWorkers(state.options) }));
+    const dependencies = await productPhase(state, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
+    await productPhase(state, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
+    const prepared = await productPhase(state, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
+    services = await productPhase(state, 'servicesMs', () => openEnvironment(prepared, context));
+    await productPhase(state, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: partWorkers(state.options) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
     collectProductResults(execution, state, msg.kept ?? []);
@@ -954,7 +965,7 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
   await productDescription(description);
   const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
-  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], failed: [], kept: [], base: partBase(root, options.dir) };
+  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], failed: [], kept: [], base: partBase(root, options.dir, currentCheckLease()) };
 }
 async function productFolders(state: PreparationState): Promise<void> {
   await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
@@ -996,7 +1007,7 @@ function sayFailedTests(out: Output, failed: FailedTest[]): void {
   if (failed.length > FAILED_SHOWN) out.line(`and ${failed.length - FAILED_SHOWN} more`);
 }
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
-  const out = new Output(), hidden = productSecrets(msg, options.hidden);
+  const out = new Output(undefined, options.activity), hidden = productSecrets(msg, options.hidden);
   let error: TestError | null = null, state: ProductState | undefined;
   try { state = await productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
   catch (failure) { out.line(failure instanceof Error ? failure.message : String(failure)); error = productFailure(failure, failedProductSignal(state, options)); }

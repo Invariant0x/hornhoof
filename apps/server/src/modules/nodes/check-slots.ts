@@ -5,7 +5,7 @@ import { jobs, nodes, machines, testParts } from '../../db/schema.js';
 import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
-import { CheckCoordinator, type CheckSnapshot } from './check-slots-queue.js';
+import { CheckCoordinator, checkPartId, type CheckSnapshot } from './check-slots-queue.js';
 
 const queues = new WeakMap<Ctx, CheckCoordinator>();
 
@@ -48,7 +48,25 @@ export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: C
     actor = { ...request, jobId: job.id };
   }
   await checkQueueLoad(ctx, id);
+  const partId = checkPartId(actor);
+  if (partId && !await hasRunningPart(ctx, id, partId)) {
+    ctx.hub.send(id, { type: 'check.state', id: request.id, state: 'ended', position: 0 });
+    return;
+  }
   queue.acquire(key, actor);
+}
+
+async function hasRunningPart(ctx: Ctx, id: NodeIdentity, partId: string): Promise<boolean> {
+  const [part] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), partsOfNode(ctx, id)));
+  return Boolean(part);
+}
+
+export function endPartChecks(ctx: Ctx, id: NodeIdentity, partId: string, cleaned: boolean): void {
+  queues.get(ctx)?.endParts(keyOf(id), claimed => claimed === partId, cleaned);
+}
+
+export function reconcilePartChecks(ctx: Ctx, id: NodeIdentity, known: ReadonlySet<string>): void {
+  queues.get(ctx)?.endParts(keyOf(id), partId => !known.has(partId), true);
 }
 
 /* A machine whose connection dropped keeps its leases while it may come back (#1060). */
@@ -65,11 +83,15 @@ export async function recordPartQueueWait(ctx: Ctx, id: NodeIdentity, frame: Ext
 
 async function updateCheckPart(ctx: Ctx, id: NodeIdentity, partId: string, values: { tail: string; startedAt?: null }, waitingOnly = false): Promise<void> {
   if (!z.uuid().safeParse(partId).success) return;
-  /* A part with no machine named is of this server's own built-in node, as all were before machines had theirs. */
-  const onBuiltin = (machine: string) => (machine === ownMachine(ctx.config) ? or(eq(testParts.builtinMachine, machine), isNull(testParts.builtinMachine)) : eq(testParts.builtinMachine, machine));
-  const owner = id.kind === 'builtin' ? and(eq(testParts.builtin, true), onBuiltin(id.machine)) : eq(testParts.nodeId, id.nodeId);
-  await ctx.db.update(testParts).set(values).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), owner,
+  await ctx.db.update(testParts).set(values).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), partsOfNode(ctx, id),
     waitingOnly ? like(testParts.tail, 'Waiting for a machine check slot.%') : undefined));
+}
+
+export function partsOfNode(ctx: Ctx, id: NodeIdentity): SQL {
+  /* A part with no machine named is of this server's own built-in node, as all were before machines had theirs. */
+  if (id.kind === 'node') return eq(testParts.nodeId, id.nodeId);
+  const machine = id.machine === ownMachine(ctx.config) ? or(eq(testParts.builtinMachine, id.machine), isNull(testParts.builtinMachine)) : eq(testParts.builtinMachine, id.machine);
+  return and(eq(testParts.builtin, true), machine)!;
 }
 
 export async function routeCheckMessage(ctx: Ctx, id: NodeIdentity, frame: NodeMessage, scope: SQL): Promise<void> {

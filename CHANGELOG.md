@@ -105,6 +105,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
 - The node's provider and terminal code no longer load each other in a ring: each provider owns how its program runs in a terminal, and people's terminal views and a session's privacy have their own modules outside the terminal host.
 
+## [0.33.1] - 2026-11-18
+
+### Fixed
+
+- Checks launched within a run part share its machine slot, cancelled parts clear their waiting checks, and a part that stops producing output or making progress alerts Operations once.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed

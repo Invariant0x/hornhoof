@@ -1,5 +1,6 @@
 import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
 import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, type CheckQueueReply, type CheckQueueRequest } from '@hornhoof/protocol';
+import { z } from 'zod';
 
 type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
 type Sample = { cpus: number; load: number; at?: number };
@@ -9,6 +10,12 @@ export type CheckSnapshot = { capacity: number; holders: CheckClaim[]; queue: Ch
 type Entry = CheckClaim & { state: CheckQueueReply['state']; stop: AbortController; finish(): void };
 /* heard: when the server last took in a frame from the node, whether or not it has handled it yet (#1060). */
 type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number; heard?(node: string): number | null };
+
+export function checkPartId(request: Acquire): string | undefined {
+  if (request.agentId || request.jobId) return undefined;
+  const part = /^Run part (.+)$/.exec(request.label)?.[1];
+  return z.uuid().safeParse(part).data;
+}
 
 /* A disconnected worker must stop its process group before another worker gets its CPU budget.
    The startup hold covers old workers discovering a server restart and performing that cleanup. */
@@ -61,6 +68,16 @@ export class CheckCoordinator {
     if (entry.state === 'queued') this.rememberEnd(entry);
     entry.stop.abort(new Error('Check released.'));
     entry.finish();
+  }
+
+  endParts(node: string, matches: (partId: string) => boolean, cleaned: boolean): void {
+    for (const entry of this.entries.values()) {
+      if (entry.node !== node) continue;
+      const partId = checkPartId(entry.request);
+      if (!partId || !matches(partId)) continue;
+      if (cleaned) this.release(node, entry.request.id);
+      else this.retire(entry);
+    }
   }
 
   /* The machine's connection dropped. Its leases stay while it may come back and claim them again; one not heard again
@@ -135,6 +152,7 @@ export class CheckCoordinator {
   }
 
   private retire(entry: Entry): void {
+    if (entry.retired) return;
     entry.retired = true;
     this.options.send(entry.node, { type: 'check.state', id: entry.request.id, state: 'ended', position: 0 });
     if (entry.state === 'queued') { this.release(entry.node, entry.request.id); return; }

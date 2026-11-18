@@ -33,7 +33,7 @@ describe('versioned product execution planning', () => {
     const input = await fixture(true), plan = await planProductParts(input);
     expect(plan.leaves).toEqual([
       { selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [] },
-      { selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha, selections: [{ kind: 'suite', suiteId: 'pytest', files: ['python/tests/test_values.py'], shard: { index: 1, count: 1 } }] }, after: [] },
+      { selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha, selections: [{ kind: 'suite', suiteId: 'pytest', files: ['python/tests/test_values.py'], shard: { index: 1, count: 1 } }] }, after: [], estimatedMs: 30_110 },
       { selection: { kind: 'final', suiteId: 'vitest', files: [] }, after: [1] },
     ]);
     expect(plan.reason).toContain('One explicit preparation runs 1 suites and 1 commands beside the batches.');
@@ -48,12 +48,13 @@ describe('versioned product execution planning', () => {
     const files = (plan: Awaited<ReturnType<typeof planProductParts>>) => batches(plan).map(batch => batch.selections.flatMap(suite => suite.files).sort());
 
     const even = await planProductParts(timed);
-    expect(even.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [] });
+    expect(even.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [], estimatedMs: 30_000 });
     expect(files(even)).toEqual([['python/tests/test_values.py', 'web/test/a.test.ts'], ['web/test/b.test.ts']]);
 
     const paced = await planProductParts({ ...timed, machines: [{ key: 'host:a', pace: 1 }, { key: 'host:b', pace: 2 }] });
-    expect(paced.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [], computer: 'host:a' });
+    expect(paced.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [], computer: 'host:a', estimatedMs: 30_000 });
     expect(paced.leaves.slice(1, 3).map(leaf => leaf.computer)).toEqual(['host:a', 'host:b']);
+    expect(paced.leaves.slice(1, 3).map(leaf => leaf.estimatedMs)).toEqual([60_110, 60_110]);
     expect(files(paced)).toEqual([['python/tests/test_values.py', 'web/test/a.test.ts'], ['web/test/b.test.ts']]);
   });
   it('retains every suite prerequisite for a final leaf after splitting', async () => {

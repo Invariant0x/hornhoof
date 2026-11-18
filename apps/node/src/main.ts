@@ -626,9 +626,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       return sendHeld(m.partId);
     }
     const inQueue = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
-    const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
-      emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
-    }, inQueue), { dir, user: testUser, hidden: [...known], signal, files, harness, runtimes: testCapabilities.testRuntimes }, inQueue, () => {});
+    const done = await runQueuedPart(m, runPart, {
+      dir, user: testUser, hidden: [...known], signal, files, harness, runtimes: testCapabilities.testRuntimes, partUser,
+      onSilent: () => emit({ type: 'tests.silent', partId: m.partId }),
+    }, inQueue, () => emit({ type: 'tests.started', partId: m.partId }));
     outbox.hold(done);
     testing.delete(m.partId);
     sendHeld(m.partId);

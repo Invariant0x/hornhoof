@@ -6,6 +6,7 @@ import { setCheckClient, withCheckSlot } from './check-queue.js';
 import type { JobUser } from './isolation.js';
 import type { TerminalHost } from './terminal/host.js';
 import type { runTests, TestsDone } from './tests.js';
+import type { TestPartUser } from './test-environment.js';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { classifyAgentCommand, classifyRunWork, localCommandFiles, refusalText, type CommandFiles, type CommandInput } from './command-guard.js';
 
@@ -53,13 +54,33 @@ export function applyProgramControl(frame: ProgramControl, checks: CheckClient, 
   return host?.operatorMessage(frame);
 }
 
-export async function runQueuedPart(message: Parameters<typeof runTests>[0], runPart: typeof runTests, options: Parameters<typeof runTests>[1], waiting: (position: number) => void, started: () => void): Promise<TestsDone> {
+type PartOptions = Parameters<typeof runTests>[1] & { partUser?: TestPartUser; onSilent?: () => void };
+
+export async function runQueuedPart(message: Parameters<typeof runTests>[0], runPart: typeof runTests, options: PartOptions, waiting: (position: number) => void, started: () => void): Promise<TestsDone> {
   try {
     const refusal = await workCommandRefusal(message, options.dir);
     if (refusal) throw new Error(refusal);
-    return await withCheckSlot(signal => { started(); return runPart(message, { ...options, signal }); }, { signal: options.signal, label: `Run part ${message.partId}`, onPosition: waiting });
+    return await withCheckSlot(signal => {
+      const run = () => { started(); return watchPart(message, runPart, options, signal); };
+      return options.partUser?.run(signal, run, waiting) ?? run();
+    }, { signal: options.signal, label: `Run part ${message.partId}`, onPosition: waiting });
   } catch (error) {
     return { type: 'tests.done', partId: message.partId, ok: false, exitCode: null, error: options.signal?.aborted ? 'cancelled' : 'failed', commit: null, log: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function watchPart(message: Parameters<typeof runTests>[0], runPart: typeof runTests, options: PartOptions, signal: AbortSignal): Promise<TestsDone> {
+  if (!message.silenceMs || !options.onSilent) return runPart(message, { ...options, signal });
+  const report = options.onSilent;
+  let armed = true;
+  const timer = setTimeout(() => { armed = false; report(); }, message.silenceMs);
+  timer.unref();
+  const stop = () => { armed = false; clearTimeout(timer); };
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    return await runPart(message, { ...options, signal, activity: () => { if (armed) timer.refresh(); } });
+  } finally {
+    stop(); signal.removeEventListener('abort', stop);
   }
 }
 

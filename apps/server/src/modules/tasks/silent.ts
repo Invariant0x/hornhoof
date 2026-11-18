@@ -1,5 +1,5 @@
 import { mapOf, turnPrograms, turnAlarms, signInTurn, type Job, type GoneProgram } from './program-state.js';
-import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage } from '@hornhoof/protocol';
+import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage, type Notification } from '@hornhoof/protocol';
 import { TOOL_QUIET_ALARM_MS, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -238,7 +238,7 @@ export async function operationsWatchers(ctx: Ctx, companyId: string): Promise<A
   return able;
 }
 
-async function busyAgentIds(ctx: Ctx): Promise<Set<string>> {
+export async function busyAgentIds(ctx: Ctx): Promise<Set<string>> {
   const rows = await ctx.db
     .select(only(jobs, 'agentId'))
     .from(jobs)
@@ -305,18 +305,27 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   );
 }
 
+type ProgramAlarm = { caseId: string; text: string; task?: { id: string; number: number }; reason?: TurnAlarmReason; detail: Notification['detail'] };
+
+export async function enqueueProgramAlarm(ctx: Ctx, to: Agent, alarm: ProgramAlarm): Promise<string> {
+  const { caseId, text, task, reason, detail } = alarm;
+  const alarmId = await enqueueTurn(ctx, {
+    companyId: to.companyId,
+    agentId: to.id,
+    prompt: text,
+    createdBy: null,
+    message: { personId: null, text, ...(task ? { task } : {}), silentJob: caseId, ...(reason ? { silentReason: reason } : {}), notification: { source: 'program_alarm', tasks: task ? [task] : [], detail } },
+  });
+  alertedSet(ctx).add(caseId);
+  return alarmId;
+}
+
 async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date, caseId = s.job.id): Promise<void> {
   if (await alreadyAlerted(ctx, caseId)) return;
   const text = await silentAlarmText(ctx, s, now);
   const task = s.task ? { id: s.task.id, number: s.task.number } : undefined;
-  const alarmId = await enqueueTurn(ctx, {
-    companyId: s.job.companyId,
-    agentId: to.id,
-    prompt: text,
-    createdBy: null,
-    message: { personId: null, text, ...(task ? { task } : {}), silentJob: caseId, silentReason: s.alarm.reason, notification: { source: 'program_alarm', tasks: task ? [task] : [], detail: { en: `${s.agent.name}: ${s.alarm.reason}`, ru: `${s.agent.name}: ${s.alarm.reason}` } } },
-  });
-  alertedSet(ctx).add(caseId);
+  const detail = `${s.agent.name}: ${s.alarm.reason}`;
+  const alarmId = await enqueueProgramAlarm(ctx, to, { caseId, text, ...(task ? { task } : {}), reason: s.alarm.reason, detail: { en: detail, ru: detail } });
   await logTurnFact(ctx, s.job, `${to.name} was told about the silent program: ${text}`, { silentCase: caseId, to: to.id });
   if (now.getTime() > Date.now()) {
     await ctx.db.update(jobs).set({ startedAt: now }).where(and(eq(jobs.id, alarmId), eq(jobs.status, 'running')));

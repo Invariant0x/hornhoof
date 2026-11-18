@@ -27,6 +27,7 @@ import { appendTurnEvent, cleanTurnEvent, publishWorking, sensitiveTurn } from '
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
+import { alertSilentPart } from '../testruns/part-silence.js';
 import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
@@ -511,6 +512,7 @@ async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Pr
     case 'tests.harness.done': await harnessSynced(ctx, id, msg); return true;
     case 'tests.described': await acceptDescription(ctx, id, msg); await pumpTests(ctx); return true;
     case 'tests.started': await partStarted(ctx, id, msg.partId); return true;
+    case 'tests.silent': await alertSilentPart(ctx, id, msg.partId); return true;
     case 'tests.done': await partDone(ctx, id, msg); return true;
     default: return false;
   }

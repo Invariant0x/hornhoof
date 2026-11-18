@@ -204,6 +204,8 @@ export async function checkCommand(args: string[], env: NodeJS.ProcessEnv): Prom
   const wait = args[0] === '--wait', rest = wait ? args.slice(1) : args;
   const command = rest[0] === '--' ? rest.slice(1) : rest;
   if (!command.length) throw new Error('Usage: hh-check [--wait] -- COMMAND [ARGUMENTS]');
+  /* A run part has no agent bridge. Its own process group already runs under the inherited slot. */
+  if (env.HH_CHECK_SLOT && !env.HH_BRIDGE) return localWaited(command, env);
   if (wait) return waited(command, env);
   if (!env.HH_BRIDGE) throw new Error('hh-check works inside a Hornhoof agent turn.');
   const stop = new AbortController(), abort = () => stop.abort();

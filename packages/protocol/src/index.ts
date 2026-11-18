@@ -354,7 +354,7 @@ export type NodeReconnect = z.infer<typeof NodeReconnect>;
    server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
    answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
    agent.restarted and node.stopping. */
-export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.silent', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
 /* Optional, so a build that does not number still talks to one that does. */
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
@@ -426,6 +426,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('load'), ...Load.shape, live: Live }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string(), n: MessageNumber }),
+  z.object({ type: z.literal('tests.silent'), partId: Id, n: MessageNumber }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */
   z.object({
     type: z.literal('tests.done'),
@@ -707,6 +708,7 @@ const ServerMessage = z.discriminatedUnion('type', [
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+    silenceMs: z.number().int().positive().max(2 ** 31 - 1).optional(),
   }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */

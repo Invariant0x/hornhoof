@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { RunKind } from '@hornhoof/protocol';
+import { parseNodeMessage, type RunKind } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
-import { checkQueueLoad, closeCheckQueue, receiveCheckRequest, recordPartQueueWait } from '../src/modules/nodes/check-slots.js';
+import { agentEvents, agents, departments, machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
+import { checkQueueLoad, checkQueueSnapshot, closeCheckQueue, receiveCheckRequest, recordPartQueueWait } from '../src/modules/nodes/check-slots.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { testsHello } from '../src/modules/testruns/runs.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { company, idle } from './test-runs-company.js';
 
@@ -41,6 +43,52 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
 }
 
 describe('reading a part that waits for a machine check slot', () => {
+  it('sends a quiet running part to Operations once through the program alarm inbox', async () => {
+    const s = await stand();
+    const { db } = s.c;
+    const companyId = s.c.task.companyId;
+    const ctx = s.c.app.ctx;
+    const [ops] = await db.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [operator] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Operations', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: s.turn.job.subscriptionId, model: '' }).returning();
+    const partId = s.parts[1]!.id;
+    const frame = parseNodeMessage(JSON.stringify({ type: 'tests.silent', partId, n: 1 }));
+    expect(frame).not.toBeNull();
+    const report = (id = s.id) => handleNodeMessage(ctx, id, frame!);
+    const notices = async () => (await db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.agentId, operator!.id))).map(row => row.data);
+    await report();
+    expect(await notices()).toEqual([]);
+    await handleNodeMessage(ctx, s.id, { type: 'tests.started', partId });
+    vi.setSystemTime(Date.now() + 60_000);
+    await report({ kind: 'builtin', machine: 'another-machine' });
+    expect(await notices()).toEqual([]);
+    await Promise.all([report(), report()]);
+    expect(await notices()).toEqual([expect.objectContaining({ text: expect.stringContaining('Test run 2, part 1'), notification: expect.objectContaining({ source: 'program_alarm' }) })]);
+  });
+
+  it('clears held and queued claims of a part the database replaced when its node no longer has it', async () => {
+    const s = await stand();
+    const ctx = s.c.app.ctx;
+    const gone = s.parts[0]!, replacement = randomUUID();
+    await receiveCheckRequest(ctx, s.id, { ...s.claims[0]!, id: randomUUID() }, sql`false`);
+    await s.c.db.update(testParts).set({ id: replacement, status: 'queued', nodeId: null }).where(eq(testParts.id, gone.id));
+    await testsHello(ctx, s.id, s.parts.slice(1).map(part => part.id));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ capacity: 1, holders: [{ request: { id: s.claims[1]!.id } }], queue: [{ request: { id: s.claims[2]!.id } }] });
+  });
+
+  it('clears waiting checks for a stopped part and admits the next after the node releases', async () => {
+    const s = await stand();
+    const ctx = s.c.app.ctx;
+    const nested = { ...s.claims[0]!, id: randomUUID() };
+    await receiveCheckRequest(ctx, s.id, nested, sql`false`);
+    expect((await s.turn.call('stop_work', { run: 1 })).error).toBe(false);
+    await receiveCheckRequest(ctx, s.id, { ...nested, id: randomUUID() }, sql`false`);
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [{ request: { id: s.claims[0]!.id }, retired: true }],
+      queue: [{ request: { id: s.claims[1]!.id } }, { request: { id: s.claims[2]!.id } }] });
+    await s.release(0);
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [{ request: { id: s.claims[1]!.id } }], queue: [{ request: { id: s.claims[2]!.id } }] });
+  });
+
   it.each(['tests', 'work'] as const)('shows the current holder and ordered queue for %s, and updates on release', async kind => {
     const s = await stand(kind);
     const part = (await s.read()).parts[0];
@@ -115,7 +163,7 @@ describe('reading a part that waits for a machine check slot', () => {
     expect(part.waiting).not.toContain('Queue is empty');
   });
 
-  it('does not attribute a part label claimed by another node to the part owner', async () => {
+  it('admits the newly requested part after rejecting a claim on the wrong node', async () => {
     const s = await stand();
     await s.release(0); await s.release(1); await s.release(2);
     const [other] = await s.c.db.insert(nodes).values({ companyId: s.c.task.companyId, machineId: s.node!.machineId }).returning();
@@ -123,6 +171,6 @@ describe('reading a part that waits for a machine check slot', () => {
     await receiveCheckRequest(s.c.app.ctx, s.id, { ...s.claims[2]!, id: randomUUID() }, sql`false`);
     await new Promise<void>(resolve => setImmediate(resolve));
     const part = (await s.read()).parts[0];
-    expect(part.checkSlot.holders).toEqual([{ kind: 'unavailable', since: s.since, position: 0, releasing: false }]);
+    expect(part.checkSlot).toMatchObject({ state: 'running', holders: [{ kind: 'tests', run: 3 }], ahead: [] });
   });
 });
