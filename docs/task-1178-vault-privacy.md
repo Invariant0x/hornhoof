@@ -1,5 +1,7 @@
 # Vault privacy, task 1178
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1178-vault-privacy.md). These are historical results, not checks of the current release.
+
 The task branch starts at `41d37dd3d4f919e63ed39f4f0ce0d898e440f4c5` and incorporates `turn-31` through `c546bfe3bfe20ff86b9889d7ee5d7bb10fc9b1a6`. The final checked code and tests are `beb379fa907715580128324e0d84ccf6834b36fe`. The broad named checks used `792ca47fb44b2d26155b26574181efd9551c2b07`; final delta checks cover the subsequent integration. The final commit adds this report and evidence only; the task completion report names its full SHA and records the authorized fast-forward to `turn-31`. This turnkey repair includes local named checks and self-review. It does not approve a release to main.
 
 ## Boundaries
@@ -40,7 +42,7 @@ All markers in the tests and RED logs are synthetic.
 
 The initial server RED on the original base had 4 intended failures and 19 passing tests. It showed the marker in replay, replay after deletion, node input and node result paths. Node RED separately demonstrated the Vault save input and Vault entry result paths. Later targeted RED checks caught routing corruption by short passwords, opaque-media corruption, unclassified URL execution, cut-off calls that wrote an audit marker, and a retained terminal tail in a later typed turn. Each received a corresponding repair.
 
-Further RED logs show retained node recording files, ignored asynchronous recorder cleanup, delegated-tool leakage and a node restart exposing a final answer. The streaming RED is explicitly a supplemental mutation: an isolated Vitest alias replaced the upload guard with a pass-through implementation, and the unchanged assertion detected it. It is not presented as a run against the original base. Logs are in [the evidence directory](task-1178-evidence/).
+Further RED logs show retained node recording files, ignored asynchronous recorder cleanup, delegated-tool leakage and a node restart exposing a final answer. The streaming RED is explicitly a supplemental mutation: an isolated Vitest alias replaced the upload guard with a pass-through implementation, and the unchanged assertion detected it. It is not presented as a run against the original base. Logs are in [the evidence directory](https://github.com/invariant0x/hornhoof/tree/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1178-evidence).
 
 The last integration introduced `report.verification.delta`. Its unique-marker regression failed before adding that field to prose masking and passed afterward, preserving the candidate identity and revision. This covers the new report path without altering the incoming route change.
 
@@ -67,6 +69,6 @@ The final named checks passed:
 
 Dryer found two existing adapter/query patterns. They are retained with an explicit reason: assistant and Vault response adapters share the same small MCP response contract but have different registration and security owners; the computer owner-name lookup and running-job lookup select different records and express different domain rules. Their scores are 1.00 and 0.85. Extracting a generic cross-domain wrapper would obscure these contracts and is outside this repair.
 
-[checks.json](task-1178-evidence/checks.json) records commands, exit codes and the source/test/config tree fingerprint. [verification.txt](task-1178-evidence/verification.txt) contains the complete final test outputs and static-check results; [quality.json](task-1178-evidence/quality.json) records the baseline comparison. The final report-only commit must match the checked code fingerprint before integration.
+[checks.json](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1178-evidence/checks.json) records commands, exit codes and the source/test/config tree fingerprint. [verification.txt](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1178-evidence/verification.txt) contains the complete final test outputs and static-check results; [quality.json](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1178-evidence/quality.json) records the baseline comparison. The final report-only commit must match the checked code fingerprint before integration.
 
 No whole suite or `run_tests` is used on this task branch. The task explicitly requires named local checks; full release validation and release approval remain with the release owner. No main merge or server deployment is part of this work.

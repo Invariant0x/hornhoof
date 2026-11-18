@@ -4,7 +4,9 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import { detail, serveApi, TASKS } from './api';
+import { captureWith } from './capture';
 
+const capture = captureWith('hide-secret', undefined);
 const messages: Record<Language, Messages> = { en, ru };
 const lengths = LANGUAGES.map(({ id }) => ({ id, size: Object.values(messages[id].tasks.hideSecret).join('').length }));
 lengths.sort((a, b) => a.size - b.size);
@@ -71,7 +73,7 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
         expect(control.height).toBeGreaterThanOrEqual(44);
       }
     }
-    if (info.project.name === 'chromium' && width === 375) await page.screenshot({ path: `../../docs/tasks/1077-${language}-${skin.id}.png` });
+    if (info.project.name === 'chromium' && width === 375) await capture(page, info, `${language}-${skin.id}`);
     await form.getByRole('button', { name: words.confirm }).click();
     await Promise.all([
       expect(input).toHaveCount(0),

@@ -1,5 +1,7 @@
 # Task 1177: direct keeper-peer scenarios
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1177-keeper-peer.md). These are historical results, not checks of the current release.
+
 Current integration base: `359c2efaa27e9afb8842d0113dd5d6804aca467c`.
 The incoming task-1178 merge contributed the same prepareSharedDatabase body. Its only overlap was the explanatory comment, retained from task 1178. The other four task files, freshPglite, ownDatabases and the lockfile were unchanged.
 The hand-in names the exact checked candidate. Run receipts, raw timing/load data and the 28-case before/after table are retained on `task-1177-evidence` and attached to task 1177, preserving the checked source SHA.

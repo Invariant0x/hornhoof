@@ -1,5 +1,7 @@
 # Task 1148: controlled keeper tests
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1148-keeper-clocks.md). These are historical results, not checks of the current release.
+
 Base: `6d17d217e568fcdf7a6e6267b636ef332c205a62`.
 The app-call mechanism was first checked at `f5171f05bf33c671ba5949749a57b8c508c93ede`; later task receipts name the expanded candidate.
 

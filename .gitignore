@@ -7,3 +7,15 @@ coverage/
 apps/web/e2e/results/
 .metrics/
 target/
+# Raw task evidence belongs in task or release attachments; keep short reports.
+/docs/evidence/**
+!/docs/evidence/**/
+!/docs/evidence/**/*.md
+/docs/tasks/*
+!/docs/tasks/*.md
+/docs/task-*-evidence/
+/docs/task-*-proof/
+/docs/task-*.txt
+/docs/task-*-series.mjs
+/docs/superpowers/reports/*.json
+/docs/superpowers/reports/*.sh.txt

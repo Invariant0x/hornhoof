@@ -1,5 +1,7 @@
 # Task 1219: preserve the previous release's node data
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1219-migration-0059.md). These are historical results, not checks of the current release.
+
 Bug, no production risk. Base: `887fa6540bad796c30ed907fb14a2b48d3f7994c`.
 Checked implementation: `4ac0a495265f905777441aa1fbf295d3e0f40300`.
 

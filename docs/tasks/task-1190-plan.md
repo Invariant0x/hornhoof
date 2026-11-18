@@ -1,5 +1,7 @@
 # Future stage owners after an employee leaves, task 1190
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/tasks/task-1190-plan.md). These are historical results, not checks of the current release.
+
 Base: origin/turn-31 at 11aa5777c4a5f74a550c0e53570ec35ebae39f53. The head explicitly removed the release prerequisite. Work belongs to task-1190 only; the head integrates it after 0.31.0 for 0.31.1. Never push or merge it into turn-31.
 
 ## Cause and scope
