@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { useTurns } from '../tasks';
-import { ALL_DEPARTMENTS, byRelease, inDepartment, NO_DEPARTMENT, type Preparing, type Released } from '../task-board';
+import { ALL_DEPARTMENTS, byRelease, inDepartment, NO_DEPARTMENT, type Preparing, type Released } from '../releases';
 import type { TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from './Backlog';
 import { Field } from './Field';
@@ -72,7 +72,7 @@ function NextRelease({ next, rows }: { next: Preparing; rows: CardRows }) {
 function ReleasedTurn({ release, rows }: { release: Released; rows: CardRows }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const { turn, goals: went } = release;
+  const { turn, trees: went } = release;
   return (
     <div className="release-fold">
       <Fold open={open} onToggle={() => setOpen(!open)}>

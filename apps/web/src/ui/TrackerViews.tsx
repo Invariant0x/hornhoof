@@ -1,7 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
-import { humanStatus, taskWaits, type Asks } from '../task-board';
-import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
+import { humanStatus, isClosed, taskWaits, type Asks, type TaskTree } from '../task-tree';
+import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
 import { dueText } from './tracker-words';
@@ -31,7 +31,7 @@ type Relations = ReadonlyMap<number, TaskLine[]>;
 function relationsOf(tasks: TaskLine[]): Relations {
   const needed = new Map<number, TaskLine[]>();
   for (const task of tasks) {
-    if (task.status === 'done' || task.status === 'cancelled') continue;
+    if (isClosed(task)) continue;
     for (const number of task.waitsFor) {
       const list = needed.get(number);
       if (list) list.push(task);

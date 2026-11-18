@@ -1,5 +1,5 @@
 import { useLanguage, useT } from '../i18n';
-import { taskWaits, type HumanStatus, type WaitTask } from '../task-board';
+import { taskWaits, type HumanStatus, type WaitTask } from '../task-tree';
 import { sinceSeconds, spanText, waitClass, waitLabel } from './tracker-words';
 
 export const STATE_CLASS: Record<HumanStatus, string> = {

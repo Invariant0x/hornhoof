@@ -79,11 +79,8 @@ describe('the board', () => {
     expect(columns.map(c => ids(c.cards.map(card => card.task)))).toEqual([['t500'], ['t419', 't412'], [], [], ['t9'], ['t502']]);
     expect(boardColumns(TASKS, null, { cancelled: true }).map(c => c.id)).toEqual(['notStarted', 'working', 'review', 'waits', 'done', 'cancelled']);
     expect(boardColumns([T412, S1, S2], null, {}, () => false).find(c => c.id === 'working')!.cards[0]).toMatchObject({ done: 1, total: 2 });
-  });
-
-  it('puts a subtask with a bare waiting status in work', () => {
-    const columns = boardColumns([S2], null);
-    expect(columns.find(c => c.id === 'working')!.cards.map(c => c.task.id)).toEqual(['s2t']);
+    /* A bare waiting status is work in progress (task-tree.test.ts has the whole table of states). */
+    expect(boardColumns([S2], null).find(c => c.id === 'working')!.cards.map(c => c.task.id)).toEqual(['s2t']);
   });
 
   it('with a pipeline, has its stages in tree order between Not started and Done, and only the tasks of that pipeline', () => {

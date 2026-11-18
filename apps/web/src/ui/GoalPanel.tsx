@@ -4,7 +4,7 @@ import { errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { useGoal, useGoals, useTasks } from '../tasks';
-import { humanStatus } from '../task-board';
+import { humanStatus } from '../task-tree';
 import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
 import { Progress } from './TaskBoard';

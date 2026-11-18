@@ -1,8 +1,12 @@
 import { useId, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import { askingTask, goalStatus, type Asks, type Goal, type Split } from '../task-board';
+import type { Split } from '../releases';
+import { askingTask, treeStatus, type Asks, type TaskTree } from '../task-tree';
 import type { TaskLine } from '../types';
 import { QuestionButton, StateWord, WaitLine } from './TaskActivity';
+
+/* The cards of Turns and releases. A goal of a release, in its words, is a task at the top of the release with the work under
+   it, a TaskTree; the tracker's goals with targets are GoalView, apart from these. */
 
 /* How a card opens its task and names where it is: its department or product. asksYou: whether an open question on a task is
    the person's to answer. */
@@ -37,11 +41,11 @@ export function Fold({ open, onToggle, children }: { open: boolean; onToggle: ()
 
 /* A task in one short line: its state, its title to open it and who has it. The work under it is not unfolded here, and a
    question for the person waits under what waits for them: a link opens the task with that work, or the task that asks. */
-function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
+function GoalRow({ goal, rows }: { goal: TaskTree; rows: CardRows }) {
   const t = useT();
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
-  const status = goalStatus(goal, asking?.id === task.id);
+  const status = treeStatus(goal, asking?.id === task.id);
   return (
     <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
       <StateWord status={status} />
@@ -61,7 +65,7 @@ function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
 }
 
 /* Tasks in short lines, one under another. */
-export function GoalRows({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
+export function GoalRows({ goals, rows }: { goals: TaskTree[]; rows: CardRows }) {
   if (!goals.length) return null;
   return <ul className="goal-rows">{goals.map(goal => <GoalRow key={goal.task.id} goal={goal} rows={rows} />)}</ul>;
 }
@@ -69,12 +73,12 @@ export function GoalRows({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
 /* One goal as a card: its title, what it does and why, its state in plain words, where it is, who has it and how many of
    its related tasks are done. A goal whose work waits for the person's answer is framed and marked, with a button to the
    task that asks; the question itself is under what waits for the person. The related tasks stay folded until one click opens them as short lines. */
-function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
+function GoalCard({ goal, rows }: { goal: TaskTree; rows: CardRows }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
-  const status = goalStatus(goal, asking?.id === task.id);
+  const status = treeStatus(goal, asking?.id === task.id);
   const place = rows.place(task);
   return (
     <article className={`goal${asking ? ' you' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
@@ -109,7 +113,7 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   );
 }
 
-export function GoalList({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
+export function GoalList({ goals, rows }: { goals: TaskTree[]; rows: CardRows }) {
   if (!goals.length) return null;
   return <ul className="goals">{goals.map(goal => <li key={goal.task.id}><GoalCard goal={goal} rows={rows} /></li>)}</ul>;
 }

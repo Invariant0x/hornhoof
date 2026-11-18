@@ -9,7 +9,7 @@ import { mapPeople, useOrg } from '../org';
 import { cutLine } from '../restarts';
 import { placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { graphPath } from '../tracker';
-import { humanStatus, matchesExternalWait, taskWaits } from '../task-board';
+import { humanStatus, isClosed, matchesExternalWait, taskWaits } from '../task-tree';
 import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { TaskEdit } from './TrackerForms';
@@ -389,7 +389,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
   const { goals } = useGoals(!!task.goal);
   const [editing, setEditing] = useState(false);
   const when = (at: string) => momentText(language, at);
-  const closed = task.status === 'done' || task.status === 'cancelled';
+  const closed = isClosed(task);
   const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
   const people = mapPeople(org);
   const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };

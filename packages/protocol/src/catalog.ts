@@ -1,7 +1,13 @@
-import type { TemplateKey } from './types';
+/* The departments and the ready-made companies Hornhoof starts from: plain data with no validators, so the web app takes it
+   from this subpath without loading zod, and the main entry hands the server the same lists. */
 
-/* The department templates in card order, as the server has them; kept here so the browser does not load the protocol's validators. */
-export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; teamMembers: number }[] = [
+export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household'] as const;
+export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
+
+/* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt.
+   teamMembers: how many people the turnkey teams of its template bring, for the headcount on a company template's card;
+   a test keeps it equal to the team templates. */
+export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; teamMembers: number }[] = [
   { key: 'operations', roleCode: 'OPS', ticked: true, always: true, teamMembers: 1 },
   { key: 'development', roleCode: 'DEV', ticked: true, always: false, teamMembers: 2 },
   { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, teamMembers: 1 },
@@ -14,13 +20,16 @@ export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: b
   { key: 'household', roleCode: 'HHD', ticked: false, always: false, teamMembers: 1 },
 ];
 
-export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab' | 'home';
-export type CompanyTemplateDept = { template: TemplateKey; name?: string; products?: string[]; staff: { role: string; count: number }[] };
+/* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
+   and the people setup hires into them (role code and how many). The names and descriptions live in the web dictionaries;
+   the mini scheme on the card is drawn from these departments. "Start empty" is not here: it is the default on the card,
+   and creates nothing. The people take a subscription the company has that may serve them, or wait for one. */
+export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab', 'home'] as const;
+export type CompanyTemplateKey = (typeof COMPANY_TEMPLATE_KEYS)[number];
+export type CompanyTemplateStaff = { role: string; count: number };
+export type CompanyTemplateDept = { template: TemplateKey; name?: string; products?: string[]; staff: CompanyTemplateStaff[] };
 export type CompanyTemplate = { key: CompanyTemplateKey; departments: readonly CompanyTemplateDept[] };
 
-/* The ready-made companies on the first screen, the same as the server's COMPANY_TEMPLATES (a test keeps them equal). The
-   card draws its mini scheme from the departments and their products, and shows the headcount from the staff counts and
-   the members of each department's turnkey teams. */
 export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'project',
