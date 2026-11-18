@@ -61,6 +61,6 @@ A command that splits the tests with `{part}` must also say how many parts there
 
 Each agent gets its own clone, in its own folder on the node, before its first turn. It keeps the clone between turns, and works in a branch per task.
 
-Nodes from 0.5.0 on take turns with a repository. An older node keeps them waiting until it is updated.
+Nodes from 0.5.0 on take turns, with a repository or without one. An older node keeps them waiting until it is updated. Nodes with the updater of 0.8.4 and later follow the server to each new version by themselves.
 
 [Back to the guide](README.md)

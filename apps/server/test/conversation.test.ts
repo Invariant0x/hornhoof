@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
-import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
+import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
@@ -26,7 +26,7 @@ async function live() {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await state(app, ceo)).ready);
   return { app, db, url, ceo, builtin };
 }
@@ -221,7 +221,7 @@ describe('the orchestrator\'s conversation', () => {
     const url = await listen(app);
     const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'project' } }));
     const builtin = await connectNode(url, NODE_KEY);
-    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     await until(async () => (await state(app, ceo)).ready);
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const prompt = (await nextRun(builtin)).prompt;
@@ -421,8 +421,7 @@ describe('the orchestrator\'s conversation', () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
-  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version and, as every node
-     since skill files does, that it writes them. */
+  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version. */
   async function onMac(version: string, provider = 'claude', hello: object = {}) {
     const { app, url, ceo } = await live();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
@@ -430,20 +429,20 @@ describe('the orchestrator\'s conversation', () => {
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
-    mac.send({ type: 'hello', version, loggedIn: true, running: [], skillFiles: true, ...hello });
+    mac.send({ type: 'hello', version, loggedIn: true, running: [], ...hello });
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
     return { app, url, ceo, mac, node };
   }
 
-  it('keeps turns from a machine whose Hornhoof is too old to run them, and says so', async () => {
-    const { app, url, ceo, mac, node } = await onMac('0.2.0');
+  it('keeps turns from a machine whose Hornhoof is older than 0.5.0, and says so', async () => {
+    const { app, url, ceo, mac, node } = await onMac('0.4.0');
     await until(async () => (await state(app, ceo)).reason === 'node_outdated');
     expect((await say(app, ceo, 'Hello')).statusCode).toBe(409);
     expect(await quiet(mac)).toBe(0);
     mac.close();
     await mac.closed;
     const updated = await connectNode(url, node.key);
-    updated.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
     expect((await nextRun(updated)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Hello`);
@@ -472,7 +471,7 @@ describe('the orchestrator\'s conversation', () => {
 
   it("fits his xhigh to a Kimi plan, and keeps a person's pick in the same session", async () => {
     const models = [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }];
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi', { models });
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -487,15 +486,15 @@ describe('the orchestrator\'s conversation', () => {
 
   it('runs him on a Codex plan at xhigh even when it takes more', async () => {
     const models = [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'ultra'], defaultEffort: 'medium' }];
-    const { app, ceo, mac } = await onMac('0.3.0', 'codex', { models });
+    const { app, ceo, mac } = await onMac('0.5.0', 'codex', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     expect((await nextRun(mac)).effort).toBe('xhigh');
   });
 
-  it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
+  it('tells every machine only the list of skills and sends their bodies as files, whatever its hello says of them', async () => {
     stillClock();
-    const { app, url, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    const { app, ceo, mac, node } = await onMac('0.5.0');
     sampleSkillBodies(app);
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
@@ -504,20 +503,16 @@ describe('the orchestrator\'s conversation', () => {
     const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-worktrees', 'dev-tdd'] }).returning();
     const posted = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) });
     expect(posted.statusCode).toBe(202);
-    const old = await nextRunOrFailed(app, mac, posted.json().jobId);
-    for (const id of ['hh-hornhoof', 'dev-worktrees', 'dev-tdd']) expect(old.instructions).toContain(app.ctx.templates.skills.get(id)!.body);
-    expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
-    expect(old.skills).toBeUndefined();
-    await finish(mac, old);
+    const worker = await nextRunOrFailed(app, mac, posted.json().jobId);
+    for (const id of ['dev-worktrees', 'dev-tdd']) {
+      expect(worker.instructions).not.toContain(`Follow ${id}.`);
+      expect(worker.skills?.find(s => s.name === id)?.body).toContain(app.ctx.templates.skills.get(id)!.body);
+    }
+    await finish(mac, worker);
     await marked(mac);
-    mac.close();
-    await mac.closed;
-    const updated = await connectNode(url, node.key);
-    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true });
-    await until(async () => (await state(app, ceo)).ready);
     const message = await say(app, ceo, 'Hello');
     expect(message.statusCode).toBe(202);
-    const run = await nextRunOrFailed(app, updated, message.json().jobId);
+    const run = await nextRunOrFailed(app, mac, message.json().jobId);
     const plan = app.ctx.templates.skills.get('orch-plan-turn')!;
     expect(run.instructions).not.toContain(plan.body);
     expect(run.instructions).toContain(app.ctx.templates.skills.get('hh-hornhoof')!.body);
@@ -525,19 +520,8 @@ describe('the orchestrator\'s conversation', () => {
     expect(run.skills?.find(s => s.name === 'orch-plan-turn')?.body).toBe(`# ${plan.title.en}\n\n${plan.body}`);
   });
 
-  it("sends the orchestrator's full instructions to a node that takes skills inline", async () => {
-    const { app, ceo, mac } = await onMac('0.5.0', 'claude', { skillFiles: false });
-    const { db } = app.ctx;
-    await until(async () => (await state(app, ceo)).ready);
-    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    const posted = await say(app, ceo, 'Hello');
-    const run = await nextRunOrFailed(app, mac, posted.json().jobId);
-    expect(run.instructions).toBe((await instructionsOf(app.ctx, orchestrator!, false)).text);
-    expect(run.skills ?? []).toEqual([]);
-  });
-
   it('keeps the next message waiting when the machine says its login ran out', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -549,7 +533,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it("holds turns while the plan is at its limit, says until when, and sends them once the limit starts over", async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     const resetsAt = new Date(Date.now() + 60_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
@@ -569,7 +553,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it.each(['claude', 'codex', 'kimi', 'antigravity'])('does not hold %s turns on a stale rejection, even with a future reset', async provider => {
-    const { app, ceo, mac, node } = await onMac('0.3.0', provider);
+    const { app, ceo, mac, node } = await onMac('0.5.0', provider);
     await until(async () => (await state(app, ceo)).ready);
     const resetsAt = new Date(Date.now() + 3600_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
@@ -582,7 +566,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('waits quietly for a limit that starts over in more than 24 days, too long for one timer', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0');
+    const { app, ceo, mac } = await onMac('0.5.0');
     await until(async () => (await state(app, ceo)).ready);
     /* Node fires a timer longer than it holds at once after a millisecond: Hornhoof asks for the longest it holds, no more. */
     const timers = vi.spyOn(globalThis, 'setTimeout');
@@ -597,7 +581,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('holds turns when the program said the plan ran out of its usage limit, though the plan itself said nothing', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -618,7 +602,7 @@ describe('the orchestrator\'s conversation', () => {
     ['its error event', '{"type":"error","code":"provider.api_error","message":"You exceeded your current token quota","name":"APIProviderQuotaExhaustedError","details":{"statusCode":429,"requestId":null,"traceId":null},"retryable":false}\n'],
     ['its terminal', 'Error: [provider.api_error] 429 You exceeded your current token quota, please check your account balance\n❯ '],
   ])("holds turns when Kimi says in %s that the plan's quota ran out, and tries again in a quarter of an hour", async (_, tail) => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
@@ -632,7 +616,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'codex');
+    const { app, ceo, mac } = await onMac('0.5.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
     const [company] = await app.ctx.db.select(idOnly(companies)).from(companies);
     const heard: string[] = [];
@@ -648,7 +632,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('keeps a hold from a refused turn through readings that moved nothing since, and ends it with one that moved', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     const plan = async () => (await app.ctx.db.select({ limits: subscriptions.limits, at: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!;
     const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }], complete: true };
@@ -676,7 +660,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('takes a reading over a hold that is over, though it moved nothing', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     const plan = () => app.ctx.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() - 1000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.provider, 'kimi'));
     const stored = async () => (await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!.limits;
@@ -690,7 +674,7 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('does not hold turns for an agent that only spoke about usage limits in its work', async () => {
-    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    const { app, ceo, mac } = await onMac('0.5.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);

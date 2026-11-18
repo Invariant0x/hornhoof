@@ -364,7 +364,9 @@ export const isTerminalReport = (data: string): boolean => TERMINAL_REPORT.test(
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
    bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.
    Newer nodes also name the machine's processor and the free and total space of the disk their folders are on, and
-   identify the physical host together with its own processors, load and memory. */
+   identify the physical host together with its own processors, load and memory. memoryShort: the machine's kernel
+   killed a process for want of memory since the node's report before, so Hornhoof starts no new agent program there
+   until a report without one; older nodes and machines that do not count such kills never say so. */
 const Load = z.object({
   cpus: z.number().int().min(1).max(4096),
   load: z.number().min(0).max(100_000),
@@ -380,11 +382,12 @@ const Load = z.object({
   hostLoad: z.number().min(0).max(100_000).optional(),
   hostMemFree: z.number().int().min(0).optional(),
   hostMemory: z.number().int().min(0).optional(),
+  memoryShort: z.boolean().optional(),
 });
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
 /* The agents whose programs run on a node now, which a node that runs them in terminals names with its hello and each load:
-   Hornhoof starts no new program on a machine short of free memory. A list that is not one counts as none said. */
+   Hornhoof starts no new program on a machine short of memory. A list that is not one counts as none said. */
 const Live = z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(200).optional().catch(undefined);
 
 /* Installed agent programs and an update in progress on the connected node. repair: the program was installed but does
@@ -491,8 +494,6 @@ const NodeMessage = z.discriminatedUnion('type', [
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
-  /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
-     the instructions. */
   z.object({
     type: z.literal('hello'),
     version: z.string().max(40),
@@ -520,7 +521,6 @@ const NodeMessage = z.discriminatedUnion('type', [
     load: Load.optional(),
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
-    skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
     account: Account.nullable().optional(),

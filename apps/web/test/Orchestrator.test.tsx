@@ -241,16 +241,16 @@ describe('AgentWindow', () => {
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
-  it('says that turns wait while the machine is busy, and he can still be written to', async () => {
+  it('says that turns wait while the machine reports a shortage of memory, and he can still be written to', async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, memoryWait: true } }] });
-    expect(await screen.findByText('The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.')).toBeInTheDocument();
+    expect(await screen.findByText('The machine reported a shortage of memory. Turns wait and go on by themselves once it reports none, and what already runs there goes on.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
-  it('says nothing of the memory while the machine has enough', async () => {
+  it('says nothing of the memory while the machine reports no shortage', async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, memoryWait: false } }] });
     await screen.findByRole('textbox');
-    expect(screen.queryByText(/free memory/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/shortage of memory/)).not.toBeInTheDocument();
   });
 
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {

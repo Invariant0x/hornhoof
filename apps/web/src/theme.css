@@ -1967,6 +1967,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-row-line { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 8px 12px; }
   .tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 8px), 12%); }
   .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; font-size: 13px; }
+  /* A name and its value in their own direction stand where the page's words start, as an isolated phrase does. */
+  .tr-cells:dir(rtl) > .tr-cell:dir(ltr) { justify-content: flex-end; }
   .tr-cell:has(.tr-v:empty) { display: none; }
   .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }

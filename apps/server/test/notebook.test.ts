@@ -30,9 +30,7 @@ describe("the company's notebook", () => {
     const [assigned] = await db.update(agents).set({ overrides: { base: 'Company rule.\n'.repeat(16_000) } }).where(eq(agents.id, orchestrator!.id)).returning();
     expect(await notebookPart(db, companyBook(assigned!.companyId))).toContain('The notebook is empty.');
     expect((await write(app, ceo, 'Keep the final entry.')).statusCode).toBe(201);
-    for (const files of [true, false]) {
-      expect((await instructionsOf(app.ctx, assigned!, files)).text).toContain('[#1] Keep the final entry.');
-    }
+    expect((await instructionsOf(app.ctx, assigned!)).text).toContain('[#1] Keep the final entry.');
   });
 
   it('keeps numbered notes that people who see the whole company write, rewrite and remove', async () => {
@@ -92,7 +90,7 @@ describe("the company's notebook", () => {
     expect(kept).toHaveLength(32);
     expect(kept.reduce((n: number, note: { text: string }) => n + note.text.length, 0)).toBeGreaterThan(4000);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    const { text } = await instructionsOf(app.ctx, orchestrator!, true);
+    const { text } = await instructionsOf(app.ctx, orchestrator!);
     for (let i = 1; i <= 31; i++) expect(text, `note ${i}`).toContain(`[#${i}] Rule ${i} `);
     expect(text).toContain(`[#31] Rule 31 ${full}`);
     expect(text).toContain(`[#32] ${full}`);

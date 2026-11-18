@@ -23,7 +23,7 @@ async function company() {
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
   await until(async () => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().state.ready);
   app.ctx.assistants.replyGraceMs = 0;
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
