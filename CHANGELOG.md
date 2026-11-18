@@ -9,13 +9,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
+- Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.
 
 ### Changed
 
 - The company map shows only employee squares again, in their original status colors and with their usual blinking.
 - The company map has no worker kinds legend.
-- Departments show one-shot calls as diamonds inside their stage cards, with running, waiting and idle states.
+- The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.
 - One-shot stages use diamonds in the tracker and task routes.
 - Generalists use squares and keep their label.
 

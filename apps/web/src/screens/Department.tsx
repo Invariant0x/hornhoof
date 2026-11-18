@@ -21,7 +21,7 @@ import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type 
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { employeeKind, WorkerMark } from '../ui/WorkerMark';
-import { OneShotMarks } from '../ui/TaskWorkflow';
+import { DepartmentStructure } from './DepartmentStructure';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
@@ -32,7 +32,7 @@ import { guardedResizeObserver, useRenderGuard } from '../guard';
 export { employeeGroups };
 
 const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
-  f.oneShot ? t.tasks.echelons.stages[f.oneShot.stage] : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+  f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
@@ -40,14 +40,14 @@ function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru
   return role.description[language] ?? '';
 }
 
-function FrameHeading({ frame: f, language, canGive, calls }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean; calls?: Department['calls'] }) {
+function FrameHeading({ frame: f, language, canGive }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean }) {
   const t = useT();
   return (
     <Edge cut={14} corner>
       <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
         <span className="fn">{frameTitle(f, language, t)}</span>
         {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
-        {f.oneShot ? <OneShotMarks stage={f.oneShot} calls={calls} /> : <span className="fc">{t.dept.agents(f.members.length)}</span>}
+        <span className="fc">{t.dept.agents(f.members.length)}</span>
       </span>
     </Edge>
   );
@@ -67,6 +67,7 @@ type Props = {
   onHire(): void;
   onOpen(agentId: string): void;
   onOpenTask(taskId: string): void;
+  onOpenDepartment?(id: string): void;
   /* A person's card opens the decisions screen showing theirs. */
   onOpenDecisions?(personId: string): void;
   /* Its Tasks button opens the tracker at this department. */
@@ -230,7 +231,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onOpenDepartment }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
@@ -251,6 +252,10 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
      repository. A team in it alone is not the department. */
   const runs = canGive;
   const [tree, setTree] = useState(false);
+  const [staffMap, setStaffMap] = useState(false);
+  const hasStructure = d.pipelines !== undefined;
+  const structure = hasStructure && !staffMap && !tree;
+  const schema = !tree && !structure;
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
@@ -293,7 +298,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     const ro = guardedResizeObserver(() => place(false), 'department');
     ro.observe(el);
     return () => ro.disconnect();
-  }, [place, tree]);
+  }, [place, schema]);
 
   /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
      a result back, as the server keeps them. */
@@ -420,22 +425,24 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
   } as CSSProperties;
   const drawerName = drawerTitle(t, drawer);
-  const treeButton = tree ? t.dept.mapButton : t.dept.treeButton;
+  const treeButton = tree ? (hasStructure && !staffMap ? t.dept.structure : t.dept.mapButton) : t.dept.treeButton;
+  const tickerText = said?.text ?? (structure ? null : t.dept.hint);
   const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
   return (
-    <div className="dview" ref={chrome.root} style={chrome.style}>
+    <div className={`dview${structure ? ' structure-open' : ''}`} ref={chrome.root} style={chrome.style}>
       {tree && (workTree ? (
         <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} />
       ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
-      {!tree && (
+      {structure && <DepartmentStructure department={d} onOpen={onOpen} onOpenDepartment={onOpenDepartment} />}
+      {schema && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" style={worldStyle}>
           <section aria-labelledby={`${id}-members`} className="slayer">
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
-              <FrameHeading frame={f} language={language} canGive={canGive} calls={d.calls} />
+            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+              <FrameHeading frame={f} language={language} canGive={canGive} />
               {f.role && canGive && (
                 <input
                   type="checkbox"
@@ -525,6 +532,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
 
       <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>
         <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
+        {hasStructure && !tree && <button className="hbtn glass ib" type="button" aria-label={staffMap ? t.dept.structure : t.dept.staffMap}
+          title={staffMap ? t.dept.structure : t.dept.staffMap} onClick={() => setStaffMap(!staffMap)}><MapIcon /></button>}
         <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
         <button className="hbtn glass" type="button" onClick={() => onOpenTracker?.(d.id)}>
           {t.dept.tasksButton}
@@ -600,14 +609,14 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
         </aside>
       )}
 
-      {!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}
+      {schema && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}
       {/* An open panel takes the room the ticker needs. */}
-      {!panel && !chrome.tickerHidden && (
+      {!panel && tickerText && (structure || !chrome.tickerHidden) && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
           <span className="live" />
           {said && <span className="tt">{said.at}</span>}
-          <span key={said?.key ?? 0} className="tx in" title={said?.text ?? t.dept.hint}>
-            {said?.text ?? t.dept.hint}
+          <span key={said?.key ?? 0} className="tx in" title={tickerText}>
+            {tickerText}
           </span>
         </div>
       )}

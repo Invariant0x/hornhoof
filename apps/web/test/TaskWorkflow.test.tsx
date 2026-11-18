@@ -23,7 +23,7 @@ describe('task workflow', () => {
   it('marks a one-shot stage in the pipeline before it runs', () => {
     const route = workflow([step('development', 'active', null), step('review', 'pending', null)], 'active');
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={{ ...route, oneShot: { review: { fanOut: 2, judge: null } } }} /></LanguageProvider>);
-    const ghost = 'A one-shot call appears for one task and is gone';
+    const ghost = 'One-shot call: starts from zero each time, no memory';
     const [work, review] = screen.getAllByRole('listitem');
     expect(within(work!).queryByRole('img', { name: ghost })).toBeNull();
     expect(within(review!).getByRole('img', { name: ghost }).querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
@@ -37,7 +37,7 @@ describe('task workflow', () => {
     const calls = [call, { ...call, id: 'c2', task: 13, number: 2 }, { ...call, id: 'c3', task: 13, judge: true }];
     render(<LanguageProvider><WorkflowStages workflow={route} resolveOwner={id => id} departmentTask={{ number: 12, calls }} /></LanguageProvider>);
     const [review, security] = screen.getAllByRole('listitem');
-    const marks = within(review!).getAllByRole('img', { name: /^Разовый вызов появляется на одну задачу и исчезает/ });
+    const marks = within(review!).getAllByRole('img', { name: /^Разовый вызов: каждый раз с нуля, без памяти/ });
     expect(marks).toHaveLength(3);
     expect(marks[0]).toHaveAccessibleName(new RegExp(ru.workers.running + '$'));
     expect(marks[1]).toHaveAccessibleName(new RegExp(ru.workers.idle + '$'));

@@ -97,7 +97,7 @@ export function useGoal(id: string) {
   return { goal: data?.goal, log: data?.log, failure, load };
 }
 
-function localPipeline(t: Messages, pipeline: Pipeline): Pipeline {
+export function localPipeline<P extends Pipeline>(t: Messages, pipeline: P): P {
   const key = pipeline.catalogKey as keyof Messages['pipelineCatalog'] | null | undefined;
   if (!key || !Object.hasOwn(en.pipelineCatalog, key)) return pipeline;
   const english = en.pipelineCatalog[key];

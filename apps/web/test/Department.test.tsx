@@ -3,7 +3,8 @@ import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider, type Language, type Messages } from '../src/i18n';
+import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { DepartmentView } from '../src/screens/Department';
@@ -27,6 +28,16 @@ const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast
 /* Lena reaches Development by its own line in her access; Kira reaches only Sales. */
 const LENA = { id: 'p6', name: 'Lena', email: 'lena@acme.com', title: 'Product lead', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
+
+const messages: Record<Language, Messages> = { en, ru };
+const structureLocales = LANGUAGES.map(({ id }) => {
+  const t = messages[id], route = t.pipelineCatalog['development-changes'];
+  const words = [t.dept.structure, t.tracker.side.pipelines, t.dept.noModelYet, t.workers.permanent, t.workers.ghost,
+    t.workers.slot(1), t.workers.judge, t.workers.idle, route.name, route.stages['Plan the change']];
+  return { id, length: words.join('').length };
+}).sort((a, b) => a.length - b.length);
+const checkedLocales = [...new Set([structureLocales[0]!.id, structureLocales.at(-1)!.id,
+  ...LANGUAGES.map(({ id }) => id).filter(id => /^(ar|fa|he|ur)(-|$)/.test(id))])];
 
 function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me = ME) {
   const calls = mockApi({
@@ -68,48 +79,96 @@ describe('Department view', () => {
     expect(within(staff).getByRole('img', { name: generalist }).querySelector('svg rect')).toBeInTheDocument();
   });
 
-  it('lights fixed call places in their own pipeline card as the org feed changes', async () => {
+  it('shows products, all linked routes and their named places on entry and lights only the route in use', async () => {
     const stream = fakeStream();
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
-    const oneShotStages = [
-      { stage: 'review', ownerRole: 'DEV-REV', gate: 1, fanOut: 3, judge: true },
-      { stage: 'security', ownerRole: 'DEV-SEC', gate: 2, fanOut: 1, judge: false },
-    ];
-    const call = { task: 12, by: 'b1', stage: 'review', judge: false, startedAt: null };
+    const design = { ...dev!, id: 'd9', name: null, templateKey: 'design' as const, products: [] };
+    const handoffs = [{ id: design.id, name: design.name, templateKey: design.templateKey }];
+    const first = { id: 'build', parentId: null, owner: null, ownerRole: 'DEV-BE', name: 'Build the change', position: 0 };
+    const review = { ...first, id: 'review', parentId: 'build', name: 'Review the change', echelon: 'review', oneShot: { fanOut: 2, judge: true }, handoffs };
+    const branch = { ...first, id: 'release', parentId: 'build', name: 'Get release ready' };
+    const pipeline = { id: 'changes', department: { id: dev!.id, name: 'Development' }, name: 'Software changes', why: '', archived: false, version: 1, isDefault: true, stages: [first, review, branch] };
+    const alternative = { ...pipeline, id: 'guides', name: 'Technical guides', isDefault: false, stages: [{ ...review, id: 'examples', parentId: null, name: 'Check examples', handoffs: [] }] };
+    const call = { task: 12, by: 'b1', pipelineId: pipeline.id, stage: 'review', judge: false, startedAt: null };
     const active = [
       { ...call, id: 'queued', number: 1 },
       { ...call, id: 'running', number: 1, task: 13, startedAt: '2026-11-17T10:00:00.000Z' },
-      { ...call, id: 'judge', number: 4, judge: true },
-      { ...call, id: 'ad-hoc', number: 2, stage: null },
+      { ...call, id: 'judge', number: 3, judge: true },
     ];
     let calls: typeof active = [];
-    shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [{ ...dev!, oneShotStages, calls }] }] });
+    let employees: Employee[] = dev!.employees.map(e => ({ ...e, provider: null, model: '', modelName: null, status: 'off' }));
+    employees.push({ ...employees.find(e => e.id === 'b1')!, id: 'team-member', name: 'Team engineer', teamId: 'team', turnkey: true });
+    const team = { id: 'team', name: 'Whole tasks', stage: null, gate: null, urgentOnly: false, turnkey: true };
+    shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [{ ...dev!, employees, teams: [team], pipelines: [pipeline, alternative], calls }, design] }] });
     await flyIn(user);
-    const schema = screen.getByRole('region', { name: 'Department schema' });
-    const review = within(schema).getByRole('group', { name: 'Review' });
-    const marks = () => within(review).getAllByRole('img', { name: /^A one-shot call appears for one task and is gone/ });
-    const diamonds = marks();
-    expect(diamonds).toHaveLength(4);
+    const structure = screen.getByRole('region', { name: 'Department structure' });
+    expect(screen.queryByText(en.dept.hint)).toBeNull();
+    expect(within(structure).getByText('Mascot')).toBeVisible();
+    const changes = within(structure).getByRole('region', { name: 'Software changes' });
+    const stage = within(changes).getByRole('heading', { name: 'Review the change' }).closest('li')!;
+    expect(within(stage).getByText('Bruno')).toBeVisible();
+    expect(within(stage).queryByText('Team engineer')).toBeNull();
+    expect(within(structure).getByText('Team engineer')).toBeVisible();
+    expect(within(stage).getByText('Backend engineer')).toBeVisible();
+    expect(within(stage).getByText('No model yet')).toBeVisible();
+    const square = within(stage).getByRole('img', { name: 'Permanent agent' });
+    expect(square).toHaveClass('cell', 'o');
+    const predecessor = within(changes).getByRole('heading', { name: 'Build the change' });
+    const stageLinks = within(changes).getAllByRole('link', { name: 'Build the change' });
+    expect(stageLinks).toHaveLength(2);
+    for (const link of stageLinks) expect(link).toHaveAttribute('href', `#${predecessor.id}`);
+    const marks = (inStage: HTMLElement) => within(inStage).getAllByRole('img', { name: /^One-shot call: starts from zero each time, no memory/ });
+    const diamonds = marks(stage);
+    expect(diamonds).toHaveLength(3);
     expect(diamonds.every(mark => mark.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]'))).toBe(true);
-    expect(diamonds[3]).toHaveAccessibleName(/Judge call.*Idle/i);
-    expect(within(within(schema).getByRole('group', { name: 'Security' })).getAllByRole('img')).toHaveLength(1);
-    expect(within(within(schema).getByRole('group', { name: 'Backend engineer' })).queryByRole('img', { name: /one-shot call/i })).toBeNull();
+    expect(diamonds[2]).toHaveAccessibleName(/Backend engineer.*Judge call.*Idle/i);
+    expect(within(stage).getByText(/Backend engineer.*Call 1/i)).toBeVisible();
+    const guides = within(structure).getByRole('region', { name: 'Technical guides' });
 
     calls = active;
+    employees = employees.map(e => e.id === 'b1' ? { ...e, status: 'working', model: 'sonnet', modelName: 'Sonnet' } : e);
     await act(async () => stream.send({ type: 'org' }));
-    expect(marks()).toEqual(diamonds);
+    expect(square).toHaveClass('w');
+    expect(within(stage).getByText('Sonnet')).toBeVisible();
+    expect(within(stage).queryByText('No model yet')).toBeNull();
+    expect(marks(stage)).toEqual(diamonds);
     expect(diamonds[0]).toHaveClass('running');
-    expect(diamonds[0]).toHaveAccessibleName(/Call 1.*Running/);
     expect(diamonds[1]).toHaveClass('idle');
-    expect(diamonds[2]).toHaveClass('idle');
-    expect(diamonds[3]).toHaveClass('waiting');
-    expect(diamonds[3]).toHaveAttribute('title', 'A one-shot call appears for one task and is gone. Judge call. Waiting');
+    expect(diamonds[2]).toHaveClass('waiting');
+    expect(diamonds[2]).toHaveAttribute('title', 'One-shot call: starts from zero each time, no memory. Backend engineer, Judge call. Waiting');
+    expect(marks(guides).every(mark => mark.classList.contains('idle'))).toBe(true);
 
     calls = [];
     await act(async () => stream.send({ type: 'org' }));
-    expect(marks()).toEqual(diamonds);
+    expect(marks(stage)).toEqual(diamonds);
     expect(diamonds.every(mark => mark.classList.contains('idle'))).toBe(true);
+    await user.click(within(stage).getByRole('link', { name: 'Design' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Design' })).toBeVisible();
+  });
+
+  it.each(checkedLocales)('localizes the route, its vacant position and both marks in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const t = messages[language], [dev] = DEV_ORG.departments;
+    const role = { en: 'Architect', ru: 'Архитектор' };
+    const stage = { id: 'plan', parentId: null, name: 'Plan the change', ownerRole: 'DEV-ARCH', ownerTitle: role, owner: null,
+      position: 0, oneShot: { fanOut: 1, judge: true } };
+    const pipeline = { id: 'changes', department: { id: dev!.id, name: 'Development' }, catalogKey: 'development-changes', name: 'Software changes',
+      why: '', archived: false, version: 1, stages: [stage] };
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...dev!, pipelines: [pipeline] }} deputies={[]} selected={null}
+      panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const names = t.pipelineCatalog['development-changes'];
+    const route = within(screen.getByRole('region', { name: names.name }));
+    expect(route.getByRole('heading', { name: names.stages['Plan the change'] })).toBeVisible();
+    expect(route.getByText(t.dept.noModelYet)).toBeVisible();
+    const namesByLocale = {
+      en: { permanent: 'Permanent agent', call: 'One-shot call: starts from zero each time, no memory' },
+      ru: { permanent: 'Постоянный агент', call: 'Разовый вызов: каждый раз с нуля, без памяти' },
+    };
+    const { permanent, call } = namesByLocale[language];
+    expect(route.getByRole('img', { name: permanent })).toHaveAttribute('title', permanent);
+    const judge = `${call}. ${role[language]}, ${t.workers.judge}. ${t.workers.idle}`;
+    expect(route.getByRole('img', { name: judge })).toHaveAttribute('title', judge);
   });
 
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
@@ -963,7 +1022,7 @@ describe('Department work tree', () => {
     const graph = await showTree(user);
     await user.click(graph.querySelector('[data-row="b6"]')!);
     const summary = screen.getByRole('dialog');
-    const marks = within(summary).getAllByRole('img', { name: /^A one-shot call appears for one task and is gone/ });
+    const marks = within(summary).getAllByRole('img', { name: /^One-shot call: starts from zero each time, no memory/ });
     expect(marks).toHaveLength(3);
     expect(marks[0]).toHaveAccessibleName(/Call 1.*Waiting/);
     expect(marks[1]).toHaveAccessibleName(/Call 2.*Idle/);

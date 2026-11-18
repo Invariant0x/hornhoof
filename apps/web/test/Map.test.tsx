@@ -66,17 +66,23 @@ describe('orchestratorStatus', () => {
   });
 });
 
+function reviewPipeline(department: Department, fanOut: number) {
+  return { id: 'changes', department: { id: department.id, name: 'Development' }, name: 'Changes', why: '', archived: false, version: 1, stages: [
+    { id: 'review', parentId: null, name: 'Review', ownerRole: 'DEV-REV', owner: null, position: 0, oneShot: { fanOut, judge: true } },
+  ] };
+}
+
 describe('Map', () => {
   it('shows an ordered row of staff squares even with declared and active one-shot calls', async () => {
     const [dev] = DEV_ORG.departments;
     const employees = [{ ...dev!.employees[0]!, status: 'working' }, { ...dev!.employees[1]!, turnkey: true, status: 'off' }];
-    const oneShotStages = [{ stage: 'review', fanOut: 2, judge: true }];
+    const pipelines = [reviewPipeline(dev!, 2)];
     const calls = [
       { id: 'running', number: 1, judge: false, task: 12, by: employees[1]!.id, stage: 'review', startedAt: '2026-11-17T10:00:00.000Z' },
       { id: 'waiting', number: 2, judge: false, task: 12, by: employees[1]!.id, stage: 'review', startedAt: null },
       { id: 'ad-hoc', number: 1, judge: false, task: 13, by: employees[1]!.id, stage: null, startedAt: null },
     ];
-    mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, employees, oneShotStages, calls }] }] });
+    mockApi({ 'GET /api/org': [200, { ...DEV_ORG, departments: [{ ...dev!, employees, pipelines, calls }] }] });
     render(<MapScreen {...PROPS} />);
     const card = await screen.findByRole('button', { name: /^Development/ });
     expect([...card.querySelectorAll('.cell')].map(cell => [cell.tagName, cell.className])).toEqual([
@@ -100,7 +106,7 @@ describe('Map', () => {
 
   it('uses the original map card height whether or not the pipeline declares one-shot calls', () => {
     const [dev] = DEV_ORG.departments;
-    const many: Department = { ...dev!, oneShotStages: [{ stage: 'review', fanOut: 80, judge: true }] };
+    const many: Department = { ...dev!, pipelines: [reviewPipeline(dev!, 80)] };
     const ordinary = arrangeMap(DEV_ORG).depts[0]!;
     const withCalls = arrangeMap({ ...DEV_ORG, departments: [many] }).depts[0]!;
     expect(ordinary.h).toBe(160);

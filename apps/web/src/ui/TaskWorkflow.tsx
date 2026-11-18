@@ -1,12 +1,15 @@
-import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import { Fragment } from 'react';
+import type { EchelonFindingsView, EchelonStage, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { useT } from '../i18n';
-import type { CallMark, OneShotStage, Org, TaskDetail } from '../types';
+import type { CallMark, Org, TaskDetail } from '../types';
 import { phaseName, stageName } from './stage-name';
 import { WorkerMark } from './WorkerMark';
 
 const STAGE_CLASS = { pending: 'next', active: 'current', complete: 'passed', skipped: 'skipped' };
 
-export function OneShotMarks({ stage: { stage, fanOut, judge }, calls = [] }: { stage: OneShotStage; calls?: CallMark[] }) {
+export function OneShotMarks({ stage: { stage, fanOut, judge }, calls = [], position }: {
+  stage: { stage?: EchelonStage; fanOut: number; judge: boolean }; calls?: CallMark[]; position?: string;
+}) {
   const words = useT().workers;
   const slots = new Map<number | 'judge', 'running' | 'waiting'>();
   /* If several tasks use the same place, show running before waiting. The judge has its own place. */
@@ -15,12 +18,16 @@ export function OneShotMarks({ stage: { stage, fanOut, judge }, calls = [] }: { 
     const key = call.judge ? 'judge' : call.number;
     if (call.startedAt || !slots.has(key)) slots.set(key, call.startedAt ? 'running' : 'waiting');
   }
-  return <span className="call-marks">
+  return <span className={`call-marks${position ? ' named' : ''}`}>
     {Array.from({ length: fanOut + Number(judge) }, (_, i) => {
       const key = i === fanOut ? 'judge' : i + 1;
       const state = slots.get(key) ?? 'idle';
-      const name = key === 'judge' ? words.judge : words.slot(key);
-      return <WorkerMark key={key} kind="ghost" className={state} detail={`${name}. ${words[state]}`} />;
+      const slot = key === 'judge' ? words.judge : words.slot(key);
+      const name = position ? `${position}, ${slot}` : slot;
+      const mark = <WorkerMark kind="ghost" className={state} detail={`${name}. ${words[state]}`} />;
+      return position ? <span key={key} className="worker-name">
+        {mark}<span aria-hidden="true"><bdi>{name}</bdi> <small>{words[state]}</small></span>
+      </span> : <Fragment key={key}>{mark}</Fragment>;
     })}
   </span>;
 }
