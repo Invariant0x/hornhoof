@@ -33,6 +33,12 @@ rm -f "$VIDEOS_DIR/ffprobe.txt"
 render_status=0
 if [ "$IN_CONTAINER" = "1" ]; then
   echo "==> Rendering scenes in this container..."
+  # The RUN steps of builds on one BuildKit share its network, so another build may hold 4180: take a free port.
+  if [ -z "${HORNHOOF_MEDIA_PORT:-}" ]; then
+    HORNHOOF_MEDIA_PORT="$(node -e "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+    export HORNHOOF_MEDIA_PORT
+  fi
+  echo "==> Web server port: $HORNHOOF_MEDIA_PORT"
   (
     cd "$REPO_ROOT"
     npm run build -w @hornhoof/protocol
