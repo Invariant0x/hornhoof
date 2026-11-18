@@ -1,7 +1,7 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, notLike } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { agents, departments, subscriptions } from '../../db/schema.js';
+import { agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './state.js';
@@ -22,14 +22,25 @@ export async function agentIdentity(db: Reader['db'], companyId: string, agentId
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))
     .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!row) return null;
-  const capability = modelCapability(row.model, row.provider);
-  return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: row.model, provider: modelProvider(row.provider), capability };
+  const model = row.model || (await ranOn(db, row.id, row.subscriptionId));
+  const capability = model ? modelCapability(model, row.provider) : null;
+  return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: model!, provider: modelProvider(row.provider), capability };
+}
+
+/* An employee on its program's Default runs whatever model that program picks, and its node tells Hornhoof which model each
+   turn ran on in the program's own words: the newest turn on the plan it is on now that names one is that model. Claude
+   Code names its own notices "<synthetic>", which is no model. None named yet leaves the strength unknown. */
+async function ranOn(db: Reader['db'], agentId: string, subscriptionId: string): Promise<string | null> {
+  const [turn] = await db.select({ model: turnTokens.model }).from(turnTokens)
+    .where(and(eq(turnTokens.agentId, agentId), eq(turnTokens.subscriptionId, subscriptionId), isNotNull(turnTokens.model), notLike(turnTokens.model, '<%>')))
+    .orderBy(desc(turnTokens.at)).limit(1);
+  return turn?.model ?? null;
 }
 
 /* Whoever hands a result in runs a model whose strength is known, so the checker after it can be chosen no weaker. */
 export async function producerIdentity(db: Reader['db'], task: Task, agentId: string): Promise<CheckerIdentity> {
   const producer = await agentIdentity(db, task.companyId, agentId);
-  if (!producer) throw new ApiError(409, 'conflict', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.', 'task_invalid');
+  if (!producer) throw new ApiError(409, 'conflict', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; on Default it counts as the model its program last ran on, and none it named yet has one.', 'task_invalid');
   return producer;
 }
 

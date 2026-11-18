@@ -9,6 +9,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Checks launched within a run part share its machine slot, cancelled parts clear their waiting checks, and a part that stops producing output or making progress alerts Operations once.
+- When a node starts a new process and reconnects, its old process's check slots free up immediately.
 - People listed one under another (in Russian on a wide screen, in every language on a phone) are as high in Chromium, Firefox and Safari: a name leaves no room under its line, and each label sits on the line of its value.
 - Removing an employee ends its waiting turns and prevents new inbox turns; a program delivery with a missing target ends once instead of retrying forever, while temporary delivery failures still retry.
 - Product test runs resend an unanswered environment description request after a minute or when its node reconnects, and a failed socket write stays retryable under the same request id.
@@ -60,6 +62,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
 - An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
 - The public link's settings the updater kept beside the newest copy that has them stay after that copy goes, since a link taken on a build that went back may be in no other place.
+- An employee on its program's Default model can hand in work and be chosen to check it: it counts as the model its program last ran on, which Codex turns now record too; a model with no known strength is still refused.
 - A browser or password manager no longer fills the Hornhoof email and password into Add phone or any other form with a key, token or site password: the pairing code is a field for six digits, keys and tokens are masked text, and only Log in, an invite, Setup and the password question offer the saved Hornhoof sign-in.
 
 ### Added
@@ -78,6 +81,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Before you update: migration 0152 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
 - Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
 - Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
@@ -104,13 +108,6 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A new agent program or one-shot call waits only after its machine's system killed a program for want of memory, until a report without one; Hornhoof's own memory and processor thresholds for agents are gone, and the machine's card and the agent's window say so in one line.
 - Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
 - The node's provider and terminal code no longer load each other in a ring: each provider owns how its program runs in a terminal, and people's terminal views and a session's privacy have their own modules outside the terminal host.
-
-## [0.33.1] - 2026-11-18
-
-### Fixed
-
-- Checks launched within a run part share its machine slot, cancelled parts clear their waiting checks, and a part that stops producing output or making progress alerts Operations once.
-- When a node starts a new process and reconnects, its old process's check slots free up immediately.
 
 ## [0.32.1] - 2026-11-17
 

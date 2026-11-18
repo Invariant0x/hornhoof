@@ -1,0 +1,1 @@
+{"timestamp": "2026-11-15T01:00:00.500Z", "type": "turn_context", "payload": {"cwd": "/work", "approval_policy": "never", "sandbox_policy": {"type": "danger-full-access"}, "model": "gpt-5", "summary": "auto"}}

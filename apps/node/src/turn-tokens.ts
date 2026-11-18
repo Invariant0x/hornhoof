@@ -80,6 +80,11 @@ export class TurnTally {
   }
 
   codexLine(line: unknown): void {
+    /* Codex names the model of each turn in its turn context, also the one it picked by itself when Hornhoof named none. */
+    if (isRecord(line) && line.type === 'turn_context' && isRecord(line.payload)) {
+      this.model = modelName(line.payload.model) ?? this.model;
+      return;
+    }
     if (!isRecord(line) || (line.type !== 'event_msg' && line.type !== 'session_meta') || !isRecord(line.payload)) return;
     if (line.type === 'session_meta') {
       /* A session's log of its own counts from nothing. */

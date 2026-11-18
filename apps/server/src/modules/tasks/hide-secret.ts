@@ -24,7 +24,6 @@ const PROSE = ['text', 'body', 'title', 'brief', 'prompt', 'requested_prompt', '
   'description', 'goal', 'messages', 'data', 'options', 'summary', 'details', 'failure', 'interruption', 'sent_report', 'message'];
 const PROSE_OF: Record<string, string[]> = {
   tasks: ['external_wait', 'paused'],
-  outbound_catalog_revisions: ['value'],
   turn_releases: ['tasks'],
   briefings: ['files'],
   program_operator_cases: ['resolution'],
@@ -170,9 +169,6 @@ async function eachBatch(q: Query, select: string, work: (rows: Row[]) => Promis
 
 const jsonOf = (columns: string[], alias: string): string => `jsonb_build_object(${columns.map(name => `'${name}', ${alias}.${quote(name)}`).join(', ')})`;
 
-/* A frozen record allows exactly these columns to lose a hidden value, from this connection, in this transaction. */
-const allow = (q: Query, columns: string[]) => q("SELECT set_config('hornhoof.hiding_secret', $1, true)", [JSON.stringify(columns)]);
-
 /* Every row of the company's prose as the mask leaves it, then every copy of it the journal and the merges kept. Nothing
    of another company is read, and nothing of the value goes to SQL: only text it has already left. */
 export async function maskCompanyRows(q: Query, facts: Facts, company: string, mask: Mask): Promise<number> {
@@ -183,7 +179,6 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
     const prose = proseColumns(t);
     const files = t.name === 'attachments';
     const wanted = [...new Set([...t.key, ...prose, ...(files ? ['media_type', 'bytes'] : [])])];
-    await allow(q, [...prose, ...(files ? ['bytes', 'size'] : [])]);
     const only = files ? " AND (t.media_type LIKE 'text/%' OR t.media_type = 'application/json')" : '';
     await eachBatch(q, `SELECT ${jsonOf(wanted, 't')} AS row FROM public.${quote(t.name)} t WHERE ${scopeOf(t, company)!.rows}${only}`, async rows => {
       for (const row of rows) {
@@ -198,7 +193,6 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
       }
     });
   }
-  await allow(q, []);
   for (const t of tables) changed += await maskCopies(q, t, company, mask);
   changed += await maskParked(q, company, mask);
   return changed;

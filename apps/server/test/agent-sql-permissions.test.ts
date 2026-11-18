@@ -98,16 +98,6 @@ it('exposes safe request/proposal digests, private proposal history to the orche
   }
 });
 
-it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to Operations, and lets the orchestrator read and change it', async table => {
-  const run = await roles();
-  const writes = [`INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
-  for (const statement of [`SELECT * FROM ${table}`, ...writes]) {
-    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied|read-only/);
-  }
-  expect((await run('write', `SELECT id FROM ${table}`))[0]!.rows).toEqual([]);
-  for (const statement of writes) await expect(run('write', statement), `write: ${statement}`).resolves.toBeDefined();
-});
-
 it('keeps departments.autonomous_release readable to both and changed only by the orchestrator', async () => {
   const run = await roles();
   for (const mode of ['write', 'read'] as const) expect((await run(mode, 'SELECT autonomous_release FROM departments WHERE false'))[0]!.rows).toEqual([]);

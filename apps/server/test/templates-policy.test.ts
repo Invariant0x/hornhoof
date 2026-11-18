@@ -24,8 +24,6 @@ const PRODUCT_POLICY: Rule[] = [
       [/\b(?:Creating accounts|New accounts)[^.!?]*\bCEO's approval\b/i, "New accounts wait for the CEO's approval."],
     ],
   },
-  /* Hornhoof sends nothing for a company: no tool or gateway that once sent for it is named. */
-  { id: 'no gateway sends for the company', forbids: [[/\boutbound_[a-z_]+\b|\bsupport_(?:submit|classify)\b|\b(?:outbound|publication) gateway\b|\bserver gateway\b|model-check-set:/i, 'Send it through the outbound gateway.']] },
   /* The one Security rule, external checkers only in echelon tasks, took the place of the old scope. */
   { id: 'the old Security scope nowhere', forbids: [[/urgent work, small tasks, direct named orders/i, 'This applies to urgent work, small tasks, direct named orders and review fixes.']] },
   /* No node gives an agent obra/superpowers any more. */
