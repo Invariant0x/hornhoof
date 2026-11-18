@@ -22,10 +22,10 @@ type Screen =
 
 export function App() {
   return (
-    <>
-      <Screens />
+    <div className="app-layout">
+      <div className="app-screen"><Screens /></div>
       <VersionMark />
-    </>
+    </div>
   );
 }
 

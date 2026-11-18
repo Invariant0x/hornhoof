@@ -81,11 +81,19 @@ describe('App', () => {
     expect(await within(dialog).findByRole('button', { name: 'Set up my personal assistant' })).toBeInTheDocument();
   });
 
-  it('shows the version and build in a corner on every screen, login too', async () => {
-    mockApi({ 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [401, signedOut], 'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
+  it.each([
+    ['log in', '/', [401, signedOut], 'heading', 'Log in'],
+    ['board', '/tasks?department=d2&view=board', [200, ME], 'region', 'Board'],
+  ] as const)('shows the version in a footer below the %s screen', async (_screen, path, me, role, name) => {
+    window.history.replaceState(null, '', path);
+    mockApi({ ...TRACKER, 'GET /api/org': [200, DEV_ORG], 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [...me],
+      'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument();
-    expect(await screen.findByText('0.4.0 (abc1234)')).toHaveClass('version-mark');
+    const content = await screen.findByRole(role, { name });
+    const version = await screen.findByText('0.4.0 (abc1234)');
+    const footer = screen.queryByRole('contentinfo');
+    expect(footer).toContainElement(version);
+    expect(footer!.previousElementSibling).toContainElement(content);
   });
 
   it('opens the workspace once the person logs in', async () => {

@@ -7,6 +7,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 ### Fixed
+- The version and build appear in their own footer below every screen.
 - The selected department uses the full sidebar row, and department, pipeline, and board card text wraps at spaces when possible.
 - The board shows Failures and Stopped columns only when they have tasks and keeps each person's name together when it fits.
 - In Turns and releases, each question button sits directly under its task's wait time.

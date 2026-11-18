@@ -115,7 +115,19 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             expect(Math.max(...top) - Math.min(...top)).toBeLessThanOrEqual(1);
           }
           await assertTrackerFit(frame);
+          const version = frame.locator('.version-mark');
+          await expect(version).toBeVisible();
           await frame.screenshot({ path: info.outputPath(`${view}-${id}-${theme}-${size.width}.png`) });
+          if (view === 'board') {
+            const last = region.getByRole('region', { name: t.tracker.statuses.done, exact: true }).locator('.tr-card').last();
+            await last.evaluate(card => card.scrollIntoView({ block: 'end', inline: 'nearest' }));
+            const [card, body, footer] = await Promise.all([last.boundingBox(), frame.locator('.tracker-page').boundingBox(), version.boundingBox()]);
+            expect(card!.y).toBeGreaterThanOrEqual(body!.y);
+            expect(Math.abs(card!.y + card!.height - (body!.y + body!.height))).toBeLessThanOrEqual(1);
+            expect(card!.y + card!.height).toBeLessThanOrEqual(footer!.y + 1);
+            await frame.screenshot({ path: info.outputPath(`board-bottom-${id}-${theme}-${size.width}.png`) });
+            await frame.locator('.tracker-page').evaluate(element => { element.scrollTop = 0; });
+          }
           if (view !== 'turns') {
             if (!wide) await frame.getByRole('button', { name: t.tracker.side.open }).click();
             await assertSelectedDepartment(sidebar);
