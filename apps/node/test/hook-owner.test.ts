@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { fromAgent, type Peer } from '../src/terminal/peer.js';
-import { agyProgram, claudeProgram, codexProgram, type TermProgram } from '../src/terminal/programs.js';
+import type { TermProgram } from '../src/terminal/programs.js';
+import { agyProgram } from '../src/providers/antigravity-terminal.js';
+import { claudeProgram } from '../src/providers/claude-terminal.js';
+import { codexProgram } from '../src/providers/codex-terminal.js';
 import { real } from './real-screens.js';
 import { Tmux } from '../src/terminal/tmux.js';
 

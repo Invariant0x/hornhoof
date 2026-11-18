@@ -11,7 +11,7 @@ import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import type { OperatorOptions } from '../src/terminal/operator-runtime.js';
 import { withProgramExit } from '../src/program-exit.js';
 import { jobDone } from '../src/runner.js';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
 import { codexJob, job, kimiJob, kimiScreen, listsAtStart, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';

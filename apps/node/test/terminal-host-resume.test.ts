@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
-import { codexProgram, type LaunchSpec } from '../src/terminal/programs.js';
+import type { LaunchSpec } from '../src/terminal/programs.js';
+import { codexProgram } from '../src/providers/codex-terminal.js';
 import { TurnWords } from '../src/terminal/program-restart.js';
 import { Tmux } from '../src/terminal/tmux.js';
 

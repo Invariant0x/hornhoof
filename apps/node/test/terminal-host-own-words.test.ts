@@ -7,7 +7,7 @@ import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { inputOf } from '../src/terminal/input.js';
-import { claudeProgram, claudeTranscript } from '../src/terminal/programs.js';
+import { claudeProgram, claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { real } from './real-screens.js';
 

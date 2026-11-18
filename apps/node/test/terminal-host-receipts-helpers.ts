@@ -8,7 +8,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import { vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { jobDone } from '../src/runner.js';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
 import { codexJob, job, kimiJob, kimiScreen, listsAtStart, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';

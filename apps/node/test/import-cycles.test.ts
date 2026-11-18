@@ -82,4 +82,9 @@ describe('the node source', () => {
   it('has no ring of value imports, so each module loads after everything it uses', () => {
     expect(cycleGroups(valueImports(SRC))).toEqual([]);
   });
+
+  /* Each provider owns how its program launches in a terminal and where it logs; the host's view of a program loads none. */
+  it('keeps the terminal program types free of any provider', () => {
+    expect(valueImports(SRC).get('terminal/programs.ts')).toEqual([]);
+  });
 });

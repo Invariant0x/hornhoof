@@ -7,7 +7,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
-import { codexProgram } from '../src/terminal/programs.js';
+import { codexProgram } from '../src/providers/codex-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
 import { onClock, untilOnClock } from './terminal-host-helpers.js';

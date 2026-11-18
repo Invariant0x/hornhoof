@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { job, listsAtStart, onClock, untilOnClock } from './terminal-host-helpers.js';
 

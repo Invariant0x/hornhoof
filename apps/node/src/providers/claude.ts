@@ -7,7 +7,7 @@ import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { credentialSecrets } from '../credentials.js';
 import { readAccount } from '../account.js';
-import { claudePlanLimits, planToken } from '../terminal/programs.js';
+import { claudePlanLimits, planToken } from './claude-terminal.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 import { CLAUDE_UNSIGNED } from './claude-attribution.js';

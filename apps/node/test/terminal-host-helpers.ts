@@ -5,7 +5,9 @@ import type { AgentEvent } from '@hornhoof/protocol';
 import { vi } from 'vitest';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
 import type { TerminalHost, TermJob } from '../src/terminal/host.js';
-import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
+import { claudeProgram } from '../src/providers/claude-terminal.js';
+import { codexProgram } from '../src/providers/codex-terminal.js';
+import { kimiProgram } from '../src/providers/kimi-terminal.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
 /* What the tests of agents in terminals share. tmux is never started: each test stands in for it with what the program would
