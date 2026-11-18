@@ -113,9 +113,11 @@ describe('the laws of video production', () => {
     expect(setup).toMatch(/prompts[\s\S]*reference frames[\s\S]*cost[\s\S]*git/i);
   });
 
-  it('uses included video credits first and keeps each order within its spending limit', () => {
+  it('recommends the cheapest route the company already has instead of imposing one, and keeps each order within its limit', () => {
     const work = templates.skills.get('vid-work-pipeline')!.body;
-    expect(work).toMatch(/included credits[\s\S]*studio[\s\S]*developer credits[\s\S]*before pay-per-use/i);
+    expect(work).toMatch(/no route is required[\s\S]*compare the routes the company actually has[\s\S]*cost per accepted second[\s\S]*recommend the cheapest route that meets the brief[\s\S]*responsible person chooses/i);
+    expect(work).toMatch(/included credits[\s\S]*studio[\s\S]*developer credits[\s\S]*often the cheapest/i);
+    expect(work).not.toMatch(/before pay-per-use/i);
     expect(work).toMatch(/spending limit and currency for each order[\s\S]*stop before the order can exceed its limit/i);
     expect(work).toMatch(/cheaper modes for drafts[\s\S]*quality mode for accepted finals/i);
     expect(work).toMatch(/record the route, model, settings[\s\S]*actual cost/i);

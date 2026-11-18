@@ -65,9 +65,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Video directors own one story line, the shot plan, performances and the final cut.
 - Video crews plan coverage, light and sound for the chosen look and keep continuity records that explain deliberate breaks.
 - Video crews review each cut and play the exported master before delivery.
-- Video crews use eligible plan credits first and record the approved tool route and cost within each order's spending limit.
+- Video crews compare the routes the company already has, recommend the cheapest that fits the brief, and record the chosen route and cost within each order's spending limit.
 - Video operators follow each model's prompt guide and use accepted shots to compare tools.
-- Design teams use approved references, plan credits and model guides when generating pictures and check the exact images at their intended size.
+- Design teams use approved references and model guides when generating pictures, recommend the cheapest fitting route and check the exact images at their intended size.
 - The company map shows only employee squares again, in their original status colors and with their usual blinking.
 - The company map has no worker kinds legend.
 - The department structure shows live squares for permanent agents and diamonds for one-shot calls, with names and plain descriptions.
