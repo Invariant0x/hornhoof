@@ -2,9 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import { makeKey, type Grant } from '../src/owner-key';
 import { CommandBox } from '../src/ui/CommandBox';
-import { useOwnerKey } from '../src/ui/PasswordPrompt';
 import { keyDefaults } from '../src/owner-key-store';
 import { mockApi, TEST_KEY } from './api-mock';
 import { commandCode } from './command-code';
@@ -21,6 +19,7 @@ describe('a join command and the key of who looks at it', () => {
     show();
     expect(await screen.findByText(commandCode(`${JOIN} --owner-key ${TEST_KEY.publicKey}`))).toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(screen.getByText(/Connecting this machine lets the orchestrator run commands with full permissions/)).toBeInTheDocument();
   });
 
   it('shows any other command as it is, and asks the server nothing', () => {
@@ -71,7 +70,7 @@ describe('a join command and the key of who looks at it', () => {
     keyDefaults.subtle = undefined as unknown as SubtleCrypto;
     const calls = mockApi(NO_KEY);
     show(JOIN, 'typed at setup');
-    expect(await screen.findByText(/This page is open at an address without https/)).toBeInTheDocument();
+    expect(await screen.findByText(/This page opened without HTTPS/)).toBeInTheDocument();
     expect(commandShown()).toBe(JOIN);
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
     expect(calls.some(call => call.method === 'PUT')).toBe(false);
@@ -84,7 +83,7 @@ describe('a join command and the key of who looks at it', () => {
     mockApi({});
     show();
     expect(await screen.findByText(commandCode(`${JOIN} --owner-key ${TEST_KEY.publicKey}`))).toBeInTheDocument();
-    expect(screen.queryByText(/This page is open at an address without https/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This page opened without HTTPS/)).not.toBeInTheDocument();
   });
 
   it('makes the key with the password the screen holds, and asks nothing', async () => {
@@ -118,69 +117,5 @@ describe('a join command and the key of who looks at it', () => {
     await user.click(screen.getByRole('button', { name: 'Отмена' }));
     expect(await screen.findByText('Эта команда содержит ваш ключ, поэтому она появится, когда вы введете пароль.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ввести пароль' })).toBeInTheDocument();
-  });
-});
-
-/* A screen that opens a machine: it asks for a grant and shows the prompt where the button was. */
-function Signer({ onGrant }: { onGrant(grant: Grant | null): void }) {
-  const { sign, prompt } = useOwnerKey();
-  return prompt ?? <button type="button" onClick={() => void sign('a'.repeat(64)).then(onGrant)}>Open</button>;
-}
-
-describe("signing with the person's key on a device", () => {
-  /* The key as the server keeps it, made by another device of theirs with this password. */
-  async function serverHolds(password: string) {
-    const calls = mockApi({ 'GET /api/me/key': [200, { key: null }] });
-    await makeKey(password);
-    const sent = calls.find(call => call.method === 'PUT')!.body as { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };
-    await keyDefaults.store.clear();
-    mockApi({ 'GET /api/me/key': [200, { key: { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations } }] });
-  }
-  const show = (language?: 'ru') => {
-    const grants: (Grant | null)[] = [];
-    if (language) localStorage.setItem('hh-lang', language);
-    render(<LanguageProvider><Signer onGrant={grant => grants.push(grant)} /></LanguageProvider>);
-    return grants;
-  };
-
-  it('asks for the password once per device', async () => {
-    await serverHolds('right');
-    const grants = show();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Open' }));
-    expect(await screen.findByText('Enter your password once on this device to sign with your key.')).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Password'), 'wrong{Enter}');
-    expect(await screen.findByText('Wrong password.')).toBeInTheDocument();
-    expect(grants).toEqual([]);
-    await user.clear(screen.getByLabelText('Password'));
-    await user.type(screen.getByLabelText('Password'), 'right{Enter}');
-    await expect.poll(() => grants.length).toBe(1);
-    expect(JSON.parse(grants[0]!.payload)).toMatchObject({ v: 1, machine: 'a'.repeat(64) });
-    const { until, at } = JSON.parse(grants[0]!.payload) as { until: number; at: number };
-    expect(until - at).toBe(24 * 3600);
-    /* The second opening on this device is one click. */
-    await user.click(await screen.findByRole('button', { name: 'Open' }));
-    await expect.poll(() => grants.length).toBe(2);
-    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
-  });
-
-  it('gives no grant when the person leaves the question, or has no key', async () => {
-    await serverHolds('right');
-    const grants = show();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Open' }));
-    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
-    await expect.poll(() => grants).toEqual([null]);
-    mockApi({ 'GET /api/me/key': [200, { key: null }] });
-    await user.click(await screen.findByRole('button', { name: 'Open' }));
-    await expect.poll(() => grants).toEqual([null, null]);
-    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
-  });
-
-  it('asks the same in Russian', async () => {
-    await serverHolds('right');
-    show('ru');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Open' }));
-    expect(await screen.findByText('Введите пароль один раз на этом устройстве, чтобы подписывать своим ключом.')).toBeInTheDocument();
   });
 });

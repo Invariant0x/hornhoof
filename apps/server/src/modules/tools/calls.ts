@@ -33,7 +33,7 @@ export const STARTS_FIRST: ReadonlySet<string> = new Set([
   'stop_tests',
   'stop_work',
   'computer',
-  'ask_computer_access',
+  'open_computer_access',
   'test_subscription',
   'update_hornhoof',
   'cancel_update',

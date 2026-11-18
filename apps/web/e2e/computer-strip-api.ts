@@ -6,20 +6,15 @@ import { chooseTerminal, serveApi } from './api';
 
 export type Settings = { lang: 'en' | 'ru'; theme: 'light' | 'dark'; width: number };
 
-export const REASON = 'Restart the nodes outside AppArmor, then clean the Docker images that the last three releases left on the disk of this machine.';
-/* A day from now: access whose time is over is no access, and the window shows none. */
-export const UNTIL = new Date(Date.now() + 24 * 3600_000).toISOString();
-/* Computer access to a machine as the server shows it to its owner: its id is the name, and it opens on a click. */
 const view = (name: string, over: Partial<Omit<ComputerAccessView, 'machine'>> = {}): ComputerAccessView => ({
   machine: { id: name, networkId: `n-${name}`, name, hostname: name, personId: 'p1', role: 'worker', os: 'linux', data: false },
-  reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
+  reachable: true, open: false, scope: null, employees: [], canOpen: true, canClose: true,
   ...over,
 });
-export const OPEN = view('node-a', { until: UNTIL });
-export const ASKED = view('node-a', { asked: { reason: REASON, at: '2026-11-04T14:30:00.000Z' } });
+export const OPEN = view('node-a', { open: true, scope: 'orchestrator' });
 export const CLOSED = view('node-a');
-export const SECOND = view('node-b', { until: UNTIL });
-export const MANY: ComputerAccessView[] = Array.from({ length: 12 }, (_, i) => view(`host-${i + 1}`, { until: UNTIL }));
+export const SECOND = view('node-b', { open: true, scope: 'orchestrator' });
+export const MANY: ComputerAccessView[] = Array.from({ length: 12 }, (_, i) => view(`host-${i + 1}`, { open: true, scope: 'orchestrator' }));
 
 export const WORDS = {
   en: {
@@ -57,7 +52,7 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });
   const posts: string[] = [];
   let views = [first, ...others];
-  const ACCESS = /^\/api\/machines\/([^/]+)\/access\/(open|close|decline)$/;
+  const ACCESS = /^\/api\/machines\/([^/]+)\/access\/(open|close)$/;
   await serveApi(page);
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
@@ -66,7 +61,7 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
     if (answered) {
       const [, id, action] = answered;
       posts.push(path);
-      const next = view(id!, action === 'open' ? { until: UNTIL } : {});
+      const next = view(id!, action === 'open' ? { open: true, scope: 'orchestrator' } : {});
       views = views.map(one => (one.machine.id === id ? next : one));
       return route.fulfill({ json: next });
     }

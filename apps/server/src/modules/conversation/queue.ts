@@ -152,9 +152,8 @@ async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Prom
    into no running turn. */
 async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<string> {
   const wake = await inboxTurn(ctx, t);
-  const inboxId = await keepLetter(ctx, t, wake, 'unread');
-  const shown = t.message.computerAccess && inboxId ? { ...t, message: { ...t.message, computerAccess: { ...t.message.computerAccess, inboxId } } } : t;
-  await showMessage(ctx, shown, wake, async () => undefined);
+  await keepLetter(ctx, t, wake, 'unread');
+  await showMessage(ctx, t, wake, async () => undefined);
   return wake;
 }
 

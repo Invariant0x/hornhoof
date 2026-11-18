@@ -95,7 +95,7 @@ function CommandLine({ command, label }: { command: string; label?: string }) {
 /* The install command with Copy, the same one for Windows beside it when there is one, and what running it means for
    the person's subscription, or for their machine. A command that joins a machine shows with the viewer's own key on it, so the machine knows its owner: with no key yet
    it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
-   the command show without one, with a line that says so: such a machine joins and opens to nobody. Any other command
+   the command shows without one, with a line that says so. Any other command
    shows as it is. */
 export function CommandBox({ command, trust, password }: { command: string; trust?: string; password?: string }) {
   const t = useT();
@@ -144,6 +144,7 @@ export function CommandBox({ command, trust, password }: { command: string; trus
         prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
       )}
       {keyless && <p className="muted">{t.subs.ownerKeyNotHere}</p>}
+      {joins && shown && <p className="muted">{t.machines.computerConsent}</p>}
       {/* The stripe and the lines start where the page does; the words read whole in their own direction. */}
       <p className="trust"><bdi>{trust ?? t.subs.trust}</bdi></p>
     </div>

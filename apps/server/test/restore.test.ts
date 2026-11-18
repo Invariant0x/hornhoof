@@ -199,7 +199,7 @@ describe('a restore from a backup', () => {
     const [danas, kept] = [await s.worker('danas', { personId: dana!.row.id }), await s.worker('kept')];
     const revoked = await s.worker('revoked');
     await db.insert(certificates).values([{ serial: 'aa01', machineId: revoked, until: soon }, { serial: 'bb02', machineId: kept, until: soon }]);
-    await db.insert(machineAccess).values({ machineId: kept, companyId: s.acme.id, until: soon, openedBy: s.owner.id, openedAt: new Date(), grant: { payload: 'p', signature: 's' } });
+    await db.insert(machineAccess).values({ machineId: kept, companyId: s.acme.id, scope: 'all_agents' });
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     void orchestrator;
     /* The recovery keys: this database's active one was retired since, and another made. */
@@ -222,7 +222,7 @@ describe('a restore from a backup', () => {
       invites: [open, hashToken('made since')],
       machines: [
         { id: revoked, revoked: true, lendsTests: true, keepsBackups: true },
-        { id: kept, revoked: false, lendsTests: false, keepsBackups: false },
+        { id: kept, revoked: false, lendsTests: false, keepsBackups: false, computerClosed: true },
         { id: randomUUID(), revoked: true, lendsTests: true, keepsBackups: true },
       ],
       serials: ['aa01', 'never-here'],
@@ -245,15 +245,15 @@ describe('a restore from a backup', () => {
     expect((await db.select({ hash: invites.tokenHash }).from(invites).where(isNull(invites.usedAt))).map(row => row.hash)).toEqual([open]);
     const machine = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
     expect((await machine(revoked)).revokedAt).not.toBeNull();
-    expect(await machine(kept)).toMatchObject({ revokedAt: null, lendsTests: false, keepsBackups: false });
+    expect(await machine(kept)).toMatchObject({ revokedAt: null, lendsTests: false, keepsBackups: false, computerClosed: true });
     const serials = await db.select().from(certificates);
     expect(serials.filter(row => row.revokedAt !== null).map(row => row.serial).sort()).toContain('aa01');
     expect(serials.find(row => row.serial === 'bb02')!.revokedAt).toBeNull();
     /* The key that was active when the old database closed is the company's recovery key. */
     expect((await activeRecovery(db, s.config))?.recipient).toBe(newer.recipient);
     expect((await db.select().from(recoveryKeys).where(and(eq(recoveryKeys.id, hereRow!.id)))).map(row => row.retiredAt !== null)).toEqual([true]);
-    /* Every machine is closed, and everyone signs in again. */
-    expect(await db.select().from(machineAccess).where(eq(machineAccess.machineId, kept))).toMatchObject([{ until: null, grant: null, openedBy: null, openedAt: null }]);
+    /* The owner keeps their switch, employee grants end, and everyone signs in again. */
+    expect(await db.select().from(machineAccess).where(eq(machineAccess.machineId, kept))).toEqual([]);
     expect(await db.select().from(sessions)).toEqual([]);
     expect((await s.app.inject({ url: '/api/people', ...as(s.ceo) })).statusCode).toBe(401);
     /* Twice is as once. */

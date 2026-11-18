@@ -376,8 +376,7 @@ case "$1 $2" in
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
         [ "${STUB_STOP_IN:-}" = pull ] && [ ! -f "$STUB_STATE/stopped" ] && { touch "$STUB_STATE/stopped"; kill -9 "$PPID"; } ;;
       # A command on the computer is made, then started. With STUB_COMPUTER_RUNS it runs until its container is removed,
-      # else it ends at once; STUB_COMPUTER_EXIT is how it ends. The CEO closes access while it runs with
-      # STUB_COMPUTER_CLOSES, and while it is made with STUB_CLOSE_ON_CREATE.
+      # else it ends at once; STUB_COMPUTER_EXIT is how it ends. STUB_CLOSE_ON_CREATE closes access during creation.
       create)
         case " $* " in
           *' --entrypoint bash '*)
@@ -390,7 +389,6 @@ case "$1 $2" in
       start)
         [ "$2" = -a ] || exit 0
         echo "ran: $(cat "$STUB_STATE/computer-command")"
-        [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
         if [ -n "${STUB_COMPUTER_HOLD:-}" ]; then
           mkfifo "$STUB_STATE/computer-removed"
           printf '%s %s\n' "$$" "$PPID" > "$STUB_COMPUTER_HOLD"

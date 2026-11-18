@@ -1,14 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { people } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
-import { machinePrincipal, withInputLock } from '../conversation/decision-context.js';
-import { appendEvent, appendOutgoing } from '../events/store.js';
-import { personParty } from '../events/parties.js';
+import { TaskReference } from '../tasks/external-wait.js';
 import type { ToolJob } from '../tools/job.js';
-import { logName, onMachine, RUN_DEFAULT_S, RUN_MAX_S, type AccessMachine, type AccessState, type Waited } from './access.js';
+import { closedLine, logName, onMachine, RUN_DEFAULT_S, RUN_MAX_S, type AccessMachine, type AccessState, type Waited } from './access.js';
+import { computerLine } from './events.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 type Said = ReturnType<typeof say>;
@@ -16,10 +14,7 @@ type Said = ReturnType<typeof say>;
 const NO_OWN = "The machine this server runs on has none of the company's core yet. Call machines for the ones that have.";
 const noSuch = (name: string) => `There is no machine of the company with a core named ${name}. Call machines for their names.`;
 const ambiguous = (name: string) => `More than one machine is called ${name}. Name it by its id from machines.`;
-const unreachable = (name: string) => `Hornhoof cannot reach ${name} now: its core has not answered for a minute. Tell its owner in a line; never ask anyone to type commands.`;
-const closed = (name: string, employee = false) => employee ? `Access to ${name} is not open to all company agents. Ask the orchestrator to request it from its owner, then go on once the owner opens all_agents.` : `Access to ${name} is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.`;
-const notTheirs = (owner: string, name: string) =>
-  `The last words in this turn came from a person who may not direct commands on ${name}: only the CEO, the CEO delegate or ${owner}, who owns it, may. Nothing was run. Ask them first.`;
+const unreachable = (name: string) => `Hornhoof cannot reach ${name} now. Check machines for its connection.`;
 
 const MACHINE = z.string().trim().min(1).max(200).optional().describe('The machine, by its name or its id from machines. Left out: the machine the company server runs on.');
 
@@ -32,11 +27,6 @@ async function named(ctx: Ctx, job: ToolJob, machine: string | undefined): Promi
 }
 
 const isSaid = (value: AccessMachine | Said): value is Said => 'content' in value;
-
-async function ownerName(ctx: Ctx, personId: string): Promise<string> {
-  const [owner] = await ctx.db.select(only(people, 'name')).from(people).where(eq(people.id, personId));
-  return owner?.name ?? 'its owner';
-}
 
 /* What a wait for a command comes to, for the orchestrator. */
 async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promise<Said> {
@@ -51,25 +41,19 @@ async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promi
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
 }
 
-/* A command starts only while the machine's grant allows it. A head or worker also needs an allowed speaker. */
 async function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
-  const run = async () => {
-    if (!(await ctx.computer.openUntil(machine.id, job.agentKind))) return say(closed(machine.name, job.agentKind !== 'orchestrator'), true);
-    if (job.agentKind !== 'orchestrator' && !(await machinePrincipal(ctx.db, job.id, machine.personId, machine.id))) {
-      return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
-    }
-    if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
-    const started = await ctx.computer.start(job, machine.id, command, seconds);
-    if (started === 'closed') return say(closed(machine.name, job.agentKind !== 'orchestrator'), true);
-    return started === 'none' ? say(noSuch(machine.name), true) : started;
-  };
-  return job.agentKind === 'orchestrator' ? run() : withInputLock(ctx, job.agentId, run);
+  const run = await ctx.computer.start(job, machine.id, command, seconds);
+  if (run === 'closed') return say(closedLine(machine.name), true);
+  if (run === 'not_granted') return say(`The orchestrator has not opened access to ${machine.name} for you on this task.`, true);
+  if (run === 'unreachable') return say(unreachable(machine.name), true);
+  return run === 'none' ? say(noSuch(machine.name), true) : run;
 }
 
 /* One machine in a line, for the orchestrator. */
 function lineOf(state: AccessState, owner: string): string {
   const { machine } = state;
-  const access = state.until ? `access open to ${state.scope} until ${state.until}` : state.asked ? `asked: ${state.asked.reason}` : 'closed';
+  const access = state.open ? `access open to ${state.scope}` : 'owner closed access';
+  const grants = state.employees.map(grant => `employee ${grant.employeeId} on task ${grant.taskId}`);
   return [
     `${machine.name} (${machine.id})`,
     machine.role ?? 'no role',
@@ -78,69 +62,65 @@ function lineOf(state: AccessState, owner: string): string {
     ...(machine.data ? ["holds the company's data"] : []),
     state.reachable ? 'reachable' : 'not answering',
     access,
-    ...(state.key === 'not_held' ? ['its owner must give it their key first (its card says how)'] : []),
+    ...grants,
   ].join(', ');
 }
 
-/* Asking an owner is available only to the orchestrator; employees use the command tools. */
-function registerAccessRequest(server: McpServer, ctx: Ctx, job: ToolJob): void {
+function registerDelegation(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
-    'ask_computer_access',
+    'open_computer_access',
     {
-      description:
-        'Asks the owner of a machine of the company for access to it for the duration its owner chooses, when a fix needs the machine itself: Docker, the system, files outside Hornhoof. ' +
-        'The owner sees the reason and opens it with one click; then you get a note and go on by yourself. Never ask anyone to type commands.',
-      inputSchema: { machine: MACHINE, reason: z.string().trim().min(1).max(500).describe('What you need the machine for, in a line.') },
+      description: 'Gives computer access on a connected machine to all company employees, or to one named employee on a task. Use revoke to withdraw it when the work ends. Access has no time limit. The machine owner can close the machine to everyone.',
+      inputSchema: {
+        machine: MACHINE,
+        allAgents: z.literal(true).optional().describe('Give access to all company employees. Leave employee and task out.'),
+        employee: z.uuid().optional().describe("The employee's id from company."),
+        task: TaskReference.optional(),
+        revoke: z.boolean().optional().describe('Withdraw the specified access.'),
+      },
     },
-    async ({ machine: asked, reason }) => {
+    async ({ machine: asked, allAgents, employee, task, revoke = false }) => {
+      const to = allAgents && employee === undefined && task === undefined ? { allAgents } : !allAgents && employee && task !== undefined ? { employee, task } : null;
+      if (!to) return say('Choose allAgents, or give both employee and task.', true);
       const machine = await named(ctx, job, asked);
       if (isSaid(machine)) return machine;
-      if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
-      const until = await ctx.computer.openUntil(machine.id);
-      if (until) return say(`Access to ${machine.name} is open until ${until}. Use computer with machine ${machine.id}.`);
-      await ctx.computer.ask(job.companyId, machine.id, reason);
+      await ctx.computer.delegate(job, machine.id, to, revoke);
       ctx.bus.publish(job.companyId, { type: 'computer' });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(logName(machine)) } });
-      await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, machine.personId) });
-      const state = (await ctx.computer.states(job.companyId)).find(one => one.machine.id === machine.id);
-      const keyless = state?.key === 'not_held' ? ` ${machine.name} does not hold their key yet, and its card tells them what to do. Do not tell anyone to type commands.` : '';
-      return say(
-        `The owner of ${machine.name}, ${await ownerName(ctx, machine.personId)}, sees your request and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.${keyless}`,
-      );
+      await computerLine(ctx, job.companyId, { state: revoke ? 'revoked' : 'delegated', ...to, ...onMachine(logName(machine)) }, null);
+      return say(revoke ? `Withdrew the specified employee access to ${machine.name}.` : `Opened the specified employee access to ${machine.name}.`);
     },
   );
 }
 
-/* A machine's grant opens it to the orchestrator, or to company agents as a group. */
 export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'machines',
     {
       description:
         "Lists the company's machines that have its core: name, id, role, owner, system, whether it holds the company's data, whether Hornhoof reaches it, and its computer access. " +
-        'Computer access is per machine, and only each machine\'s owner opens it, with their own key.',
+        'The orchestrator has standing access and can delegate it to employees. Each owner can close their machine.',
       inputSchema: {},
     },
     async () => {
       const states = await ctx.computer.states(job.companyId);
-      if (states.length === 0) return say("No machine of the company has its core yet, so there is no computer access to ask for.");
+      if (states.length === 0) return say("No machine of the company has its core yet, so there is no computer access yet.");
       const owners = await ctx.db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, [...new Set(states.map(state => state.machine.personId))]));
       const names = new Map(owners.map(owner => [owner.id, owner.name]));
       return say(states.map(state => lineOf(state, names.get(state.machine.personId) ?? 'unknown')).join('\n'));
     },
   );
 
-  if (job.agentKind === 'orchestrator') registerAccessRequest(server, ctx, job);
+  if (job.agentKind === 'orchestrator') registerDelegation(server, ctx, job);
 
   server.registerTool(
     'computer',
     {
       _meta: { secretCommand: true },
       description:
-        'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
+        'Runs a bash command as root on a connected machine and gives back its exit code and the end of its output. ' +
         (job.agentKind === 'orchestrator'
-          ? 'The grant applies in any turn and in tool steps between turns. '
-          : "A department agent also needs a turn whose speaker may direct commands on that machine. ") +
+          ? 'Standing access applies in any turn and tool step while the machine owner keeps it open. '
+          : 'Use the access the orchestrator gave you for this task or for all company employees. ') +
         "It runs in a helper container with every privilege, in the machine's processes and network: docker reaches the machine's Docker, the machine's files are at /host, " +
         "and chroot /host sh -c '...' runs a command on the machine itself (Linux; on a Mac the machine is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
         'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran, where and why.',

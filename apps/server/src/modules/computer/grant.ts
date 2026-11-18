@@ -1,9 +1,8 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { isP256 } from './owner-key.js';
 
-/* The word of a machine's owner that opens its computer: what they signed in their browser with their own key, exactly
-   as signed, and the signature. The app checks it when the owner opens, and the machine's keeper checks it again
-   against the key it holds, so nothing the server keeps can open a machine by itself. */
+/* Older leaders send timed grants signed by the machine owner. Updated keepers still check those grants against their
+   pinned key. Standing access has its own reply. */
 export type Grant = { payload: string; signature: string };
 /* machine: the network id of the one machine it opens. until, at: seconds. nonce: 16 random bytes, in base64url. */
 type GrantFacts = { v: 1; machine: string; until: number; at: number; nonce: string };

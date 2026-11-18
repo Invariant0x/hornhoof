@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { companies, computerRuns, machines, people, personKeys } from '../src/db/schema.js';
+import { machines, people } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
 import { checkHead } from '../src/modules/backups/bundle.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
@@ -31,6 +31,12 @@ import { type Company, DAY_MS, HOST_ID, MAC, SLEEPER, ask, company, folder, hasL
 import { appAt, controlledTime, registerStep, until } from './worker-keeper-time.js';
 
 beforeEach(controlledTime);
+
+function updaterAlive(control: string): void {
+  const file = join(control, 'alive');
+  writeFileSync(file, '');
+  utimesSync(file, new Date(), new Date());
+}
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -554,145 +560,6 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await until(() => readPin(config.dir) === ownerKey);
     await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(ownerKey));
     await w.stop();
-  });
-
-  /* What a machine's updater reads of its computer access, and the updater's side of a command. */
-  const accessIn = (control: string) => {
-    try {
-      return JSON.parse(readFileSync(join(control, 'computer.json'), 'utf8')) as { untilSec: number | null; by?: string };
-    } catch {
-      return null;
-    }
-  };
-  const updaterAlive = (control: string) => {
-    const file = join(control, 'alive');
-    writeFileSync(file, '');
-    utimesSync(file, new Date(), new Date());
-  };
-  async function command(c: Company, machine: string, text: string): Promise<string> {
-    const [acme] = await c.db.select().from(companies);
-    const [run] = await c.db.insert(computerRuns).values({ companyId: acme!.id, machineId: machine, command: text, timeoutS: 30 }).returning();
-    return run!.id;
-  }
-  const runOf = async (c: Company, id: string) => (await c.db.select().from(computerRuns).where(eq(computerRuns.id, id)))[0]!;
-  async function updaterAnswers(control: string, id: string, output: string): Promise<{ command: string }> {
-    const file = join(control, 'computer', `${id}.json`);
-    await until(() => existsSync(file));
-    const taken = JSON.parse(readFileSync(file, 'utf8')) as { command: string };
-    writeFileSync(join(control, 'computer', `${id}.out.json.new`), JSON.stringify({ id, exit: 0, output }));
-    writeFileSync(join(control, 'computer', `${id}.out.json`), JSON.stringify({ id, exit: 0, output }));
-    return taken;
-  }
-
-  it("carries the server's own computer access from its app to its updater", async () => {
-    const c = await company();
-    updaterAlive(c.control);
-    const server = (await c.serverRow())!.id;
-    /* Its keeper asks with its updater alive, so the machine is reachable; it holds no key and takes its app's word. */
-    await until(() => c.app.ctx.computer.reachable(server));
-    expect(accessIn(c.control)).toEqual({ untilSec: null, until: null, asked: null, by: 'keeper' });
-    const opened = await c.app.inject({ method: 'POST', url: `/api/machines/${server}/access/open`, payload: {}, ...as(c.ceo) });
-    expect(opened.statusCode).toBe(200);
-    const untilSec = Math.floor(Date.parse((opened.json() as { until: string }).until) / 1000);
-    await until(() => accessIn(c.control)?.untilSec === untilSec);
-    const id = await command(c, server, 'uname -a');
-    expect(await updaterAnswers(c.control, id, 'Linux\n')).toMatchObject({ command: 'uname -a' });
-    await until(async () => (await runOf(c, id)).state === 'done');
-    expect(await runOf(c, id)).toMatchObject({ exit: 0, output: 'Linux\n' });
-    await until(() => !existsSync(join(c.control, 'computer', `${id}.json`)));
-    /* The close reaches the updater's folder too, and the keeper leaves it closed when it stops. */
-    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(c.ceo) })).statusCode).toBe(200);
-    await until(() => accessIn(c.control)?.untilSec === null);
-    expect((await c.serverRow())!.ownerPin).toBeNull();
-  });
-
-  it("reports the print of the key its owner gave the server's machine, and its system", async () => {
-    const ownerKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
-    const c = await company({}, {}, { HORNHOOF_OWNER_KEY: ownerKey, HORNHOOF_HOST_OS: 'linux' });
-    await until(async () => (await c.serverRow())?.ownerPin === keyPrint(ownerKey));
-    expect(await c.serverRow()).toMatchObject({ os: 'linux' });
-    /* With a key it takes no app's word: an open without its owner's signature opens nothing there. */
-    updaterAlive(c.control);
-    const server = (await c.serverRow())!.id;
-    await until(() => c.app.ctx.computer.reachable(server));
-    const refused = await c.app.inject({ method: 'POST', url: `/api/machines/${server}/access/open`, payload: {}, ...as(c.ceo) });
-    expect([refused.statusCode, (refused.json() as { error: { reason: string } }).error.reason]).toEqual([400, 'grant_needed']);
-    /* A row written past the app says open, and the keeper stays closed. */
-    const [acme] = await c.db.select().from(companies);
-    const { machineAccess } = await import('../src/db/schema.js');
-    await c.db.insert(machineAccess).values({ machineId: server, companyId: acme!.id, until: new Date(Date.now() + 3_600_000) });
-    await until(() => c.lines.some(line => line.includes('with no grant of its owner')));
-    expect(accessIn(c.control)?.untilSec).toBeNull();
-  });
-
-  it('carries computer access over the peer link, opened only by what its owner signed', async () => {
-    const c = await company({}, {}, {}, undefined, true);
-    const { subtle } = webcrypto;
-    const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-    const ownerKey = Buffer.from(await subtle.exportKey('spki', pair.publicKey)).toString('base64url');
-    const [acme] = await c.db.select().from(companies);
-    const [owner] = await c.db.select().from(people).where(eq(people.isOwner, true));
-    await c.db.insert(personKeys).values({ personId: owner!.id, companyId: acme!.id, publicKey: ownerKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 });
-    const { machine, ticket } = await c.joined();
-    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: 'darwin', survivorMs: 600_000 };
-    updaterAlive(config.controlDir);
-    const w = await workerOn(c, config);
-    await until(() => hasLeader(w.status()));
-    await w.keeper['report']();
-    expect((await c.rowOf(machine)).ownerPin).toBe(keyPrint(ownerKey));
-    const carrier = w.keeper['carrier'];
-    await carrier.tick();
-    expect(c.app.ctx.computer.reachable(machine)).toBe(true);
-    expect(accessIn(config.controlDir)).toMatchObject({ untilSec: null, by: 'keeper' });
-
-    const signed = async (over: object = {}) => {
-      const at = Math.floor(Date.now() / 1000);
-      const payload = JSON.stringify({ v: 1, machine: config.machineId, until: at + 3600, at, nonce: Buffer.from(webcrypto.getRandomValues(new Uint8Array(16))).toString('base64url'), ...over });
-      return { payload, signature: Buffer.from(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(payload))).toString('base64url') };
-    };
-    const grant = await signed();
-    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/access/open`, payload: { grant }, ...as(c.ceo) })).statusCode).toBe(200);
-    const untilSec = (JSON.parse(grant.payload) as { until: number }).until;
-    await carrier.tick();
-    expect(accessIn(config.controlDir)?.untilSec).toBe(untilSec);
-    /* A command for it goes through the leader to its updater's folder, and the answer back. */
-    const id = await command(c, machine, 'cat /host/etc/hostname');
-    await carrier.tick();
-    expect(await updaterAnswers(config.controlDir, id, 'dev-mac\n')).toMatchObject({ command: 'cat /host/etc/hostname' });
-    await carrier.tick();
-    expect(await runOf(c, id)).toMatchObject({ state: 'done', exit: 0, output: 'dev-mac\n' });
-    /* Whoever comes to the worker's own web port is no keeper, whatever they write: nothing is taken through it. */
-    const next = await command(c, machine, 'id');
-    const through = await ask(w.front, { path: '/api/network/computer?updater=1', headers: { 'x-hornhoof-via': 'keeper', 'x-hornhoof-keeper': '1' } });
-    expect(through.status).toBe(403);
-    await carrier.tick();
-    await updaterAnswers(config.controlDir, next, 'uid=0\n');
-    await carrier.tick();
-    expect((await runOf(c, next)).state).toBe('done');
-
-    /* A row written past the app that says open, with the old grant or with none, opens nothing on the machine. */
-    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/access/close`, ...as(c.ceo) })).statusCode).toBe(200);
-    await carrier.tick();
-    expect(accessIn(config.controlDir)?.untilSec).toBeNull();
-    const { machineAccess } = await import('../src/db/schema.js');
-    await c.db.update(machineAccess).set({ until: new Date(Date.now() + 3_600_000), grant }).where(eq(machineAccess.machineId, machine));
-    await carrier.tick();
-    expect(w.lines.some(line => line.includes('with no grant of its owner'))).toBe(true);
-    expect(accessIn(config.controlDir)?.untilSec).toBeNull();
-    /* Its keeper tells the server so, and the row says closed again: nobody is shown an open machine that runs nothing,
-       and a command that comes then is ended without reaching the machine. */
-    await carrier.tick();
-    expect((await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, machine)))[0]!.until).toBeNull();
-    const late = await command(c, machine, 'id');
-    await carrier.tick();
-    expect(await runOf(c, late)).toMatchObject({ exit: 126 });
-    expect(existsSync(join(config.controlDir, 'computer', `${late}.json`))).toBe(false);
-
-    /* Disconnected, it closes and asks no more. */
-    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
-    await w.keeper['readView']();
-    expect(w.status().disconnected).toBe(true);
-    expect(accessIn(config.controlDir)).toMatchObject({ untilSec: null, by: 'keeper' });
   });
 
   it("has a data machine's keeper report its addresses and its host's name", async () => {

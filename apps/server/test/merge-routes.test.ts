@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { departments, machineAccess, machines, people, tasks } from '../src/db/schema.js';
+import { departments, machines, people, tasks } from '../src/db/schema.js';
 import type { ConflictView } from '../src/modules/merge/picks.js';
 import { as, invitePerson, ownDatabases } from './helpers.js';
 import { mergeApp, rowsOf } from './merge-app-fixture.js';
@@ -15,12 +15,11 @@ type Decisions = { merges: { id: string; label: string; after: string | null; op
 async function stand() {
   const s = await mergeApp();
   const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'company', passwordHash: 'hash-here' }).returning();
-  const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();
-  await s.db.insert(machineAccess).values({ ...s.on, machineId: machine!.id });
+  const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac', computerClosed: true }).returning();
   const fork = await s.fork();
   await fork.db.update(people).set({ name: 'Maria There', passwordHash: 'hash-there' }).where(eq(people.id, maria!.id));
   await s.db.update(people).set({ name: 'Maria Here', passwordHash: 'hash-here-2' }).where(eq(people.id, maria!.id));
-  await fork.db.update(machineAccess).set({ until: new Date(Date.now() + 3_600_000), openedBy: s.owner.id, openedAt: new Date(), grant: { payload: 'p', signature: 's' } }).where(eq(machineAccess.machineId, machine!.id));
+  await fork.db.update(machines).set({ computerClosed: false }).where(eq(machines.id, machine!.id));
   await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
   await s.db.update(tasks).set({ title: 'Here' }).where(eq(tasks.id, s.one.id));
   await s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), '2026-11-10T08:00:00Z', 'hornhoof_before_t1')`);
@@ -35,7 +34,7 @@ describe("the CEO's conflicts of a merge", () => {
     const s = await stand();
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const inside = { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) };
-    expect(((await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] }).conflicts.map(row => row.table).sort()).toEqual(['machine_access', 'people', 'tasks']);
+    expect(((await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] }).conflicts.map(row => row.table).sort()).toEqual(['machines', 'people', 'tasks']);
     /* A person of the whole company, and nobody at all. */
     for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) {
       const [read, write] = [await s.conflictsOf(who), await s.pick({ merge: s.id, take: 'here' }, who)];
@@ -44,7 +43,7 @@ describe("the CEO's conflicts of a merge", () => {
     expect((await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.merge_conflicts WHERE picked IS NOT NULL`))[0]!.n).toBe(0);
     const listed = (await s.conflictsOf(as(s.ceo))).json() as { conflicts: ConflictView[] };
     /* His own, and not the orchestrator's: those are in the orchestrator's task. */
-    expect(listed.conflicts.map(conflict => [conflict.table, conflict.whose]).sort()).toEqual([['machine_access', 'ceo'], ['people', 'ceo']]);
+    expect(listed.conflicts.map(conflict => [conflict.table, conflict.whose]).sort()).toEqual([['machines', 'ceo'], ['people', 'ceo']]);
     const person = listed.conflicts.find(conflict => conflict.table === 'people')!;
     expect(person).toMatchObject({ what: 'Maria Here (maria@acme.test)', kind: 'differs', here: { name: '"Maria Here"', password_hash: '(hidden)' }, there: { name: '"Maria There"', password_hash: '(hidden)' } });
     expect(JSON.stringify(listed)).not.toContain('hash-');
@@ -54,11 +53,11 @@ describe("the CEO's conflicts of a merge", () => {
     expect(await rowsOf(s.db, sql`SELECT picked, picked_by FROM net.merge_conflicts WHERE id = ${person.id}`)).toEqual([{ picked: 'there', picked_by: `person:${s.owner.id}` }]);
     expect(((await s.conflictsOf(as(s.ceo), '?settled=1')).json() as { conflicts: ConflictView[] }).conflicts.map(conflict => conflict.id)).toEqual([person.id]);
     /* Computer access is its owner's to open, on the machine's card: no pick opens it, the CEO's neither. */
-    const access = listed.conflicts.find(conflict => conflict.table === 'machine_access')!;
+    const access = listed.conflicts.find(conflict => conflict.table === 'machines')!;
     const refused = await s.pick({ ids: [access.id], take: 'there' });
-    expect(refused.json()).toMatchObject({ settled: 0, refused: [{ id: access.id, why: "Only the machine's owner opens computer access, on its card." }] });
-    expect((await s.db.select().from(machineAccess))[0]).toMatchObject({ until: null, grant: null });
-    expect((await s.pick({ merge: s.id, table: 'machine_access', take: 'here' })).json()).toMatchObject({ settled: 1, here: 1 });
+    expect(refused.json()).toMatchObject({ settled: 0, refused: [{ id: access.id, why: "Only the machine's owner changes its computer access on its card." }] });
+    expect((await s.db.select().from(machines).where(eq(machines.machineKey, 'm1')))[0]).toMatchObject({ computerClosed: true });
+    expect((await s.pick({ merge: s.id, table: 'machines', take: 'here' })).json()).toMatchObject({ settled: 1, here: 1 });
     /* Nothing is settled without saying which, and no other word is taken. */
     expect((await s.pick({ take: 'here' })).statusCode).toBe(400);
     expect((await s.pick({ merge: s.id, take: 'both' })).statusCode).toBe(400);
@@ -86,7 +85,7 @@ describe("the CEO's conflicts of a merge", () => {
     /* Settled, it is gone. */
     await s.pick({ merge: s.id, table: 'people', take: 'here' });
     expect((await decisions(as(s.ceo))).merges).toMatchObject([{ open: 1 }]);
-    await s.pick({ merge: s.id, table: 'machine_access', take: 'here' });
+    await s.pick({ merge: s.id, table: 'machines', take: 'here' });
     const after = await decisions(as(s.ceo));
     expect([after.merges, after.counts.total]).toEqual([[], 0]);
   });

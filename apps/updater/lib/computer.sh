@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # The computer this updater runs on. It runs the orchestrator's commands on this computer, as root, while the machine's
-# owner keeps access to it open: the machine's keeper writes computer.json {untilSec} and each command as
+# owner keeps access to it open: the machine's keeper refreshes computer.json {untilSec} and writes each command as
 # computer/<id>.json {id, command, timeout}; this answers computer/<id>.out.json {id, exit, output}. It checks untilSec
 # itself before each command. With HORNHOOF_HOST_OS=linux it also writes the machine's own addresses to addresses.json
 # {at, addresses} once a minute, for the keeper to report.
@@ -80,17 +80,17 @@ computer_runs() {
       -v /var/run/docker.sock:/var/run/docker.sock --entrypoint bash "$COMPUTER_IMAGE" -c "$command" > /dev/null 2>> "$out" || made=''
     if [ -z "$made" ]; then
       code=125
-    elif ! computer_open; then
+    elif [ ! -f "$file" ] || ! computer_open; then
       touch "$out.closed"
       docker rm -f "$name" > /dev/null 2>&1 || true
     else
-      # The watch removes the container once its time is up or access closes, unless the command ended first.
+      # The watch removes the container if its time is up, access closes or its keeper takes the command back.
       (
         i=0
         while [ "$i" -lt "$timeout" ]; do
           sleep 1
           [ ! -f "$out.done" ] || exit 0
-          if ! computer_open; then
+          if [ ! -f "$file" ] || ! computer_open; then
             touch "$out.closed"
             docker rm -f "$name"
             exit 0

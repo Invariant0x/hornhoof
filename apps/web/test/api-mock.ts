@@ -275,23 +275,22 @@ export const REQUESTS: WaitingRequest[] = [
   { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV }, ownerPersonId: 'p1', canAnswer: true },
 ];
 
-/* Computer access to a machine as the server shows it to its owner: with its core answering, and opened on the server's
-   word unless the test says the machine holds a key. Its id is m-<name>, its network id n-<name>. */
+/* A connected machine and the access its owner sees. */
 export function accessView(name: string, over: Partial<Omit<ComputerAccessView, 'machine'>> & { machine?: Partial<AccessMachine> } = {}): ComputerAccessView {
   const { machine, ...rest } = over;
   return {
     machine: { id: `m-${name}`, networkId: `n-${name}`, name, hostname: name, personId: 'p1', role: 'worker', os: 'linux', data: false, ...machine },
-    reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
+    reachable: true, open: true, scope: 'orchestrator', employees: [], canOpen: true, canClose: true,
     ...rest,
   };
 }
 
-/* What GET /api/requests answers: the requests, the orchestrator's cards and his requests for machines, counted per
+/* What GET /api/requests answers: the requests and the orchestrator's cards, counted per
    owner and per asking agent as the server counts them. */
-export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'machineAccess' | 'merges'>> = {}): Decisions {
+export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'merges'>> = {}): Decisions {
   const { merges = [], ...given } = more;
-  const all = { proposals: [], machineAccess: [], ...given };
-  const items = [...requests, ...all.proposals, ...all.machineAccess];
+  const all = { proposals: [], ...given };
+  const items = [...requests, ...all.proposals];
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const i of items) {

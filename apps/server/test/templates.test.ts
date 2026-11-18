@@ -352,7 +352,7 @@ describe('templates', () => {
     expect(trouble).toMatch(/goes in that employee's log with your name, the reason and how many letters/);
     expect(trouble).toMatch(/employees mark only their own letters/);
     const resources = body('orch-resources');
-    expect(resources).toMatch(/While the grant is open, use it in any turn or tool step, whoever started it/);
+    expect(resources).toMatch(/Use computer in any turn or tool step, whoever started it/);
     expect(resources).not.toMatch(/runs only in a turn that answers/);
     for (const id of ['orch-trouble', 'orch-resources']) expect(body(id), id).not.toMatch(/[\u2014ё]/);
   });
@@ -374,7 +374,7 @@ describe('templates', () => {
     expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
     expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);
     expect(body('orch-people')).toMatch(/in any turn, as the company's owner[\s\S]*notebook[\s\S]*Never use database SQL/);
-    expect(body('orch-resources')).toMatch(/What is not forbidden is allowed[\s\S]*notebook[\s\S]*ask_computer_access[\s\S]*actual authorization/);
+    expect(body('orch-resources')).toMatch(/What is not forbidden is allowed[\s\S]*notebook[\s\S]*open_computer_access[\s\S]*named employee on a task/);
     expect(body('hh-notebook')).toMatch(/What is not forbidden there or by Hornhoof itself is allowed[\s\S]*without asking anyone to confirm/);
   });
 

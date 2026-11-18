@@ -11,7 +11,7 @@ import { fixture } from './helpers-db.js';
 export const SERVER_MACHINE_ENV = { HORNHOOF_MACHINE_ID: hostIdOf('server-0001-abcd') };
 
 /* The server's own machine of the test company, with its keeper asking and its updater alive: the machine computer
-   access is asked for when none is named. */
+   tools use when none is named. */
 export async function serverMachine(app: FastifyInstance): Promise<string> {
   const [company] = await app.ctx.db.select(idOnly(companies)).from(companies);
   const { id } = await thisMachine(app.ctx.db, app.ctx.config, company!.id);
@@ -30,7 +30,6 @@ export const nextTurn = (): Promise<void> => new Promise(resolve => { turn(resol
    waits, on the clock Date gives. */
 export function testComputers(app: FastifyInstance, opts: { waitMs?: number } = {}): Computers {
   const computer = new Computers(app.ctx, { ...opts, pause: nextTurn });
-  computer.moveLegacy(app.ctx.config.controlDir);
   app.ctx.computer = computer;
   return computer;
 }

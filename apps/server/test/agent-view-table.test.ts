@@ -228,8 +228,8 @@ const ELSEWHERE: Record<string, string> = {
 const NO_AGENT_DATA: string[] = [
   'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
   'POST /api/vault', 'PATCH /api/vault/:id', 'DELETE /api/vault/:id',
-  'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
-  'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/decline', 'POST /api/machines/:id/access/open',
+  'POST /api/computer/close', 'POST /api/computer/open',
+  'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/open',
   /* A person or the orchestrator registers and probes; the phone owner or the orchestrator stops and resumes, never a head. */
   'POST /api/phones/probe', 'POST /api/phones', 'POST /api/phones/:id/stop', 'POST /api/phones/:id/resume',
   'GET /api/feedback', 'POST /api/feedback/inbound',

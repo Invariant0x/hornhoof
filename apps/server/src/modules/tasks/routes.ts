@@ -195,21 +195,6 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Deci
   };
 }
 
-/* What a machine's access card shows, with the orchestrator's request for it; its id is the machine's, and open and
-   decline go to that machine's routes. */
-function computerView(computer: Decisions['computers'][number], names: Map<string, string>) {
-  return {
-    kind: 'computer_access' as const,
-    id: computer.view.machine.id,
-    agent: { id: computer.agentId, name: names.get(computer.agentId) ?? '' },
-    ownerPersonId: computer.ownerPersonId,
-    canAnswer: computer.canAnswer,
-    decidedBy: decidedByView(computer.decidedBy, new Map()),
-    at: computer.asked.at,
-    view: computer.view,
-  };
-}
-
 function machineCards(me: Person, person: string | undefined, cards: Decisions['machines']) {
   return cards.filter(card => !person || person === me.id || person === card.owner?.id)
     .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
@@ -529,8 +514,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const mine = shown.filter(r => r.known);
     const lines = await linesFor(ctx, viewer, mine.map(r => r.task));
     const cards = decisions.proposals.filter(p => picked(p.ownerPersonId));
-    const computers = decisions.computers.filter(c => picked(c.ownerPersonId));
-    const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...computers.map(c => c.agentId)]);
+    const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId)]);
     const places = await departmentNames(ctx, placesOf(cards, shown));
     const pictures = await picturesOf(db, shown.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
@@ -541,7 +525,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       proposals: cards.map(c => proposalView(c, names, places)),
       /* A page loaded before machines had access of their own reads the old key, which held one request or none. */
       computerAccess: null,
-      machineAccess: computers.map(c => computerView(c, names)),
+      machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
       counts: decisions.counts,

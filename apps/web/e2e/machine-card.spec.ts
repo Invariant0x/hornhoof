@@ -38,7 +38,7 @@ const machine = (id: string, hostname: string, over: Partial<MachineView>): Mach
 } as MachineView);
 const openAccess = (id: string, hostname: string) => ({
   machine: { id, networkId: `n-${hostname}`, name: hostname, hostname, personId: 'p1', role: 'worker', os: 'linux', data: true },
-  reachable: true, until: new Date(NOW + 20 * 3_600_000).toISOString(), asked: null, canOpen: true, canClose: true, key: 'not_needed',
+  reachable: true, open: true, scope: 'orchestrator', employees: [], canOpen: true, canClose: true,
 });
 
 /* A plan of the CEO's on the server's machine, so the other two offer Add my plan. */

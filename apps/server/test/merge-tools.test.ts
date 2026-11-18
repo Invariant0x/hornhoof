@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, machineAccess, machines, people, sessions, tasks, turns } from '../src/db/schema.js';
+import { departments, jobs, machines, people, sessions, tasks, turns } from '../src/db/schema.js';
 import type { ConflictView } from '../src/modules/merge/picks.js';
 import { as, listen, mcp, ownDatabases } from './helpers.js';
 import { mergeApp, ORCHESTRATOR_TOKEN, rowsOf } from './merge-app-fixture.js';
@@ -221,17 +221,16 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
 
   it('never opens computer access', async () => {
     const s = await stand();
-    const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();
-    await s.db.insert(machineAccess).values({ ...s.on, machineId: machine!.id });
+    const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac', computerClosed: true }).returning();
     const fork = await s.fork();
-    await fork.db.update(machineAccess).set({ until: new Date(Date.now() + 3_600_000), openedBy: s.owner.id, openedAt: new Date(), grant: { payload: 'p', signature: 's' } }).where(eq(machineAccess.machineId, machine!.id));
+    await fork.db.update(machines).set({ computerClosed: false }).where(eq(machines.id, machine!.id));
     const { id } = await s.merge(fork);
     const [conflict] = await s.conflicts(id);
-    expect(conflict).toMatchObject({ tbl: 'machine_access', kind: 'differs' });
-    for (const how of [{ take: 'there' }, { take: 'value', value: { until: new Date(Date.now() + 3_600_000).toISOString() } }]) {
-      expect(text(await call(s.tools, 'merge_pick', { ids: [conflict!.id], ...how }))).toBe(`Settled 0: kept here 0, took there 0.\nRefused 1: ${conflict!.id}: Only the machine's owner opens computer access, on its card.`);
+    expect(conflict).toMatchObject({ tbl: 'machines', kind: 'differs' });
+    for (const how of [{ take: 'there' }, { take: 'value', value: { computer_closed: false } }]) {
+      expect(text(await call(s.tools, 'merge_pick', { ids: [conflict!.id], ...how }))).toBe(`Settled 0: kept here 0, took there 0.\nRefused 1: ${conflict!.id}: Only the machine's owner changes its computer access on its card.`);
     }
-    expect((await s.db.select().from(machineAccess))[0]).toMatchObject({ until: null, grant: null });
+    expect((await s.db.select().from(machines).where(eq(machines.machineKey, 'm1')))[0]).toMatchObject({ computerClosed: true });
   });
 
   it("is the orchestrator's alone", async () => {

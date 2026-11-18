@@ -3,8 +3,7 @@ import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
-import type { ComputerAccessView, Me, Org } from '../types';
-import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
+import type { Me, Org } from '../types';
 import { LogoMark } from '../ui/icons';
 import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
@@ -69,39 +68,6 @@ function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onClose,
   return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onClose={onClose} />;
 }
 
-/* For a person who sits at a machine of the company that is theirs to open and closed: a group of the menu, its line
-   above it, that gives the orchestrator access to it for a day. Opened, the menu closes. Elsewhere, or on a machine they
-   cannot open now, nothing shows, not even the line. */
-function AccessHere({ onDone }: { onDone: () => void }) {
-  const t = useT();
-  const [view, setView] = useState<ComputerAccessView | null>(null);
-  const [failure, setFailure] = useState<unknown>(null);
-  const { answer, prompt } = useAccess(onDone, setFailure);
-  useEffect(() => {
-    let live = true;
-    /* A server from before machines had access of their own knows no such route: then there is nothing to offer. */
-    api.get<{ view: ComputerAccessView | null }>('/api/machines/here').then(
-      res => live && setView(res.view),
-      () => undefined,
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  if (!view || !view.canOpen || isOpen(view) || cannotOpen(t, view)) return null;
-  return (
-    <>
-      <hr className="am-sep" />
-      {prompt ?? (
-        <button className="mi" type="button" onClick={() => void answer(view, 'open')}>
-          <span>{t.window.computerHere(machineName(t, view.machine))}</span>
-        </button>
-      )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-    </>
-  );
-}
-
 /* One row of the account menu: it closes the menu, then does what it says. */
 function MenuRow({ label, count, onPick, onClose }: { label: string; count?: { shown: number; said: string }; onPick: () => void; onClose: () => void }) {
   return (
@@ -163,7 +129,6 @@ function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, .
         <span><bdi dir="ltr">{me.person.email}</bdi></span>
         {version && <span className="menu-version"><Idents text={t.shell.version(versionText(version))} idents={[versionText(version)]} /></span>}
       </div>
-      <AccessHere onDone={onClose} />
       <hr className="am-sep" />
       <MenuRow label={t.firstContact.title} onPick={onContact} onClose={onClose} />
       <MenuRow label={t.settings.menu} onPick={onSettings} onClose={onClose} />

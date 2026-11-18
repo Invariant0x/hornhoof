@@ -21,14 +21,14 @@ export const FIRST_TURN_TEMPLATE =
   'The CEO set the company up from a ready-made template, so its departments already exist. Greet the CEO by name, say in one line that the company started from a template and that you can change its departments any time, call "company" to see them, and offer to staff them one at a time, beginning with the first that has nobody yet. Do not propose a structure card; the departments are already there.';
 
 /* The machine a person sits at when they write, and until when its computer access is open. */
-export type WrittenFrom = { machine: string; until: string | null };
+export type WrittenFrom = { machine: string; open: boolean };
 
 /* A person's message as he reads it, with who wrote it. When they write from a machine of the company, one line before
    it says which, so he knows where the person sits and whether that machine is open to him. */
 export function turnPrompt(author: { name: string; title: string }, text: string, from?: WrittenFrom): string {
   const said = author.title ? `${author.name} (${author.title}): ${text}` : `${author.name}: ${text}`;
   if (!from) return said;
-  return `${author.name} writes this from ${from.machine}; access to it is ${from.until ? `open until ${from.until}` : 'closed'}.\n${said}`;
+  return `${author.name} writes this from ${from.machine}; access to it is ${from.open ? 'open' : 'closed by its owner'}.\n${said}`;
 }
 
 /* What someone else wrote, inside a prompt: every line of it is marked, so no line of it passes for Hornhoof's own or for

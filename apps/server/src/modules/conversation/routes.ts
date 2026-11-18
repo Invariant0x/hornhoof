@@ -140,7 +140,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { text, task, pictures } = MessageBody.parse(req.body);
     /* The orchestrator is told which machine of the company a person writes from, when they sit at one. */
     const here = !me.via && agent.kind === 'orchestrator' ? await ctx.computer.here(req, me.companyId) : null;
-    const from = here ? { machine: here.name, until: await ctx.computer.openUntil(here.id) } : undefined;
+    const from = here ? { machine: here.name, open: (await ctx.computer.view(me, here.id))?.open ?? false } : undefined;
     const jobId = await writeToAgent(ctx, me, agent, { text, task, pictures, from });
     reply.code(202);
     return { jobId };

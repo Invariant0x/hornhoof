@@ -22,7 +22,7 @@ export type Picked = { settled: number; here: number; there: number; refused: { 
 
 /* How many conflicts one call settles at most. */
 const AT_ONCE = 500;
-const OWNERS_ALONE = "Only the machine's owner opens computer access, on its card.";
+const OWNERS_ALONE = "Only the machine's owner changes its computer access on its card.";
 
 type ConflictRow = {
   id: string; merge: string; label: string; path: string | null; tbl: string; key: Record<string, unknown>; op: 'insert' | 'update' | 'delete'; kind: string; topic: string;
@@ -142,6 +142,7 @@ function permanentDeletion(conflict: ConflictRow, take: 'there' | 'value', value
 /* Everything a pick must hold to before it writes; it throws why not. */
 function allowed(conflict: ConflictRow, take: Take, value?: Record<string, unknown>): void {
   if (conflict.picked) throw new NotTaken('Already settled.');
+  if (conflict.tbl === 'machine_access' && take !== 'here') throw new NotTaken('Employee computer access is set by the orchestrator.');
   const own = TABLE_RULES[conflict.tbl]?.hereOnly ?? [];
   const written = take === 'value' ? Object.keys(value ?? {}) : take === 'there' && conflict.op === 'update' ? (conflict.cols.length > 0 ? conflict.cols : own) : [];
   if (written.some(column => own.includes(column))) throw new NotTaken(OWNERS_ALONE);

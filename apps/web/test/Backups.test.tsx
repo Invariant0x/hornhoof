@@ -103,7 +103,7 @@ describe('Backups in Settings', () => {
     expect(screen.getByText('These machines joined later and must be connected again: new-pc, lab.')).toBeInTheDocument();
     expect(screen.getByText('These people were added later and must be invited again: Sasha.')).toBeInTheDocument();
     expect(screen.getByText('Everyone signs in again afterwards.')).toBeInTheDocument();
-    expect(screen.getByText('Access to machines is closed on every machine; their owners open it again.')).toBeInTheDocument();
+    expect(screen.getByText('The machines keep their access settings. The orchestrator gives employees access again as needed.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Recovery file')).not.toBeInTheDocument();
     /* Cancel asks nothing of the server. */
     await user.click(within(ask).getByRole('button', { name: 'Cancel' }));

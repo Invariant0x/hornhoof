@@ -90,13 +90,25 @@ describe('updater, the computer', () => {
     expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 124, output: expect.stringContaining('Stopped after 1 seconds.') });
   });
 
-  it('stops a running command when the CEO closes access', async () => {
+  it('stops a running command when the machine owner closes access', async () => {
     const s = stand();
     access(s, later());
     command(s, 'c6', 'apt-get upgrade -y', 60);
-    const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_COMPUTER_CLOSES: '1' });
+    const close = 'if [ -f "$HORNHOOF_CONTROL_DIR/computer/c6.started" ]; then echo "{}" > "$HORNHOOF_CONTROL_DIR/computer.json"; fi';
+    const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: close });
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c6');
     expect(answer(s, 'c6')).toMatchObject({ id: 'c6', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
+  });
+
+  it('stops a command the keeper takes back even while computer access is open again', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c8', 'recorded sample', 4);
+    const forget = 'if [ -f "$HORNHOOF_CONTROL_DIR/computer/c8.started" ]; then echo "computer watch" >> "$STUB_LOG"; rm -f "$HORNHOOF_CONTROL_DIR/computer/c8.json"; fi';
+    const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: forget });
+    expect(r.calls.filter(line => line === 'computer watch')).toEqual(['computer watch']);
+    expect(r.calls).toContain('docker rm -f hornhoof-computer-c8');
+    expect(answer(s, 'c8')).toBeNull();
   });
 
   it('runs no command a second time after it restarted, and stops what still runs of it', async () => {

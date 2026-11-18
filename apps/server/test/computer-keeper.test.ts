@@ -59,6 +59,23 @@ function stand(over: { pin?: string | null; trustApp?: boolean } = {}) {
 const CLOSED = { untilSec: null, until: null, asked: null, by: 'keeper' };
 
 describe("a machine's keeper and its computer access", () => {
+  it('takes standing access from its company leader even with a pinned owner key', async () => {
+    const s = stand({ pin: (await owner()).publicKey });
+    const carrier = s.make();
+    carrier.prepare();
+    const id = randomUUID();
+    s.said.get = { status: 200, body: { access: { standing: true }, runs: [{ id, command: 'recorded sample', timeout: 30 }] } };
+    await carrier.tick();
+    expect(s.files()).toEqual([`${id}.json`]);
+    expect(s.settings().untilSec).toBeGreaterThan(s.nowS());
+    s.advance(30 * DAY_S * 1000);
+    await carrier.tick();
+    expect(s.settings().untilSec).toBeGreaterThan(s.nowS());
+    s.said.get = closed();
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+  });
+
   it('writes the access and the commands for its updater, and brings the answers back', async () => {
     const s = stand();
     s.alive();
@@ -69,7 +86,7 @@ describe("a machine's keeper and its computer access", () => {
     const until_ = s.nowS() + 3600;
     s.said.get = open(until_, null, [{ id, command: 'uname -a', timeout: 30 }]);
     await carrier.tick();
-    expect(s.asked[0]).toMatchObject({ method: 'GET', path: '/api/network/computer?updater=1&held=' });
+    expect(s.asked[0]).toMatchObject({ method: 'GET', path: '/api/network/computer?standing=1&updater=1&held=' });
     expect(s.settings()).toEqual({ untilSec: until_, until: new Date(until_ * 1000).toISOString(), asked: null, by: 'keeper' });
     expect(s.files()).toEqual([`${id}.json`]);
     expect(JSON.parse(readFileSync(join(s.controlDir, 'computer', `${id}.json`), 'utf8'))).toEqual({ id, command: 'uname -a', timeout: 30 });
@@ -77,7 +94,7 @@ describe("a machine's keeper and its computer access", () => {
     s.said.get = open(until_);
     s.put(`${id}.out.json`, { id, exit: 3, output: 'Linux\n' });
     await carrier.tick();
-    expect(s.asked.at(-2)).toMatchObject({ method: 'GET', path: `/api/network/computer?updater=1&held=${id}` });
+    expect(s.asked.at(-2)).toMatchObject({ method: 'GET', path: `/api/network/computer?standing=1&updater=1&held=${id}` });
     expect(s.asked.at(-1)).toEqual({ method: 'POST', path: `/api/network/computer/${id}`, body: { exit: 3, output: 'Linux\n' } });
     expect(s.files()).toEqual([]);
   });
@@ -87,7 +104,7 @@ describe("a machine's keeper and its computer access", () => {
     const carrier = s.make();
     carrier.prepare();
     await carrier.tick();
-    expect(s.asked[0]!.path).toBe('/api/network/computer?updater=0&held=');
+    expect(s.asked[0]!.path).toBe('/api/network/computer?standing=1&updater=0&held=');
   });
 
   it('closes on a refusal, and when it hears nothing for a minute', async () => {

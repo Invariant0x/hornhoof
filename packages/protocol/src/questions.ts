@@ -13,7 +13,7 @@ export const QuestionMaterials = z.discriminatedUnion('presentation', [Result, z
 export type QuestionMaterials = z.infer<typeof QuestionMaterials>;
 
 /* Native source identity, without a synthetic task or caller-supplied authority. */
-export const SourceRef = z.strictObject({ kind: z.enum(['task_request', 'proposal', 'computer_access']), id: z.uuid() });
+export const SourceRef = z.strictObject({ kind: z.enum(['task_request', 'proposal']), id: z.uuid() });
 export type SourceRef = z.infer<typeof SourceRef>;
 export const QuestionAudience = z.enum(['internal', 'human', 'legacy']);
 export type QuestionAudience = z.infer<typeof QuestionAudience>;
@@ -28,7 +28,7 @@ const ResourceReference = z.string().min(1).max(200)
   .refine(value => value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value), 'Use the exact resource reference.');
 /* The service still verifies the resource and its actual responsible person. */
 export const HumanActionBinding = z.strictObject({
-  kind: z.enum(['payment', 'owner_login', 'manual_machine_action', 'ceo_permission']), resourceId: ResourceReference,
+  kind: z.enum(['payment', 'owner_login', 'manual_machine_action']), resourceId: ResourceReference,
 });
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
 
@@ -75,7 +75,6 @@ export const QuestionPurpose = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('payment'), resourceId: ResourceReference, amount: Amount, currency: z.string().regex(/^[A-Z]{3}$/), payee: Plain(QUESTION_LIMITS.labelBytes) }),
   z.strictObject({ kind: z.literal('owner_login'), resourceId: ResourceReference, subscriptionId: z.uuid(), ownerPersonId: z.uuid(), provider: z.enum(PROVIDER_IDS) }),
   z.strictObject({ kind: z.literal('manual_machine_action'), resourceId: ResourceReference, machineId: z.uuid(), nodeId: z.uuid().nullable(), actionId: Identifier, until: UTC.nullable() }),
-  z.strictObject({ kind: z.literal('ceo_permission'), resourceId: ResourceReference, permission: z.literal('server_computer_access'), machineId: z.uuid().nullable(), until: UTC }),
 ]);
 export type QuestionPurpose = z.infer<typeof QuestionPurpose>;
 /* PRIVATE snapshot metadata, never a public view, a native grant or client input.

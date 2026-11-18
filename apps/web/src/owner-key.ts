@@ -65,16 +65,6 @@ export async function unlockKey(server: StoredKey, password: string, deps: Parti
   return privateKey;
 }
 
-/* What a machine's owner signs to open it: the machine by its id in the company's network, until when, when it was
-   signed, and a number used once. The machine's keeper checks exactly these words against the key it holds. */
-export type Grant = { payload: string; signature: string };
-
-export async function signGrant(privateKey: CryptoKey, machine: string, untilS: number, nowS: number, deps: Partial<KeyDeps> = {}): Promise<Grant> {
-  const { subtle } = { ...keyDefaults, ...deps };
-  const payload = JSON.stringify({ v: 1, machine, until: untilS, at: nowS, nonce: base64url(crypto.getRandomValues(new Uint8Array(16))) });
-  return { payload, signature: base64url(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(payload))) };
-}
-
 /* A command that joins a machine carries the key of whoever runs it there, so the machine knows its owner from the
    command itself. Any other command stays as it is. */
 export function withOwnerKey(command: string, publicKey: string): string {

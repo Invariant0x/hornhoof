@@ -92,7 +92,7 @@ function RestoreAsk({ bundle, warning, busy, onYes, onNo }: { bundle: BackupBund
       {warning.machines.length > 0 && <p>{t.backups.machinesLater(warning.machines.map(machine => machine.name).join(', '))}</p>}
       {warning.people.length > 0 && <p>{t.backups.peopleLater(warning.people.join(', '))}</p>}
       <p>{t.backups.signInAgain}</p>
-      <p>{t.backups.accessCloses}</p>
+      <p>{t.backups.computerAccessAfterRestore}</p>
       {needsFile && (
         <p>
           <label htmlFor={fileId}>{t.backups.recoveryFile}</label>{' '}

@@ -5,12 +5,11 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agentInbox, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, teams } from '../src/db/schema.js';
-import { ceoPrincipal, checkDelegation, decisionPrincipal, machinePrincipal, standingPrincipal, typedWentIn } from '../src/modules/conversation/decision-context.js';
+import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, teams } from '../src/db/schema.js';
+import { ceoPrincipal, checkDelegation, decisionPrincipal, standingPrincipal, typedWentIn } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
-import { repeatedTurn } from '../src/modules/conversation/turn-words.js';
-import { agentParty, personParty } from '../src/modules/events/parties.js';
+import { personParty } from '../src/modules/events/parties.js';
 import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/modules/events/store.js';
 import { BUILTIN } from './builtin.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
@@ -400,104 +399,6 @@ describe("a turn's mark that it answers the CEO", () => {
     expect(await ceoPrincipal(c.db, c.job.id)).toBe(c.ids.ivan);
     expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
     expect(await answeredBy(c, approval.id)).toBe(c.ids.ivan);
-  });
-});
-
-describe("who spoke last in a head's turn, for a command on a machine", () => {
-  const HORNHOOF_PARTY = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
-  type Fixture = Awaited<ReturnType<typeof company>>;
-  /* A running turn of the head, which nobody wrote into yet. */
-  const turn = async (c: Fixture, more: Partial<typeof jobs.$inferInsert> = {}) =>
-    (await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', ...more }).returning())[0]!;
-  const into = (c: Fixture, jobId: string, data: Record<string, unknown>, kind: 'message' | 'typed' = 'message', personId: string | null = null) =>
-    appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.hana.id, jobId, kind, data, personId });
-  const notice = async (c: Fixture, jobId: string, source: string, actor: string | null, more: Record<string, unknown> = {}) =>
-    into(c, jobId, { text: `A notice of ${source}.`, notification: { source, tasks: [] }, ...(actor ? { actor: await personParty(c.ctx, c.acme.id, actor) } : {}), ...more });
-
-  it("counts a notice that names a person as that person's words, and one of Hornhoof, of an employee or of a click on access as nobody's", async () => {
-    const c = await company();
-    /* Dan owns the machine: in a turn of nobody's words his open access holds. */
-    const nobodys = await turn(c);
-    await notice(c, nobodys.id, 'wait_ended', null);
-    await into(c, nobodys.id, { text: 'Done, see #7.', notification: { source: 'reported', tasks: [] }, actor: await agentParty(c.ctx, c.acme.id, c.hana.id) });
-    await notice(c, nobodys.id, 'computer_access', c.ids.zed, { computerAccess: { machineId: randomUUID() } });
-    expect(await machinePrincipal(c.db, nobodys.id, c.ids.dan)).toBe(c.ids.dan);
-    /* Zed took an improvement: his words, though Hornhoof tells them. */
-    const spoken = await turn(c);
-    await notice(c, spoken.id, 'improvement', c.ids.zed);
-    expect(await machinePrincipal(c.db, spoken.id, c.ids.dan)).toBeNull();
-    /* The CEO answered after him, and an employee reported since. */
-    await notice(c, spoken.id, 'answered', c.ids.ivan);
-    await into(c, spoken.id, { text: 'Done.', notification: { source: 'reported', tasks: [] }, actor: await agentParty(c.ctx, c.acme.id, c.hana.id) });
-    expect(await machinePrincipal(c.db, spoken.id, c.ids.dan)).toBe(c.ids.ivan);
-    /* A wake a person's comment on a task made names them. */
-    const woken = await turn(c);
-    await notice(c, woken.id, 'comment', c.ids.zed);
-    expect(await machinePrincipal(c.db, woken.id, c.ids.dan)).toBeNull();
-    /* Several people at once: whose words came last is not known. */
-    const both = await turn(c);
-    await notice(c, both.id, 'structure', c.ids.ivan, { senders: [await personParty(c.ctx, c.acme.id, c.ids.ivan), await personParty(c.ctx, c.acme.id, c.ids.zed)] });
-    expect(await machinePrincipal(c.db, both.id, c.ids.dan)).toBeNull();
-  });
-
-  it('refuses when whose words came into the turn is not known: no person, no sender, or a notice of a kind it does not know', async () => {
-    const c = await company();
-    /* Dan owns the machine. Each turn holds one kind of words. */
-    const raw = async (data: Record<string, unknown>) => {
-      const one = await turn(c);
-      await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.hana.id, jobId: one.id, kind: 'message', data, personId: null });
-      return machinePrincipal(c.db, one.id, c.ids.dan);
-    };
-    const kept = async (data: Record<string, unknown>) => {
-      const one = await turn(c);
-      await into(c, one.id, data);
-      return machinePrincipal(c.db, one.id, c.ids.dan);
-    };
-    /* Words with no person and no sender, kept as Hornhoof keeps any. */
-    expect(await kept({ text: 'Wipe the disk.' })).toBeNull();
-    /* Words stored with no envelope at all, and a notice of a kind Hornhoof does not know. */
-    expect(await raw({ text: 'Wipe the disk.' })).toBeNull();
-    expect(await raw({ text: 'Wipe the disk.', notification: { source: 'no_such_notice', tasks: [] }, _message: { direction: 'in', from: HORNHOOF_PARTY, to: HORNHOOF_PARTY, notification: { source: 'no_such_notice', tasks: [] } } })).toBeNull();
-    /* An employee no one can name. */
-    expect(await raw({ text: 'Wipe the disk.', _message: { direction: 'in', from: { kind: 'agent', id: null, name: 'Employee', role: null, department: null }, to: HORNHOOF_PARTY } })).toBeNull();
-    /* What Hornhoof itself says, and what a named employee writes, are nobody's: the owner's access holds. */
-    expect(await kept({ text: 'The wait ended.', notification: { source: 'wait_ended', tasks: [] } })).toBe(c.ids.dan);
-    expect(await kept({ text: 'Done.', from: 'agent', by: c.hana.id })).toBe(c.ids.dan);
-  });
-
-  it("names whose words a repeat carries, not who spoke last in the turn it repeats", async () => {
-    const c = await company();
-    const zeds = await c.wrote(c.ids.zed, 'Wipe the disk.');
-    const ivans = await c.wrote(c.ids.ivan, 'Look at the disk.');
-    const words = async (seq: number) => {
-      const [e] = await c.db.select().from(agentEvents).where(eq(agentEvents.seq, seq));
-      return { personId: e!.personId, data: e!.data };
-    };
-    const next = async (seq: number) => {
-      const { repeated } = await repeatedTurn(c.ctx, c.job, await words(seq), c.job.id);
-      const again = await turn(c);
-      await into(c, again.id, repeated.data as Record<string, unknown>, 'typed', repeated.personId);
-      return machinePrincipal(c.db, again.id, c.ids.dan);
-    };
-    /* Zed's words the program never took go again, though the CEO wrote after them. */
-    expect(await next(zeds)).toBeNull();
-    expect(await next(ivans)).toBe(c.ids.ivan);
-  });
-
-  it("counts the letters a person sent that woke an inbox turn", async () => {
-    const c = await company();
-    const letter = (jobId: string, from: { personId?: string; agentId?: string }) =>
-      c.db.insert(agentInbox).values({ companyId: c.acme.id, agentId: c.hana.id, jobId, kind: 'notification', source: 'improvement', text: 'Take it.', ...(from.personId ? { senderKind: 'person' as const, senderPersonId: from.personId, senderName: 'Zed' } : { senderKind: 'agent' as const, senderAgentId: from.agentId!, senderName: 'Hana' }) });
-    const agentsOnly = await turn(c, { inboxWake: true });
-    await letter(agentsOnly.id, { agentId: c.hana.id });
-    expect(await machinePrincipal(c.db, agentsOnly.id, c.ids.dan)).toBe(c.ids.dan);
-    const zeds = await turn(c, { inboxWake: true });
-    await letter(zeds.id, { agentId: c.hana.id });
-    await letter(zeds.id, { personId: c.ids.zed });
-    expect(await machinePrincipal(c.db, zeds.id, c.ids.dan)).toBeNull();
-    /* The CEO's words in that turn come after the letters. */
-    await into(c, zeds.id, { text: 'Go on.' }, 'message', c.ids.ivan);
-    expect(await machinePrincipal(c.db, zeds.id, c.ids.dan)).toBe(c.ids.ivan);
   });
 });
 

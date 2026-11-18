@@ -256,7 +256,12 @@ export class UnitWriter {
       for (const [column, value] of Object.entries(closing.also ?? {})) put(column, value);
       break;
     }
-    for (const column of rule.hereOnly ?? []) if (row[column] !== null && row[column] !== undefined) put(column, null);
+    if (t.name === 'machines' && row.computer_closed === undefined) put('computer_closed', false);
+    for (const column of rule.hereOnly ?? []) {
+      /* A machine first seen here keeps the owner's switch that came with it. */
+      if (t.name === 'machines' && column === 'computer_closed') continue;
+      if (row[column] !== null && row[column] !== undefined) put(column, null);
+    }
     /* A row never points at what is never merged. */
     for (const fk of t.fks) {
       const [column] = fk.columns;

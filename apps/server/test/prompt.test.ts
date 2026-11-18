@@ -180,12 +180,12 @@ describe('orchestrator instructions', () => {
     expect(carried).not.toContain('data fix you cannot make');
   });
 
-  it('fixes trouble on the computer itself after asking the CEO for it, and never asks the CEO to type commands', () => {
-    expect(ability('orch-trouble')).toMatch(/protected computer tool and ask_computer_access authorization flow/i);
+  it('fixes trouble on connected machines and never asks the CEO to type commands', () => {
+    expect(ability('orch-trouble')).toMatch(/protected computer tool on a connected machine/i);
     expect(ability('orch-trouble')).toMatch(/never ask a person to type SQL or shell commands/i);
-    expect(ability('orch-resources')).toMatch(/ask_computer_access[\s\S]*wait for its actual authorization/i);
-    expect(ability('orch-resources')).toMatch(/do not reuse another machine owner's access approval/i);
-    expect(ability('orch-resources')).toMatch(/call machines[\s\S]*opens only with that owner's signature/i);
+    expect(ability('orch-resources')).toMatch(/open_computer_access[\s\S]*withdraw it when the work ends/i);
+    expect(ability('orch-resources')).toMatch(/if the owner closed the machine, record that/i);
+    expect(ability('orch-resources')).toMatch(/call machines[\s\S]*use computer in any turn or tool step/i);
     expect(ability('orch-resources')).toMatch(/never ask the CEO to type shell commands/i);
   });
 

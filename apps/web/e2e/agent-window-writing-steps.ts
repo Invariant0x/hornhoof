@@ -6,9 +6,9 @@ import { AGENT_HIDDEN, chooseTerminal } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 import { ORCHESTRATOR, ORCHESTRATOR_CARD, VIEWERS, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
-export const ASKED: ComputerAccessView = {
+export const STANDING: ComputerAccessView = {
   machine: { id: 'node-a', networkId: 'n-node-a', name: 'node-a', hostname: 'node-a', personId: 'p1', role: 'worker', os: 'linux', data: false },
-  reachable: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, canOpen: true, canClose: true, key: 'not_needed',
+  reachable: true, open: true, scope: 'orchestrator', employees: [], canOpen: false, canClose: false,
 };
 
 /* What reached the server from this person, and the keys that reached the terminal. */

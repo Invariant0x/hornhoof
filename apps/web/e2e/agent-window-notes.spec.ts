@@ -3,13 +3,12 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { box } from './api';
 import type { ComputerAccessView } from '../src/types';
-import { ASKED, CLOSED, OPEN, openWindow } from './computer-strip-api';
+import { CLOSED, OPEN, openWindow } from './computer-strip-api';
 
 /* The agent's screen holds its terminal and short notes (#1115, Design #1102). A note of the program or of Hornhoof,
    such as the program sleeping until the agent's next task or the machine low on memory, stands at the foot of the
    window, under the terminal and the input line inside it, never over either; several stand one under another, each
-   led by a word in a frame. Access to a machine is no longer opened or closed here: a note says it is asked for or open,
-   and links to the machine in Machines. */
+   led by a word in a frame. A note of standing access links to the machine in Machines. */
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -88,26 +87,18 @@ for (const look of LOOKS) {
     expect(errors).toEqual([]);
   });
 
-  test(`access is asked and open only as notes that lead to Machines: ${named(look)}`, async ({ page }) => {
-    const asked = { ...ASKED, machine: { ...ASKED.machine, id: 'node-b', name: 'node-b', hostname: 'node-b', networkId: 'n-node-b' } };
-    const { window, errors, posts } = await openNotes(page, look, { running: true }, OPEN, [asked]);
-    /* No strip, no buttons that open or close a machine. */
-    await expect(window.getByRole('region', { name: t.machineAccess('node-a'), exact: true })).toHaveCount(0);
-    await expect(window.getByRole('region', { name: t.computerAsks('node-b'), exact: true })).toHaveCount(0);
-    const c = messages[look.lang].machines.computer;
-    for (const name of [t.computerClose, c.choose, c.openFor['1h'], t.computerNotNow]) await expect(window.getByRole('button', { name, exact: true })).toHaveCount(0);
-    const asks = noteOf(window, t.computerAsks('node-b'));
-    const open = noteOf(window, 'node-a');
-    await expectStacked(page, window, [asks, open], look.width);
+  test(`standing access appears as a note that leads to Machines: ${named(look)}`, async ({ page }) => {
+    const { window, errors, posts } = await openNotes(page, look, { running: true }, OPEN);
+    await expect(window.getByRole('button', { name: t.computerClose, exact: true })).toHaveCount(0);
+    const open = noteOf(window, t.computerStanding('node-a'));
+    await expectStacked(page, window, [open], look.width);
     await page.screenshot({ path: test.info().outputPath('agent-access-notes.png'), animations: 'disabled' });
-    await expect(asks.getByText(t.notes.asks, { exact: true })).toBeVisible();
     await expect(open.getByText(t.notes.access, { exact: true })).toBeVisible();
-    /* The link of the request opens its machine's card in Machines, and the window steps aside for it. */
     await page.route(url => url.pathname === '/api/machines' || url.pathname === '/api/subscriptions', route =>
       route.fulfill({ json: new URL(route.request().url()).pathname === '/api/machines' ? { machines: [], builtin: null } : { subscriptions: [] } }),
     );
-    await asks.getByRole('link', { name: t.notes.answer, exact: true }).click();
-    await expect(page).toHaveURL(/\/machines\/node-b$/);
+    await open.getByRole('link', { name: t.notes.manage, exact: true }).click();
+    await expect(page).toHaveURL(/\/machines\/node-a$/);
     await expect(window).toBeHidden();
     expect(posts).toEqual([]);
     expect(errors).toEqual([]);
