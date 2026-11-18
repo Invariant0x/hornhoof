@@ -283,7 +283,7 @@ describe('macOS hook ownership without proc', () => {
     expect(await macOwner(table(TABLE))(async () => [1]).owns!('agent-1', peer)).toBe(true);
     expect(await macOwner(table(TABLE))(async () => [0]).owns!('agent-1', peer)).toBe(false);
     const loop = '   55    10\n   10    55\n';
-    await expect(macOwner(table(loop))(async () => [10]).owns!('agent-1', peer)).rejects.toThrow('ps gave an inconsistent process lineage');
+    await expect(macOwner(table(loop))(async () => [10]).owns!('agent-1', peer)).rejects.toThrow('ps gave a cyclic process lineage');
   });
 
   it.each(['55 10 truncated', '55 10\n55 1', '9007199254740993 10', '55 9007199254740993'])('gives no ownership answer for an invalid process table (%s)', async table => {

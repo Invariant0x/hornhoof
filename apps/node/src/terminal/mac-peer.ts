@@ -84,8 +84,9 @@ function processLineage(table: string, pid: number): Set<number> {
   }
   const seen = new Set<number>();
   for (let at = pid; at > 0;) {
+    if (seen.has(at)) throw new OwnerUnknown('ps gave a cyclic process lineage');
     const parent = parents.get(at);
-    if (parent === undefined || seen.has(at)) throw new OwnerUnknown('ps gave an inconsistent process lineage');
+    if (parent === undefined) throw new OwnerUnknown('ps gave an incomplete process lineage');
     seen.add(at);
     at = parent;
   }
