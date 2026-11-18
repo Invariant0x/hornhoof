@@ -10,7 +10,6 @@ export const PRIVATE_TOOLS = {
   delegate: { name: 'use_tool', _meta: { delegatesTool: true } },
 } as const;
 
-export const PRIVATE_TOOL_NOTE = 'Sensitive tool data and raw terminal output hidden.';
 export const PRIVATE_COMMAND_REFUSED = 'This command contains a vault secret and was not sent or recorded. Type the password with your own program on the machine instead.';
 export const PRIVATE_TURN_LOST = 'The server restarted after this turn used a vault secret. Its temporary value masks are gone, so no new changes can be recorded. End this turn and start a new one.';
 
@@ -115,25 +114,6 @@ export class PrivateValues {
 }
 
 const parsed = (value: string): unknown => { try { return JSON.parse(value); } catch { return value; } };
-
-/* Results have no call identity. After a sensitive call, subsequent inputs and results can contain it, including
-   commands that type it into a form. Text and reports still reach people, with exact values hidden. */
-export function privateToolEvent(event: AgentEvent, sensitive: boolean, untracked = false): AgentEvent {
-  if (!sensitive && !sensitiveEvent(event)) return event;
-  if (event.kind === 'tool') return { ...event, input: PRIVATE_TOOL_NOTE, sensitive: true };
-  if (event.kind === 'tool_result') return { ...event, summary: PRIVATE_TOOL_NOTE };
-  return untracked ? hiddenText(event) : event;
-}
-
-function sensitiveEvent(event: AgentEvent): boolean {
-  return event.kind === 'tool' && (event.sensitive === true || privateToolCall(event.name, parsed(event.input)).policy?.sensitive === true);
-}
-
-function hiddenText(event: AgentEvent): AgentEvent {
-  if (event.kind === 'text') return { ...event, text: PRIVATE_TOOL_NOTE };
-  if (event.kind === 'todo') return { ...event, items: [] };
-  return event;
-}
 
 export class ToolPrivacy {
   sensitive = false;
