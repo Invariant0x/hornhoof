@@ -4,6 +4,7 @@ import { useT } from '../i18n';
 import { useLive } from '../tasks';
 import type { InboxCard } from '../types';
 import { BusyLabel } from '../ui/BusyLabel';
+import { LoadFailure, useLoadFailure } from '../ui/LoadFailure';
 import { FailureLine } from './Feedback';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
@@ -105,6 +106,7 @@ function Cards({ cards, failure }: { cards: InboxCard[] | null | undefined; fail
 export function FeedbackInbox({ onHome }: { onHome: () => void }) {
   const t = useT();
   const { data: cards, failure } = useLive('/api/feedback/inbox', (b: { cards: InboxCard[] }) => b.cards, m => m.type === 'feedback');
+  const shown = useLoadFailure(failure);
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   return (
     <section className="tasks">
@@ -114,8 +116,8 @@ export function FeedbackInbox({ onHome }: { onHome: () => void }) {
           <p className="muted">{t.inbox.intro}</p>
         </div>
       </header>
-      <FailureLine failure={failure} />
-      <Cards cards={cards} failure={failure} />
+      <LoadFailure failure={failure} />
+      <Cards cards={cards} failure={shown} />
     </section>
   );
 }

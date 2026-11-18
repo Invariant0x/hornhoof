@@ -82,6 +82,12 @@ function connect(): void {
   });
 }
 
+/* The server answers again after an update held it. What the screens asked for meanwhile was refused, so every listener
+   hears "reconnected" and fetches what it shows anew, as after a break of the stream. */
+export function heardAgain(): void {
+  tell({ type: 'reconnected' });
+}
+
 /* Calls fn for everything the server says live until the returned function is called. */
 export function listen(fn: Listener): () => void {
   listeners.add(fn);
