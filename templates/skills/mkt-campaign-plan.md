@@ -18,4 +18,4 @@ Use this ability to plan an assigned campaign. Inputs are the goal, audience, ap
 
 Return a plan, with any approval rule its department set. A new public approach is the department's own decision; a paid commitment goes by its spend rule. The plan does not assign employees, change task gates or authorize publication.
 
-For a video, use vid-laws. Set the look and platform in the brief and send it to Video production when that department exists. If Marketing makes it, give one keeper the shot continuity decision and plan the set and markers, probe and keeper check before the edit.
+For video, give the production owner the look, platform and brief. If Marketing makes the video, assign the probe, clip continuity and final acceptance before production.

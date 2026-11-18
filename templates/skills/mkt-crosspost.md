@@ -16,4 +16,4 @@ Use this ability to adapt an assigned core piece for several specified networks.
 
 Return the native variants and, only when publication was assigned and authorized, their delivery evidence. Never add networks or accounts outside the assignment or use a personal account.
 
-For video, use vid-laws. Keep the keeper's approved look and world in every platform cut. Return any new shots to the keeper before editing.
+Adapt an accepted cut for each destination and send changed footage back for the checks it needs.

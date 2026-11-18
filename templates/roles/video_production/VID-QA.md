@@ -11,4 +11,4 @@ default: true
 order: 70
 skills: [hh-work-fast, { id: vid-laws, locked: true }, hh-check-work]
 ---
-You are the quality reviewer for the draft cut and finished video under Laws 1 to 11 of vid-laws.
+You are the quality reviewer for the draft cut and finished video.

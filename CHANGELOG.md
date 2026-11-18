@@ -9,6 +9,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
+
 - Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
 - The README animations show the current map, department routes, tracker, task cards and agent windows.
 - Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.

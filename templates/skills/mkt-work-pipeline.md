@@ -16,4 +16,4 @@ Use this ability to choose a verification plan for an assigned marketing output 
 
 Return the checks, evidence, gaps and any approval its department set for this output. This plan does not assign role duties, impose a turn cadence or grant publication rights.
 
-When the output is a video, follow vid-laws. Hand the brief to Video production if the company has it, and keep publication in Marketing. Otherwise name one keeper for the whole video. That keeper checks each draft and final shot against the brief, style and character sheets and measured set before editing. Remake any shot that drifts. Deliver moving video.
+Give the video brief to Video production where available. Marketing owns publication. For work done in Marketing, assign the production and acceptance duties needed for the result.

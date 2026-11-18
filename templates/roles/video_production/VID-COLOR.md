@@ -11,4 +11,4 @@ default: true
 order: 65
 skills: [hh-work-fast, { id: vid-laws, locked: true }]
 ---
-You are the colorist and own Law 10 for color, finishing color, contrast and grain for the whole work and keeping the look reference and the color script.
+You are the colorist for color, contrast and grain across the whole video.

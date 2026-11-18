@@ -36,6 +36,26 @@ describe('the laws of video production', () => {
     }
   });
 
+  it('makes the look, set, probe and platform fit the brief', () => {
+    const laws = templates.skills.get('vid-laws')!.body;
+    expect(laws).not.toMatch(/real failure|mean live-action film|5 to 8 s/i);
+    expect(laws).toMatch(/planning sketch[\s\S]*approved production asset/i);
+    expect(laws).toMatch(/real or drawn[\s\S]*screen recording/i);
+    expect(laws).toMatch(/hardest moment[\s\S]*few seconds/i);
+    expect(laws).toMatch(/destination[\s\S]*for example, a short vertical video/i);
+  });
+
+  it('assigns clip acceptance explicitly and reserves text judging for written proposals', () => {
+    const plan = templates.skills.get('vid-work-pipeline')!.body;
+    expect(plan).toMatch(/stage owner assigns[\s\S]*qualified substitute/i);
+    const route = templates.stagesOf('video_production');
+    expect(route.stages[0]?.oneShot?.judge).toMatch(/written proposals[\s\S]*cannot verify footage/i);
+    const catalog = templates.catalogs.get('video_production')!;
+    const footage = catalog.pipelines.find(p => p.key === 'video-footage-editing')!;
+    const names = footage.stages.map(s => s.name);
+    expect(names.indexOf('Check the footage')).toBeLessThan(names.indexOf('Prove the hardest edit'));
+  });
+
   it('finishes the whole work against the probe reference before judging the result', () => {
     const finish = templates.skills.get('vid-laws')?.body.split('## Law 10.')[1]?.split('## Law 11.')[0];
     expect(finish).toMatch(/color, contrast, grain, sound and titles[\s\S]*each by one owner[\s\S]*one look reference/i);
@@ -50,15 +70,10 @@ describe('the laws of video production', () => {
 
   it('applies the laws to a short clip and a feature film with a work level above the scenes', () => {
     const intro = templates.skills.get('vid-laws')?.body.split('## Law 1.')[0];
-    expect(intro).toMatch(/ten-second clip[\s\S]*feature film[\s\S]*work level above the scenes/i);
+    expect(intro).toMatch(/short clip[\s\S]*feature film[\s\S]*work level above the scenes/i);
   });
 
   it('assigns each production role the shared laws and gives only the keeper the continuity gate', () => {
-    const roles = {
-      'VID-HEAD': 'Laws 1, 8 and 11', 'VID-WRITE': 'Laws 1, 2 and 3', 'VID-BOARD': 'Laws 2 and 5',
-      'VID-KEEP': 'Laws 4, 5 and 6', 'VID-GEN': 'Laws 3, 4 and 7', 'VID-EDIT': 'Laws 3, 7 and 9', 'VID-QA': 'Laws 1 to 11',
-    };
-    for (const [id, laws] of Object.entries(roles)) expect(templates.roles.get(id)?.body, id).toContain(laws);
     const roster = [...templates.roles.values()].filter(role => role.id.startsWith('VID-'));
     for (const role of roster) expect(role.skills, role.id).toContainEqual(expect.objectContaining({ id: 'vid-laws', on: true }));
     expect(roster.filter(role => role.skills.some(skill => skill.id === 'vid-continuity')).map(role => role.id)).toEqual(['VID-KEEP']);
@@ -69,24 +84,20 @@ describe('the laws of video production', () => {
   it('gives finishing to a colorist and a sound designer and lets the head assign both duties to the editor on a short video', () => {
     const color = templates.roles.get('VID-COLOR');
     expect(color?.title).toEqual({ en: 'Colorist', ru: 'Колорист' });
-    expect(color?.body).toMatch(/Law 10 for color[\s\S]*color, contrast and grain[\s\S]*look reference and the color script/i);
+    expect(color?.body).toMatch(/color, contrast and grain across the whole video/i);
     const sound = templates.roles.get('VID-SOUND');
     expect(sound?.title).toEqual({ en: 'Sound designer', ru: 'Звукорежиссер' });
-    expect(sound?.body).toMatch(/Law 10 for sound[\s\S]*sound design and the final mix/i);
+    expect(sound?.body).toMatch(/sound plan and final mix/i);
     expect(templates.skills.get('vid-work-pipeline')?.body).toMatch(/for a short video the head may give both finishing duties to the editor/i);
-    expect(templates.skills.get('vid-continuity')?.body).toMatch(/one lead keeper[\s\S]*shared sheets and sets[\s\S]*other keepers check scenes against them and never change them/i);
+    expect(templates.skills.get('vid-continuity')?.body).toMatch(/one lead keeper[\s\S]*shared sheets and sets[\s\S]*other keepers check their scenes against the shared records/i);
   });
 
   it('sets up the video service through the vault while leaving the agent on its regular plan', () => {
     const head = templates.roles.get('VID-HEAD');
     expect(head?.skills).toContainEqual(expect.objectContaining({ id: 'vid-work-pipeline', on: true }));
     const setup = templates.skills.get('vid-work-pipeline')?.body;
-    expect(setup).toMatch(/ask for a video generation API key/i);
-    expect(setup).toMatch(/vault[\s\S]*spending limit[\s\S]*usual subscription/i);
-    expect(setup).toMatch(/an aggregator API with several video models[\s\S]*the model maker's API/i);
-    expect(setup).toMatch(/consumer subscriptions[\s\S]*no API/i);
+    expect(setup).toMatch(/existing account[\s\S]*named vault entry[\s\S]*protected sign-in surface[\s\S]*spending limit[\s\S]*usual subscription/i);
     expect(setup).toMatch(/prompts[\s\S]*reference frames[\s\S]*cost[\s\S]*git/i);
-    expect(templates.skills.get('orch-company')?.body).toContain('vid-work-pipeline');
   });
 
   it('offers a long-work pipeline next to the short default and finishes before the whole-work gate', () => {
@@ -99,7 +110,7 @@ describe('the laws of video production', () => {
       'Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
       'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version',
     ]);
-    expect(long!.stages[1]?.brief).toMatch(/character sheets[\s\S]*set with markers[\s\S]*look book[\s\S]*color script[\s\S]*sound palette/i);
+    expect(long!.stages[1]?.brief).toMatch(/character sheets[\s\S]*sets with markers[\s\S]*look book[\s\S]*color script[\s\S]*sound palette/i);
     expect(long!.stages[6]?.brief).toMatch(/Law 10[\s\S]*colorist[\s\S]*sound designer[\s\S]*editor/i);
     expect(long!.stages[7]).toMatchObject({ ownerRole: 'VID-QA', brief: expect.stringContaining('Law 11') });
   });
@@ -115,19 +126,15 @@ describe('the laws of video production', () => {
     for (const id of ['MKT-HEAD', 'MKT-WRITE', 'MKT-SOCIAL', 'MKT-EDIT', 'DSN-HEAD', 'DSN-PM', 'DSN-UI', 'DSN-QA']) {
       expect(templates.roles.get(id)?.skills, id).toContainEqual(expect.objectContaining({ id: 'vid-laws', on: true }));
     }
-    for (const id of ['mkt-work-pipeline', 'mkt-campaign-plan', 'mkt-social-posts', 'dsn-work-pipeline']) {
-      expect(templates.skills.get(id)?.body, id).toContain('vid-laws');
-    }
     const news = templates.catalogs.get('marketing')?.pipelines.find(p => p.key === 'marketing-news-videos');
     expect(news?.stages[0]).toMatchObject({ handoffTo: ['video_production'] });
     const fallback = news?.stages.map(stage => stage.brief ?? '').join('\n');
-    expect(fallback).toMatch(/set and markers[\s\S]*probe[\s\S]*keeper[\s\S]*before editing/i);
+    expect(fallback).toMatch(/assigns each required check[\s\S]*accepted probe[\s\S]*keeper/i);
     const editing = templates.catalogs.get('design')?.pipelines.find(p => p.key === 'design-video-editing');
-    expect(editing?.stages[0]?.brief).toMatch(/vid-laws[\s\S]*keeper[\s\S]*before editing/i);
+    expect(editing?.stages[0]?.brief).toMatch(/assign the keeper and footage check/i);
   });
 
   it('points Marketing and Design to the final acceptance law', () => {
-    for (const id of ['MKT-HEAD', 'DSN-HEAD']) expect(templates.roles.get(id)?.body, id).toContain('Laws 1, 8 and 11');
     for (const [department, key] of [['marketing', 'marketing-news-videos'], ['design', 'design-video-editing']] as const) {
       const pipeline = templates.catalogs.get(department)?.pipelines.find(p => p.key === key);
       expect(pipeline?.stages.map(stage => stage.brief).join('\n'), key).toMatch(/Law 10[\s\S]*Law 11/);

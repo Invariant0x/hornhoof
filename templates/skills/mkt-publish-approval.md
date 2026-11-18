@@ -15,4 +15,4 @@ Use this ability to publish for the department: a post, a reply, an announcement
 
 Return what was published, where, and the commit that records it.
 
-For video, follow vid-laws. Check that the head accepted the finished cut after the keeper checked every shot.
+Before publishing a video, verify that the finished version has the required acceptance.

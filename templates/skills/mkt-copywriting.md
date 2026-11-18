@@ -17,4 +17,4 @@ Use this ability to write an assigned page, article, email or announcement. Inpu
 
 Return a draft with its channel, language and claim sources. It remains a draft until approved for use. Publication is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; selecting this ability does not authorize sending or publishing.
 
-For a video script, follow vid-laws. Write key events as actions that happen in view and match the brief's look and platform.
+For a video script, make the required events clear in the look and format of the brief.

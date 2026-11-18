@@ -1,6 +1,6 @@
 ---
 department: video_production
 stages:
-  - { stage: development, oneShot: { fanOut: 2, judge: "Compare the proposed shot prompts or draft takes against the brief, the keeper's reference frames and the measured set. Report which options best hold motion and continuity. The operator checks the answers and sends the draft clips to the keeper for the decision." } }
+  - { stage: development, oneShot: { fanOut: 2, judge: "Compare written proposals against the brief and supplied evidence. A text answer cannot verify footage. If no proposal meets the brief, identify the missing changes or evidence. The operator takes the draft clips to a keeper who can play them." } }
   - { stage: review, ability: vid-continuity }
 ---

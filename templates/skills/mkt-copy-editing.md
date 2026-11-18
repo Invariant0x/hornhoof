@@ -19,4 +19,4 @@ Use this ability to edit an assigned draft while preserving its intended meaning
 
 Return the edited draft and a short list of changes that affect meaning, so the assignment owner can assess them. Editing does not approve new commercial terms or publication. Public use of the edited revision is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
 
-For a video script or cut, use vid-laws. Keep key events on screen and confirm that the keeper accepted each shot before editing.
+For a video script or cut, check whether the intended audience can understand the key events.

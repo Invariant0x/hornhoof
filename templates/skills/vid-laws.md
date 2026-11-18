@@ -7,54 +7,48 @@ sources: []
 ---
 # The laws of video production
 
-These eleven laws hold for a ten-second clip and for a feature film alike. They hold for any look: live-action film, 3D, 2D animation, anime, stop motion, motion graphics, a screen recording. A long work adds a work level above the scenes. Each law says what must be true of the finished video and why. How the team meets it is the team's craft and changes as tools change.
-
-They come from a real failure (18.11). An order asked for a cinematic film. The team treated the storyboard drawings as the source of the video, animated each drawing on its own and cut the pieces short. The video came out as a half-drawn slideshow, with a monster and a room that changed from shot to shot. The same story, made under these laws, came out as real film on the first try.
+These eleven laws apply to every look and length, from a short clip to a feature film. A long work adds a work level above the scenes so they can share the same decisions and references.
 
 ## Law 1. The brief's look governs every frame
 
-The brief names the look of the video and the platform. Every frame of the finished video is in that look, and nothing else decides it: not the tools used for planning, not the look of an earlier order, not the habit of a team member. "Cinematic", "like a film", "realistic" mean live-action film. A new order starts from its own brief: what an earlier video looked like says nothing about this one.
+Use the medium and look set by the brief. Turn ambiguous style words into observable choices using agreed examples or the responsible person's intent. Keep those choices throughout the work so the audience sees the video it was meant to receive.
 
 ## Law 2. Planning material explains, it does not dictate
 
-The storyboard, sketches, plans and reference pictures exist so that everyone understands the scenes: what happens, in what order, where the camera is, what matters. They may be drawn in any style, quickly, by any tool, including a cartoon sketch for a live-action film. They are never the material the video is made from and never copied frame for frame. The video is made fresh in the brief's look. Where the made video tells the story better than the storyboard, the video wins.
+A planning sketch or storyboard communicates action, order, camera and emphasis in whatever form makes them clear. Use an approved production asset directly when its look, rights and purpose fit the brief. Adapt the plan when it helps the finished video tell the intended story.
 
 ## Law 3. What matters happens on screen
 
-Every key event of the story (an appearance, a break, a transformation, a reveal) happens inside a shot, in view, with its motion. It is never hidden in a cut between two shots. Pace comes from the action and the camera inside the shots, not from chopping shots short.
+Make every required event understandable to the audience. Choose whether the shot, the edit or the sound conveys it. Show the motion itself when seeing how it happens is part of the brief.
 
 ## Law 4. One world, held still
 
-Within a video the world keeps its rules: the same places with the same layout, the same characters with the same faces, clothes and sizes, the same light, the same physics of the chosen look. A character who should stand still stands still; one who runs, runs. The team writes down what must hold (sizes in numbers, layout, looks) before making anything, and makes shots in a way that keeps it (fewer, longer, continuous shots; one shot continuing from the last frame of the one before).
+Record the features and rules viewers must recognize from shot to shot: identities, relative sizes, movement, light and the physics of the chosen look. Keep them consistent unless the brief calls for a change. Choose a way of making shots that preserves those relationships.
 
 ## Law 5. The set is built before it is filmed
 
-Every place where the story happens exists first as a set: a simple measured 3D layout of the space (walls, openings, floor, ceiling height, the main furniture as plain shapes), with named markers on it. Markers fix what must not move: where each character stands or walks, where the camera is and where it goes, where every key event happens (the wall that breaks, the door that opens, the screen that lights up). Characters and creatures stand in the set as plain figures at their real height, so every size is fixed by the set, not by a sentence.
-
-The set is the single truth of space for the whole video. Every shot is planned on it, from its markers and camera positions; a view of the set from a camera marker fixes the layout of that shot (a first frame in the brief's look is made over that view, or the view goes in as a layout or depth guide where the tool takes one, but a plain render of the set never goes into a shot as its look, Law 1); the edit uses it for anything that must line up exactly; and the keeper checks every made shot against it. The set is a planning tool like the storyboard (Law 2): it fixes where things are, never how the video looks. A team without a 3D tool builds the same set as a measured plan with the same markers.
+For any work that shows a space, real or drawn, build a shared set plan before making or editing shots where the layout matters. Mark the fixed features, paths, viewpoints and key events that need to line up. Use measurements where scale matters. A screen recording maps its screen, including the locations of actions and overlays. A floor plan or a measured model can serve the same purpose for a physical scene. Use the set and its markers to plan shots, align the cut and check continuity.
 
 ## Law 6. A keeper holds the look and the world
 
-The keeper checks every shot against the brief's look, against what Law 4 wrote down and against the set and its markers (Law 5), before it reaches the edit. On a long work one lead keeper holds the shared sheets and sets, and each scene has a keeper who checks its shots against them. Any drift is made again, not explained away. The keeper also checks that no shot is a still picture pretending to be video.
+Have a keeper compare each clip that will enter the cut with the agreed look, continuity records and relevant set markers. Check the motion when the brief calls for it and record acceptance for that exact version. Return any material drift to its production owner and check the replacement before it enters the cut. On a long work, a lead keeper owns the common references that scene keepers use.
 
 ## Law 7. Each tool does what it does best
 
-The generation model makes motion, light, matter and performance. Exact geometry is made in the edit: a picture inside a screen, an interface, logos, titles, an end card, a scene shrinking into a phone. Sound is part of the work from the first shot, not added at the end.
+Assign motion, performance, sound and precise visual details to tools that can produce and preserve them reliably. Check those properties in the result. Plan sound with the action from the start, including when silence is intentional.
 
 ## Law 8. Prove the hardest moment first
 
-Before the whole video, the team makes a short probe (5 to 8 s) of the hardest moment in the chosen tool and look. The head and the keeper accept its look, motion and world. Only then does the whole video go into work. The department keeps a short note of which tool gave which look well, at what cost, with the probe file, and picks tools from it.
+Make a short probe of the hardest moment in the chosen look and method, often a few seconds. Include enough context to judge the risk. The head and keeper accept the result and set the look reference before full production. Keep the probe, method and cost so the next tool choice has evidence.
 
 ## Law 9. The platform shapes the frame
 
-The brief's platform sets the frame and the attention. For short vertical video, use 9:16, put the hook in the first second, keep important parts in the middle clear of the platform's buttons, and make the story readable without sound.
+Compose for the destination's verified format, viewing area and playback conditions. Keep essential action, words and sound accessible there. For example, a short vertical video can use the destination's vertical format, keep important details clear of its buttons and use captions where viewers watch without sound.
 
 ## Law 10. The whole work is finished as one
 
-Color, contrast, grain, sound and titles of the whole work are finished together at the end, each by one owner, against one look reference. Generated shots always differ a little from each other. The finish makes them one work. Set the look reference with the probe (Law 8): reference frames for each scene and, for a long work, a color script that says where the color changes on purpose, such as for night, memory or mood. Any other change between shots is drift and is corrected.
-
-The owner of color compares neighbouring shots side by side and by measurement (levels, color balance, skin tones). The owner of sound does the same for loudness, voices and room tone. The finish never hides a broken world, scale or motion (Laws 4 to 6). Such a shot is made again.
+Finish color, contrast, grain, sound and titles together across the assembled work, each by one owner and against one look reference. Use the probe (Law 8) to establish that reference. Keep reference frames for each scene where useful and a color script for a long work when its look changes on purpose. Compare adjacent shots by sight and sound and measure properties that matter, such as levels, color balance, skin tones, loudness, voices and room tone. An underlying failure of world, scale or motion (Laws 4 to 6) must be repaired at its source, with the shot made again where necessary.
 
 ## Law 11. Judge the finished video, not the effort
 
-Before delivery, the head watches the video at full size, then frame by frame at every cut and key event, and asks one question per law. A video that breaks a law goes back, however much it cost.
+Before delivery the head watches the finished work as the audience will see it, inspects cuts and key events at the detail needed to judge them, and checks the result against the brief and the applicable laws. Send any failed condition to the owner who can fix it and check the corrected version before delivery.

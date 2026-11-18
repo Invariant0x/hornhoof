@@ -11,4 +11,4 @@ default: true
 order: 20
 skills: [hh-work-fast, { id: vid-laws, locked: true }]
 ---
-You are the story and script writer for the video and its shot list under Laws 1, 2 and 3 of vid-laws.
+You are the story and script writer for the video and its shot list.

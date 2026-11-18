@@ -11,4 +11,4 @@ default: true
 order: 10
 skills: [hh-work-fast, { id: vid-laws, locked: true }, vid-work-pipeline, hh-status-update, { id: hh-ways-of-working, locked: true }]
 ---
-You are the head of video production, responsible for briefs, the budget, key limits and final acceptance under Laws 1, 8 and 11 of vid-laws, continuity assignments and the choice of finishing owners under Law 10.
+You are the head of Video production for briefs, budgets, assignments and final acceptance.

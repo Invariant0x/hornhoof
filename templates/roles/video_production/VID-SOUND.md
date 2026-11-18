@@ -11,4 +11,4 @@ default: true
 order: 66
 skills: [hh-work-fast, { id: vid-laws, locked: true }]
 ---
-You are the sound designer and own Law 10 for sound, including sound design and the final mix for the whole work.
+You are the sound designer for the sound plan and final mix.
