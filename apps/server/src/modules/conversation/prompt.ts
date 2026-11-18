@@ -1,6 +1,7 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { EventView } from '../events/store.js';
 import type { MessageEnvelope, MessageParty } from '../events/parties.js';
+import type { BotLang } from '../telegram/words.js';
 
 /* Standing identity; company procedures arrive through selected abilities. Nothing is hidden from him and he may do
    anything, his own system included (Ivan's word of 17 November 2026). */
@@ -92,11 +93,13 @@ export function whoIs(author: { name: string }, standing: Standing): string {
 }
 
 /* Below a person's message that came through the agent's Telegram bot: who they are, and where the answer goes. */
-export function answerInTelegram(author: { name: string }, standing: Standing): string {
+export function answerInTelegram(author: { name: string }, standing: Standing, lang: BotLang): string {
+  const language = lang === 'ru' ? 'Russian' : 'English';
   return [
-    `${author.name} wrote this in Telegram. ${whoIs(author, standing)} Your answer in this window goes back to them there as plain text, so write it without formatting.`,
+    `This is ${author.name} writing to you directly in Telegram. ${whoIs(author, standing)}`,
+    `Your last message of this turn goes to ${author.name} as your answer. Write it directly to them in ${language}. Keep it short and use plain text. Do not narrate your steps to them.`,
     `Files you attach to the chat in this turn with hh-attach --chat FILE go to their Telegram chat as documents too.`,
-    `It goes to ${author.name} alone: answer ${author.name}'s own words here. Other people write to you in Telegram too, each in a turn of their own, and what you owe one of them you answer in their turn, not in this one.`,
+    `This answer goes to ${author.name} alone. Answer their own words here. Answer other people in their own turns.`,
   ].join(' ');
 }
 

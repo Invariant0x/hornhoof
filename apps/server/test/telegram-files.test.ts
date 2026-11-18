@@ -71,7 +71,7 @@ describe('a file sent to a head through its Telegram bot', () => {
     expect(run.prompt).toContain(`brief.zip: hh-fetch message ${kept!.id}`);
     expect(run.prompt).toContain('A file came with this message');
     expect(run.prompt).toContain(KEEP_IN_REPOSITORY);
-    expect(run.prompt).toContain('wrote this in Telegram');
+    expect(run.prompt).toContain('writing to you directly in Telegram');
     expect(tg.sent).toEqual([]);
     const [event] = await db.select().from(agentEvents).where(eq(agentEvents.jobId, run.jobId));
     expect(event).toMatchObject({ data: { text: 'Материалы к запуску', channel: 'telegram', pictures: [{ id: kept!.id, name: 'brief.zip', file: true }] } });
@@ -112,6 +112,7 @@ describe('a file sent to a head through its Telegram bot', () => {
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('A voice message, 2 s, with no transcript');
     expect(run.prompt).toContain('voice.ogg: hh-fetch message');
+    expect(run.prompt).toContain('Write it directly to them in Russian.');
   });
 
   it('keeps the language of the person\'s earlier text for a voice message without a transcript', async () => {
@@ -125,6 +126,7 @@ describe('a file sent to a head through its Telegram bot', () => {
     tg.send(TOKEN, user, { voice: { file_id: 'v-1', file_size: OGG.length, duration: 33 } });
     const voice = await nextOf(builtin, 'job.run');
     expect(voice.prompt).toContain('A voice message, 33 s, with no transcript');
+    expect(voice.prompt).toContain('Write it directly to them in Russian.');
     const forVoice = () => db.select().from(telegramReplies).where(eq(telegramReplies.jobId, voice.jobId));
     await until(async () => (await forVoice()).length === 1);
     const [reply] = await forVoice();

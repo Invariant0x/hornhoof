@@ -180,7 +180,7 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const before = await lastSeq(ctx, agent.id);
   let jobId: string;
   try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id } });
+    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang } });
   } catch (err) {
     const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
     if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');

@@ -49,7 +49,7 @@ it('lets a linked invited person write to the company bot and get their own answ
   await until(() => builtin.queued() > 0 || sentTo(tg, CLARA.id).length > 0);
   expect(builtin.queued()).toBe(1);
   const run = await nextOf(builtin, 'job.run');
-  expect(run.prompt).toContain('Clara wrote this in Telegram');
+  expect(run.prompt).toContain('This is Clara writing to you directly in Telegram.');
   builtin.send({ type: 'job.started', jobId: run.jobId });
   await until(async () => (await db.select().from(telegramReplies)).some(reply => reply.jobId === run.jobId));
   say(builtin, run.jobId, 0, 'С какого устройства начнем?');
@@ -63,8 +63,8 @@ describe('two people who write to one head in Telegram', () => {
     const { tg, db, builtin, owner, clara } = await company();
     tg.write(TOKEN, MAX, 'Сколько лидов за неделю?');
     const first = await nextOf(builtin, 'job.run');
-    expect(first.prompt).toContain('Ivan wrote this in Telegram');
-    expect(first.prompt).toContain("It goes to Ivan alone: answer Ivan's own words here.");
+    expect(first.prompt).toContain('This is Ivan writing to you directly in Telegram.');
+    expect(first.prompt).toContain('This answer goes to Ivan alone.');
     builtin.send({ type: 'job.started', jobId: first.jobId });
     await until(async () => (await db.select().from(jobs).where(eq(jobs.id, first.jobId)))[0]!.status === 'running');
     await until(async () => (await db.select().from(telegramReplies)).length === 1);
@@ -75,12 +75,13 @@ describe('two people who write to one head in Telegram', () => {
     const [queued] = await db.select().from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
     expect(queued!.createdBy).toBe(clara.id);
     expect(queued!.prompt).toContain('Пришли бриф по запуску.');
-    expect(queued!.prompt).toContain('Clara wrote this in Telegram');
+    expect(queued!.prompt).toContain('This is Clara writing to you directly in Telegram.');
 
     /* Max's own follow-up still goes into his running turn. */
     tg.write(TOKEN, MAX, 'И по каналам тоже.');
     const typed = await nextOf(builtin, 'agent.say');
     expect(typed.text).toContain('И по каналам тоже.');
+    expect(typed.text).toContain('Write it directly to them in Russian.');
     builtin.send({ type: 'agent.said', ref: typed.ref, ok: true });
 
     say(builtin, first.jobId, 0, 'Лидов за неделю: 42, по каналам ниже.');
