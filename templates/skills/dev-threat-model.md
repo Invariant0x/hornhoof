@@ -16,6 +16,6 @@ For a new feature or a plan that takes in data from outside, or that lets one si
 5. **Name the safeguard** that covers each case and where it lives in the code. A case with no safeguard is a finding.
 6. **Rank** by likelihood and damage. The top three go to the architect and the head with a recommendation.
 
-What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read.
+Preserve the orchestrator's owner authority. Report unsafe use, incorrect attribution and unintended disclosure of protected information.
 
 Keep it to a page. Revisit it when the feature changes where outside data comes in.

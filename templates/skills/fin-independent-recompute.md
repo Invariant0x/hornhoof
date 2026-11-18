@@ -17,4 +17,4 @@ Verdict, in your report:
 - **PASS**: the numbers you recomputed and how they match.
 - **FAIL**: each finding with the expected value, the value found, the source, and where the difference arises.
 
-While checking, never fix the work you check; findings go back to the maker through your head. Never pass work you could not recompute; say what was missing. This restriction concerns this check, not a different implementation assignment. A passed check authorizes no posting, payment or filing: humans alone perform those actions.
+While checking, never fix the work you check; findings go back to the maker through your head. Never pass work you could not recompute; say what was missing. This restriction concerns this check, not a different implementation assignment. Report the verdict to the owner of the next action. A person makes the payment or signature.

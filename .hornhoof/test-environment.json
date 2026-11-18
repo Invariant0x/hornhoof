@@ -726,6 +726,7 @@
           "apps/server/test/turn-effort-dispatch.test.ts",
           "apps/server/test/turn-effort.test.ts",
           "apps/server/test/turn-endings.test.ts",
+          "apps/server/test/video-template.test.ts",
           "apps/server/test/wait-producers.test.ts",
           "apps/server/test/work-tree-route.test.ts"
         ]

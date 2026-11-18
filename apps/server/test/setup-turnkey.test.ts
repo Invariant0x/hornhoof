@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentChanges, agents, departments, subscriptions, teams } from '../src/db/schema.js';
 import { modelOnPlan } from '../src/modules/agents/role-model.js';
+import { agentParty } from '../src/modules/events/parties.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
 const LATER = { ...SETUP, orchestrator: { mode: 'later' } };
@@ -31,6 +32,40 @@ const addKey = (app: FastifyInstance, ceo: string, target: object, apiKey = 'sk-
   app.inject({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', provider: 'anthropic_api', label: 'Company key', apiKey, target }, ...as(ceo) });
 
 describe('POST /api/setup staffs the template', () => {
+  it.each(['setup', 'add department'])('shows Video production and its gates before model assignment through %s', async entry => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, entry === 'setup' ? { ...LATER, template: 'video_studio' } : LATER);
+    if (entry === 'add department') {
+      const response = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'video_production', staff: true }] }, ...as(ceo) });
+      expect(response.statusCode, response.body).toBe(201);
+    }
+
+    const response = await app.inject({ url: '/api/org', ...as(ceo) });
+    const video = response.json().departments.find((d: { templateKey: string }) => d.templateKey === 'video_production');
+    expect(video).toMatchObject({ roleCode: 'VID', calls: [], teams: [expect.objectContaining({ turnkey: false })] });
+    expect(video.employees.map((e: { roleId: string }) => e.roleId).sort()).toEqual([
+      'VID-BOARD', 'VID-COLOR', 'VID-EDIT', 'VID-GEN', 'VID-HEAD', 'VID-KEEP', 'VID-PM', 'VID-QA', 'VID-REF', 'VID-SOUND', 'VID-WRITE',
+    ]);
+    for (const employee of video.employees) expect(employee).toMatchObject({ model: '', provider: null });
+    const head = (await staffOf(app)).find(employee => employee.roleKey === 'VID-HEAD')!;
+    expect((await agentParty(app.ctx, head.companyId, head.id)).department?.name).toEqual({ en: 'Video production', ru: 'Производство видео' });
+    const route = video.pipelines.find((p: { isDefault: boolean }) => p.isDefault);
+    expect(route.catalogKey).toBe('video-production');
+    expect(route.stages.map((s: { name: string; ownerRole: string }) => [s.name, s.ownerRole])).toEqual([
+      ['Write the brief', 'VID-HEAD'], ['Write the script and shot list', 'VID-WRITE'], ['Draw the storyboard', 'VID-BOARD'],
+      ['Make character and style sheets', 'VID-KEEP'], ['Build the set and markers', 'VID-BOARD'], ['Prove the hardest shot', 'VID-HEAD'],
+      ['Generate draft shots', 'VID-GEN'], ['Check shot continuity', 'VID-KEEP'], ['Edit the draft cut', 'VID-EDIT'],
+      ['Check the cut', 'VID-QA'], ['Generate final shots', 'VID-GEN'], ['Accept and deliver the video', 'VID-HEAD'],
+    ]);
+    expect(route.stages[6]).toMatchObject({ echelon: 'development', oneShot: { fanOut: 2, judge: true } });
+    expect(route.stages[7]).toMatchObject({ echelon: 'review', parentId: route.stages[6].id });
+    expect(route.stages[8].parentId).toBe(route.stages[7].id);
+    expect(video.pipelines).toContainEqual(expect.objectContaining({
+      catalogKey: 'video-long-work', isDefault: false, why: 'For a film, a series or a work with many scenes or places.',
+    }));
+    expect(await plans(app)).toEqual([]);
+  });
+
   it.each([...COMPANY_TEMPLATE_KEYS, undefined])('offers first work for %s as soon as the company is set up', async template => {
     const { app } = await testApp();
     const { ceo } = await setUp(app, { ...LATER, template });
@@ -41,7 +76,7 @@ describe('POST /api/setup staffs the template', () => {
       studio: ['pickProduct', 'reviewScreens'], corporation: ['reviewBills', 'sortRequests', 'planRelease'],
       security: ['reviewSecurity', 'triageReport'], opensource: ['sortIssues', 'writeGuide'],
       agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
-      home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
+      home: ['findDevices', 'checkDevices', 'householdBooks'], video_studio: ['planVideo'], empty: ['chooseDepartments'],
     };
     expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'] });
   });
@@ -179,7 +214,8 @@ describe('every ready-made company', () => {
     const ops = org.find((d: { templateKey: string }) => d.templateKey === 'operations');
     const target = org.find((d: { templateKey: string }) => d.templateKey === 'development') ?? org.find((d: { templateKey: string }) => d.templateKey === 'home_devices' || d.templateKey === 'support');
     const recovery = ops.pipelines.find((p: { catalogKey: string }) => p.catalogKey === 'operations-incidents');
-    expect(recovery.stages.at(-1).handoffs).toContainEqual(expect.objectContaining({ id: target.id }));
+    if (target) expect(recovery.stages.at(-1).handoffs).toContainEqual(expect.objectContaining({ id: target.id }));
+    else expect(recovery.stages.at(-1).handoffs).toEqual([]);
   }
 
   it.each([...COMPANY_TEMPLATE_KEYS])('%s has products and all linked route stages with agents and call places before any subscription', async template => {

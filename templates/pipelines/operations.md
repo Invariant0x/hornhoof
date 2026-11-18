@@ -14,7 +14,7 @@ pipelines:
     name: "Service recovery"
     why: "For a stopped service, stuck program or failed delivery."
     stages:
-      - { name: "Check the signal", ownerRole: "OPS-WATCH", brief: "Compare the screen and events from the current run. Check recent updates and reconnects before treating a quiet machine as stalled." }
+      - { name: "Check the signal", ownerRole: "OPS-WATCH", brief: "Compare the activity and events from the current run. Ask the program operator to inspect the screen when needed. Check recent updates and reconnects before treating a quiet machine as stalled." }
       - { name: "Restore service", ownerRole: "OPS-PROGRAM", echelon: "development", brief: "Handle routine prompts and finish interrupted delivery. Restart only when the screen and recent activity show that the run has stopped." }
       - { name: "Confirm recovery", ownerRole: "OPS-FIX", echelon: "review", oneShot: {"fanOut": 3, "judge": "Compare recovery evidence and keep gaps that could leave work stuck."} }
       - { name: "Record the cause", ownerRole: "OPS-BUGS", handoffTo: [development, support, home_devices] }

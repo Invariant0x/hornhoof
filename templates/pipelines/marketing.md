@@ -23,10 +23,13 @@ pipelines:
     name: "Short news videos"
     why: "For making short videos from verified news or product updates."
     stages:
+      - { name: "Plan the video", ownerRole: "MKT-HEAD", handoffTo: [video_production], brief: "Give Video production the verified facts, look, destination and brief when the company has that department. Marketing owns publication. For local production, the stage owner assigns each required check." }
       - { name: "Write the script", ownerRole: "MKT-WRITE", echelon: "development", oneShot: {"fanOut": 3, "judge": "Pick the clearest short script that sticks to verified facts."} }
-      - { name: "Record the voice", ownerRole: "MKT-WRITE" }
-      - { name: "Render the video", ownerRole: "MKT-SOCIAL" }
-      - { name: "Review the result", ownerRole: "MKT-EDIT", echelon: "review", brief: "Check rights to images and sound, facts, captions and playback." }
+      - { name: "Record the voice", ownerRole: "MKT-WRITE", brief: "Plan sound with the first shots and record the narration." }
+      - { name: "Prepare the shots", ownerRole: "MKT-SOCIAL", brief: "Give the operator the brief, the relevant references and the accepted probe. Send playable drafts to the keeper." }
+      - { name: "Check shot continuity", ownerRole: "MKT-EDIT", echelon: "review", brief: "The keeper checks every shot against the brief, sheets and measured set before editing. Remake any shot that drifts or plays as a still." }
+      - { name: "Render the video", ownerRole: "MKT-SOCIAL", brief: "Edit and check the accepted drafts before generating any final shots. Get the keeper to accept new clips before using them in the edit. Finish color, sound and titles across the whole cut against the probe's look reference under Law 10, with one owner for each. Keep prompts, reference frames and costs in git." }
+      - { name: "Review the result", ownerRole: "MKT-EDIT", brief: "Check the brief and style sheet, rights to images and sound, facts, captions and playback. The head accepts the finished cut under Law 11 before publication." }
       - { name: "Publish the video", ownerRole: "MKT-SOCIAL" }
   - key: marketing-press-pool
     name: "Press outreach"

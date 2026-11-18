@@ -9,6 +9,30 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Development instructions keep the independent Security check before shared integration in every ability that can integrate changes.
+- Development instructions keep release checks tied to the exact commit and record why test selection had to use a fallback.
+- Review instructions tell reviewers to flag tests that cap the length of agent instructions or skills.
+- Agents check the sender of quoted text and keep secrets out of messages and notes.
+- Agent replies go through the channel that reaches the intended person or employee.
+- Agents check shell paths before overwriting or deleting files and ask the CEO only for irreversible deletion.
+- Questions include shared and per-option materials that people can inspect before answering.
+- Agents record browser challenges and continue with other pages without bypassing the challenge.
+- Agents track remote checks and delegated work as active work and wait only when a person needs to act.
+- The watchdog alerts the department head when work can start and an eligible employee is free.
+- The orchestrator uses department names from the screen, includes the default staff, and applies permitted staffing changes directly.
+- Staffing instructions explain how Operations keeps its required roles and how eligible subscriptions are assigned.
+- The orchestrator checks employee changes and leaves active work running when applying instruction edits.
+- The orchestrator uses the owner's tools and verifies the result when changing company resources or fixing a blocker.
+- The orchestrator routes small additions before the final check and lets the department release the exact checked commit.
+- Operations templates assign access, recovery and shared changes to the people who can carry them out.
+- Design and household templates adapt handoffs, reminders and checks to the work.
+- Marketing, Sales and Business Development templates use the department's own terms and choose evidence for each decision.
+- Finance and Support templates route decisions to the people responsible and describe what each check needs to prove.
+- Development templates keep evidence tied to the checked version and distinguish product failures from faults in checks.
+- Work templates keep running work visible and assign repairs and checks to the people who own them.
+- Company templates explain who can act, when to ask a person and how to keep sign-ins private.
+- Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
+
 - Tracker lists give task titles more room, task cards use smaller headings, department stages drop repeated links and use matching status wording, and pipeline names wrap beside their chevrons.
 - The README animations show the current map, department routes, tracker, task cards and agent windows.
 - Task list rows line up the subtask arrow, status and details with the first line of the title, and show the task number and wait note underneath.
@@ -20,6 +44,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
+- Set up a Video studio or add Video production to plan, make, finish and check videos. Marketing and Design use the same video production laws.
+- Video production has a colorist and a sound designer who finish the whole video together before the final check.
+- Video production offers a separate pipeline for films and series, with scenes made in parallel from shared references.
 - The Media workflow captures the current map, Startup department, tracker list, task card and agent window at desktop and phone widths in light and dark.
 - Departments open on their products, linked routes, permanent agents and one-shot call places, even before a model is set up.
 - Starter kits and new templated departments start with every route, and the Startup kit includes its first product.

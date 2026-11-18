@@ -1,7 +1,7 @@
 /* The departments and the ready-made companies Hornhoof starts from: plain data with no validators, so the web app takes it
    from this subpath without loading zod, and the main entry hands the server the same lists. */
 
-export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household'] as const;
+export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household', 'video_production'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 /* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt.
@@ -18,13 +18,14 @@ export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string
   { key: 'finance', roleCode: 'FIN', ticked: false, always: false, teamMembers: 1 },
   { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, teamMembers: 1 },
   { key: 'household', roleCode: 'HHD', ticked: false, always: false, teamMembers: 1 },
+  { key: 'video_production', roleCode: 'VID', ticked: false, always: false, teamMembers: 1 },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
    and the people setup hires into them (role code and how many). The names and descriptions live in the web dictionaries;
    the mini scheme on the card is drawn from these departments. "Start empty" is not here: it is the default on the card,
    and creates nothing. The people take a subscription the company has that may serve them, or wait for one. */
-export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab', 'home'] as const;
+export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab', 'video_studio', 'home'] as const;
 export type CompanyTemplateKey = (typeof COMPANY_TEMPLATE_KEYS)[number];
 export type CompanyTemplateStaff = { role: string; count: number };
 export type CompanyTemplateDept = { template: TemplateKey; name?: string; products?: string[]; staff: CompanyTemplateStaff[] };
@@ -104,6 +105,13 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
       { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }, { role: 'OPS-FIX', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-ACCT', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }, { role: 'DEV-PM', count: 1 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-TEST', count: 1 }, { role: 'DEV-OPS', count: 1 }] },
       { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }, { role: 'BIZ-PM', count: 1 }, { role: 'BIZ-REV', count: 1 }, { role: 'BIZ-PARTNER', count: 1 }] },
+    ],
+  },
+  {
+    key: 'video_studio',
+    departments: [
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }, { role: 'OPS-FIX', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-ACCT', count: 1 }] },
+      { template: 'video_production', staff: [{ role: 'VID-HEAD', count: 1 }, { role: 'VID-WRITE', count: 1 }, { role: 'VID-BOARD', count: 1 }, { role: 'VID-KEEP', count: 1 }, { role: 'VID-GEN', count: 1 }, { role: 'VID-EDIT', count: 1 }, { role: 'VID-COLOR', count: 1 }, { role: 'VID-SOUND', count: 1 }, { role: 'VID-QA', count: 1 }, { role: 'VID-PM', count: 1 }] },
     ],
   },
   {

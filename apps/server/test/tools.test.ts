@@ -117,7 +117,8 @@ describe('/mcp', () => {
       ],
       subscriptions: [{ provider: 'anthropic_api', kind: 'api_key', servesWholeCompany: true }],
     });
-    expect(view.templates).toHaveLength(10);
+    expect(view.templates).toHaveLength(11);
+    expect(view.templates).toContainEqual(expect.objectContaining({ key: 'video_production', name: 'Video production' }));
     expect(view.templates.filter((t: { alwaysOn: boolean }) => t.alwaysOn).map((t: { key: string }) => t.key)).toEqual(['operations']);
     expect(view.templates[0]).toMatchObject({ key: 'operations', name: 'Operations', description: expect.any(String) });
   });

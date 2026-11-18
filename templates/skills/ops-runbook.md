@@ -19,4 +19,4 @@ Include:
 
 Commands reference secret store entry names, never values. Test the changed procedure on the real problem or a safe copy through the approved check route before calling it usable. Record steps that failed and their corrections.
 
-A runbook cannot grant permission or bypass approval. Urgent, small, named work and review fixes retain protected human approval and an independent Security engineer's pass before shared merge for access, root, permissions or secrets changes. For prepared test environments, retain pinned fingerprints, private mutable attempt state and approved provisioning; never prescribe running-container patches, host sockets or node credentials in product tests.
+State the operator, preparation evidence, recovery steps and assigned checks. A runbook records the approved method for that environment.

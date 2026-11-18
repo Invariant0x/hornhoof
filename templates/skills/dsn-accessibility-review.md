@@ -13,7 +13,7 @@ Review the assigned mockup or built screen against WCAG 2.2 level AA. State the 
 - [ ] **Structure**: a clear main heading, ordered headings, landmarks, real lists and table headers.
 - [ ] **Forms**: visible labels, errors associated with fields and announced, required state in text rather than colour alone.
 - [ ] **Zoom and reflow**: usable at 200 percent zoom and 320 px width without horizontal scroll or lost content or actions.
-- [ ] **Targets**: at least 24 by 24 px, with 44 by 44 px for main touch controls.
+- [ ] **Targets**. Check the applicable accessibility minimum and the design system's stricter touch target where one is set. Record which requirement applies.
 - [ ] **Motion**: no flashing above three times per second; reduced-motion preferences respected.
 - [ ] **Language**: the page and each translated version declare their language.
 
