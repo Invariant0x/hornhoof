@@ -51,6 +51,30 @@ async function fits(host: Locator) {
   for (const r of result) { expect(r.height, r.text ?? '').toBeGreaterThanOrEqual(44); expect(r.overflow, r.text ?? '').toBeLessThanOrEqual(1); }
 }
 
+/* On a wide card the parts stand side by side, and the words of their headings stand on one line, within a pixel. The
+   words, not the heading's box: a part stretched to its row keeps its box at the top while its words move down. */
+async function partsInLine(card: Locator) {
+  const tops = await card.locator('.part-h').evaluateAll(headings => headings.map(h => {
+    const words = document.createRange();
+    words.selectNodeContents(h);
+    return words.getBoundingClientRect().top;
+  }));
+  expect(tops).toHaveLength(2);
+  expect(Math.abs(tops[0]! - tops[1]!)).toBeLessThanOrEqual(1);
+}
+
+/* What a token of the open skin computes to, to compare a colour with the token rather than with a number. */
+async function tokenColour(page: Page, token: string): Promise<string> {
+  return page.evaluate(name => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${name})`;
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  }, token);
+}
+
 /* Each shipped theme and language is a test of its own: each loads the page anew, and eight loads in one test took a busy
    machine past the time a test has. The title names the language, not its id, so the run of a release checks every
    theme and language at 1440px as before, and the full run the 375px ones. */
@@ -77,6 +101,7 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
     await card.getByRole('button', { name: t.phones.watch }).click();
     await expect(card.getByText(t.phones.noPicture).first()).toBeVisible();
     await fits(card);
+    if (width === 1440) await partsInLine(card);
     await card.getByRole('button', { name: t.phones.stop, exact: true }).click();
     await expect(card.getByText(t.phones.paused, { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: t.phones.resume })).toBeEnabled();
@@ -95,15 +120,30 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
     const t = await setup(page, language.id, skin.id, missing);
     const section = page.getByRole('region', { name: t.phones.heading });
     const card = section.getByRole('article', { name: missing.name });
-    await expect(card.locator('.stline')).toContainText(t.phones.notConnected.state);
+    /* A state to wait or act on, in the amber of the book's statuses, while the owner stays a muted line. */
+    const state = card.locator('.stline').getByText(t.phones.notConnected.state, { exact: true });
+    const amber = await tokenColour(page, '--amber-ink');
+    await expect(state).toHaveCSS('color', amber);
+    await expect(state).toHaveCSS('border-top-color', amber);
+    await expect(card.locator('.stline').getByText(t.phones.owner(missing.owner.name), { exact: true })).toHaveCSS('color', await tokenColour(page, '--muted'));
     const hint = card.getByText(t.phones.notConnected.hint, { exact: true });
     await expect(hint).toBeVisible();
+    const watch = card.getByRole('button', { name: t.phones.watch });
+    await expect(watch).toBeDisabled();
+    await expect(watch).toHaveAccessibleDescription(t.phones.notConnected.noScreen);
+    const reason = card.getByText(t.phones.notConnected.noScreen, { exact: true });
+    await expect(reason).toBeVisible();
+    await expect(card.getByRole('button', { name: t.phones.stop, exact: true })).toBeEnabled();
     for (const direction of ['ltr', 'rtl']) {
       await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
       await fits(card);
-      const [inner, outer] = [await hint.boundingBox(), await card.boundingBox()];
-      expect(inner!.x).toBeGreaterThanOrEqual(outer!.x - 1);
-      expect(inner!.x + inner!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
+      const outer = await card.boundingBox();
+      for (const text of [hint, reason]) {
+        const inner = await text.boundingBox();
+        expect(inner!.x).toBeGreaterThanOrEqual(outer!.x - 1);
+        expect(inner!.x + inner!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
+      }
+      if (width === 1440) await partsInLine(card);
       expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
     await page.evaluate(() => { document.documentElement.dir = 'ltr'; });

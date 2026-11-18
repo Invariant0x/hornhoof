@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
@@ -127,15 +127,22 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     finally { setBusy(false); }
   }
   const missing = phone.connection === 'not_connected';
-  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={missing ? t.phones.notConnected.state : t.phones.states[phone.online ? phone.state : 'offline']} line={t.phones.owner(phone.owner.name)} />}>
+  const reason = useId();
+  /* A screen that closed because its phone left stays closed when the phone comes back, until its owner opens it. */
+  useEffect(() => { if (missing) setWatching(false); }, [missing]);
+  const open = watching && !missing;
+  /* A phone its computer does not see waits for someone to plug it in: a status to act on, as the style book draws one. */
+  const state = missing ? <span className="status not_connected">{t.phones.notConnected.state}</span> : t.phones.states[phone.online ? phone.state : 'offline'];
+  return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={state} line={t.phones.owner(phone.owner.name)} />}>
     <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} />{missing && <p>{t.phones.notConnected.hint}</p>}<p className="muted">{t.phones.waiting(phone.queued)}</p></Part>
     {mine && <Part title={t.phones.control}>
-      <div className="entry-actions"><button type="button" className="act" aria-expanded={watching} onClick={() => setWatching(v => !v)}>{watching ? t.phones.hide : t.phones.watch}</button>
+      <div className="entry-actions"><button type="button" className="act" aria-expanded={open} disabled={missing} aria-describedby={missing ? reason : undefined} onClick={() => setWatching(v => !v)}>{open ? t.phones.hide : t.phones.watch}</button>
         {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}
       </div>
+      {missing && <p id={reason} className="part-note">{t.phones.notConnected.noScreen}</p>}
       {phone.stopping && <p role="status">{t.phones.stopping}</p>}
       {failure !== null && <p className="bad" role="alert">{errorText(t, failure)}</p>}
-      {watching && <PhoneScreen phone={phone} />}
+      {open && <PhoneScreen phone={phone} />}
     </Part>}
   </CardFrame>;
 }

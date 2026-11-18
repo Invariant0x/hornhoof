@@ -121,3 +121,53 @@ it.each([
   expect(within(ready).getByText(t.phones.states.available)).toBeInTheDocument();
   expect(within(ready).queryByText(t.phones.notConnected.hint)).toBeNull();
 });
+
+it.each([['en', en], ['ru', ru]] as const)('in %s shows a phone its computer does not see as a state to act on, with Watch off and its reason, and Stop on', async (language, t) => {
+  localStorage.setItem('hh-lang', language);
+  onTestFinished(() => { localStorage.removeItem('hh-lang'); });
+  const gone: PhoneView = { ...PHONE, online: false, state: 'offline', connection: 'not_connected', queued: 2 };
+  const here: PhoneView = { ...PHONE, id: 'ph3', name: 'Phone in place' };
+  const calls = mockApi({
+    'GET /api/phones': [200, { phones: [gone, here] }],
+    'POST /api/phones/ph1/stop': [200, { ...gone, lending: false, state: 'owner', queued: 0 }],
+  });
+  render(<LanguageProvider><Phones me={ME} machines={[MACHINE]} /></LanguageProvider>);
+  const card = await until(() => screen.queryByRole('article', { name: gone.name }));
+  expect(within(card).getByText(t.phones.notConnected.state)).toHaveClass('status', 'not_connected');
+  expect(within(card).getByText(t.phones.owner(ME.person.name))).not.toHaveClass('status');
+  const watch = within(card).getByRole('button', { name: t.phones.watch });
+  expect(watch).toBeDisabled();
+  expect(watch).toHaveAccessibleDescription(t.phones.notConnected.noScreen);
+  expect(within(card).getByText(t.phones.notConnected.noScreen)).toBeVisible();
+  const stop = within(card).getByRole('button', { name: t.phones.stop });
+  expect(stop).toBeEnabled();
+  fireEvent.click(stop);
+  await until(() => calls.find(c => c.method === 'POST' && c.path === '/api/phones/ph1/stop'));
+  const ready = screen.getByRole('article', { name: here.name });
+  expect(within(ready).getByText(t.phones.states.available)).not.toHaveClass('not_connected');
+  expect(within(ready).getByRole('button', { name: t.phones.watch })).toBeEnabled();
+  expect(within(ready).getByRole('button', { name: t.phones.watch })).not.toHaveAccessibleDescription();
+  expect(within(ready).queryByText(t.phones.notConnected.noScreen)).toBeNull();
+});
+
+it('closes the screen when its computer stops seeing the phone, and leaves it closed when the phone comes back', async () => {
+  let listed = PHONE;
+  mockApi({
+    'GET /api/phones': () => [200, { phones: [listed] }],
+    'GET /api/phones/ph1/live': [200, { lending: true, frame: { sequence: 1, at: '2026-11-16T12:00:00Z', imageUrl: '/api/phones/ph1/live/image?s=s1&v=1' } }],
+  });
+  render(<Phones me={ME} machines={[MACHINE]} />);
+  fireEvent.click(await until(() => screen.queryByRole('button', { name: en.phones.watch })));
+  await until(() => screen.queryByRole('img'));
+  listed = { ...PHONE, online: false, state: 'offline', connection: 'not_connected' };
+  await act(() => vi.advanceTimersByTimeAsync(5000));
+  await until(() => screen.queryByText(en.phones.notConnected.state));
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByRole('button', { name: en.phones.watch })).toHaveAttribute('aria-expanded', 'false');
+  listed = PHONE;
+  await act(() => vi.advanceTimersByTimeAsync(5000));
+  await until(() => screen.queryByText(en.phones.states.available));
+  expect(screen.getByRole('button', { name: en.phones.watch })).toBeEnabled();
+  expect(screen.getByRole('button', { name: en.phones.watch })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('img')).toBeNull();
+});
