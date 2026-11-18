@@ -4,7 +4,8 @@
 # dump.json {id} and seals what it finds in dumps/, which holds every dump in the clear for a day at most.
 #
 # Deleting a copy cannot be undone, so the copies of updates go only as keep_backups says: once an update ended on a
-# database that works, and never the one that update may go back to.
+# database that works, and never the one that update may go back to. The newest settings of the public link kept beside
+# a copy never go.
 
 # How many copies of the database updates saved stay in backups/, the one of the update under way among them.
 KEEP_BACKUPS=3
@@ -39,18 +40,22 @@ backup() {
 # the database as it was or on the copy put back. It keeps KEEP_BACKUPS of them: its own, whatever time the clock gave
 # the others, and the newest of the others. An update that ended any other way deletes none, since the copy it made may
 # not load and an older one may then be the only one that does; neither does one that made no copy, as on a worker. The
-# public link's settings kept with a copy go with it.
+# public link's settings kept with a copy go with it, but for the newest of them, which stay for good: a link the company
+# took on a build that went back may be in no other place.
 keep_backups() {
-  local kept=0 old
+  local kept=0 old link
   [ -n "$BACKUP" ] || return 0
   [ ! -f "$BACKUP" ] || kept=1
+  # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.tunnel.json
+  link=$(ls -1t "$SERVER_DIR"/backups/hornhoof-*.tunnel.json 2> /dev/null | head -n 1) || true
   # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
   { ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz 2> /dev/null || true; } | while read -r old; do
     [ "$old" != "$BACKUP" ] || continue
     if [ "$kept" -lt "$KEEP_BACKUPS" ]; then
       kept=$((kept + 1))
     else
-      rm -f "$old" "${old%.sql.gz}.tunnel.json" || true
+      rm -f "$old" || true
+      [ "${old%.sql.gz}.tunnel.json" = "$link" ] || rm -f "${old%.sql.gz}.tunnel.json" || true
     fi
   done
 }

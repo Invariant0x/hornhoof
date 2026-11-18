@@ -156,16 +156,26 @@ describe('updater', () => {
     expect(readdirSync(join(s.server, 'backups')).filter(f => f.endsWith('.tunnel.json'))).toEqual([]);
   });
 
-  it("lets a kept copy of the link's settings go with its database copy", async () => {
+  /* The newest settings kept may be the only place a link taken on a build that went back is in, so they stay for good. */
+  it("keeps the newest copy of the link's settings for good, and lets the others go with their database copies", async () => {
     const s = stand();
-    writeFileSync(join(s.control, 'tunnel.json'), '{}', { mode: 0o600 });
-    await runOnce(s, ask('t3'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
     const backups = join(s.server, 'backups');
-    const first = readdirSync(backups).find(f => f.endsWith('.sql.gz'))!;
-    utimesSync(join(backups, first), new Date(2026, 0, 1), new Date(2026, 0, 1));
-    for (const id of ['t4', 't5', 't6']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
-    expect(readdirSync(backups).filter(f => f.includes('-t3.'))).toEqual([]);
-    expect(readdirSync(backups)).toHaveLength(3);
+    const age = (id: string, day: number) => {
+      for (const name of readdirSync(backups).filter(f => f.includes(`-${id}.`))) utimesSync(join(backups, name), new Date(2026, 0, day), new Date(2026, 0, day));
+    };
+    for (const [id, day] of [['t3', 1], ['t4', 2]] as const) {
+      writeFileSync(join(s.control, 'tunnel.json'), JSON.stringify({ url: `https://${id}.hornhoof.org` }), { mode: 0o600 });
+      expect((await runOnce(s, ask(id), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' })).status.state).toBe('rolled_back');
+      age(id, day);
+    }
+    for (const id of ['t5', 't6', 't7']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
+    const left = readdirSync(backups);
+    expect(left.filter(f => f.includes('-t3.'))).toEqual([]);
+    const link = left.filter(f => f.includes('-t4.'));
+    expect(link).toEqual([expect.stringMatching(/^hornhoof-\d{8}T\d{6}Z-t4\.tunnel\.json$/)]);
+    expect(readFileSync(join(backups, link[0]!), 'utf8')).toBe(JSON.stringify({ url: 'https://t4.hornhoof.org' }));
+    expect(left.filter(f => f.endsWith('.sql.gz')).map(f => f.replace(/^hornhoof-\d{8}T\d{6}Z-/, '')).sort()).toEqual(['t5.sql.gz', 't6.sql.gz', 't7.sql.gz']);
+    expect(left).toHaveLength(4);
   });
 
   /* The build from before may not know a service of the new one, as the tunnel, which would carry the public link
