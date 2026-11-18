@@ -33,6 +33,7 @@ await prepareInstalls([
   '0084_skill_bricks',
   '0085_work_fast_cards',
   '0097_route_abilities',
+  '0112_computer_access',
   '0129_builtin_node_connections',
   BEFORE_DROP,
 ]);
@@ -676,7 +677,7 @@ describe('migration 0112, computer access per machine', () => {
     expect(tables.rows).toEqual(['computer_runs', 'machine_access'].map(relname => ({ relname, closed: true, journaled: true })));
   });
 
-  it('takes only the states and times of a command there are, and a request only whole', async () => {
+  it('takes only the states and times of a command there are', async () => {
     const db = await fullyMigrated();
     const run = (state: string, timeout: number) =>
       db.execute(sql`insert into computer_runs (company_id, machine_id, command, timeout_s, state) values (gen_random_uuid(), gen_random_uuid(), 'true', ${timeout}, ${state})`);
@@ -686,7 +687,12 @@ describe('migration 0112, computer access per machine', () => {
     expect(await codeOf(run('queued', 300))).toBe('23514');
     expect(await codeOf(run('waiting', 0))).toBe('23514');
     expect(await codeOf(run('waiting', 1801))).toBe('23514');
+  });
 
+  it('takes a request only whole on an install at 0112', async () => {
+    const client = await olderInstall('0112_computer_access');
+    const db = drizzle(client);
+    await client.exec(`SET session_replication_role = replica`);
     await db.execute(sql`insert into machine_access (machine_id, company_id) values (gen_random_uuid(), gen_random_uuid())`);
     await db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason, asked_at) values (gen_random_uuid(), gen_random_uuid(), 'look', now())`);
     expect(await codeOf(db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason) values (gen_random_uuid(), gen_random_uuid(), 'look')`))).toBe('23514');
