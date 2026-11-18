@@ -2125,6 +2125,20 @@ export const ru: Messages = {
         "Accept and deliver the video": "Принять и передать видео",
       },
     },
+    "video-long-work": {
+      name: "Производство длинного видео", why: "Для фильма, сериала или видео с множеством сцен или мест действия.",
+      stages: {
+        "Write the brief": "Написать задание",
+        "Write the story and make a production guide": "Написать историю и собрать справочник",
+        "Break down sequences and scenes": "Разбить историю на эпизоды и сцены",
+        "Prove the hardest moment": "Проверить самый сложный момент",
+        "Make the scenes": "Сделать сцены",
+        "Assemble the cut": "Собрать монтаж",
+        "Finish color, sound and titles": "Доработать цвет, звук и титры",
+        "Check the whole work": "Проверить всю работу",
+        "Prepare and deliver the final version": "Подготовить и передать финальную версию",
+      },
+    },
     "video-footage-editing": {
       name: "Монтаж готовых кадров", why: "Для создания видео из уже снятого материала.",
       stages: {

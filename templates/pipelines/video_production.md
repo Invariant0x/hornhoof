@@ -18,6 +18,19 @@ pipelines:
       - { name: "Check the cut", ownerRole: "VID-QA", brief: "Check the draft against the brief and style sheet before final generation. Return problems to their owners." }
       - { name: "Generate final shots", ownerRole: "VID-GEN", brief: "Render only accepted shots. Get the keeper's yes on every new clip before the editor replaces the drafts." }
       - { name: "Accept and deliver the video", ownerRole: "VID-HEAD", brief: "Have the assigned owners finish color, sound and titles across the cut under Law 10. Get the finished cut checked by the quality reviewer, then watch it at full size and check the cuts and key events frame by frame under Law 11. Commit prompts, reference frames and total cost to git and deliver the accepted video." }
+  - key: video-long-work
+    name: "Long video production"
+    why: "For a film, a series or a work with many scenes or places."
+    stages:
+      - { name: "Write the brief", ownerRole: "VID-HEAD", brief: "Set the purpose, audience, look, platform and budget once for the whole work. Name one lead keeper for its shared sheets and sets." }
+      - { name: "Write the story and make a production guide", ownerRole: "VID-KEEP", brief: "Keep one production bible for the whole work. Bring together the writer's story and character sheets, every place as a measured set with markers, the look book and color script from the colorist, and the sound palette from the sound designer." }
+      - { name: "Break down sequences and scenes", ownerRole: "VID-PM", brief: "Break the story into sequences and scenes. Note which characters, sets, markers and references each scene uses." }
+      - { name: "Prove the hardest moment", ownerRole: "VID-HEAD", brief: "Make one probe of the hardest moment for the whole work under Law 8. Accept it with the lead keeper and set the look reference with the colorist: reference frames for each scene and the color script for planned changes." }
+      - { name: "Make the scenes", ownerRole: "VID-PM", brief: "Run each scene as its own task, in parallel with the other scenes. Use video-production from the scene script through the keeper's gate and the scene edit. Use only the bible's sheets, sets and look reference. A scene never changes the bible. Send a proposed change to the lead keeper and the head, then give the agreed change to every scene it touches." }
+      - { name: "Assemble the cut", ownerRole: "VID-EDIT", brief: "Put the accepted scene edits together in story order. Check how the sequences and scenes play together." }
+      - { name: "Finish color, sound and titles", ownerRole: "VID-COLOR", brief: "Finish the whole assembled work together against the look reference under Law 10. The colorist grades color, contrast and grain against the color script, the sound designer makes the final mix, and the editor finishes titles." }
+      - { name: "Check the whole work", ownerRole: "VID-QA", brief: "Check the whole work against the brief, bible and look reference. The head watches it at full size and checks every cut and key event frame by frame under Law 11. Return any failure to its owner before mastering." }
+      - { name: "Prepare and deliver the final version", ownerRole: "VID-HEAD", brief: "Make the master from the accepted cut and deliver it in the agreed formats. Keep the master and the work record in the department's repository." }
   - key: video-footage-editing
     name: "Edit existing footage"
     why: "For making a finished video from footage you already have."

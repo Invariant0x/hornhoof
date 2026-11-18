@@ -39,6 +39,7 @@ Use the routes and one-shot briefs in the catalog when you lay out the work. Giv
 ### Video production
 
 - `video-production` Video production. For making an original video from a brief.
+- `video-long-work` Long video production. For a film, a series or a work with many scenes or places.
 - `video-footage-editing` Edit existing footage. For making a finished video from footage you already have.
 - `video-screen-recording` Screen recording. For showing how something works on a screen.
 

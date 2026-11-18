@@ -60,6 +60,9 @@ describe('POST /api/setup staffs the template', () => {
     expect(route.stages[6]).toMatchObject({ echelon: 'development', oneShot: { fanOut: 2, judge: true } });
     expect(route.stages[7]).toMatchObject({ echelon: 'review', parentId: route.stages[6].id });
     expect(route.stages[8].parentId).toBe(route.stages[7].id);
+    expect(video.pipelines).toContainEqual(expect.objectContaining({
+      catalogKey: 'video-long-work', isDefault: false, why: 'For a film, a series or a work with many scenes or places.',
+    }));
     expect(await plans(app)).toEqual([]);
   });
 

@@ -2123,6 +2123,20 @@ export const en = {
         "Accept and deliver the video": "Accept and deliver the video",
       },
     },
+    "video-long-work": {
+      name: "Long video production", why: "For a film, a series or a work with many scenes or places.",
+      stages: {
+        "Write the brief": "Write the brief",
+        "Write the story and make a production guide": "Write the story and make a production guide",
+        "Break down sequences and scenes": "Break down sequences and scenes",
+        "Prove the hardest moment": "Prove the hardest moment",
+        "Make the scenes": "Make the scenes",
+        "Assemble the cut": "Assemble the cut",
+        "Finish color, sound and titles": "Finish color, sound and titles",
+        "Check the whole work": "Check the whole work",
+        "Prepare and deliver the final version": "Prepare and deliver the final version",
+      },
+    },
     "video-footage-editing": {
       name: "Edit existing footage", why: "For making a finished video from footage you already have.",
       stages: {

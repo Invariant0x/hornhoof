@@ -11,7 +11,7 @@ import { DepartmentView } from '../src/screens/Department';
 import { DepartmentStructure } from '../src/screens/DepartmentStructure';
 import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
-import { useDepartmentTree } from '../src/tasks';
+import { localPipeline, useDepartmentTree } from '../src/tasks';
 import { toD } from '../src/ui/wires';
 import type { DepartmentTree, Employee, Me, Org, ProgramView } from '../src/types';
 import { CARD, decisions, DEV_ORG, DEV_TREE, REVIEW_TREE, TREE_ORG, ME, mockApi, REQUESTS, ROSTER, TASKS } from './api-mock';
@@ -206,6 +206,30 @@ describe('Department view', () => {
     expect(within(keeperPlace!).getByRole('img', { name: t.workers.permanent })).toHaveClass('cell', 'o');
     expect(within(keeperPlace!).getByText(keeper.ownerTitle[language])).toBeVisible();
     expect(within(keeperPlace!).getByText(t.dept.noModelYet)).toBeVisible();
+  });
+
+  it.each(checkedLocales)('localizes the long video pipeline and its use in %s', language => {
+    localStorage.setItem('hh-lang', language);
+    const [dev] = DEV_ORG.departments;
+    const copy = {
+      en: {
+        name: 'Long video production', why: 'For a film, a series or a work with many scenes or places.',
+        stages: ['Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
+          'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version'],
+      },
+      ru: {
+        name: 'Производство длинного видео', why: 'Для фильма, сериала или видео с множеством сцен или мест действия.',
+        stages: ['Написать задание', 'Написать историю и собрать справочник', 'Разбить историю на эпизоды и сцены', 'Проверить самый сложный момент',
+          'Сделать сцены', 'Собрать монтаж', 'Доработать цвет, звук и титры', 'Проверить всю работу', 'Подготовить и передать финальную версию'],
+      },
+    };
+    const pipeline = { id: 'long-video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-long-work',
+      name: copy.en.name, why: copy.en.why, archived: false, version: 1,
+      stages: copy.en.stages.map((name, position) => ({ id: String(position), parentId: position ? String(position - 1) : null, name, position, ownerRole: null, owner: null })) };
+    expect(localPipeline(messages[language], pipeline).why).toBe(copy[language].why);
+    render(<LanguageProvider><DepartmentStructure department={{ ...dev!, employees: [], pipelines: [pipeline] }} onOpen={() => {}} /></LanguageProvider>);
+    const route = within(screen.getByRole('region', { name: copy[language].name }));
+    expect(route.getAllByRole('heading', { level: 5 }).map(heading => heading.textContent)).toEqual(copy[language].stages);
   });
 
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */

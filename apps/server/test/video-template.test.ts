@@ -89,6 +89,28 @@ describe('the laws of video production', () => {
     expect(templates.skills.get('orch-company')?.body).toContain('vid-work-pipeline');
   });
 
+  it('offers a long-work pipeline next to the short default and finishes before the whole-work gate', () => {
+    const catalog = templates.catalogs.get('video_production')!;
+    expect(catalog.default).toBe('video-production');
+    const long = catalog.pipelines[1];
+    expect(long).toMatchObject({ key: 'video-long-work', name: 'Long video production', why: 'For a film, a series or a work with many scenes or places.' });
+    expect(templates.skills.get('orch-pipelines')?.body).toContain(`\`video-long-work\` ${long!.name}. ${long!.why}`);
+    expect(long!.stages.map(stage => stage.name)).toEqual([
+      'Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
+      'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version',
+    ]);
+    expect(long!.stages[1]?.brief).toMatch(/character sheets[\s\S]*set with markers[\s\S]*look book[\s\S]*color script[\s\S]*sound palette/i);
+    expect(long!.stages[6]?.brief).toMatch(/Law 10[\s\S]*colorist[\s\S]*sound designer[\s\S]*editor/i);
+    expect(long!.stages[7]).toMatchObject({ ownerRole: 'VID-QA', brief: expect.stringContaining('Law 11') });
+  });
+
+  it('runs scenes in parallel through the short pipeline and sends bible changes to every affected scene', () => {
+    const long = templates.catalogs.get('video_production')?.pipelines.find(p => p.key === 'video-long-work');
+    const scenes = long?.stages.find(s => s.name === 'Make the scenes')?.brief;
+    expect(scenes).toMatch(/each scene[\s\S]*own task[\s\S]*in parallel[\s\S]*video-production[\s\S]*script[\s\S]*keeper's gate[\s\S]*edit/i);
+    expect(scenes).toMatch(/only the bible's sheets, sets and look reference[\s\S]*never changes the bible[\s\S]*lead keeper and the head[\s\S]*every scene it touches/i);
+  });
+
   it('routes Marketing video through the shared laws and the Video production department when it exists', () => {
     for (const id of ['MKT-HEAD', 'MKT-WRITE', 'MKT-SOCIAL', 'MKT-EDIT', 'DSN-HEAD', 'DSN-PM', 'DSN-UI', 'DSN-QA']) {
       expect(templates.roles.get(id)?.skills, id).toContainEqual(expect.objectContaining({ id: 'vid-laws', on: true }));
