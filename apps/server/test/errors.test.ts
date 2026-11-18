@@ -1,10 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { Writable } from 'node:stream';
 import { DrizzleQueryError } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { NotConfirmed, requestRoute } from '../src/db/confirm.js';
-import { NOT_CONFIRMED, registerErrorHandling } from '../src/errors.js';
-import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
+import { NOT_CONFIRMED, READ_ONLY_MESSAGE, registerErrorHandling } from '../src/errors.js';
 
 /* A route that throws err, and what the log got of it. */
 async function thrown(err: Error) {
@@ -26,6 +26,11 @@ async function thrown(err: Error) {
 }
 
 describe('an error no route handled', () => {
+  it('defines errors without a dependency on keeper app mode', () => {
+    const source = readFileSync(new URL('../src/errors.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/from ['"].*\/keeper\/app-mode\.js['"]/);
+  });
+
   it('reaches the log without the values of a failed query, the database detail or a password in an address', async () => {
     const cause = Object.assign(new Error('could not connect to postgres://hornhoof:pa55-marker@db:5432/hornhoof'), {
       code: '08006',

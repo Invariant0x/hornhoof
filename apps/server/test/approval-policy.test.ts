@@ -15,10 +15,10 @@ const answer = (c: C, id: string, approve: boolean) => c.app.inject({ method: 'P
 const ruleFor = (c: C, departmentId: string, channel: string) => c.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, departmentId), eq(approvalPolicies.channel, channel as never)));
 
 describe('reading and changing a department\'s approval policy', () => {
-  it('asks nothing for what goes out, every commit, and a new kind of the rest while nobody set a rule, and stores nothing for that', async () => {
+  it('asks nothing on any channel while nobody set a rule, and stores nothing for that', async () => {
     const c = await company();
     const view = (await c.policy(c.ceoToken, c.dev.id)).json();
-    expect(view.rules).toEqual([...['message', 'price', 'publication'].map(channel => ({ channel, mode: 'none' })), { channel: 'commit', mode: 'every' }, ...['spend', 'other'].map(channel => ({ channel, mode: 'new_kinds' }))]);
+    expect(view.rules).toEqual(['message', 'price', 'publication', 'commit', 'spend', 'other'].map(channel => ({ channel, mode: 'none' })));
     expect(view).toMatchObject({ departmentId: c.dev.id, owner: null, canSetOwner: true, canChangePolicy: true });
     expect(await c.db.select().from(approvalPolicies)).toEqual([]);
   });
@@ -117,6 +117,32 @@ describe('reading and changing a department\'s approval policy', () => {
 });
 
 describe('asking for an approval under the policy', () => {
+  it('uses the commit rule when ask_person names a commit', async () => {
+    const c = await company();
+    const tools = await c.tools(c.worker);
+    const commit = 'a'.repeat(40);
+    const args = { task: c.task.number, commit, question: 'May this commit go?' };
+    expect(said(await call(tools, 'ask_person', args))).toMatch(/no approval/i);
+    expect(await openRequests(c)).toEqual([]);
+    expect((await c.setRule(c.danaToken, c.dev.id, 'commit', { mode: 'every' })).statusCode).toBe(200);
+    expect(said(await call(tools, 'ask_person', args))).toContain('waits');
+    expect(await openRequests(c)).toMatchObject([{ commit, kind: 'approval' }]);
+  });
+
+  it('applies an explicit new-kinds commit rule to both request tools', async () => {
+    const c = await company();
+    const tools = await c.tools(c.worker);
+    expect((await c.setRule(c.danaToken, c.dev.id, 'commit', { mode: 'new_kinds' })).statusCode).toBe(200);
+    const firstCommit = 'a'.repeat(40);
+    await call(tools, 'request_approval', { task: c.task.number, channel: 'commit', kind: 'Release', text: 'Release?', commit: firstCommit });
+    const [first] = await openRequests(c);
+    expect(first).toMatchObject({ commit: firstCommit });
+    expect((await answer(c, first!.id, true)).statusCode).toBe(200);
+    const second = await call(tools, 'ask_person', { task: c.task.number, question: 'Release the next commit?', commit: 'b'.repeat(40) });
+    expect(said(second)).toMatch(/no approval/i);
+    expect(await openRequests(c)).toEqual([]);
+  });
+
   const asks = (over: Record<string, unknown> = {}) => ({ task: 1, channel: 'spend', kind: 'ads', text: 'Buy ads.', ...over });
   /* Bruno's tools, on the task he holds. */
   const bruno = async (c: C) => {
@@ -124,9 +150,10 @@ describe('asking for an approval under the policy', () => {
     return (over: Record<string, unknown> = {}) => call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
   };
 
-  it('asks for a new kind on a channel with no rule, and sends it to the CEO with no owner', async () => {
+  it('asks for a new kind under an explicit rule and sends it to the CEO with no owner', async () => {
     const c = await company();
     const ask = await bruno(c);
+    await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'new_kinds' });
     const res = await ask({ amount: 1 });
     expect(res.isError).toBeFalsy();
     const [open] = await openRequests(c);
@@ -139,6 +166,7 @@ describe('asking for an approval under the policy', () => {
   it('sends it to the named owner when the department has one', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'every' });
     await (await bruno(c))();
     const hers = (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(c.danaToken) })).json();
     expect(hers.requests[0]).toMatchObject({ kind: 'approval', agent: { id: c.worker.id }, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo' } });
@@ -174,21 +202,22 @@ describe('asking for an approval under the policy', () => {
     const c = await company();
     await c.setRule(c.ceoToken, c.dev.id, 'spend', { mode: 'within_limits', limit: 100 });
     const ask = await bruno(c);
+    await c.setRule(c.danaToken, c.dev.id, 'other', { mode: 'every' });
     await ask({ channel: 'other', amount: 1 });
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('asks nobody for a message, a price or a publication while the department set no rule for them, and says so in the task\'s log', async () => {
+  it('asks nobody for any channel while the department set no rule for it, and says so in the task\'s log', async () => {
     const c = await company();
     const ask = await bruno(c);
-    for (const channel of ['message', 'price', 'publication']) {
-      const res = await ask({ channel, kind: 'test addresses with consent', amount: 1000 });
+    for (const channel of ['message', 'price', 'publication', 'spend', 'other', 'commit']) {
+      const res = await ask({ channel, kind: 'new work', amount: 1000, ...(channel === 'commit' ? { commit: 'a'.repeat(40) } : {}) });
       expect(res.isError).toBeFalsy();
       expect(said(res)).toMatch(/no approval/i);
     }
     expect(await openRequests(c)).toEqual([]);
     const log = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'comment')));
-    expect(log.map(l => l.text)).toEqual(['message', 'price', 'publication'].map(channel => expect.stringContaining(`asks no approval for ${channel}`)));
+    expect(log.map(l => l.text)).toEqual(['message', 'price', 'publication', 'spend', 'other', 'commit'].map(channel => expect.stringContaining(`asks no approval for ${channel}`)));
   });
 
   it('lets a department that wants to approve its own messages ask, and then stop asking', async () => {
@@ -203,8 +232,9 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('defaults to asking only for a new kind of spend: a kind goes free once approved, however it is typed', async () => {
+  it('asks only for a new kind of spend under an explicit rule: a kind goes free once approved, however it is typed', async () => {
     const c = await company();
+    await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'new_kinds' });
     const ask = await bruno(c);
     await ask({ channel: 'spend', kind: 'Office  supplies' });
     const requests = await openRequests(c);
@@ -269,6 +299,7 @@ describe('asking for an approval under the policy', () => {
 
   it('wakes the agent with the answer, and says what was approved rather than a commit', async () => {
     const c = await company();
+    await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'every' });
     await (await bruno(c))({ amount: 7 });
     const [first] = await openRequests(c);
     await answer(c, first!.id, true);
@@ -300,6 +331,7 @@ describe('asking for an approval under the policy', () => {
   it('counts its questions with the others of the turn', async () => {
     const c = await company();
     const ask = await bruno(c);
+    await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'every' });
     for (let i = 0; i < 3; i++) await ask({ kind: `k${i}` });
     const fourth = await ask({ kind: 'k3' });
     expect(fourth.isError).toBe(true);
@@ -315,6 +347,7 @@ describe('telling the CEO when goals are missed', () => {
     expect(own!.ownerPersonId).toBe(c.ids.dana);
     const tools = await c.tools(c.worker);
     expect((await tools.listTools()).tools.map(t => t.name)).not.toContain('escalate_missed_goal');
+    await c.setRule(c.danaToken, c.dev.id, 'other', { mode: 'every' });
     await call(tools, 'request_approval', { task: c.task.number, channel: 'other', kind: 'x', text: 'Pass?' });
     const [approval] = await openRequests(c);
     await answer(c, approval!.id, true);

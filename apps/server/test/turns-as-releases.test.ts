@@ -14,15 +14,15 @@ const START = '9'.repeat(40);
 
 const reportOf = async (f: Awaited<ReturnType<typeof readyInTurn>>, id = f.task.id) => (await f.detail(id)).log.findLast(event => event.kind === 'report')?.data;
 
-describe('a department always has one open turn, the release it gets ready', () => {
-  it('opens one for every top-level department: the one setup makes and one built later', async () => {
+describe('a department that releases its work has one open turn, the release it gets ready', () => {
+  it('opens none for a top-level department that keeps no repository: the one setup makes and one built later', async () => {
     const { app, db } = await testApp();
     const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
     const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(ceo) });
     expect(built.statusCode).toBeLessThan(300);
     const tops = await db.select().from(departments).where(isNull(departments.parentId));
     expect(tops.map(top => top.templateKey).sort()).toEqual(['operations', 'support']);
-    for (const top of tops) expect(await db.select().from(turns).where(and(eq(turns.departmentId, top.id), eq(turns.status, 'open')))).toHaveLength(1);
+    for (const top of tops) expect(await db.select().from(turns).where(and(eq(turns.departmentId, top.id), eq(turns.status, 'open')))).toHaveLength(0);
   });
 
   it('offers no tools to plan, merge or switch the mode of turns', async () => {

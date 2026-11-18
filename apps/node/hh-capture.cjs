@@ -1,4 +1,4 @@
-/* A pane's raw output, bounded and written by one process. Open only the private files the host already made. */
+/* A pane's output, bounded and written by one process. Open only the private files the host already made. */
 const { spawnSync } = require('node:child_process');
 const { closeSync, constants, fstatSync, ftruncateSync, openSync, readSync, rmSync, writeSync } = require('node:fs');
 
@@ -52,10 +52,10 @@ function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
 if (require.main === module) record();
 
 function captureArguments(args) {
-  const [file, ready, flush, bytes, socket, session, position] = args;
+  const [file, ready, flush, bytes, socket, session, position, control] = args;
   const limit = Number(bytes);
   if (!file || !ready || !flush || !socket || !session || !position || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
-  return { file, ready, flush, limit, socket, session, position };
+  return { file, ready, flush, limit, socket, session, position, control };
 }
 
 function positionPublisher(fd) {
@@ -72,14 +72,43 @@ function positionPublisher(fd) {
   };
 }
 
+/* The bridge waits for the acknowledgement before releasing a credential to the terminal program. */
+function listenForMasks(path, ready, update) {
+  const { createServer } = require('node:net');
+  return createServer({ allowHalfOpen: true }, client => {
+    let body = '';
+    client.setEncoding('utf8');
+    client.on('error', () => client.destroy());
+    client.on('data', chunk => { body += chunk; });
+    client.on('end', () => {
+      let reply;
+      try {
+        const forms = JSON.parse(body);
+        if (Array.isArray(forms) && forms.every(value => typeof value === 'string' && value)) {
+          update(forms);
+          reply = 'ok';
+        }
+      } catch { /* A corrupt mask update is not acknowledged. */ }
+      client.end(reply);
+    });
+  }).listen(path, ready);
+}
+
 function record() {
-const { file, ready, flush, limit, socket, session, position } = captureArguments(process.argv.slice(2));
+const { file, ready, flush, limit, socket, session, position, control } = captureArguments(process.argv.slice(2));
 const fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
 const readyFd = openSync(ready, constants.O_WRONLY | constants.O_NOFOLLOW);
 const positionFd = openSync(position, constants.O_WRONLY | constants.O_NOFOLLOW);
 const publish = positionPublisher(positionFd);
 publish({ generation: 0, end: 0, size: 0 });
 const keep = tail(fd, limit, { write: writeSync, truncate: ftruncateSync, publish });
+let forms = [];
+const masker = control && new (require('./dist/terminal/mask.js').PrivateStreamMask)(() => forms);
+const decoder = control && new (require('node:string_decoder').StringDecoder)('utf8');
+const write = text => { if (text) keep(Buffer.from(text)); };
+const data = chunk => { if (masker) write(masker.push(decoder.write(chunk))); else keep(chunk); };
+const started = () => writeSync(readyFd, 'ready', 0, 'utf8');
+const masks = control ? listenForMasks(control, started, known => { forms = [...new Set([...forms, ...known])].sort((a, b) => b.length - a.length); }) : null;
 let closed = false;
 
 function requested() {
@@ -107,22 +136,24 @@ function drainKernel() {
       throw error;
     }
     if (bytes === 0) return;
-    keep(buffer.subarray(0, bytes));
+    data(buffer.subarray(0, bytes));
   }
 }
 
 function finish() {
   if (closed) return;
   process.stdin.pause();
-  process.stdin.removeListener('data', keep);
-  for (let chunk; (chunk = process.stdin.read()) !== null;) keep(chunk);
+  process.stdin.removeListener('data', data);
+  for (let chunk; (chunk = process.stdin.read()) !== null;) data(chunk);
   drainKernel();
+  if (masker) write(masker.push(decoder.end()) + masker.end());
   keep.end();
   closeSync(fd);
   closeSync(positionFd);
   writeSync(readyFd, 'ended', 0, 'utf8');
   closeSync(readyFd);
   closed = true;
+  masks?.close();
   clearInterval(poll);
   process.stdin.destroy();
   removeIfSessionEnded();
@@ -131,6 +162,7 @@ function finish() {
 function close() {
   if (closed) return;
   closed = true;
+  masks?.close();
   clearInterval(poll);
   closeSync(fd);
   closeSync(positionFd);
@@ -149,11 +181,11 @@ function removeIfSessionEnded() {
     rmSync(position, { force: true });
   }
 }
-process.stdin.on('data', keep);
+process.stdin.on('data', data);
 process.stdin.once('end', finish);
 const poll = setInterval(() => { if (requested()) finish(); }, 10);
 poll.unref();
-writeSync(readyFd, 'ready', 0, 'utf8');
+if (!masks) started();
 for (const signal of ['SIGTERM', 'SIGHUP']) process.once(signal, () => { close(); process.exit(0); });
 }
 

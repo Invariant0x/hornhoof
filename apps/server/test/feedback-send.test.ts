@@ -8,8 +8,6 @@ import { as, invitePerson, setUpCompany, TEST_SECRET, testApp } from './helpers.
 /* An installation of some company sends a bug, an improvement or an idea to Hornhoof's developers through hornhoof.org:
    the person sees what goes, the technical data with it, and nothing leaves until they press send. */
 
-const HOUR = 60 * 60 * 1000;
-
 async function installation(env: NodeJS.ProcessEnv = {}) {
   const relay = await fakeRelay();
   const { app, db, config } = await testApp({ RELAY_URL: relay.url, ...env });
@@ -63,7 +61,7 @@ describe('sending feedback to Hornhoof developers', () => {
     const sent = await send({ ...BUG, digest: shown.json().digest });
     expect([sent.statusCode, sent.json()]).toEqual([200, { sent: true }]);
     expect(relay.calls).toEqual(['POST /api/v1/feedback']);
-    expect(relay.feedback).toEqual([{ v: 1, installation: expect.stringMatching(/^[0-9a-f]{32}$/), ...shown.json().report }]);
+    expect(relay.feedback).toEqual([{ v: 1, installation: expect.stringMatching(/^[0-9a-f]{32}$/), submission: expect.stringMatching(/^[0-9a-f]{64}$/), ...shown.json().report }]);
   });
 
   it('refuses to send what the person did not see', async () => {
@@ -166,20 +164,17 @@ describe('sending feedback to Hornhoof developers', () => {
     const { digest } = (await preview(BUG)).json();
     relay.feedbackAnswer = { status: 429, headers: { 'retry-after': '120' } };
     const busy = await send({ ...BUG, digest });
-    expect(busy.statusCode).toBe(429);
+    expect([busy.statusCode, busy.headers['retry-after']]).toEqual([429, '120']);
   });
 
-  it('lets one person send 10 in an hour, then asks to wait until the hour has passed', async () => {
-    const { relay, preview, send, later } = await installation();
-    const sendOne = async (title: string) => {
-      const report = { kind: 'idea', title, text: '' };
-      return send({ ...report, digest: (await preview(report)).json().digest });
+  it('lets one person send distinct reports without an hourly cap or resending a retry', async () => {
+    const { relay, preview, send } = await installation();
+    const payload = async (i: number) => {
+      const report = { kind: 'idea', title: `Idea ${i}`, text: '' };
+      return { ...report, digest: (await preview(report)).json().digest };
     };
-    for (let i = 0; i < 10; i++) expect((await sendOne(`Idea ${i}`)).statusCode).toBe(200);
-    const eleventh = await sendOne('Idea 10');
-    expect([eleventh.statusCode, eleventh.headers['retry-after']]).toEqual([429, '3600']);
-    later(HOUR);
-    expect((await sendOne('Idea 11')).statusCode).toBe(200);
-    expect(relay.feedback).toHaveLength(11);
+    for (let i = 0; i < 12; i++) expect((await send(await payload(i))).statusCode).toBe(200);
+    expect((await send(await payload(0))).statusCode).toBe(200);
+    expect(relay.feedback).toHaveLength(12);
   });
 });

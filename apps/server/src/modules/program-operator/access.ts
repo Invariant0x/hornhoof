@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PROGRAM_OPERATOR_ROLE, ProgramKey, type OperatorQuestion, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
+import { redactExact } from '@hornhoof/protocol/redaction';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
@@ -18,8 +19,6 @@ import { operatorTransaction } from './transactions.js';
 
 /* Operations, by the role each holds in it: the head of Operations and the program operator. */
 export const OPERATIONS_ROLES: Record<string, 'head' | 'worker'> = { 'OPS-HEAD': 'head', [PROGRAM_OPERATOR_ROLE]: 'worker' };
-const HIDDEN = '[hidden]';
-const SECRET_MIN = 8;
 
 type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
@@ -199,20 +198,7 @@ function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { ph
 }
 
 export function masked(text: string, secrets: string[]): string {
-  let out = text;
-  for (const secret of secretForms(secrets)) out = out.replaceAll(secret, HIDDEN);
-  return out;
-}
-
-function secretForms(secrets: string[]): string[] {
-  const forms = new Set(secrets.filter(Boolean));
-  for (const secret of secrets.filter(value => value.length >= SECRET_MIN)) {
-    const base64 = Buffer.from(secret).toString('base64');
-    forms.add(base64);
-    forms.add(base64.replace(/=+$/, ''));
-    forms.add(Buffer.from(secret).toString('base64url'));
-  }
-  return [...forms].sort((a, b) => b.length - a.length);
+  return redactExact(text, secrets, 'literal');
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {

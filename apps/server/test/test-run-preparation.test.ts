@@ -8,7 +8,7 @@ import { checkTestTimes, pumpTests, TEST_MINUTES_MAX } from '../src/modules/test
 import { until } from './helpers.js';
 import { company, done, idle, nextOf } from './test-runs-company.js';
 
-const FILES = Array.from({ length: 12 }, (_, index) => `test/${String(index).padStart(2, '0')}.ts`);
+const FILES = Array.from({ length: 12 }, (_, index) => `checks/${String(index).padStart(2, '0')}.ts`);
 const RUNTIMES = [
   { id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64), platform: { os: 'linux', arch: 'x64', libc: 'glibc' } },
   { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'c'.repeat(64), platform: { os: 'linux', arch: 'x64', libc: 'glibc' } },
@@ -19,7 +19,7 @@ async function described(request: Extract<ServerMessage, { type: 'tests.describe
   const manifest = {
     version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'none' as const, inputs: [], install: [], paths: [], cache: 'none' as const }, services: [], prepare: [], reset: null,
-    suites: [{ id: 'unit', root: '.', files: ['test/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'] }],
+    suites: [{ id: 'unit', root: '.', files: ['checks/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'] }],
     impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported' as const, reason: 'Not applicable.' } }, mutation: { status: 'unsupported' as const, language: 'typescript', reason: 'Not configured.' },
     execution: { version: 2 as const, oncePreparation: { profiles: ['fast'], suiteIds: [], commands: [{ program: 'node', args: ['lint.js'], cwd: '.' }] } },
   };

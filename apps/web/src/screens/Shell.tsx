@@ -7,6 +7,7 @@ import type { ComputerAccessView, Me, Org } from '../types';
 import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
 import { Idents } from '../ui/Idents';
+import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -128,12 +129,13 @@ type MenuProps = {
   onVersions?: () => void;
   onSettings: () => void;
   onAbout: () => void;
+  onContact: () => void;
   toDecide: number;
 };
 
 /* The pages of the whole company: what employees found to improve with how many wait for a decision, the feedback
    inbox and Versions. Nothing, and no line above it, for a person who sees only some departments. */
-function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }: Omit<MenuProps, 'me' | 'onSignOut' | 'onSettings' | 'onAbout'>) {
+function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }: Omit<MenuProps, 'me' | 'onSignOut' | 'onSettings' | 'onAbout' | 'onContact'>) {
   const t = useT();
   if (!onImprovements && !onInbox && !onVersions) return null;
   return (
@@ -150,7 +152,7 @@ function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }:
    between them: giving the orchestrator access to this machine, Settings, the pages of the whole company, About and Log
    out. onImprovements, onInbox and onVersions: only for people who see the whole company, onInbox only on Hornhoof's own
    installation. Themes and the language live in Settings, feedback in About. */
-function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, ...company }: MenuProps) {
+function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, onContact, ...company }: MenuProps) {
   const t = useT();
   const version = useVersion();
 
@@ -163,6 +165,7 @@ function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, ...company }
       </div>
       <AccessHere onDone={onClose} />
       <hr className="am-sep" />
+      <MenuRow label={t.firstContact.title} onPick={onContact} onClose={onClose} />
       <MenuRow label={t.settings.menu} onPick={onSettings} onClose={onClose} />
       <CompanyRows onClose={onClose} {...company} />
       <hr className="am-sep" />
@@ -208,10 +211,10 @@ function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: nu
   );
 }
 
-function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, toDecide, account, accountButton }: {
+function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, onContact, toDecide, account, accountButton }: {
   me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean; inbox: boolean;
   navigate: ReturnType<typeof useRoute>['navigate']; openAccount: (next: Route) => void;
-  onSignOut: () => void; toDecide: number;
+  onSignOut: () => void; onContact: () => void; toDecide: number;
   account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>;
 }) {
   const t = useT();
@@ -221,7 +224,7 @@ function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onInbox={company && inbox ? () => navigate({ kind: 'inbox' }) : undefined} onVersions={company ? () => openAccount({ kind: 'versions' }) : undefined} onSettings={() => openAccount({ kind: 'settings', group: 'profile' })} onAbout={() => openAccount({ kind: 'about' })} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onContact={onContact} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onInbox={company && inbox ? () => navigate({ kind: 'inbox' }) : undefined} onVersions={company ? () => openAccount({ kind: 'versions' }) : undefined} onSettings={() => openAccount({ kind: 'settings', group: 'profile' })} onAbout={() => openAccount({ kind: 'about' })} toDecide={toDecide} />}
       </div>
     </div>
   );
@@ -304,7 +307,7 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
   );
 }
 
-/* welcome: setup just finished, so the orchestrator's window opens at once. */
+/* Setup or an accepted invitation opens the orchestrator's first contact at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
   const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
@@ -312,13 +315,14 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const goHome = () => navigate({ kind: 'map' });
   const openAccount = (next: Route) => navigate(next, route);
   const [menu, setMenu] = useState(false);
+  const [contact, setContact] = useState(welcome);
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
   const inbox = useFeedbackInbox();
   const denied = !company && ['improvements', 'inbox', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
-  const windows = useAgentWindows(welcome && company ? 'orchestrator' : null);
+  const windows = useAgentWindows(null);
   /* A window's note leads to a machine's card: the window steps aside to its strip, so the card is not under it. */
   const openMachine = (id: string) => {
     windows.hide();
@@ -364,6 +368,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
+  const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
 
   useEffect(() => {
     if (!menu) return;
@@ -402,7 +407,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <span className="sr">{me.company.name}</span>
         </div>
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
-        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
+        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} onContact={() => setContact(true)} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
       <SwitchBanner>
         {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} />}
@@ -446,6 +451,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} onOpenMachine={openMachine} />
       <LightNotice />
+      {contact && <FirstContact onClose={closeContact} />}
       {taskId && card === 'task' && (
         <TaskPanel
           key={`task:${taskId}`}

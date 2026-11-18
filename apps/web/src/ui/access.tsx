@@ -7,8 +7,8 @@ import { useOwnerKey } from './PasswordPrompt';
 
 export type AccessAnswer = 'open' | 'close' | 'decline';
 /* What its owner chose before opening a machine: for whom and for how long. Every agent of the company is opened only
-   after the owner said yes once more, which confirm carries. Nothing chosen: the orchestrator, for the first duration. */
-export type AccessChoice = { scope: AccessScope; duration: AccessDuration; confirm?: true };
+   when the owner selects it. Nothing chosen: the orchestrator, for the first duration. */
+export type AccessChoice = { scope: AccessScope; duration: AccessDuration };
 const FIRST: AccessChoice = { scope: 'orchestrator', duration: '1h' };
 
 /* A machine by the name its computer told; the server's own with none is "the server's computer". */

@@ -2,14 +2,15 @@ import { API_MODELS } from '@hornhoof/protocol';
 import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, requests, tasks, teams } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
 import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan, until, echelonsTurn, prepareApp } from './helpers.js';
+
+await prepareApp();
 
 /* Which employees' lanes were asked for, in order: a change to an employee waits in its lane while another is written. */
 const lanes = vi.hoisted(() => [] as string[]);
@@ -59,9 +60,12 @@ const open = (app: FastifyInstance, token: string, id: string) => app.inject({ u
 const patch = (app: FastifyInstance, token: string, id: string, payload: object) => app.inject({ method: 'PATCH', url: `/api/agents/${id}`, payload, ...as(token) });
 
 describe('hiring', () => {
-  it('hires an employee with as many skills as a hire takes, their bodies going as files', async () => {
+  it('hires an employee with a long role and delivers all of its skills', async () => {
     const { app, db, ceo, dev, teamKey } = await company();
-    const own = app.ctx.templates.roles.get('DEV-FE')!.skills.filter(s => s.on).map(s => s.id);
+    const role = app.ctx.templates.roles.get('DEV-FE')!;
+    const detail = 'Keep the frontend contract. '.repeat(8_000);
+    app.ctx.templates = { ...app.ctx.templates, roles: new Map(app.ctx.templates.roles).set(role.id, { ...role, body: role.body + detail }) };
+    const own = role.skills.filter(s => s.on).map(s => s.id);
     const many = [...new Set([...own, ...app.ctx.templates.skills.keys()])].filter(id => !id.startsWith('orch-')).slice(0, 60);
     const res = await app.inject({
       method: 'POST',
@@ -72,7 +76,7 @@ describe('hiring', () => {
     expect(res.statusCode).toBe(201);
     const [ira] = await db.select().from(agents).where(eq(agents.name, 'Ira'));
     const told = await instructionsOf(app.ctx, ira!);
-    expect(told.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    expect(told.text.includes(detail)).toBe(true);
     expect(told.skills.length + many.filter(id => app.ctx.templates.skills.get(id)!.kind === 'core').length).toBe(many.length);
   });
 });
@@ -113,8 +117,7 @@ describe('the employee card', () => {
     expect(card.skills.find((s: { id: string }) => s.id === 'hh-report-to-head')).toMatchObject({ on: true, locked: true, overridden: false, templateChanged: false });
     expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', 'assignment', ...role.skills.filter(s => s.on).map(() => 'skill')]);
     expect(card.raw).toBe(card.parts.map((p: { text: string }) => p.text).join('\n\n'));
-    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
-    expect(card.instructions).toEqual({ length: (await instructionsOf(app.ctx, bruno!)).text.length, max: MAX_INSTRUCTIONS });
+    expect(card).not.toHaveProperty('instructions');
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(card.runsOn.map((r: { subscription: { id: string } }) => r.subscription.id)).toEqual([codex, orchestrator!.subscriptionId, teamKey]);
     expect(card.runsOn.find((r: { subscription: { id: string } }) => r.subscription.id === teamKey).models).toEqual(API_MODELS.anthropic_api);
@@ -225,25 +228,38 @@ describe('the employee card', () => {
     expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain('You own the billing API.');
   });
 
-  it('keeps the instructions within what a turn carries, counting only what is not a skill file', async () => {
+  it('keeps long assignments and skill overrides whole on the employee card', async () => {
     const { app, db, ceo, brunoId } = await company();
     const card = (await open(app, ceo, brunoId)).json();
-    const told = async () => (await instructionsOf(app.ctx, (await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!)).text;
-    const core = (id: string) => app.ctx.templates.skills.get(id)?.kind === 'core';
-    /* No field a person writes reaches the limit alone: an existing assignment is saved near it first. */
-    await db.update(agents).set({ overrides: { base: '' } }).where(eq(agents.id, brunoId));
-    await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS - (await told()).length - 100) } }).where(eq(agents.id, brunoId));
-    /* A core skill goes whole into the instructions. Its part carries its markers and heading around the text it takes. */
-    const part = (card.parts as { kind: string; id: string; text: string }[]).find(p => p.kind === 'skill' && core(p.id))!;
-    const text = /\n\n([\s\S]*)\n<!-- \/hh:skill -->$/.exec(part.text)![1]!;
-    expect((await patch(app, ceo, brunoId, { skillText: { [part.id]: text + 'x'.repeat(101) } })).json().error.reason).toBe('instructions_too_long');
-    expect((await patch(app, ceo, brunoId, { skillText: { [part.id]: text + 'x'.repeat(100) } })).statusCode).toBe(200);
-    expect((await told()).length).toBe(MAX_INSTRUCTIONS);
-    /* A skill that goes as a file may grow to all a field takes. */
-    const file = (card.parts as { kind: string; id: string }[]).find(p => p.kind === 'skill' && !core(p.id))!;
-    expect((await patch(app, ceo, brunoId, { skillText: { [file.id]: 'y'.repeat(8000) } })).statusCode).toBe(200);
-    const run = { type: 'job.run', jobId: brunoId, subscriptionId: brunoId, provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1, secret: null, instructions: await told(), toolToken: null };
-    expect(parseServerMessage(JSON.stringify(run))).not.toBeNull();
+    const parts = card.parts as { kind: string; id: string }[];
+    const core = parts.find(p => p.kind === 'skill' && app.ctx.templates.skills.get(p.id)?.kind === 'core')!;
+    const file = 'dev-tdd';
+    const base = 'Own the checkout.\n'.repeat(15_000);
+    const body = 'Review the whole change.\n'.repeat(9_000);
+    const res = await patch(app, ceo, brunoId, { base, skillText: { [core.id]: body, [file]: body } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('instructions');
+    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    const told = await instructionsOf(app.ctx, bruno!);
+    expect(told.text).toContain(base);
+    expect(told.text).toContain(body);
+    expect(told.skills.find(skill => skill.name === file)?.body.endsWith(body)).toBe(true);
+  });
+
+  it('preserves a tracker nudge written after the card has read the employee', async () => {
+    const { app, db, ceo, brunoId } = await company();
+    const last = new Date('2026-11-15T12:00:00Z');
+    const nudged = new Date('2026-11-15T12:02:00Z');
+    await db.update(agents).set({ timerMinutes: 60, timerOrder: 'Check the tracker.', timerAt: last }).where(eq(agents.id, brunoId));
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async (...args) => {
+      await db.update(agents).set({ timerAt: nudged, timerNudgedAt: nudged }).where(eq(agents.id, brunoId));
+      return transaction(...args);
+    });
+    const edited = await patch(app, ceo, brunoId, { name: 'Bruna' });
+    expect(edited.statusCode).toBe(200);
+    const [row] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    expect(row).toMatchObject({ name: 'Bruna', timerAt: nudged, timerNudgedAt: nudged });
   });
 
   it('keeps both of two changes sent at once', async () => {
@@ -291,7 +307,7 @@ describe('the employee card', () => {
     const skillText = Object.fromEntries(role.skills.filter(s => s.on).slice(0, 4).map(s => [s.id, long]));
     expect((await patch(app, ceo, brunoId, { base: long, skillText })).statusCode).toBe(200);
     const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
-    expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
+    expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).whole).toContain(long);
   });
 
   it('resets template abilities while preserving the employee assignment', async () => {
@@ -381,6 +397,23 @@ describe('the employee card', () => {
     expect((await app.inject({ method: 'DELETE', url: `/api/agents/${orchestrator!.id}`, ...as(ceo) })).json().error.reason).toBe('orchestrator_locked');
   });
 
+  it('makes all waiting turns obsolete when an employee leaves and keeps its completed history', async () => {
+    const { app, db, ceo, teamKey, brunoId } = await company();
+    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    const recorded = await db.insert(jobs).values([
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Inbox wake.', inboxWake: true, timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Waiting words.', timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'tools', prompt: 'Waiting step.', timeoutMs: 900000 },
+      { companyId: bruno!.companyId, subscriptionId: teamKey, agentId: brunoId, kind: 'conversation', prompt: 'Finished words.', status: 'done', result: 'Kept history.', timeoutMs: 900000 },
+    ]).returning();
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(ceo) })).statusCode).toBe(204);
+    const after = await db.select().from(jobs).where(eq(jobs.agentId, brunoId));
+    for (const before of recorded.filter(j => j.status === 'queued')) {
+      expect(after.find(j => j.id === before.id)).toMatchObject({ status: 'obsolete', error: 'removed', finishedAt: expect.any(Date) });
+    }
+    expect(after.find(j => j.status === 'done')).toMatchObject({ result: 'Kept history.' });
+  });
+
   it("changes the orchestrator's model from his card", async () => {
     const { app, db, ceo } = await company();
     const card = (await open(app, ceo, 'orchestrator')).json();
@@ -399,7 +432,7 @@ describe('the employee card', () => {
     const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.departments[0].employees).toEqual([
-      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'xhigh', state: 'sleeping', status: 'idle', on: true, opens: true, task: null, timer: null, context: null, alarm: null, program: null, retry: null, failure: null, held: null, obsolete: null },
+      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'xhigh', state: 'sleeping', status: 'idle', on: true, opens: true, task: null, timer: null, context: null, alarm: null, program: null, retry: null, failure: null, held: null, obsolete: null, turnkey: false },
     ]);
   });
 

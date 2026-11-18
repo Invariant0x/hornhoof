@@ -13,7 +13,7 @@ const CARD: AgentCardView = {
   currentTask: null,
   id: BRUNO.id, name: BRUNO.name, kind: 'worker', role: null, department: { id: 'd2', name: 'Development' },
   product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', retry: null, failure: null, skills: [], parts: [],
-  raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, canRemove: false, timer: null,
+  raw: '', runsOn: [], changes: [], interrupted: [], canEdit: false, canRemove: false, timer: null,
 };
 const program = (state: ProgramView['state'], since: number): ProgramView => ({ state, since, tool: null, screenAt: NOW, signAt: null, retry: null, reportedAt: NOW });
 const STATES: { name: string; program: ProgramView | null; alarm: TurnAlarm | null; held?: Employee['held']; en: string; ru: string; red: boolean; calm?: boolean }[] = [

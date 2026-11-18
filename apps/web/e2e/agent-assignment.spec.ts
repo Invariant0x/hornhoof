@@ -57,7 +57,7 @@ function cardOf(state: FixtureState): AgentCardView {
     product: null, team: null, teams: [], model: '', effort: null, subscription: null, machine: null,
     state: 'sleeping', program: null, alarm: null, retry: null, failure: null,
     skills: [{ id: 'dev-tdd', title: SKILL_TITLE, description: SKILL_TITLE, on: true, locked: false, overridden: state.skill !== DEFAULT_SKILL, templateChanged: false }],
-    parts, raw, instructions: { length: raw.length, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: state.canEdit, canRemove: state.canEdit, timer: null,
+    parts, raw, runsOn: [], changes: [], interrupted: [], canEdit: state.canEdit, canRemove: state.canEdit, timer: null,
   };
 }
 

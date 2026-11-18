@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { PhoneEndpoint, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
+import { PhoneEndpoint, networkEndpoint, type PhoneDevice, type PhoneReadinessIssue } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { MachineView, Me } from '../types';
@@ -10,6 +10,7 @@ import { PhoneScreen } from './PhoneScreen';
 export type PhoneView = {
   id: string; name: string; owner: { id: string; name: string }; machineId: string; lending: boolean; online: boolean;
   state: 'owner' | 'busy' | 'available'; queued: number; stopping: boolean; endpoint?: string;
+  readiness?: PhoneReadinessIssue[] | null;
 };
 export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
 
@@ -125,7 +126,12 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     finally { setBusy(false); }
   }
   return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={t.phones.states[phone.online ? phone.state : 'offline']} line={t.phones.owner(phone.owner.name)} />}>
-    <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} /><p className="muted">{t.phones.waiting(phone.queued)}</p></Part>
+    <Part title={t.phones.computer}>
+      <Facts items={[[t.phones.computer, machine]]} />
+      <p className="muted">{t.phones.waiting(phone.queued)}</p>
+      {phone.readiness === null && <p className="muted" role="status">{t.phones.readiness.checking}</p>}
+      {phone.readiness?.map(issue => <p key={issue} className="bad">{t.phones.readiness[issue]}</p>)}
+    </Part>
     {mine && <Part title={t.phones.control}>
       <div className="entry-actions"><button type="button" className="act" aria-expanded={watching} onClick={() => setWatching(v => !v)}>{watching ? t.phones.hide : t.phones.watch}</button>
         {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}

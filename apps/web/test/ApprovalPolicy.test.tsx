@@ -30,10 +30,10 @@ describe('ApprovalPolicy', () => {
     mockApi({ [POLICY]: [200, ceoView({ rules: [{ channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }, { channel: 'commit', mode: 'every' }] })] });
     render(<ApprovalPolicy departmentId="d1" />);
     await screen.findByRole('combobox', { name: t.owner });
-    expect(screen.getByText(/By default, messages, prices and publications need no approval/)).toBeInTheDocument();
+    expect(screen.getByText(/By default, work needs no approval/)).toBeInTheDocument();
     expect(rowOf('message').getByRole('combobox', { name: t.mode })).toHaveValue('new_kinds');
     expect(rowOf('price').getByRole('combobox', { name: t.mode })).toHaveValue('every');
-    expect(rowOf('commit').getByText(t.readModes.every)).toBeInTheDocument();
+    expect(rowOf('commit').getByRole('combobox', { name: t.mode })).toHaveValue('every');
   });
 
   it('says the CEO decides while there is no owner, and offers the CEO those who may own it', async () => {

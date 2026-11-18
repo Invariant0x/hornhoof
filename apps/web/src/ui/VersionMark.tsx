@@ -29,8 +29,8 @@ const shortCommit = (commit?: string) => commit?.slice(0, 7) || '?';
 export const versionText = ({ version, commit }: Version) => `${version} (${shortCommit(commit)})`;
 export const buildText = (build: Version & { tag: string }) => versionText({ version: build.version || build.tag, commit: build.commit });
 
-/* Small and muted in the bottom right of every screen. */
+/* The running build has a footer below the screen. */
 export function VersionMark() {
   const version = useVersion();
-  return version && <span className="version-mark">{versionText(version)}</span>;
+  return version && <footer className="version-mark">{versionText(version)}</footer>;
 }

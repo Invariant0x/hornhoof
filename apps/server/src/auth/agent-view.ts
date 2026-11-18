@@ -20,9 +20,7 @@ import { type Person, viaOrchestrator } from './session.js';
    things stay with each plan's owner even there: typing into an agent's terminal, which works with that owner's sign-in on
    their machine, and the plan's secrets (keys, sign-ins, codes), which no view of an agent carries. Anyone else, and the
    owner outside their department, sees an agent only on a plan of their own in a place they reach: neither alone is
-   enough. An assistant's own agent is apart from all of that: its owner alone sees it, as nobody else talks to their
-   assistant, not the CEO and not the orchestrator. This is the one rule; every route that opens an agent, or shows its own
-   words, asks it here.
+   enough. The orchestrator can inspect every assistant. Only its own person can talk to it.
    plans: the person's own live plans. agents: the employees that passes for now, empty for a full view. own: the agents of
    the person's own assistants. apart: every other assistant's agent of the company, which even a full view leaves out. */
 export type AgentViewer = {
@@ -64,7 +62,7 @@ export function seesAgentId(viewer: AgentViewer, id: string | null | undefined):
   return Boolean(id) && viewer.agents.has(id!);
 }
 
-/* The company's assistants' own agents, split into this person's and the rest. A call from inside has none of its own. */
+/* Assistant agents this caller can see, and those kept in their own person's view. */
 async function assistantAgentsOf(db: Db, me: Person): Promise<{ own: Set<string>; apart: Set<string> }> {
   const rows = await db
     .select({ id: agents.id, ownerId: people.assistantOf })
@@ -72,7 +70,7 @@ async function assistantAgentsOf(db: Db, me: Person): Promise<{ own: Set<string>
     .leftJoin(assistants, eq(assistants.agentId, agents.id))
     .leftJoin(people, eq(people.id, assistants.personId))
     .where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'assistant')));
-  const mine = (row: { ownerId: string | null }) => !me.via && row.ownerId === me.id;
+  const mine = (row: { ownerId: string | null }) => viaOrchestrator(me) || (!me.via && row.ownerId === me.id);
   return { own: new Set(rows.filter(mine).map(r => r.id)), apart: new Set(rows.filter(r => !mine(r)).map(r => r.id)) };
 }
 
@@ -105,6 +103,11 @@ export const placeOf = async (db: Db, agent: AgentRow, planId: string | null = a
 export async function canViewAgent(db: Db, me: Person, agent: AgentRow, planId: string | null = agent.subscriptionId): Promise<boolean> {
   if (agent.companyId !== me.companyId) return false;
   return seesAgent(await viewerOf(db, me), await placeOf(db, agent, planId));
+}
+
+/* A personal channel can reach the orchestrator without opening its window or shared history. */
+export async function canContactAgent(db: Db, me: Person, agent: AgentRow): Promise<boolean> {
+  return agent.companyId === me.companyId && (agent.kind === 'orchestrator' || await canViewAgent(db, me, agent));
 }
 
 export const agentHidden = () => new ApiError(403, 'forbidden', 'This employee is not on a plan of yours in a department you have, nor in a department you own.', 'agent_hidden');

@@ -42,6 +42,12 @@ export default defineConfig({
         channel: process.env.PLAYWRIGHT_CHANNEL,
       },
     },
+    ...(['firefox', 'webkit'] as const).map(browserName => ({
+      name: browserName,
+      grep: /tracker screenshots/,
+      testMatch: ['**/tasks.spec.ts', '**/board.spec.ts', '**/turns.spec.ts'],
+      use: { browserName, video: 'off' as const },
+    })),
   ],
   webServer: {
     command: `npx vite --mode browser-test --port ${PORT} --strictPort`,

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { and, count, desc, eq, inArray, sql, sum } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { limiter, type Attempts } from '../../auth/limit.js';
-import { companies, feedbackInbox, feedbackSignals, FEEDBACK_KINDS } from '../../db/schema.js';
+import { companies, feedbackInbox, feedbackSignals, feedbackSubmissions, FEEDBACK_KINDS } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { cleaned, TEXT_MAX, TITLE_MAX, type IssueLink, type Report, type Shown } from './report.js';
@@ -15,9 +15,7 @@ type Kind = (typeof FEEDBACK_KINDS)[number];
 export type Priority = 'high' | 'normal' | 'low';
 
 const HOUR = 60 * 60 * 1000;
-/* What one installation may send in an hour, and how many new cards all of them may open in an hour together, so made-up
-   installations cannot fill the list. */
-const REPORTS_PER_HOUR = 10;
+/* The anonymous inbox bounds how many new rows made-up installations can fill at once. */
 const NEW_CARDS_PER_HOUR = 200;
 /* Every signal consumes the shared budget, even when its report repeats an existing card under a made-up installation. */
 const SIGNALS_PER_HOUR = 2000;
@@ -43,10 +41,10 @@ export function fingerprintOf(kind: Kind, errorCode: string | null, title: strin
 
 /* Counted on the server's clock, which tests move. */
 type SignalAttempt = { at: number; signals: number };
-type Limits = { perInstallation: Attempts; newCards: Attempts; signals: SignalAttempt[] };
+type Limits = { newCards: Attempts; signals: SignalAttempt[] };
 const kept = new WeakMap<object, Limits>();
 function limitsOf(ctx: object): Limits {
-  const found = kept.get(ctx) ?? { perInstallation: limiter({ max: REPORTS_PER_HOUR, windowMs: HOUR }), newCards: limiter({ max: NEW_CARDS_PER_HOUR, windowMs: HOUR }), signals: [] };
+  const found = kept.get(ctx) ?? { newCards: limiter({ max: NEW_CARDS_PER_HOUR, windowMs: HOUR }), signals: [] };
   kept.set(ctx, found);
   return found;
 }
@@ -89,12 +87,10 @@ async function companyOf(ctx: Pick<Ctx, 'db'>): Promise<string> {
 
 /* Takes one report into the list: a new card, or more signals on the card it repeats, one or as many repeats as it tells
    of. Its words are cleaned once more, whoever sent it. It answers with the card's number and its issue, if any. */
-export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Report): Promise<{ number: number; issue: IssueLink | null }> {
+export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Report, anonymous = true): Promise<{ number: number; issue: IssueLink | null }> {
   const now = ctx.clock();
   const limits = limitsOf(ctx);
   const signals = report.repeats ?? 1;
-  withinSignals(limits, signals, now);
-  within(limits.perInstallation, report.installation, now);
   const companyId = await companyOf(ctx);
   const title = titleOf(report);
   const text = cleaned(report.text).text.slice(0, TEXT_MAX);
@@ -102,11 +98,21 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
   const at = new Date(now);
   const versions = [report.facts.version];
   const platforms = report.facts.platform;
+  const key = report.submission ? `in:${report.installation}:${report.submission}` : null;
   const taken = await ctx.db.transaction(async tx => {
+    if (key) {
+      const [added] = await tx.insert(feedbackSubmissions).values({ key }).onConflictDoNothing().returning();
+      if (!added) {
+        const [already] = await tx.select({ card: feedbackInbox }).from(feedbackSubmissions)
+          .innerJoin(feedbackInbox, eq(feedbackInbox.id, feedbackSubmissions.cardId)).where(eq(feedbackSubmissions.key, key));
+        return already!.card;
+      }
+    }
+    if (anonymous) withinSignals(limits, signals, now);
     const place = and(eq(feedbackInbox.companyId, companyId), eq(feedbackInbox.fingerprint, fingerprint));
     let [card] = await tx.select().from(feedbackInbox).where(place).for('update');
     if (!card) {
-      within(limits.newCards, 'all', now);
+      if (anonymous) within(limits.newCards, 'all', now);
       const open = () => tx
         .insert(feedbackInbox)
         .values({ companyId, fingerprint, kind: report.kind, title, text, errorCode: report.facts.errorCode, versions, platforms, createdAt: at, updatedAt: at })
@@ -131,6 +137,7 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
       .insert(feedbackSignals)
       .values({ cardId: card!.id, installation: report.installation, signals, createdAt: at, updatedAt: at })
       .onConflictDoUpdate({ target: [feedbackSignals.cardId, feedbackSignals.installation], set: { signals: sql`${feedbackSignals.signals} + ${signals}`, updatedAt: at } });
+    if (key) await tx.update(feedbackSubmissions).set({ cardId: card!.id }).where(eq(feedbackSubmissions.key, key));
     return card!;
   });
   inboxChanged(ctx, companyId);
