@@ -40,6 +40,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The task log shows the latest four steps, including waits, and lets you open earlier steps.
 - A question appears below the log when you can answer it from the card.
 - The title menu holds task actions, details, materials and the full log.
+- The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
 
 ## [0.34.0] - 2026-11-18
 
