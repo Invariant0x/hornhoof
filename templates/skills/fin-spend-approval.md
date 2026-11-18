@@ -1,20 +1,20 @@
 ---
 id: fin-spend-approval
 title: { en: "Spend approval", ru: "Согласование расходов" }
-description: { en: "Gate for every spend: checks the request against budget and policy before a human approves and pays.", ru: "Шлюз для каждого расхода: проверяет запрос по бюджету и правилам, прежде чем человек утвердит и оплатит." }
+description: { en: "Checks each expense against the budget and spending rules.", ru: "Проверяет каждый расход по бюджету и правилам." }
 kind: gate
 sources: []
 ---
-No money is spent without this gate: purchases, subscriptions, contractors, ads, refunds, AI usage above budget. Agents never pay; the gate prepares the decision for the human who does.
+For an assigned expense, check the amount, purpose and applicable budget before giving the payment details to the person who pays.
 
 For each request, check:
 1. **Request**: who asks, what for, amount and currency, one-off or recurring (with the yearly total), vendor, when it is needed.
-2. **Budget**: which budget line it hits, what is left on it this month, and the total after this spend. Over budget goes to the CEO.
+2. **Budget**. Record the applicable budget line, available amount and amount after the proposed expense. Take exceptions to the people responsible for the limit.
 3. **Need**: the business reason in one sentence, what happens if it is not bought, and cheaper options considered.
 4. **Policy**: within the approval limit your company set for that person or department; the vendor is real and known (check name, site and bank details against earlier invoices; changed bank details are a red flag); no purchase split to stay under a limit.
-5. **Terms**: contract length, auto-renewal, cancellation, what data the vendor gets. Long or unusual terms go to the CEO.
+5. **Terms**. Read duration, renewal, cancellation and data sharing. Send exceptional terms to the person responsible for them.
 6. **Separation**: the requester does not approve their own spend, and the approver does not also pay.
 
-Recommendation: approve for payment (name the authorized human approver and the different human who pays), approve with changes, refuse (with the reason), or escalate to the CEO. Record the recommendation and the human's actual decision separately in the spend log with date and amount. Report any spend that skipped this gate to the CEO, however small.
+Record the recommendation separately from any decision required by the department's spend rule and from the payment itself. Include the amount, date, decision owner and evidence. Report skipped controls to the responsible Finance people.
 
-Before payment lists or figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. Agents never post entries, move money or file returns; selecting this ability grants no spending or system permissions.
+Identify the source records and material figures needed for the release check. Paying and signing are personal actions.

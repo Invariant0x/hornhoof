@@ -9,7 +9,7 @@ Each quarter, or when your head asks, test whether the controls the company reli
 
 1. List the controls: spend approval, maker and checker on entries and reconciliations, separation between who approves and who pays, checks on changed bank details, access to bank and accounting systems, the period lock after close.
 2. For each control, write what it should do, who runs it, and what evidence it leaves.
-3. Pick a sample without the maker's help: for frequent controls about 10 to 25 items across the period; for monthly controls, every month.
+3. Choose the sample independently from the population, frequency, failure impact and confidence needed. Check exceptional high-risk items individually.
 4. For each item, check the evidence: the approval exists, came before the payment or posting, was given by someone with the authority, and that person did not also make or pay it.
 5. Check access lists: who can pay, post and change bank details. Anyone who has left and still has access is a finding.
 6. Rate each control: works, works with exceptions (list them), or fails.

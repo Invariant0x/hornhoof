@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- Finance and Support templates route decisions to the people responsible and describe what each check needs to prove.
 - Development templates keep evidence tied to the checked version and distinguish product failures from faults in checks.
 - Work templates keep running work visible and assign repairs and checks to the people who own them.
 - Company templates explain who can act, when to ask a person and how to keep sign-ins private.
