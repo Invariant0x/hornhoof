@@ -15,3 +15,5 @@ Use this ability to choose a verification plan for an assigned marketing output 
 6. For model checks, require a versioned example set with known answers labeled independently, an owner-set threshold, separate false-accept and false-reject counts, and new examples from real misses. Revalidate when the check, prompt, lists or model changes. Keep company examples private. An unvalidated check, including subjective brand review without a valid set, proves no pass.
 
 Return the checks, evidence, gaps and any approval its department set for this output. This plan does not assign role duties, impose a turn cadence or grant publication rights.
+
+When the output is a video, follow vid-laws. Hand the brief to Video production if the company has it, and keep publication in Marketing. Otherwise name one keeper for the whole video. That keeper checks each draft and final shot against the brief, style and character sheets and measured set before editing. Remake any shot that drifts. Deliver moving video.

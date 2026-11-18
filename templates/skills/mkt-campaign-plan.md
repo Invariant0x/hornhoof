@@ -17,3 +17,5 @@ Use this ability to plan an assigned campaign. Inputs are the goal, audience, ap
 8. Name the measure for each channel, its source, baseline and evaluation date. Record assumptions and stop conditions.
 
 Return a plan, with any approval rule its department set. A new public approach is the department's own decision; a paid commitment goes by its spend rule. The plan does not assign employees, change task gates or authorize publication.
+
+For a video, use vid-laws. Set the look and platform in the brief and send it to Video production when that department exists. If Marketing makes it, give one keeper the shot continuity decision and plan the set and markers, probe and keeper check before the edit.

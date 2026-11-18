@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { loadTemplates } from '../src/modules/templates/load.js';
 
 const DIR = new URL('../../../templates/', import.meta.url);
@@ -57,5 +58,28 @@ describe('the laws of video production', () => {
     expect(setup).toMatch(/consumer subscriptions[\s\S]*no API/i);
     expect(setup).toMatch(/prompts[\s\S]*reference frames[\s\S]*cost[\s\S]*git/i);
     expect(templates.skills.get('orch-company')?.body).toContain('vid-work-pipeline');
+  });
+
+  it('routes Marketing video through the shared laws and the Video production department when it exists', () => {
+    for (const id of ['MKT-HEAD', 'MKT-WRITE', 'MKT-SOCIAL', 'MKT-EDIT', 'DSN-HEAD', 'DSN-PM', 'DSN-UI', 'DSN-QA']) {
+      expect(templates.roles.get(id)?.skills, id).toContainEqual(expect.objectContaining({ id: 'vid-laws', on: true }));
+    }
+    for (const id of ['mkt-work-pipeline', 'mkt-campaign-plan', 'mkt-social-posts', 'dsn-work-pipeline']) {
+      expect(templates.skills.get(id)?.body, id).toContain('vid-laws');
+    }
+    const news = templates.catalogs.get('marketing')?.pipelines.find(p => p.key === 'marketing-news-videos');
+    expect(news?.stages[0]).toMatchObject({ handoffTo: ['video_production'] });
+    const fallback = news?.stages.map(stage => stage.brief ?? '').join('\n');
+    expect(fallback).toMatch(/set and markers[\s\S]*probe[\s\S]*keeper[\s\S]*before editing/i);
+    const editing = templates.catalogs.get('design')?.pipelines.find(p => p.key === 'design-video-editing');
+    expect(editing?.stages[0]?.brief).toMatch(/vid-laws[\s\S]*keeper[\s\S]*before editing/i);
+  });
+
+  it('delivers the laws to video roles hired before the laws were added', () => {
+    const role = templates.roles.get('MKT-SOCIAL')!;
+    const skills: string[] = [];
+    const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Ari', roleKey: role.id, skills, overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1];
+    const rendered = renderInstructions(templates, agent, { company: 'Company', department: 'Marketing', product: null });
+    expect(rendered.skills.find(file => file.name === 'vid-laws')?.body).toContain('## Law 6. A keeper holds the look and the world');
   });
 });

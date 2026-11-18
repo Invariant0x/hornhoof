@@ -2057,6 +2057,8 @@ export const en = {
       name: "Video editing", why: "For turning existing footage into a finished video.",
       stages: {
         "Sort footage": "Sort footage",
+        "Prove the hardest edit": "Prove the hardest edit",
+        "Check shot continuity": "Check shot continuity",
         "Edit a rough cut": "Edit a rough cut",
         "Add sound and captions": "Add sound and captions",
         "Review the cut": "Review the cut",
@@ -2085,8 +2087,11 @@ export const en = {
     "marketing-news-videos": {
       name: "Short news videos", why: "For making short videos from verified news or product updates.",
       stages: {
+        "Plan the video": "Plan the video",
         "Write the script": "Write the script",
         "Record the voice": "Record the voice",
+        "Prepare the shots": "Prepare the shots",
+        "Check shot continuity": "Check shot continuity",
         "Render the video": "Render the video",
         "Review the result": "Review the result",
         "Publish the video": "Publish the video",

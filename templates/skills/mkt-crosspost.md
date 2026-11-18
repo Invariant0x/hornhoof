@@ -15,3 +15,5 @@ Use this ability to adapt an assigned core piece for several specified networks.
 6. For an authorized published item, inspect the visitor view for text, media, links and previews, and record its URL, time and approval reference. Correct a public record yourself with a new revision; deleting one for good is irreversible and needs the CEO's yes.
 
 Return the native variants and, only when publication was assigned and authorized, their delivery evidence. Never add networks or accounts outside the assignment or use a personal account.
+
+For video, use vid-laws. Keep the keeper's approved look and world in every platform cut. Return any new shots to the keeper before editing.

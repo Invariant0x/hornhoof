@@ -2059,6 +2059,8 @@ export const ru: Messages = {
       name: "Монтаж видео", why: "Чтобы собрать готовое видео из отснятого материала.",
       stages: {
         "Sort footage": "Разобрать исходники",
+        "Prove the hardest edit": "Проверить самый сложный монтажный переход",
+        "Check shot continuity": "Проверить согласованность кадров",
         "Edit a rough cut": "Собрать черновой монтаж",
         "Add sound and captions": "Добавить звук и субтитры",
         "Review the cut": "Проверить монтаж",
@@ -2087,8 +2089,11 @@ export const ru: Messages = {
     "marketing-news-videos": {
       name: "Короткие новостные видео", why: "Для коротких видео о проверенных новостях или изменениях продукта.",
       stages: {
+        "Plan the video": "Спланировать видео",
         "Write the script": "Написать сценарий",
         "Record the voice": "Записать голос",
+        "Prepare the shots": "Подготовить кадры",
+        "Check shot continuity": "Проверить согласованность кадров",
         "Render the video": "Собрать видео",
         "Review the result": "Проверить результат",
         "Publish the video": "Опубликовать видео",

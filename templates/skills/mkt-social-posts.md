@@ -16,3 +16,5 @@ Use this ability to draft posts for an assigned network and audience. Inputs are
 7. Check facts and permitted links; identify the source for every claim. Include media requirements and useful alt text.
 
 Return each draft with network, account, language, proposed time and sources. A draft does not authorize posting or replying. A public item goes from the company's own account, is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
+
+For original video, use vid-laws and work with Video production when the company has it. If Marketing makes the video, use the keeper's frames for generation and send every shot to that keeper before editing. Publish the accepted moving video.

@@ -14,3 +14,5 @@ Use this ability to publish for the department: a post, a reply, an announcement
 5. **Corrections**: fix a live error yourself and tell your head; deleting a public record for good is irreversible and needs the CEO's yes.
 
 Return what was published, where, and the commit that records it.
+
+For video, follow vid-laws. Check that the head accepted the finished cut after the keeper checked every shot.

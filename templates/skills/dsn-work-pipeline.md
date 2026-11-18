@@ -15,3 +15,5 @@ Plan verification for the design scope named in the assignment. Read the brief, 
 6. Keep protected approvals explicit. A breaking system change needs the decision of the department's own responsible people, with affected products and implementation cost. No sample, model result or selected ability waives human approval or publication controls.
 
 Return a verification plan with check scope, reference version, assigned owner, procedure, expected evidence, gaps and measures such as returned designs or findings by product. Record descriptions in the company-designated location when requested; staffing and turn cadence remain properties of the assignment.
+
+For video editing, apply vid-laws. Name one keeper to check all incoming clips against the brief, style sheet and measured set before editing. Send drifting clips back for a new take. Route original production to Video production when that department exists.
