@@ -11,6 +11,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Before you update: migration 0145 drops the 24 tables External messaging left in the database, every `outbound_*` table, `support_tickets`, `support_classifications` and every `model_check*` table, with their rows: mailbox sign-ins, contacts, letters, support tickets and checks made by a model. Take out what you still need first; the database copy the update saves before it migrates keeps them, and the machine keeps the last three such copies. No other table changes.
 
+## [0.32.1] - 2026-11-17
+
+### Fixed
+
+- The tracker in the light skin draws a chosen card, a chosen node and a node under the pointer with a border people can see; a due day reads day before month right to left; a side panel gives its words the same width in Chromium, Firefox and Safari; and a link of two letters is 44 px wide to press.
+- Employees on gpt-6.2-sol or gpt-6.2-astra can hand in their work and be chosen to check others' work, as on gpt-6.1-sol and gpt-6-astra.
+- A test run of a release keeps the results of tests a change does not reach: a script that belongs to no suite, as the updater's, ties the tests that use it to its own folder instead of the whole repository, and a log file counts as data.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

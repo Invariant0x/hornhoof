@@ -304,6 +304,11 @@ export function Fact({ name, children }: { name: string; children: ReactNode }) 
   );
 }
 
+/* A due day in its own direction, so "20 Nov" reads day then month right to left too; past it, in the colour of a delay. */
+export function DueDay({ due }: { due: { text: string; late: boolean } }) {
+  return <span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span>;
+}
+
 /* Who answers for it, who does it, its pipeline and stage, its date, and its time in words. */
 function TaskFacts({ task }: { task: TaskDetail }) {
   const t = useT();
@@ -320,7 +325,7 @@ function TaskFacts({ task }: { task: TaskDetail }) {
       <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
       <Fact name={words.executor}>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</Fact>
       {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
-      {due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined}>{due.text}</span></Fact>}
+      {due && <Fact name={words.due}><DueDay due={due} /></Fact>}
       {time && (
         <Fact name={words.time}>
           {words.inStatus(t.tasks.states[task.status], spanText(t, sinceSeconds(time.inStatusSince)))}
