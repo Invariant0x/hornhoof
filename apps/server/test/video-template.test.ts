@@ -39,10 +39,11 @@ describe('the laws of video production', () => {
   it('makes the look, set, probe and platform fit the brief', () => {
     const laws = templates.skills.get('vid-laws')!.body;
     expect(laws).not.toMatch(/real failure|mean live-action film|5 to 8 s/i);
+    expect(laws).toMatch(/medium and look[\s\S]*required method of capture/i);
     expect(laws).toMatch(/planning sketch[\s\S]*approved production asset/i);
-    expect(laws).toMatch(/real or drawn[\s\S]*screen recording/i);
-    expect(laws).toMatch(/hardest moment[\s\S]*few seconds/i);
-    expect(laws).toMatch(/destination[\s\S]*for example, a short vertical video/i);
+    expect(laws).toMatch(/shared set plan[\s\S]*where the layout matters/i);
+    expect(laws).toMatch(/hardest moment[\s\S]*materially different risk/i);
+    expect(laws).toMatch(/destination's verified format, viewing area and playback conditions/i);
   });
 
   it('assigns clip acceptance explicitly and reserves text judging for written proposals', () => {
@@ -106,19 +107,78 @@ describe('the laws of video production', () => {
     const long = catalog.pipelines[1];
     expect(long).toMatchObject({ key: 'video-long-work', name: 'Long video production', why: 'For a film, a series or a work with many scenes or places.' });
     expect(long!.stages.map(stage => stage.name)).toEqual([
-      'Write the brief', 'Write the story and make a production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
-      'Make the scenes', 'Assemble the cut', 'Finish color, sound and titles', 'Check the whole work', 'Prepare and deliver the final version',
+      'Write the brief', 'Write the story', 'Keep the production guide', 'Break down sequences and scenes', 'Prove the hardest moment',
+      'Make the scenes', 'Assemble and lock the cut', 'Finish and export the master', 'Check the whole work', 'Deliver the accepted master',
     ]);
-    expect(long!.stages[1]?.brief).toMatch(/character sheets[\s\S]*sets with markers[\s\S]*look book[\s\S]*color script[\s\S]*sound palette/i);
-    expect(long!.stages[6]?.brief).toMatch(/Law 10[\s\S]*colorist[\s\S]*sound designer[\s\S]*editor/i);
-    expect(long!.stages[7]).toMatchObject({ ownerRole: 'VID-QA', brief: expect.stringContaining('Law 11') });
+    expect(long!.stages[2]?.brief).toMatch(/character sheets[\s\S]*sets with markers[\s\S]*look book[\s\S]*color script[\s\S]*sound palette/i);
+    expect(long!.stages[7]?.brief).toMatch(/Law 10[\s\S]*colorist[\s\S]*sound designer[\s\S]*editor/i);
+    expect(long!.stages[8]).toMatchObject({ ownerRole: 'VID-QA', brief: expect.stringContaining('Law 11') });
   });
 
   it('runs scenes in parallel through the short pipeline and sends bible changes to every affected scene', () => {
     const long = templates.catalogs.get('video_production')?.pipelines.find(p => p.key === 'video-long-work');
     const scenes = long?.stages.find(s => s.name === 'Make the scenes')?.brief;
     expect(scenes).toMatch(/each scene[\s\S]*own task[\s\S]*in parallel[\s\S]*video-production[\s\S]*script[\s\S]*keeper's gate[\s\S]*edit/i);
-    expect(scenes).toMatch(/only the bible's sheets, sets and look reference[\s\S]*never changes the bible[\s\S]*lead keeper and the head[\s\S]*every scene it touches/i);
+    expect(scenes).toMatch(/bible's approved story, sheets, sets and look references[\s\S]*lead keeper and the director[\s\S]*every affected scene/i);
+  });
+
+  it('lets the brief choose the way shots are made and keeps usable footage', () => {
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/film brief calls for live action[\s\S]*cartoon calls for animation/i);
+    expect(work).toMatch(/use camera capture when the brief requires/i);
+    const stages = templates.catalogs.get('video_production')!.pipelines[0]!.stages;
+    expect(stages.find(stage => stage.name === 'Make or capture draft shots')).toMatchObject({ ownerRole: 'VID-GEN', echelon: 'development' });
+    expect(stages.find(stage => stage.name === 'Prepare final shots and required pickups')?.brief).toMatch(/keep accepted drafts and recordings/i);
+  });
+
+  it('gives the writer the story, the director the creative decisions and the keeper custody of the bible', () => {
+    const long = templates.catalogs.get('video_production')!.pipelines.find(p => p.key === 'video-long-work')!;
+    expect(long.stages[1]).toMatchObject({ ownerRole: 'VID-WRITE', brief: expect.stringMatching(/director approves[\s\S]*story line/i) });
+    expect(long.stages[2]).toMatchObject({ ownerRole: 'VID-KEEP', brief: expect.stringContaining('approved story') });
+    expect(long.stages.find(stage => stage.name === 'Make the scenes')?.brief).toMatch(/story and performance[\s\S]*setup or payoff/i);
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/premise[\s\S]*beats[\s\S]*scene objective[\s\S]*setups and payoffs/i);
+    expect(work).toMatch(/director approves[\s\S]*story line[\s\S]*shot plan[\s\S]*preferred performances/i);
+  });
+
+  it('plans film craft in the working skill and proves new risks against a shared baseline', () => {
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/cinematographer[\s\S]*production designer/i);
+    expect(work).toMatch(/shot list[\s\S]*shot size[\s\S]*angle[\s\S]*lens[\s\S]*camera movement[\s\S]*coverage/i);
+    expect(work).toMatch(/motivated light[\s\S]*look book[\s\S]*color script/i);
+    expect(work).toMatch(/play the join[\s\S]*shared baseline[\s\S]*materially different risk/i);
+    for (const look of ['Live action', '3D animation', '2D animation', 'Anime', 'Stop motion', 'Motion graphics', 'Screen recording']) {
+      expect(work).toContain(`**${look}.**`);
+    }
+    const long = templates.catalogs.get('video_production')!.pipelines.find(p => p.key === 'video-long-work')!;
+    expect(long.stages.find(stage => stage.name === 'Prove the hardest moment')?.brief).toMatch(/shared baseline[\s\S]*materially different risk/i);
+  });
+
+  it('plans sound early and reviews an assembly, rough cut and fine cut before picture lock', () => {
+    const work = templates.skills.get('vid-work-pipeline')!.body;
+    expect(work).toMatch(/sound from the start[\s\S]*room tone[\s\S]*temporary tracks/i);
+    expect(work).toMatch(/assembly[\s\S]*rough cut[\s\S]*fine cut[\s\S]*notes after each pass[\s\S]*locks picture/i);
+    expect(work).toMatch(/cut on action[\s\S]*J cut[\s\S]*L cut/i);
+    const short = templates.catalogs.get('video_production')!.pipelines[0]!;
+    expect(short.stages.find(stage => stage.name === 'Edit the draft cut')?.brief).toMatch(/music, exact geometry, titles and an end card only where the brief needs them/i);
+  });
+
+  it('has every route play the actual exported master at normal speed before delivery', () => {
+    for (const route of templates.catalogs.get('video_production')!.pipelines) {
+      const watch = route.stages.findIndex(stage => /play the exact exported master at normal speed/i.test(stage.brief ?? ''));
+      expect(watch, route.key).toBeGreaterThanOrEqual(0);
+      expect(route.stages.slice(watch).some(stage => /deliver the accepted master/i.test(`${stage.name} ${stage.brief}`)), route.key).toBe(true);
+    }
+    const laws = templates.skills.get('vid-laws')!.body.split('## Law 11.')[1];
+    expect(laws).toMatch(/exact version intended for delivery/i);
+  });
+
+  it('records screen direction and exact takes while allowing a reasoned continuity break', () => {
+    expect(templates.roles.get('VID-KEEP')?.title.en).toBe('Script supervisor and continuity keeper');
+    const continuity = templates.skills.get('vid-continuity')!.body;
+    expect(continuity).toMatch(/180-degree rule[\s\S]*eyelines[\s\S]*match on action/i);
+    expect(continuity).toMatch(/continuity sheet[\s\S]*story day[\s\S]*entry and exit/i);
+    expect(continuity).toMatch(/play the exact clip[\s\S]*director approves[\s\S]*record the reason[\s\S]*check the break in context[\s\S]*check the replacement/i);
   });
 
   it('routes Marketing video through the shared laws and the Video production department when it exists', () => {

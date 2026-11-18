@@ -11,7 +11,7 @@ These eleven laws apply to every look and length, from a short clip to a feature
 
 ## Law 1. The brief's look governs every frame
 
-Use the medium and look set by the brief. Turn ambiguous style words into observable choices using agreed examples or the responsible person's intent. Keep those choices throughout the work so the audience sees the video it was meant to receive.
+The medium and look must serve the brief, including any required method of capture. Agree on what the audience should see and hear and hold to those choices throughout the work.
 
 ## Law 2. Planning material explains, it does not dictate
 
@@ -23,15 +23,15 @@ Make every required event understandable to the audience. Choose whether the sho
 
 ## Law 4. One world, held still
 
-Record the features and rules viewers must recognize from shot to shot: identities, relative sizes, movement, light and the physics of the chosen look. Keep them consistent unless the brief calls for a change. Choose a way of making shots that preserves those relationships.
+The identities, relative sizes, movement, light and physics of the chosen look must stay recognizable from shot to shot. An intentional change must serve the work as agreed in the brief.
 
 ## Law 5. The set is built before it is filmed
 
-For any work that shows a space, real or drawn, build a shared set plan before making or editing shots where the layout matters. Mark the fixed features, paths, viewpoints and key events that need to line up. Use measurements where scale matters. A screen recording maps its screen, including the locations of actions and overlays. A floor plan or a measured model can serve the same purpose for a physical scene. Use the set and its markers to plan shots, align the cut and check continuity.
+A shared set plan must guide shot choices where the layout matters. Fixed features, paths, viewpoints and events must line up across shots so the audience can follow the space.
 
 ## Law 6. A keeper holds the look and the world
 
-Have a keeper compare each clip that will enter the cut with the agreed look, continuity records and relevant set markers. Check the motion when the brief calls for it and record acceptance for that exact version. Return any material drift to its production owner and check the replacement before it enters the cut. On a long work, a lead keeper owns the common references that scene keepers use.
+Each exact clip in the cut needs the keeper's recorded acceptance against the agreed look, continuity records and relevant set markers, including motion when it matters. A deliberate break must serve the director's intent and have a recorded reason. Material drift needs correction and a new check. On a long work, a lead keeper owns the common references that scene keepers use.
 
 ## Law 7. Each tool does what it does best
 
@@ -39,11 +39,11 @@ Assign motion, performance, sound and precise visual details to tools that can p
 
 ## Law 8. Prove the hardest moment first
 
-Make a short probe of the hardest moment in the chosen look and method, often a few seconds. Include enough context to judge the risk. The head and keeper accept the result and set the look reference before full production. Keep the probe, method and cost so the next tool choice has evidence.
+The hardest moment must be proven in enough context to judge the risk before full production. The head and keeper accept that evidence as the shared baseline for the look and method. A materially different risk calls for its own evidence. Keep the result, method and cost so the next choice has evidence.
 
 ## Law 9. The platform shapes the frame
 
-Compose for the destination's verified format, viewing area and playback conditions. Keep essential action, words and sound accessible there. For example, a short vertical video can use the destination's vertical format, keep important details clear of its buttons and use captions where viewers watch without sound.
+Compose for the destination's verified format, viewing area and playback conditions. Keep essential action, words and sound accessible there.
 
 ## Law 10. The whole work is finished as one
 
@@ -51,4 +51,4 @@ Finish color, contrast, grain, sound and titles together across the assembled wo
 
 ## Law 11. Judge the finished video, not the effort
 
-Before delivery the head watches the finished work as the audience will see it, inspects cuts and key events at the detail needed to judge them, and checks the result against the brief and the applicable laws. Send any failed condition to the owner who can fix it and check the corrected version before delivery.
+The head judges the exact version intended for delivery, as the audience will see and hear it, against the brief and the applicable laws. That acceptance belongs to the finished version and must be established again after a repair.

@@ -34,6 +34,12 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | alirezarezvani/claude-skills | MIT | Business development, partnerships, proposals, RFPs, SaaS metrics. |
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
+| ScreenSkills [director](https://www.screenskills.com/job-profiles/browse/film-and-tv-drama/development-film-and-tv-drama-job-profiles/director-film-and-tv-drama/) and [script supervisor](https://www.screenskills.com/skills-checklists/scripted-film-and-tv/script-supervisor-department/script-supervisor-skills/) | Facts only | Director and crew duties, continuity records, take decisions and editorial handoff. |
+| Sundance Collab [screenwriting](https://collab.sundance.org/catalog/Screenwriting-From-Outline-to-First-Draft-of-Your-Screenplay/April-2025) and Sundance Institute [exhibition guidance](https://www.sundance.org/wp-content/uploads/2023/10/2024-Technical-Specifications-For-Festival-Presentation.pdf) | Facts only | Story development and playback of the actual screening copy. |
+| Disney Animation [layout](https://www.disneyanimation.com/process/layout/) and [hand-drawn animation](https://disneyanimation.com/process/hand-drawn-animation/) | Facts only | Blocking, shot choices, early playback and timing of key drawings. |
+| The Science Behind Pixar [story and art](https://sciencebehindpixar.org/pipeline/story-and-art) | Facts only | Look development and the color script. |
+| University of Arkansas, Moving Pictures [cinematography](https://uark.pressbooks.pub/movingpictures/chapter/cinematography/) and [sound](https://uark.pressbooks.pub/movingpictures/chapter/sound/) | Facts only | Lens, light, dialogue, ambience and sound across edits. |
+| Frame.io [editing stages](https://workflow.frame.io/guide/editing-stages) and Adobe [J and L cuts](https://helpx.adobe.com/premiere/desktop/edit-projects/trim-clips/perform-j-cuts-and-l-cuts.html) | Facts only | Edit passes and sound carried across picture cuts. |
 
 The development testing and environment procedures are project-owned adaptations. The current procedures define their use.
 
@@ -336,7 +342,7 @@ The development testing and environment procedures are project-owned adaptations
 | `roles/video_production/VID-WRITE.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
 | `teams/video_production/VID-TEAM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
 | `echelons/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `pipelines/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-continuity.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-laws.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
-| `skills/vid-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `pipelines/video_production.md` | Written for Hornhoof | ScreenSkills, Sundance Institute and Frame.io for crew decisions, edit passes and export checks | Hornhoof |
+| `skills/vid-continuity.md` | Written for Hornhoof | ScreenSkills for continuity, take records and the handoff to the editor | Hornhoof |
+| `skills/vid-laws.md` | Written for Hornhoof | ScreenSkills and Sundance Institute for continuity and checks of the delivery copy | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | Sundance Collab, ScreenSkills, Disney Animation, The Science Behind Pixar, Moving Pictures, Frame.io and Adobe for production and editing practice | Hornhoof |
