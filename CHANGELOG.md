@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- Looking up green test results uses an index on the release and one array of fingerprints; a failed lookup or description save reports the database transaction limit or a server failure instead of blaming the node's evidence.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed
