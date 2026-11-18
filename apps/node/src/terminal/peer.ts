@@ -13,7 +13,7 @@ export type Ownership = { owns: Owns | null; capture?: Capture };
 export type OwnerFactory = (panes: Panes) => Ownership;
 
 /* A look at the machine's processes that gave no answer, as a command out of time does: the bridge asks the caller to try
-   again and keeps nothing of it, for a refusal would stay with the connection. Its message says which look, never what. */
+   again and keeps nothing of it. Its message names the lookup without including its input or output. */
 export class OwnerUnknown extends Error {}
 
 /* Refuses with its reason. */
@@ -51,10 +51,9 @@ async function inPaneSession(proc: string, caller: TerminalSession | null, roots
   return leader?.session === caller.session && leader.tty === caller.tty;
 }
 
-/* The socket of the caller's end, from the kernel's table of TCP connections. A table that cannot be read gives no answer,
-   never an empty table. */
+/* The socket of the caller's end, from the kernel's table of TCP connections. */
 export async function socketOf(proc: string, { port, bridgePort }: Peer): Promise<string | null> {
-  const table = await readFile(join(proc, 'net', 'tcp'), 'utf8').catch(() => { throw new OwnerUnknown('socket table read failed'); });
+  const table = await readFile(join(proc, 'net', 'tcp'), 'utf8').catch(() => { throw new OwnerUnknown('Linux TCP table read failed'); });
   for (const line of table.split('\n').slice(1)) {
     const cols = line.trim().split(/\s+/);
     if (cols[1] === `${LOCAL}:${hex(port)}` && cols[2] === `${LOCAL}:${hex(bridgePort)}` && cols[9] && cols[9] !== '0') return cols[9];

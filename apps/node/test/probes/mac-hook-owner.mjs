@@ -12,9 +12,9 @@ import { answered } from '../../dist/terminal/mac-peer.js';
 const took = { lsof: [], ps: [] };
 function timed(file, args, options) {
   const started = performance.now();
-  return new Promise((resolve, reject) => execFile(file, args, options, (error, output) => {
+  return new Promise((resolve, reject) => execFile(file, args, options, (error, output, diagnostic) => {
     took[file.endsWith('lsof') ? 'lsof' : 'ps'].push(performance.now() - started);
-    try { resolve(answered(file, error, output)); } catch (failed) { reject(failed); }
+    try { resolve(answered(error, output, file, diagnostic)); } catch (failed) { reject(failed); }
   }));
 }
 const slowest = times => `${Math.round(Math.max(...times))} ms`;

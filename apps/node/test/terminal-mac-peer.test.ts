@@ -1,13 +1,16 @@
 import { Agent, request } from 'node:http';
 import type { Socket } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { macOwner, type Command } from '../src/terminal/mac-peer.js';
 import { trackCheckProcess } from '../src/check-processes.js';
 import { terminalOwner } from '../src/main.js';
 
 const cleanups: (() => void)[] = [];
-afterEach(() => cleanups.splice(0).forEach(clean => clean()));
+afterEach(() => {
+  cleanups.splice(0).forEach(clean => clean());
+  vi.useRealTimers();
+});
 
 type Rejection = { key: string | null; event: string; reason: string };
 
@@ -30,7 +33,7 @@ const timedOut = (file: string) => Object.assign(new Error(`Command failed: ${fi
 /* Stands in for lsof and ps. The client end of each connection belongs to one process, 55 unless the mode says otherwise,
    and the bridge's own end lists the pair the other way round under the node, 999. lsof asked with -p shows that process
    only, as lsof does; ps answers for one process with -p, or with the whole table. */
-async function opened(mode = 'own', roots = [10]) {
+async function opened(mode = 'own', roots = [10], beforeCommand?: (file: string) => Promise<void>) {
   let url = '';
   let current = mode;
   const commands: { file: string; args: string[]; timeout: number }[] = [];
@@ -38,6 +41,7 @@ async function opened(mode = 'own', roots = [10]) {
   const rejected: Rejection[] = [];
   const run: Command = async (file, args, options) => {
     commands.push({ file, args, timeout: options.timeout });
+    await beforeCommand?.(file);
     const only = args.includes('-p') ? Number(args[args.indexOf('-p') + 1]) : null;
     if (file === '/bin/ps') {
       if (current === 'ps-timeout') throw timedOut(file);
@@ -135,13 +139,53 @@ describe('macOS hook ownership without proc', () => {
     expect(c.sockets.size).toBe(1);
   });
 
+  it('checks ownership again after the pane is re-adopted on a kept connection', async () => {
+    const roots: number[] = [];
+    const c = await opened('own', roots);
+    expect(await post(c.url, c.agent, 55, 'tool')).toBe(403);
+    roots.push(10);
+    expect(await post(c.url, c.agent, 55, 'tool')).toBe(200);
+    expect(c.sockets.size).toBe(1);
+    expect(c.heard).toEqual(['agent-1']);
+  });
+
+  it('answers a slow pair of lookups with 502 before the tool hook deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    let readingPs!: () => void;
+    const enteredPs = new Promise<void>(resolve => { readingPs = resolve; });
+    let slow = true;
+    const c = await opened('own', [10], async file => {
+      if (!slow) return;
+      if (file === '/usr/sbin/lsof') started();
+      else readingPs();
+      await new Promise<void>(resolve => setTimeout(resolve, 1_750));
+    });
+    const first = post(c.url, c.agent, 55, 'tool');
+    void first.catch(() => {});
+    await entered;
+    await vi.advanceTimersByTimeAsync(1_750);
+    await enteredPs;
+    await vi.advanceTimersByTimeAsync(749);
+    expect(c.rejected).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(c.rejected).toEqual([{ key: 'agent-1', event: 'tool', reason: 'owner check unavailable: macOS owner lookup timed out' }]);
+    expect(await first).toBe(502);
+    expect(c.heard).toEqual([]);
+    slow = false;
+    expect(await post(c.url, c.agent, 55, 'tool')).toBe(200);
+    expect(c.sockets.size).toBe(1);
+    expect(c.heard).toEqual(['agent-1']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(c.heard).toEqual(['agent-1']);
+  });
+
   it('says in the log why it refused a call or asks for it again, and names no secret of the address', async () => {
     const c = await opened('foreign');
     expect(await post(c.url, c.agent, 55)).toBe(403);
     expect(await post(c.url, c.agent, 77)).toBe(403);
     expect(await post(c.url, c.agent, 'zero')).toBe(403);
-    /* A new connection: this one keeps its refusal of pid 55. */
-    c.agent.destroy();
     for (const mode of ['lsof-timeout', 'lsof-error', 'ps-timeout', 'ps-error', 'ps-empty']) {
       c.mode(mode);
       expect(await post(c.url, c.agent, 55, 'tool')).toBe(502);
@@ -159,7 +203,7 @@ describe('macOS hook ownership without proc', () => {
     expect(JSON.stringify(c.rejected)).not.toContain(c.url.split('/').at(-1)!);
   });
 
-  it('looks up each connection and pid hint once, and every new connection again', async () => {
+  it('reuses a successful check only for the same connection and pid hint', async () => {
     const c = await opened();
     expect(await post(c.url, c.agent)).toBe(200);
     expect(await post(c.url, c.agent)).toBe(200);

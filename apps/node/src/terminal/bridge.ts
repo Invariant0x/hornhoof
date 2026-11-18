@@ -14,9 +14,6 @@ import { ToolsMemory } from './tools-memory.js';
 const MAX_BODY = 4 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
-/* A hook waits 3 s at least for its answer (hh-hook-send.cjs): an owner check that takes longer answers it a retry before
-   it gives up. */
-const HOOK_OWNER_MS = 2_000;
 /* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
    calls, and with Node's 5 seconds its next call on a connection the bridge was closing broke with ECONNRESET. */
 const KEEP_ALIVE_MS = 72_000;
@@ -72,8 +69,7 @@ export class Bridge {
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
-  /* What the check found for each open connection and agent: a connection's process does not change, so its owner stays
-     proven. A refusal is not kept: the pane may run that program again by the connection's next call. */
+  /* Share pending checks and keep successful checks for the connection. A refusal can change when a pane is adopted. */
   private readonly checked = new WeakMap<Socket, Map<string, Promise<Verdict>>>();
 
   private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
@@ -102,9 +98,9 @@ export class Bridge {
     server.on('connection', socket => {
       if (!this.owns) return;
       const captured = this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 });
-      /* A socket table that could not be read is read again by the connection's next call. */
-      captured.catch(() => { if (this.accepted.get(socket) === captured) this.accepted.delete(socket); });
       this.accepted.set(socket, captured);
+      /* The first request observes the outcome. A socket can close without sending one. */
+      void captured.catch(() => {});
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     this.server = server;
@@ -198,17 +194,22 @@ export class Bridge {
   }
 
   private fromOwner(key: string, socket: Socket, peer: Peer): Promise<Verdict> {
-    if (!this.owns) return Promise.resolve({ owner: true });
+    const owns = this.owns;
+    if (!owns) return Promise.resolve({ owner: true });
     const known = this.checked.get(socket) ?? new Map<string, Promise<Verdict>>();
     this.checked.set(socket, known);
     const hint = `${key}:${peer.pid ?? 'legacy'}`;
     let found = known.get(hint);
     if (!found) {
       let why = '';
-      found = this.owns(key, peer, reason => { why = reason; }).then(
-        (owner): Verdict => { if (!owner) known.delete(hint); return owner ? { owner } : { owner, why }; },
-        error => { known.delete(hint); throw error; },
-      );
+      found = this.capturePeer(socket, peer)
+        .then(captured => owns(key, captured, reason => { why = reason; }))
+        .then((owner): Verdict => {
+          if (owner) return { owner };
+          known.delete(hint);
+          return { owner, why };
+        })
+        .catch(error => { known.delete(hint); throw error; });
       known.set(hint, found);
     }
     return found;
@@ -224,19 +225,30 @@ export class Bridge {
     return this.notOwned(res, key, kind, event, 403, found.why ? `owner check failed: ${found.why}` : 'owner check failed');
   }
 
-  /* A hook is named by its event, any other call by its kind. */
+  /* Use only recognized event and call names in rejection logs. */
   private notOwned(res: ServerResponse, key: string, kind: string, event: string | undefined, status: number, reason: string): false {
-    this.failures.reject(key, kind === 'hook' ? hookEvent(event) : kind, reason);
+    const label = kind === 'hook' ? hookEvent(event) : bridgeCallKind(kind);
+    this.failures.reject(key, label, reason);
     reply(res, status, '');
     return false;
   }
 
-  private async peer(req: IncomingMessage): Promise<Peer> {
+  private peer(req: IncomingMessage): Peer {
     const peer: Peer = { port: req.socket.remotePort ?? 0, bridgePort: this.port };
     const hint = req.headers['x-hh-pid'];
     if (hint !== undefined) peer.pid = typeof hint === 'string' && /^[1-9][0-9]{0,9}$/.test(hint) ? Number(hint) : 0;
-    if (this.owns) Object.assign(peer, await (this.accepted.get(req.socket) ?? this.capture(peer)));
     return peer;
+  }
+
+  private async capturePeer(socket: Socket, peer: Peer): Promise<Peer> {
+    const captured = this.accepted.get(socket) ?? this.capture(peer);
+    this.accepted.set(socket, captured);
+    try {
+      return { ...peer, ...await captured };
+    } catch (error) {
+      if (this.accepted.get(socket) === captured) this.accepted.delete(socket);
+      throw error;
+    }
   }
 
   private refused(req: IncomingMessage, res: ServerResponse, status: number, reason: string): void {
@@ -277,7 +289,7 @@ export class Bridge {
     const key = this.agentAt(req, kind, inPath, event);
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = this.peer(req);
-    const owned = peer.then(found => this.fromOwner(key, req.socket, found));
+    const owned = this.fromOwner(key, req.socket, peer);
     /* A check nobody waits for, at an address with nothing under it, fails nothing. */
     void owned.catch(() => {});
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
@@ -287,12 +299,12 @@ export class Bridge {
        then, and goes on to Hornhoof as it comes. */
     const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
     void reading?.catch(() => {});
-    if (!(await this.ownCall(res, key, kind, event, kind === 'hook' ? beforeHookGivesUp(owned, asked) : owned))) return;
+    if (!(await this.ownCall(res, key, kind, event, owned))) return;
     const body = reading ? await reading : Buffer.alloc(0);
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
-    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, (await peer).pid);
+    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, peer.pid);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
@@ -536,16 +548,6 @@ function onlyReading(kind: string, method: string | undefined, body: Buffer): bo
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-/* The owner check of a hook asked at that moment, or no answer once the hook would give up waiting for one. */
-function beforeHookGivesUp<T>(check: Promise<T>, asked: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<never>((_resolve, reject) => {
-    /* A time already past is as soon as possible, as Node takes it. */
-    timer = setTimeout(() => reject(new OwnerUnknown('owner check timed out')), asked + HOOK_OWNER_MS - Date.now());
-  });
-  return Promise.race([check, late]).finally(() => clearTimeout(timer));
-}
-
 function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -571,6 +573,10 @@ function hookFailure(status: number): string {
 }
 
 const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+function bridgeCallKind(kind: string): string {
+  return kind === 'check' || kind === 'mcp' || kind === 'attach' ? kind : 'unknown';
+}
+
 const hookEvent = (event: string | undefined): string => (HOOKS.has(event ?? '') ? event! : 'unknown');
 const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';
 

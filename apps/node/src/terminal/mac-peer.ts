@@ -3,20 +3,31 @@ import { basename } from 'node:path';
 import { agentRoots, OwnerUnknown, refuse, type OwnerFactory, type Peer } from './peer.js';
 
 export type Command = (file: string, args: string[], options: { timeout: number }) => Promise<string>;
-const LOOKUP_MS = 2000;
+const LOOKUP_MS = 2_000;
+/* Leave room for the bridge to reply inside the shortest hook sender's 3 s wait. This covers the pane lookup too. */
+const OWNER_LOOKUP_MS = 2_500;
 
-/* What a command printed, also what lsof printed when it ended with 1, as it does when it finds nothing it was asked
-   about. A command ended at its time limit, one that did not start and one that failed otherwise gave no answer. */
-export function answered(file: string, error: ExecFileException | null, output: string): string {
-  if (error && (error.code !== 1 || error.killed || basename(file) !== 'lsof')) throw error;
-  return output;
+/* A silent exit 1 from lsof can mean no match. An error from ps or an incomplete or diagnostic lsof result gave no answer. */
+export function answered(error: ExecFileException | null, output: string, file: string, diagnostic: string): string {
+  if (!error) return output;
+  if (file === '/usr/sbin/lsof' && error.code === 1 && !error.killed && !output && !diagnostic) return '';
+  throw error;
 }
 
 const command: Command = (file, args, options) => new Promise((resolve, reject) => {
-  execFile(file, args, options, (error, output) => {
-    try { resolve(answered(file, error, output)); } catch (failed) { reject(failed); }
+  execFile(file, args, options, (error, output, diagnostic) => {
+    try { resolve(answered(error, output, file, diagnostic)); } catch (failed) { reject(failed); }
   });
 });
+
+async function beforeDeadline<T>(read: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new OwnerUnknown('macOS owner lookup timed out')), OWNER_LOOKUP_MS);
+  });
+  try { return await Promise.race([read(), expired]); }
+  finally { clearTimeout(timer); }
+}
 
 /* A command's output, or OwnerUnknown when it gave none. */
 async function lookup(run: Command, file: string, args: string[]): Promise<string> {
@@ -57,10 +68,9 @@ async function socketOwner(peer: Peer, run: Command): Promise<number | null> {
    as the Linux inode check does. A caller gone by then has none, and a line that is no pair of numbers leads nowhere: the
    walk stops at anything that is not a process. */
 async function lineageOf(pid: number, run: Command): Promise<Set<number>> {
-  const table = await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
-  /* The table holds ps itself at least. */
-  if (!table.trim()) throw new OwnerUnknown('ps gave no process table');
   const parents = new Map<number, number>();
+  const table = await lookup(run, '/bin/ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
+  if (!table.trim()) throw new OwnerUnknown('ps gave no process table');
   for (const line of table.split('\n')) {
     const [child, parent] = line.trim().split(/\s+/).map(Number);
     parents.set(child!, parent!);
@@ -74,12 +84,12 @@ export function macOwner(run: Command = command): OwnerFactory {
   return panes => ({
     /* Nothing is looked up as a connection opens: the call says which process it comes from. */
     capture: async () => ({}),
-    owns: async (key, peer, why = () => {}) => {
+    owns: (key, peer, why = () => {}) => beforeDeadline(async () => {
       if (peer.pid !== undefined && !(Number.isSafeInteger(peer.pid) && peer.pid > 0)) return refuse(why, 'malformed pid hint');
       const pid = await socketOwner(peer, run);
       if (!pid) return refuse(why, peer.pid === undefined ? 'no single process holds the connection' : 'the hinted process does not hold the connection');
       const lineage = await lineageOf(pid, run);
       return (await agentRoots(panes, key)).some(root => lineage.has(root)) || refuse(why, "the caller is not under the agent's pane");
-    },
+    }),
   });
 }

@@ -107,7 +107,7 @@ describe('which agent a connection to the bridge comes from', () => {
   it('gives no answer when the socket table cannot be read, rather than taking it for an empty one', async () => {
     const proc = fakeProc(socket, 12);
     rmSync(join(proc, 'net', 'tcp'));
-    await expect(socketOf(proc, socket)).rejects.toThrow(new OwnerUnknown('socket table read failed'));
+    await expect(socketOf(proc, socket)).rejects.toThrow(new OwnerUnknown('Linux TCP table read failed'));
     await expect(fromAgent(panes, proc)('agent-1', { ...socket, pid: 12 })).rejects.toBeInstanceOf(OwnerUnknown);
   });
 });
