@@ -169,6 +169,16 @@ describe('macOS hook ownership without proc', () => {
     expect(c.commands.filter(command => command.file === '/usr/sbin/lsof')).toHaveLength(3);
   });
 
+  it("walks the ps table up to launchd, never to the kernel's 0, and stops at a loop in it", async () => {
+    const table = (text: string): Command => async file => file === '/bin/ps' ? text : 'p55\nn127.0.0.1:1->127.0.0.1:2\n';
+    const peer = { port: 1, bridgePort: 2, pid: 55 };
+    expect(await macOwner(table(TABLE))(async () => [1]).owns!('agent-1', peer)).toBe(true);
+    expect(await macOwner(table(TABLE))(async () => [0]).owns!('agent-1', peer)).toBe(false);
+    const loop = '   55    10\n   10    55\n';
+    expect(await macOwner(table(loop))(async () => [10]).owns!('agent-1', peer)).toBe(true);
+    expect(await macOwner(table(loop))(async () => [77]).owns!('agent-1', peer)).toBe(false);
+  });
+
   it('captures ancestry before waiting for a slow pane lookup', async () => {
     let atPane!: () => void;
     const entered = new Promise<void>(resolve => { atPane = resolve; });
