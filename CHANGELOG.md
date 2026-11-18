@@ -9,6 +9,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- A part of a test run takes as many Vitest workers as the machine's free memory holds, at 2.5 GiB each, and the processors its load leaves free, so a machine short of memory no longer runs half its cores of workers into swap.
 - A test run of a release goes out in as many parts as keep each within three quarters of its time limit by what its files took before, at once on free machines and one after another on one, so a run whose tests pass no longer runs into the limit with everything in one part; a part stopped at its limit no longer makes its machine look faster to the next plan.
 
 ## [0.32.1] - 2026-11-17
