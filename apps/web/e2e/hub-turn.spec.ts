@@ -158,8 +158,9 @@ for (const lang of ['en', 'ru'] as const) {
         await live.closeTurn();
         await expect(page.locator('.dept-turn')).toHaveCount(0);
         await expect(hub.locator('.turn-sec, .hub-eq, .hub-focus-tag')).toHaveCount(0);
-        /* 160 px and one more row of staff marks, 12 px: Development's 24 people take two rows of twenty. */
-        expect(await page.locator('button.dept').evaluateAll(cards => cards.map(c => (c as HTMLElement).style.height))).toEqual(Array(6).fill('172px'));
+        /* All cards return to their resting height, including Development's card with 24 staff squares. */
+        await expect(card(page, 'Development').locator('.cells .cell')).toHaveCount(24);
+        expect(await page.locator('button.dept').evaluateAll(cards => cards.map(c => (c as HTMLElement).style.height))).toEqual(Array(6).fill('160px'));
         await looksRight(page);
         await shot('closed');
         expect(await page.evaluate(initial => document === initial, initialDocument)).toBe(true);
