@@ -57,6 +57,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Right to left, the tracker keeps the order of a goal's name and of its progress in words, of a person's task in the left panel, and of each value with its name in a narrow list, "Executor: Hana".
 - Right to left, every phrase of a goal's card, of Turns and releases with its list for later turns, and of the goal board keeps its order: a goal's name with its number, a task with its number, and each sentence with its full stop at its end.
 - A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
+- An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
+- The public link's settings the updater kept beside the newest copy that has them stay after that copy goes, since a link taken on a build that went back may be in no other place.
 
 ### Added
 

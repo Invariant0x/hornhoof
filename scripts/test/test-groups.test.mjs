@@ -50,6 +50,7 @@ for (const [group, path, expected] of [
   ['the installer', 'scripts/install.sh', ['release-scripts', 'server']],
   ['the installer for Windows', 'scripts/install.ps1', ['release-scripts', 'server']],
   ['the updater', 'apps/updater/updater.sh', ['release-scripts', 'server']],
+  ['a part of the updater', 'apps/updater/lib/backup.sh', ['release-scripts', 'server']],
   ['the image of the app', 'Dockerfile', ['release-scripts', 'server']],
   ['the compose file', 'compose.yaml', ['release-scripts', 'server']],
   ['a browser scenario', 'apps/web/e2e/about.spec.ts', []],
