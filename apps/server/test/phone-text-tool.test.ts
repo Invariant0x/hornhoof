@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { PhoneReply, toolPrivacy, type PhoneTypingIssue } from '@hornhoof/protocol';
 import { expect, it, vi } from 'vitest';
 import type { Ctx } from '../src/app.js';
@@ -30,7 +31,8 @@ it.each(outcomes)('passes the $kind typing outcome through the phone action tool
     await server.connect(a);
     await client.connect(b);
     const operation = { kind: 'text', text: 'ab\r\nc' };
-    const result = await client.callTool({ name: 'phone_action', arguments: { session: id, operation } });
+    const result = CallToolResultSchema.parse(await client.callTool({ name: 'phone_action', arguments: { session: id, operation } }));
+    expect(result.isError).not.toBe(true);
     const value = typing.kind === 'typing_failed' ? null : capture;
     expect(result.content).toHaveLength(1);
     const block = result.content[0];
