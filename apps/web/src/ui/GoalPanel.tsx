@@ -35,7 +35,7 @@ function GoalHistory({ log }: { log: TaskLogLine[] }) {
       <ol className="tp-log" aria-label={t.tracker.card.history}>
         {log.map((e, i) => {
           const by = e.by?.name ?? t.window.hornhoof;
-          const line = e.kind === 'created' ? t.tracker.history.goalCreated(by) : trackerLine(t, e, by, t.tracker.goal.statuses, names);
+          const line = e.kind === 'created' ? t.tracker.history.goalCreated(by) : trackerLine(t, e, by, t.tracker.goal.statuses, names, 'goal');
           return (
             <li key={i} className={e.kind}>
               <span className="tp-ev" dir="auto">{line ?? by} <time dateTime={e.at}>{momentText(language, e.at)}</time></span>

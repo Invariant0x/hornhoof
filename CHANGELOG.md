@@ -11,6 +11,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Right to left, the tracker keeps the order of a goal's name and of its progress in words, of a person's task in the left panel, of the line under the heading, and of each value with its name in a narrow list, "Executor: Hana".
 - Right to left, every phrase of a goal's card, of Turns and releases with its list for later turns, and of the goal board keeps its order: a goal's name with its number, a task with its number, and each sentence with its full stop at its end.
+- A goal's or a task's history never shows a name from the code for what changed: an edit it has no words for reads "Ivan changed the goal" or "Ivan changed the task".
 
 ## [0.32.1] - 2026-11-17
 

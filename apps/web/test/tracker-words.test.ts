@@ -33,7 +33,7 @@ describe('a due day', () => {
 describe('an edit in the history', () => {
   const by = { kind: 'person' as const, id: 'p1', name: 'Ivan' };
   const edited = (fields: string[]): TaskLogLine => ({ kind: 'edited', text: '', data: { fields }, by, at: '2026-11-12T09:30:00.000Z' });
-  const line = (t: typeof en, fields: string[]) => trackerLine(t, edited(fields), 'Ivan', {}, () => undefined);
+  const line = (t: typeof en, fields: string[], whole: 'goal' | 'task' = 'goal') => trackerLine(t, edited(fields), 'Ivan', {}, () => undefined, whole);
   const GOAL = ['title', 'why', 'parent', 'responsible', 'target', 'current', 'unit', 'due'];
   const TASK = ['title', 'brief', 'why', 'goal', 'responsible', 'due', 'pipeline', 'stage'];
 
@@ -48,7 +48,27 @@ describe('an edit in the history', () => {
   });
 
   it('names everything a task can change in words, in English and in Russian', () => {
-    expect(line(en, TASK)).toBe('Ivan changed the title, the short text, the why, the goal, who answers for it, the due date, the pipeline and the stage');
-    expect(line(ru, TASK)).toBe('Ivan изменил название, краткое описание, зачем, цель, ответственного, срок, конвейер и этап');
+    expect(line(en, TASK, 'task')).toBe('Ivan changed the title, the short text, the why, the goal, who answers for it, the due date, the pipeline and the stage');
+    expect(line(ru, TASK, 'task')).toBe('Ivan изменил название, краткое описание, зачем, цель, ответственного, срок, конвейер и этап');
+  });
+
+  /* A name the tracker has no words for, one from the code or one a later server writes, never shows: the line says the
+     goal or the task changed. So does an edit that names nothing, and a name that is no own word of the tracker. */
+  it('says the goal changed for a name it has no words for, never the name itself', () => {
+    expect(line(en, ['dueAt'])).toBe('Ivan changed the goal');
+    expect(line(ru, ['dueAt'])).toBe('Ivan изменил цель');
+    expect(line(en, ['toString'])).toBe('Ivan changed the goal');
+    expect(line(en, [])).toBe('Ivan changed the goal');
+    expect(line(ru, [])).toBe('Ivan изменил цель');
+  });
+
+  it('says the task changed for a name it has no words for in a task\'s history', () => {
+    expect(line(en, ['priority'], 'task')).toBe('Ivan changed the task');
+    expect(line(ru, ['priority'], 'task')).toBe('Ivan изменил задачу');
+  });
+
+  it('keeps the names it knows beside one word for the rest', () => {
+    expect(line(en, ['due', 'dueAt', 'owner'])).toBe('Ivan changed the due date and the goal');
+    expect(line(ru, ['due', 'dueAt', 'owner'])).toBe('Ivan изменил срок и цель');
   });
 });

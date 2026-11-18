@@ -2147,6 +2147,7 @@ export const ru: Messages = {
         title: 'название', brief: 'краткое описание', why: 'зачем', goal: 'цель', responsible: 'ответственного', due: 'срок', pipeline: 'конвейер',
         stage: 'этап', parent: 'большую цель', target: 'цель в числах', current: 'где цель сейчас', unit: 'в чем считаем',
       } as Record<string, string>,
+      whole: { goal: 'цель', task: 'задачу' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} и ${items.at(-1)}`),
     },
   },

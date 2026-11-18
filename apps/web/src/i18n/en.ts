@@ -2153,6 +2153,8 @@ export const en = {
         title: 'the title', brief: 'the short text', why: 'the why', goal: 'the goal', responsible: 'who answers for it', due: 'the due date', pipeline: 'the pipeline',
         stage: 'the stage', parent: 'the bigger goal', target: 'the target', current: 'where it stands now', unit: 'what it is counted in',
       } as Record<string, string>,
+      /* What changed when it has no words of its own: the goal or the task itself. */
+      whole: { goal: 'the goal', task: 'the task' },
       and: (...items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`),
     },
   },

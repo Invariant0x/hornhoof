@@ -599,22 +599,27 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
 }
 
 /* Design's finding on the pictures of #1329: a goal's history says what changed in words of the person's language, here
-   its due date, never the name the code keeps it under. */
+   its due date, never the name the code keeps it under; a name it has no words for reads as the goal changed. */
 const DUE_CHANGED: Record<Language, string> = { en: 'Ivan changed the due date', ru: 'Ivan изменил срок' };
+const GOAL_CHANGED: Record<Language, string> = { en: 'Ivan changed the goal', ru: 'Ivan изменил цель' };
+const UNNAMED = 'reviewCadence';
 for (const lang of LANGUAGES.map(l => l.id)) {
   test(`says in words what changed in a goal's history: ${lang}`, async ({ page }) => {
     const t = MESSAGES[lang];
     const goal = GOALS[1]!;
     await serveTasksBoard(page);
-    await serveGoalHistory(page);
+    await serveGoalHistory(page, [{ kind: 'edited', text: '', data: { fields: [UNNAMED] }, by: { kind: 'person', id: 'p1', name: 'Ivan' }, at: '2026-11-15T10:00:00.000Z' }]);
     await open(page, lang, 1440, '/tasks');
     await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
     const history = page.getByRole('complementary', { name: goal.title, exact: true }).getByRole('list', { name: t.tracker.card.history });
-    /* Its three lines, set, edited and the note, are there; the edit is read once, so a wrong word fails at once. */
-    await expect(history.getByRole('listitem')).toHaveCount(3);
-    const edit = await history.getByRole('listitem').nth(1).innerText();
-    expect(edit).toContain(DUE_CHANGED[lang]);
-    expect(edit).not.toContain('dueAt');
+    /* Its four lines, set, the date moved, the note and an edit of a name without words, are there; each edit is read
+       once, so a wrong word fails at once. */
+    await expect(history.getByRole('listitem')).toHaveCount(4);
+    const [due, unnamed] = [await history.getByRole('listitem').nth(1).innerText(), await history.getByRole('listitem').nth(3).innerText()];
+    expect(due).toContain(DUE_CHANGED[lang]);
+    expect(due).not.toContain('dueAt');
+    expect(unnamed).toContain(GOAL_CHANGED[lang]);
+    expect(unnamed).not.toContain(UNNAMED);
   });
 }
 
