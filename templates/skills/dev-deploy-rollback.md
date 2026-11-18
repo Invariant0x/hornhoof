@@ -5,10 +5,10 @@ description: { en: "Ships a build with a backup, a health check and a tested way
 kind: checklist
 sources: [anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md, addyosmani/agent-skills skills/shipping-and-launch/SKILL.md, affaan-m/ECC skills/docker-patterns/SKILL.md]
 ---
-You can deploy an approved build and restore the previously agreed working version.
+You can deploy a checked build and restore the previously agreed working version.
 
 Before:
-- The build passed every gate and this exact commit has either the release owner's or CEO's approval, or the server's recorded auto-approval under the department's autonomous release.
+- The exact commit passed every applicable check. If the department requires approval, use the responsible person's answer, the answer of the orchestrator acting for the owner, or recorded auto-approval under the department's autonomous release.
 - A backup of the data was taken and you know how to restore it.
 - You know the previous version and the command to go back to it.
 - Migrations in this release: can the previous version run on the new schema? If not, say so before deploying.

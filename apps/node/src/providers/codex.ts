@@ -26,12 +26,10 @@ function endpointArgs(api: ApiEndpoint): string[] {
   return ['-c', 'model_provider="hornhoof"', ...set('name', 'API'), ...set('base_url', api.baseUrl), ...set('env_key', ENDPOINT_KEY), ...set('wire_api', 'responses')];
 }
 
-/* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. A mebibyte holds the longest instructions
-   at four bytes a character, and the conversation from before that a live session's AGENTS.md carries too. */
-export const WHOLE_AGENTS_MD = ['-c', `project_doc_max_bytes=${1 << 20}`];
+/* Raise Codex's project document setting when Hornhoof writes a larger AGENTS.md. */
+export const projectDocArgs = (bytes = 0): string[] => ['-c', `project_doc_max_bytes=${Math.max(1 << 20, bytes)}`];
 
-/* The container is the sandbox, so Codex's own approvals and sandbox are off; resume takes no -C or -s. */
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE];
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
 export const SIGNED_OUT = /401 Unauthorized|Missing bearer|invalid_api_key|not logged in|(?:^|\n)\s*unauthorized:/i;
 
 /* What a --json line shows people: messages, MCP calls, shell commands with their results, and the plan. */
@@ -200,10 +198,12 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
     const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
     const told = toldPlace('codex', input);
-    if (input.instructions) writePrivate(told.file, told.head + input.instructions + '\n', user);
+    const instructions = input.instructions ? told.head + input.instructions + '\n' : '';
+    if (instructions) writePrivate(told.file, instructions, user);
+    const flags = [...FLAGS, ...projectDocArgs(Buffer.byteLength(instructions)), ...CODEX_NO_AUTO_UPDATE];
     const args = input.sessionId
-      ? ['exec', 'resume', ...mcp, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
-      : ['exec', ...(once ? ['--ephemeral'] : []), ...mcp, ...FLAGS, '-C', input.workDir, ...model, '--', input.prompt];
+      ? ['exec', 'resume', ...mcp, ...flags, ...model, '--', input.sessionId, input.prompt]
+      : ['exec', ...(once ? ['--ephemeral'] : []), ...mcp, ...flags, '-C', input.workDir, ...model, '--', input.prompt];
 
     let sessionId: string | null = input.sessionId;
     let answer = '';

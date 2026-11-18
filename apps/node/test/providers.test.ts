@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { CLAUDE_ALIASES, MAX_INSTRUCTIONS, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { adapterFor, programFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
@@ -978,12 +978,20 @@ describe('Hornhoof tools and instructions', () => {
     expect(lastRun().argv).not.toContain('--plugin-dir');
   });
 
+  it('gives Codex the byte length of the full instructions file', async () => {
+    const instructions = 'Full decision with é.\n'.repeat(52_000);
+    await adapter('codex').run(input({ instructions }));
+    const bytes = statSync(join(work, 'AGENTS.md')).size;
+    expect(lastRun().argv).toContain(`project_doc_max_bytes=${bytes}`);
+  });
+
   it('give Claude Code the instructions in a file of its folder, as one argument may hold only 128 KiB on Linux', async () => {
-    await adapter('claude').run(input({ instructions: 'x'.repeat(MAX_INSTRUCTIONS) }));
+    const instructions = 'Full instructions.\n'.repeat(20_000);
+    await adapter('claude').run(input({ instructions }));
     const { argv } = lastRun();
     const file = argv[argv.indexOf('--append-system-prompt-file') + 1]!;
     expect(file).toBe(join(work, '.hh-instructions.md'));
-    expect(readFileSync(file, 'utf8')).toBe(`${'x'.repeat(MAX_INSTRUCTIONS)}\n`);
+    expect(readFileSync(file, 'utf8')).toBe(`${instructions}\n`);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(argv).not.toContain('--append-system-prompt');
     expect(Math.max(...argv.map(a => a.length))).toBeLessThan(1000);

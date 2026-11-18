@@ -144,6 +144,8 @@ describe('one source for the values of a skin', () => {
   it('cuts the parts of a stepped skin in steps, and leaves ghost and focused buttons square', () => {
     const stepped = RULES.filter(rule => rule.selectors.some(selector => selector.includes("[data-cut='steps']")));
     expect(stepped.flatMap(rule => rule.selectors)).toEqual([
+      ":where(:root[data-cut='steps']) .tr-dept-mark",
+      ":where(:root[data-cut='steps']) .tr-status-pill",
       ":where(:root[data-cut='steps']) .edge",
       ":where(:root[data-cut='steps']) .btn",
       ":where(:root[data-cut='steps']) .tview .lchip",

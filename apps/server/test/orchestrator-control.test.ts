@@ -148,26 +148,25 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   it("shows the CEO, in this window, the commands that connect the CEO's machines and plans, and the orchestrator when it reads them", async () => {
     const { app, db, ceo } = await company();
     const client = await mcp(app, TOKEN);
-    const SHOWN = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
     const commands = async () => (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands as { id: string; command: string }[];
     const code = (command: string) => command.split('--join ')[1]!;
     const machine = { machineId: 'laptop-0002-abcd', hostname: 'dev-laptop', os: 'linux', arch: 'x86_64' };
 
-    expect(text(await call(client, 'machine_command', {}))).toBe(SHOWN);
+    const standalone = JSON.parse(text(await call(client, 'machine_command', {})));
     const [alone] = await commands();
-    expect(alone).toMatchObject({ kind: 'machine', plans: [], machine: null, expiresAt: expect.any(String) });
+    expect(alone).toMatchObject({ ...standalone, kind: 'machine', plans: [], machine: null, expiresAt: expect.any(String) });
     const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(alone!.command), ...machine } })).json();
     expect(joined.nodes).toMatchObject([{ subscriptionId: null, provider: 'machine' }]);
     expect(await commands()).toEqual([]);
 
-    expect(text(await call(client, 'connect_plans', { providers: ['claude'] }))).toBe(SHOWN);
+    const connect = JSON.parse(text(await call(client, 'connect_plans', { providers: ['claude'] })));
     const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.provider, 'claude'));
     expect((await call(client, 'plan_command', { subscription: plan!.id })).isError).toBe(true);
-    expect(text(await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan!.id }))).toBe(SHOWN);
+    const add = JSON.parse(text(await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan!.id })));
     const made = await commands();
     expect(made).toMatchObject([
-      { kind: 'plans', plans: ['Claude'], machine: null },
-      { kind: 'add', plans: ['Claude'], machine: 'dev-laptop' },
+      { id: connect.id, command: connect.command, kind: 'plans', plans: ['Claude'], machine: null },
+      { id: add.id, command: add.command, kind: 'add', plans: ['Claude'], machine: 'dev-laptop' },
     ]);
     const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(made[1]!.command), ...machine } })).json();
     expect(there.nodes).toMatchObject([{ subscriptionId: plan!.id, provider: 'claude' }]);
@@ -713,19 +712,19 @@ describe('what the CEO may ask for, which the orchestrator does in any turn as t
     expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(false);
   });
 
-  it('takes no answer as a permission to change machines in a company with no owner but the CEO delegate\'s own one, in the card of a task still open', async () => {
+  it('requires an active owner even if an older call supplies a machine answer', async () => {
     const c = await quiet();
     const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
     const lend = (permission: string) => call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });
-    const NO_PERMISSION = "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
+    const NO_OWNER = 'This company has no active owner.';
     const about = await askedInCard(c, 'task');
     const answered = await askedInCard(c, 'machines');
     await c.db.update(people).set({ isOwner: false }).where(eq(people.id, c.ceoId));
-    expect(text(await lend(about)), 'an answer about the task').toBe(NO_PERMISSION);
-    expect(text(await lend('00000000-0000-4000-8000-0000000000cc')), 'no such answer').toBe(NO_PERMISSION);
-    expect(text(await lend(answered)), 'a person who is no longer the CEO').toBe(NO_PERMISSION);
+    expect(text(await lend(about)), 'an answer about the task').toBe(NO_OWNER);
+    expect(text(await lend('00000000-0000-4000-8000-0000000000cc')), 'no such answer').toBe(NO_OWNER);
+    expect(text(await lend(answered)), 'a person who is no longer the CEO').toBe(NO_OWNER);
     expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(true);
   });
 

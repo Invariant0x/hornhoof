@@ -97,7 +97,8 @@ export function judgePage({ requested, finalUrl, answer, sample }: { requested: 
 }
 
 const NEXT: Partial<Record<PageStatus, string>> = {
-  login_required: 'Never try to get past it, and ask nobody for a way in. Note this address and what it asks for in your report for a person, and go on with the other addresses.',
+  login_required:
+    "Sign in yourself, as a person does: take the site's sign-in with vault_entries and vault_entry and type it into this page in a real browser on your machine, as hh-browse signs in nowhere. When the sign-in asks for a code the site sends to a person's phone, or the vault has no sign-in for the site, tell your head, and go on with the other addresses meanwhile.",
   robot_check: 'Never try to get past it, and ask nobody for a way in. Note this address and what it asks for in your report for a person, and go on with the other addresses.',
   refused: 'This address stays refused: go on with the other addresses.',
   failed: 'Try the address once more if the reason allows it; otherwise note it for a person and go on with the other addresses.',

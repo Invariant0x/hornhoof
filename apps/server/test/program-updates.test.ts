@@ -3,7 +3,7 @@ import type { ProgramInfo } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { companies, departments, people } from '../src/db/schema.js';
+import { agents, companies, departments, people } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { BUILTIN } from './builtin.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
@@ -43,7 +43,8 @@ async function liveCompany(onHost = false) {
     const response = await app.inject({ url: '/api/machines', ...as(token) });
     return response.json();
   };
-  return { app, owner, stranger, ceo, ownerId: person!.id, machine, join, connect, machineView };
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  return { app, owner, stranger, ceo, ownerId: person!.id, orchestratorId: orchestrator!.id, machine, join, connect, machineView };
 }
 
 describe('updating the programs on a machine', () => {
@@ -56,7 +57,7 @@ describe('updating the programs on a machine', () => {
     for (const row of [...f.machine.nodes, other.nodes[0]!]) await until(() => f.app.ctx.hub.isReady(nodeIdentity(row.nodeId)));
     const send = vi.spyOn(f.app.ctx.hub, 'send');
     onTestFinished(() => send.mockRestore());
-    const auth = actor === 'delegated' ? { headers: orchestratorHeaders(f.ownerId, '00000000-0000-4000-8000-000000000009') } : as(f[actor === 'owner' ? 'owner' : 'ceo']);
+    const auth = actor === 'delegated' ? { headers: orchestratorHeaders(f.ownerId, f.orchestratorId) } : as(f[actor === 'owner' ? 'owner' : 'ceo']);
     const request = () => f.app.inject({ method: 'POST', url: `/api/machines/${f.machine.machine.id}/programs/update`, ...auth });
     const accepted = await request();
     expect(accepted.statusCode).toBe(202);

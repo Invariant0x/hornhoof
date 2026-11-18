@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
-import { canViewAgent, placeOf, seesAgent, viewerOf } from '../../auth/agent-view.js';
+import { canContactAgent, placeOf, seesAgent, viewerOf } from '../../auth/agent-view.js';
 import { requireAssistant, wholeCompany } from '../../auth/assistant.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
@@ -40,12 +40,11 @@ export const LONGEST_WAIT_S = 50;
 export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
 const IdParams = z.object({ id: z.uuid() });
 
-/* The assistant writes to exactly the agents its owner writes to in the agent's window: the window's own check, with the
-   owner's rights as they are now. The agents of the company it may write to, in the order they were hired. */
+/* An assistant reaches the orchestrator and the employees its owner may write to in their windows. */
 async function writable(ctx: Ctx, me: Person): Promise<AgentRow[]> {
   const viewer = await viewerOf(ctx.db, me);
   const all = await ctx.db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt))).orderBy(agents.createdAt);
-  const open = await Promise.all(all.map(async a => seesAgent(viewer, await placeOf(ctx.db, a))));
+  const open = await Promise.all(all.map(async a => a.kind === 'orchestrator' || seesAgent(viewer, await placeOf(ctx.db, a))));
   return all.filter((_, i) => open[i]);
 }
 
@@ -53,7 +52,7 @@ async function writable(ctx: Ctx, me: Person): Promise<AgentRow[]> {
 async function writableAgent(ctx: Ctx, me: Person, id: string): Promise<AgentRow> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
   if (!agent) throw new ApiError(404, 'not_found', 'This employee does not exist.', 'agent_unknown');
-  if (!(await canViewAgent(ctx.db, me, agent))) {
+  if (!(await canContactAgent(ctx.db, me, agent))) {
     throw new ApiError(403, 'forbidden', 'The person this assistant belongs to does not write to this agent, so neither does the assistant.', 'assistant_agent_refused');
   }
   return agent;

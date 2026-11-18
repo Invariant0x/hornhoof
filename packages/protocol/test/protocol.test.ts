@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_OPEN_TASKS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_OPEN_TASKS, MAX_RUN_FILES, MAX_TEST_PARTS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
 import * as protocol from '../src/index.js';
 
@@ -140,10 +140,16 @@ describe('server messages', () => {
     }
   });
 
-  it('carry up to 200,000 characters of instructions, ten times what nodes before skill files take', () => {
-    expect([MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS]).toEqual([200_000, 20_000]);
-    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions: 'x'.repeat(MAX_INSTRUCTIONS) }))).toMatchObject({ type: 'job.run' });
-    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions: 'x'.repeat(MAX_INSTRUCTIONS + 1) }))).toBeNull();
+  it('carries the full instructions and skill files', () => {
+    const instructions = 'Full assignment.\n'.repeat(20_000);
+    const skills = Array.from({ length: 210 }, (_, i) => ({ name: `skill-${i}`, description: 'Example skill', body: i ? 'A skill.' : instructions }));
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions, skills }))).toMatchObject({ type: 'job.run', instructions, skills });
+  });
+
+  it('allows an untimed one-shot call and still requires a time for other jobs', () => {
+    const job = { ...SERVER[0], timeoutMs: 0 };
+    expect(parseServerMessage(JSON.stringify(job))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...job, call: true }))).toMatchObject({ call: true, timeoutMs: 0 });
   });
 
   it('let a node say it writes skills as files, which nodes before it do not', () => {

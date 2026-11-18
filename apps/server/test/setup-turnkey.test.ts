@@ -1,7 +1,10 @@
 import { COMPANY_TEMPLATE_KEYS, COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentChanges, agents, departments, subscriptions, teams } from '../src/db/schema.js';
 import { modelOnPlan } from '../src/modules/agents/role-model.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
@@ -29,6 +32,72 @@ const addKey = (app: FastifyInstance, ceo: string, target: object, apiKey = 'sk-
   app.inject({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', provider: 'anthropic_api', label: 'Company key', apiKey, target }, ...as(ceo) });
 
 describe('POST /api/setup staffs the template', () => {
+  it.each([...COMPANY_TEMPLATE_KEYS, undefined])('offers first work for %s as soon as the company is set up', async template => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    const offer = await app.inject({ url: '/api/orchestrator/first-contact', ...as(ceo) });
+    expect(offer.statusCode).toBe(200);
+    const expected = {
+      project: ['fixProject', 'checkSetup'], startup: ['planLaunch', 'sketchProduct', 'findCustomers'],
+      studio: ['pickProduct', 'reviewScreens'], corporation: ['reviewBills', 'sortRequests', 'planRelease'],
+      security: ['reviewSecurity', 'triageReport'], opensource: ['sortIssues', 'writeGuide'],
+      agency: ['findLeads', 'answerClients'], lab: ['planExperiment', 'reviewResults'],
+      home: ['findDevices', 'checkDevices', 'householdBooks'], empty: ['chooseDepartments'],
+    };
+    expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'setUpPipeline', 'telegram', 'assistant'] });
+  });
+
+  it.each([...COMPANY_TEMPLATE_KEYS, undefined])('starts %s with one default pipeline for each department', async template => {
+    const { app, db } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    const all = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
+    const top = await db.select().from(departments).where(isNull(departments.parentId));
+    expect(all).toHaveLength(top.length);
+    for (const dept of top) {
+      const catalog = app.ctx.templates.catalogs.get(dept.templateKey!)!;
+      const stock = catalog.pipelines.find(p => p.key === catalog.default)!;
+      expect(all).toContainEqual(expect.objectContaining({
+        department: expect.objectContaining({ id: dept.id }), catalogKey: stock.key, isDefault: true,
+        name: stock.name, stages: stock.stages.map(stage => expect.objectContaining({ name: stage.name, ownerRole: stage.ownerRole })),
+      }));
+    }
+  });
+
+  it('gives a department built after setup its default pipeline even without staff', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, LATER);
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'design', staff: false }] }, ...as(ceo) });
+    expect(built.statusCode, built.body).toBe(201);
+    const list = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
+    expect(list).toContainEqual(expect.objectContaining({ catalogKey: 'design-requests', isDefault: true }));
+  });
+
+  it('shows ordinary staff, turnkey members and declared one-shot stages before a template company has plans', async () => {
+    const templates = mkdtempSync(join(tmpdir(), 'hornhoof-worker-kinds-'));
+    onTestFinished(() => rmSync(templates, { recursive: true, force: true }));
+    cpSync(new URL('../../../templates', import.meta.url), templates, { recursive: true });
+    const route = join(templates, 'echelons', 'marketing.md');
+    writeFileSync(route, `---\ndepartment: marketing\nstages:\n  - { stage: development }\n  - { stage: review, ability: hh-check-work, oneShot: { fanOut: 3, judge: Private judge brief } }\n---\n`);
+    const { app, db } = await testApp({ TEMPLATES_DIR: templates });
+    const { ceo } = await setUp(app, { ...LATER, template: 'corporation' });
+
+    expect(await plans(app)).toEqual([]);
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('Private judge brief');
+    const { departments: org } = res.json();
+    const marketing = org.find((d: { templateKey: string }) => d.templateKey === 'marketing');
+    expect(marketing).toMatchObject({ oneShotStages: [{ stage: 'review', fanOut: 3, judge: true }], calls: [] });
+    const [generalist, ordinary] = [true, false].map(turnkey => marketing.employees.find((e: { teamId?: string }) => Boolean(e.teamId) === turnkey));
+    expect(generalist).toMatchObject({ turnkey: true, state: 'needs_subscription' });
+    expect(ordinary).toMatchObject({ turnkey: false, state: 'needs_subscription' });
+
+    const nonTurnkey = await db.update(teams).set({ turnkey: false }).where(eq(teams.id, generalist.teamId)).returning({ id: teams.id });
+    expect(nonTurnkey).toHaveLength(1);
+    const next = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(next.departments.flatMap((d: typeof marketing) => d.employees)).toContainEqual(expect.objectContaining({ id: generalist.id, turnkey: false }));
+  });
+
   it('hires every employee of the template, with its role, skills and the model its tier asks for on the key', async () => {
     const { app, db } = await testApp();
     await setUp(app, { ...SETUP, template: 'project' });
@@ -85,6 +154,26 @@ describe('POST /api/setup staffs the template', () => {
 });
 
 describe('every ready-made company', () => {
+  it.each([...COMPANY_TEMPLATE_KEYS])('%s shows its declared ghost places on the map before any subscription is connected', async template => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    expect(await plans(app)).toEqual([]);
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    const { departments: org } = res.json();
+    const listed = COMPANY_TEMPLATES.find(t => t.key === template)!.departments;
+    const expected = listed.map(({ template: key }) => ({
+      templateKey: key,
+      oneShotStages: app.ctx.templates.stagesOf(key).stages.flatMap(({ stage, oneShot }) =>
+        oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
+      ),
+      calls: [],
+    }));
+    expect(expected.some(dept => dept.oneShotStages.length > 0)).toBe(true);
+    expect(org).toHaveLength(expected.length);
+    expect(org).toEqual(expect.arrayContaining(expected.map(dept => expect.objectContaining(dept))));
+  });
+
   it.each([...COMPANY_TEMPLATE_KEYS])('%s brings each department with its head and employees, each with skills, waiting for a subscription', async template => {
     const { app, db } = await testApp();
     await setUp(app, { ...LATER, template });

@@ -487,7 +487,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
    open jobs end. */
 export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<void> {
   const { db, hub } = ctx;
-  await db.transaction(async tx => {
+  if (!sub.removedAt) await db.transaction(async tx => {
     await tx
       .update(subscriptions)
       .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
