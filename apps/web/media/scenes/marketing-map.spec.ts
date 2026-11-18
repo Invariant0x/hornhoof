@@ -168,7 +168,7 @@ for (const shape of SHAPES) {
     await film.until(async () => page.locator('.tracker').isVisible());
     film.mark('tracker');
     /* Park the pointer in the lower right margin before the tracker hold. */
-    await film.glide({ x: shape.viewport.width - 32, y: shape.viewport.height - 36 }, 400);
+    await film.glide({ x: shape.viewport.width - 32, y: Math.round(shape.viewport.height * 0.78) }, 400);
 
     /* 5. The tracker held still for 3 s. */
     film.mark('tracker held');
