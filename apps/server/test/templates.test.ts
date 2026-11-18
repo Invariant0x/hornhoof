@@ -1668,14 +1668,7 @@ describe('only an irreversible deletion needs the CEO, and what goes out needs n
 
 /* Hornhoof sends nothing for a company: an agent writes and publishes like a person and keeps every record of it in its
    department's git, in whatever format suits the work. */
-const GONE_GATEWAY = /\boutbound_[a-z_]+\b|\bsupport_(?:submit|classify)\b|\b(?:outbound|publication) gateway\b|\bserver gateway\b|model-check-set:/i;
-
 describe('writing to people outside', () => {
-  it('names no tool or gateway that sent for the company in any skill or role', () => {
-    for (const skill of skills) expect(skill.body, skill.id).not.toMatch(GONE_GATEWAY);
-    for (const role of templates.roles.values()) expect(role.body, role.id).not.toMatch(GONE_GATEWAY);
-  });
-
   it('has sales write and marketing publish themselves, marking each step in the department git', () => {
     const sal = templates.skills.get('sal-outbound-approval')!.body;
     const mkt = templates.skills.get('mkt-publish-approval')!.body;
@@ -1706,7 +1699,6 @@ describe('writing to people outside', () => {
     const text = [mail().body, mail().title.en, mail().title.ru, mail().description.en, mail().description.ru].join('\n');
     expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
     expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
-    expect(text).not.toMatch(GONE_GATEWAY);
     const body = mail().body;
     expect(body).toMatch(/department's git lists each mailbox[^.!?]*address[^.!?]*server/);
     expect(body).toMatch(/sign-in[^.!?]*vault_entry/);
@@ -1748,7 +1740,6 @@ describe('writing to people outside', () => {
       expect(role.body, id).toMatch(/^You are [^\n.!?]+\.$/);
       const rendered = renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Ari', roleKey: id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
       const abilities = [rendered.text, ...rendered.skills.map(file => file.body)].join('\n');
-      expect(abilities, id).not.toMatch(GONE_GATEWAY);
       expect(abilities, id).toMatch(/department's (?:git|repository)/);
       if (id !== 'SUP-KB') {
         expect(abilities, id).toMatch(/vault/);

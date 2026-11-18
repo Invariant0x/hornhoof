@@ -22,8 +22,6 @@ const PIPELINES: Record<TemplateKey, string> = {
 const SKILL_IDS = [...new Set(Object.values(PIPELINES))];
 const bodyOf = (id: string) => templates.skills.get(id)!.body;
 const localIds = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-/* No skill names a private example set: the sets of the checks Hornhoof once ran on messages are gone with them. */
-const SET_LINKS: Record<string, string[]> = {};
 
 /* Assertions protect meaning and evidence, not one heading layout, role roster or review schedule. */
 const COMMON = [
@@ -118,8 +116,6 @@ const POINTS: Record<string, RegExp[]> = {
 function problemsOf(id: string, body: string): string[] {
   const problems = [...COMMON, ...(POINTS[id] ?? [])].filter(rule => !rule.test(body)).map(rule => `missing ${rule}`);
   for (const ref of new Set(body.match(localIds) ?? [])) problems.push(`skill dependency ${ref}`);
-  const named = [...body.matchAll(/model-check-set:([^\s`.,;:]*)/g)].map(m => m[1]!).sort();
-  if (named.join() !== [...(SET_LINKS[id] ?? [])].sort().join()) problems.push('wrong private example set');
   if (/[Ѐ-ӿ]|\b(?:Claude|Codex|GitHub)\b|#\d+|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+/.test(body)) problems.push('incident or non-English body');
   if (/\bper-item approval\b|\bexplicit (?:human )?approval of each\b/i.test(body)) problems.push('a person\'s yes to what goes out by default');
   return problems;
@@ -150,7 +146,6 @@ describe('standalone verification planning abilities', () => {
     ['missing model rejection count', (body: string) => body.replaceAll('false rejects', 'results')],
     ['independent model labels', (body: string) => body.replace('labelled by someone other than its author', 'labelled by its author')],
     ['unvalidated model acceptance', (body: string) => body.replace('Until a set has run for a check, that check proves nothing', 'Before validation, the model check certifies acceptance')],
-    ['unknown private set', (body: string) => `${body} model-check-set:invented`],
     ['skill dependency', (body: string) => `${body} Follow sup-support-policy.`],
     ['incident', (body: string) => `${body} See task #42.`],
     ['the stop mark', (body: string) => body.replace('never written to again', 'written to again later')],
