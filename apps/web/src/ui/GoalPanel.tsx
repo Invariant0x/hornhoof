@@ -37,11 +37,11 @@ function GoalHistory({ log }: { log: TaskLogLine[] }) {
       <ol className="tp-log" aria-label={t.tracker.card.history}>
         {log.map((e, i) => {
           const by = e.by?.name ?? t.window.hornhoof;
-          const line = e.kind === 'created' ? t.tracker.history.goalCreated(by) : trackerLine(t, e, by, t.tracker.goal.statuses, names);
+          const line = e.kind === 'created' ? t.tracker.history.goalCreated(by) : trackerLine(t, e, by, t.tracker.goal.statuses, names, 'goal');
           return (
             <li key={i} className={e.kind}>
-              <span className="tp-ev">{line ?? by} <time dateTime={e.at}>{momentText(language, e.at)}</time></span>
-              {line === null && e.text && <p>{e.text}</p>}
+              <span className="tp-ev" dir="auto">{line ?? by} <time dateTime={e.at}>{momentText(language, e.at)}</time></span>
+              {line === null && e.text && <p dir="auto">{e.text}</p>}
             </li>
           );
         })}
@@ -117,8 +117,8 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
     <>
       <CardPath goals={goalChain(goal.parentId, goals)} onOpenGoal={onOpenGoal} onOpen={onOpen} />
       <header className="ac-head">
-        <p className="muted tp-type">{goal.department ? words.kinds.goal(goal.department.name) : words.kinds.companyGoal}</p>
-        <h3>{goal.title}</h3>
+        <p className="muted tp-type" dir="auto">{goal.department ? words.kinds.goal(goal.department.name) : words.kinds.companyGoal}</p>
+        <h3 dir="auto">{goal.title}</h3>
         <p className="tp-state"><span className={`tstate ${goal.status === 'reached' ? 'done' : goal.status === 'active' ? 'working' : ''}`}>{t.tracker.goal.statuses[goal.status]}</span></p>
       </header>
       {goal.why && (
@@ -145,7 +145,7 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
           <ul className="tp-subs">
             {smaller.map(g => (
               <li key={g.id}>
-                <button className="linkish" type="button" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
+                <button className="linkish" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
                 <small>{t.tracker.goal.statuses[g.status]}</small>
               </li>
             ))}
@@ -158,13 +158,13 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
           <ul className="tp-subs">
             {serving.map(task => (
               <li key={task.id}>
-                <button className="linkish" type="button" onClick={() => onOpen(task.id)}>#{task.number} {task.title}</button>
+                <button className="linkish" type="button" dir="auto" onClick={() => onOpen(task.id)}>#{task.number} {task.title}</button>
                 <small>{t.tracker.groups[humanStatus(task)]}</small>
                 <WaitLine task={task} />
               </li>
             ))}
           </ul>
-        ) : tasks && <p className="muted">{words.noTasks}</p>}
+        ) : tasks && <p className="muted" dir="auto">{words.noTasks}</p>}
       </section>
       <GoalHistory log={log} />
       {mayEdit && <GoalStatusActions goal={goal} onChanged={onChanged} />}
@@ -179,7 +179,7 @@ export function GoalPanel({ goalId, kind, active = true, onClose, onHome, ...res
   useEscapeCloses(onClose, active);
   return (
     <PanelFrame label={goal?.title ?? t.tracker.graph.goal} heading={t.tracker.graph.goal} busy={!goal && failure === null} kind={kind} onClose={onClose}>
-      {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
+      {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert" dir="auto">{errorText(t, failure)}</p>)}
       {goal && !unavailableFailure(failure) && <GoalBody goal={goal} log={log ?? []} onChanged={load} {...rest} />}
     </PanelFrame>
   );

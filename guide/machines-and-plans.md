@@ -95,6 +95,15 @@ One plan can run on several machines of its owner this way.
 - Such an employee starts in a fresh session that catches up from the conversation.
 - The employee's card shows the machine it works on.
 
+## When does a new agent program wait?
+
+Hornhoof sets no memory or processor limits of its own for agents. A machine's node reports every 20 seconds whether the machine's system had to kill a program for want of memory since its report before.
+
+- After such a report, a turn that would start a new agent program on that machine waits, and so does a one-shot call there. The machine's card and the agent's window say "The machine reported a shortage of memory".
+- The turns and calls wait in their order and start by themselves with the first report that finds no new kill.
+- Programs that already run there go on and take their turns as before, the orchestrator's and the heads' as everyone's.
+- A machine that does not count such kills, a Mac for one, never holds a program for memory.
+
 ## What happens when I disconnect a machine?
 
 Disconnecting a machine stops everything on it. A plan that runs nowhere else waits for a machine again.

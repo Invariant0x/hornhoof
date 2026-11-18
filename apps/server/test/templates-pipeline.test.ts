@@ -189,8 +189,6 @@ describe('standalone verification planning abilities', () => {
       const asFile = await instructionsOf(app.ctx, head!);
       expect(asFile.skills.find(f => f.name === id)?.body, key).toContain(bodyOf(id));
       expect(asFile.text, key).toContain(`\n- ${id}: `);
-      const whole = await instructionsOf(app.ctx, head!, false);
-      expect(whole.text, key).toContain(bodyOf(id));
       seen.add(key);
     }
     expect([...seen].sort()).toEqual([...TEMPLATE_KEYS].sort());

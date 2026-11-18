@@ -16,6 +16,8 @@ export type MachineLoad = {
   hostLoad?: number;
   hostMemFree?: number;
   hostMemory?: number;
+  /* How many processes the machine's kernel killed for want of memory since it started, where it says. */
+  oomKills?: number;
 };
 
 type Disk = { free: number; total: number };
@@ -68,6 +70,12 @@ const containerMemory = (read: (path: string) => string | null, rawFree: number,
   return { memFree: Math.min(rawFree, Math.max(0, limit - current)), memTotal: limit };
 };
 
+/* The kernel counts every process it kills for want of memory, the machine's own and a container's over its limit alike. */
+const oomKills = (vmstat: string | null) => {
+  const count = vmstat ? /^oom_kill (\d+)$/m.exec(vmstat)?.[1] : undefined;
+  return count === undefined ? {} : { oomKills: Number(count) };
+};
+
 /* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
 const processorModel = (cpuModel: string, hostCpu: string | undefined) => {
   const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
@@ -109,7 +117,7 @@ const diskOf = (path: string) => (): Disk | null => {
 
 /* The machine as a test run meets it: its processors, the load average over the last minute, and the memory a new program
    can get. On Linux that is MemAvailable, which counts the cache the system drops when asked, and a container with a
-   memory limit gets at most what is left under it. */
+   memory limit gets at most what is left under it. Linux also counts the processes its kernel killed for want of memory. */
 export function machineLoad({
   read = readText,
   cpus = availableParallelism(),
@@ -135,6 +143,7 @@ export function machineLoad({
     ...(model ? { cpuModel: model } : {}),
     ...(space ? { diskFree: Math.min(space.free, space.total), diskTotal: space.total } : {}),
     ...hostFacts(read, env, cores, busy, rawFree, rawTotal),
+    ...oomKills(read('/proc/vmstat')),
   };
 }
 

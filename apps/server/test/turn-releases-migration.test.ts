@@ -124,7 +124,6 @@ describe('turns become releases', () => {
     await db.update(agents).set({ subscriptionId: key!.id, model: 'claude-opus-5-5' });
     vi.spyOn(app.ctx.hub, 'isReady').mockReturnValue(true);
     vi.spyOn(app.ctx.hub, 'hasTerminals').mockReturnValue(false);
-    vi.spyOn(app.ctx.hub, 'takesSkillFiles').mockReturnValue(true);
     vi.spyOn(app.ctx.hub, 'send').mockReturnValue(true);
     const later = new Date(Date.now() + 10 * 60_000);
     await reconcile(app.ctx, later);

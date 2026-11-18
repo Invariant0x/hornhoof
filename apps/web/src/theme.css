@@ -865,7 +865,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* A badge, like a status, breaks a word only where it does not fit a line of its own. */
 .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; overflow-wrap: break-word; }
 .status.ready { color: var(--ok); border-color: currentColor; }
-.status.needs_login, .status.needs_setup, .status.waiting_machine { color: var(--amber-ink); border-color: currentColor; }
+.status.needs_login, .status.needs_setup, .status.waiting_machine, .status.not_connected { color: var(--amber-ink); border-color: currentColor; }
 .subs .status { display: inline-block; white-space: nowrap; }
 .status.offline, .status.builtin_offline { color: var(--muted); }
 .limits { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
@@ -1967,6 +1967,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-row-line { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 8px 12px; }
   .tr-task-name { padding-inline-start: min(calc(var(--tr-depth) * 8px), 12%); }
   .tr-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; font-size: 13px; }
+  /* A name and its value in their own direction stand where the page's words start, as an isolated phrase does. */
+  .tr-cells:dir(rtl) > .tr-cell:dir(ltr) { justify-content: flex-end; }
   .tr-cell:has(.tr-v:empty) { display: none; }
   .tr-k { position: static; inline-size: auto; block-size: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
@@ -3047,6 +3049,9 @@ th.k-prio .sorth { white-space: nowrap; }
 .phones .people-head > .entry-actions { inline-size: auto; }
 .phone-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
 .phone-cards .wcard { min-inline-size: 0; max-inline-size: 100%; }
+/* The parts of a phone's card stand in the card's grid row by row: each keeps its lines at its top, so their headings stand
+   on one line beside each other instead of the shorter part spreading its lines over the row's height. */
+.phone-cards .blocks > .part { align-content: start; }
 .phone-cards :is(h3, p, dd, .stline), .phone-recording :is(h4, p) { overflow-wrap: anywhere; }
 .phone-form { max-inline-size: 640px; padding: 16px; margin-block-end: 16px; border: 1px solid var(--line); background: var(--surface); }
 .phone-form fieldset { min-inline-size: 0; padding: 0; margin: 0; border: 0; display: grid; gap: 16px; }

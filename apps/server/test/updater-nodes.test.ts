@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { JQ, killProcessGroup, pidAlive, runUpdater, SCRIPT, tempUpdaterDir } from './updater-fixture.js';
+import { JQ, killProcessGroup, pidAlive, runUpdater, tempUpdaterDir, updaterSource } from './updater-fixture.js';
 
 const DOCKERFILE = fileURLToPath(new URL('../../updater/Dockerfile', import.meta.url));
 const INSTALL = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
@@ -209,7 +209,7 @@ describe('updater of a server\'s nodes on another computer', () => {
 
   it('runs the installer its own image carries, which fills in every value the server fills in', async () => {
     expect(readFileSync(DOCKERFILE, 'utf8')).toMatch(/^COPY scripts\/install\.sh \/usr\/local\/share\/hornhoof\/install\.sh$/m);
-    const updaterScript = readFileSync(SCRIPT, 'utf8');
+    const updaterScript = updaterSource();
     expect(updaterScript).toContain('INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"');
     const placeholders = [...new Set(readFileSync(INSTALL, 'utf8').match(/__HORNHOOF_[A-Z_]+__/g))];
     expect(placeholders.sort()).toEqual(['__HORNHOOF_HOST_ID__', '__HORNHOOF_NODE_IMAGE__', '__HORNHOOF_SERVER__', '__HORNHOOF_UPDATER_IMAGE__']);
