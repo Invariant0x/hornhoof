@@ -184,6 +184,7 @@ describe('a maintenance refusal while the update panel shows', () => {
 
   it('still reports a task list failure when the department list was refused for maintenance', async () => {
     const { asked } = await held({
+      ...TAB_ROUTES,
       'GET /api/org': [200, ORG],
       'GET /api/task-departments': [200, { whole: true, mayPlanCompany: true, departments: [] }],
     }, { 'GET /api/tasks?status=all': BROKEN });
@@ -234,7 +235,7 @@ describe('a maintenance refusal while the update panel shows', () => {
     expect(bars()).toEqual([]);
   });
 
-  const goal: GoalView = { id: 'g1', number: 1, title: 'More subscribers', why: '', department: null, parentId: null, responsible: null,
+  const goal: GoalView = { id: 'g1', number: 1, title: 'More subscribers', why: '', department: null, parentId: null, responsible: ME.person,
     target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 0, mayEdit: false };
   it.each([
     ['/tasks/t12', '/api/tasks/t12', { task: TASK_DETAIL }, '#12 Checkout API'],
