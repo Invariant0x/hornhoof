@@ -113,9 +113,9 @@ export class Tmux {
     return ['-u', '-f', '/dev/null', '-L', this.socket];
   }
 
-  run(args: string[], input?: string): Promise<string> {
+  run(args: string[], input?: string, signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = execFile('tmux', [...this.base(), ...args], { env: this.env, uid: this.user?.uid, gid: this.user?.gid, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) =>
+      const child = execFile('tmux', [...this.base(), ...args], { env: this.env, uid: this.user?.uid, gid: this.user?.gid, maxBuffer: 8 * 1024 * 1024, signal }, (err, stdout, stderr) =>
         err ? reject(new Error(String(stderr || err.message).trim())) : resolve(stdout),
       );
       if (input !== undefined) child.stdin?.end(input);

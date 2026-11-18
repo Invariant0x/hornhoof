@@ -55,12 +55,12 @@ describe('shared hook transport', () => {
 });
 
 describe('lifecycle hook delivery', () => {
-  it.each(['tool', 'tooldone', 'toolfail'])('%s tries once with a one-second timeout', async event => {
+  it.each(['tool', 'tooldone', 'toolfail'])('%s tries once, and waits three seconds for a busy node to check its caller', async event => {
     const calls = await bridge(503);
     const timer = vi.spyOn(AbortSignal, 'timeout');
     expect(await sendHook(event, '{}')).toBeNull();
     expect(calls).toHaveLength(1);
-    expect(timer).toHaveBeenCalledWith(1000);
+    expect(timer).toHaveBeenCalledWith(3000);
   });
   it('retries an interrupt with the same call id', async () => {
     const calls = await bridge(503, true);

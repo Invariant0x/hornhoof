@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { privateToolCall, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
+import { OwnerUnknown, socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
@@ -42,6 +42,8 @@ const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
 const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
+/* What the owner check found for a connection: its agent's program, or why not. */
+type Verdict = { owner: true } | { owner: false; why: string };
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* The agent's secret a program sends as a bearer token to the tools address that carries none. */
@@ -67,15 +69,16 @@ export class Bridge {
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
-  /* What the check found for each open connection and agent: a connection's process does not change. */
-  private readonly checked = new WeakMap<Socket, Map<string, Promise<boolean>>>();
+  /* Share pending checks and keep successful checks for the connection. A refusal can change when a pane is adopted. */
+  private readonly checked = new WeakMap<Socket, Map<string, Promise<Verdict>>>();
 
-  private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
+  private readonly accepted = new WeakMap<Socket, { captured: ReturnType<Capture>; atAccept: boolean }>();
   private readonly calls = new HookCalls();
   private readonly checkStops = new Map<string, Set<AbortController>>();
   /* Check commands that run in a step of their own, with no turn: a turn's token does not stop them. */
   private readonly stepStops = new Map<string, Set<AbortController>>();
   private readonly failures: HookFailures;
+  private readonly ownerFailures: HookFailures;
   /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
   private readonly refusals: HookFailures;
   private readonly memory = new ToolsMemory();
@@ -85,16 +88,21 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; ownerRejected?: HookRejected; ownerReported?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck; sensitive?: (key: string, name: string, input: unknown, answer?: unknown, policy?: ToolPrivacyPolicy) => void | Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
+    this.ownerFailures = options.ownerReported ? new HookFailures(options.ownerReported) : this.failures;
     this.refusals = new HookFailures(options.refused);
   }
 
   async start(): Promise<void> {
     const server = createServer({ keepAliveTimeout: KEEP_ALIVE_MS }, (req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
-      if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
+      if (!this.owns) return;
+      const captured = this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 });
+      this.accepted.set(socket, { captured, atAccept: true });
+      /* The first request observes the outcome. A socket can close without sending one. */
+      void captured.catch(() => {});
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     this.server = server;
@@ -187,30 +195,73 @@ export class Bridge {
     });
   }
 
-  private fromOwner(key: string, socket: Socket, peer: Peer): Promise<boolean> {
-    if (!this.owns) return Promise.resolve(true);
-    const known = this.checked.get(socket) ?? new Map<string, Promise<boolean>>();
+  private fromOwner(key: string, socket: Socket, peer: Peer): Promise<Verdict> {
+    const owns = this.owns;
+    if (!owns) return Promise.resolve({ owner: true });
+    const known = this.checked.get(socket) ?? new Map<string, Promise<Verdict>>();
     this.checked.set(socket, known);
     const hint = `${key}:${peer.pid ?? 'legacy'}`;
     let found = known.get(hint);
     if (!found) {
-      found = this.owns(key, peer).catch(error => { known.delete(hint); throw error; });
+      let why = '';
+      found = this.capturePeer(socket, peer)
+        .then(captured => owns(key, captured, reason => { why = reason; }))
+        .then((owner): Verdict => {
+          if (owner) return { owner };
+          known.delete(hint);
+          return { owner, why };
+        })
+        .catch(error => { known.delete(hint); throw error; });
       known.set(hint, found);
     }
     return found;
   }
 
-  private async peer(req: IncomingMessage): Promise<Peer> {
+  /* Whether the call comes from the agent's own program. When not, it is answered here and the node's log says why: a
+     look at the machine that gave no answer is a failure to try again, which the connection keeps nothing of. */
+  private async ownCall(res: ServerResponse, key: string, kind: string, event: string | undefined, owned: Promise<Verdict>): Promise<boolean> {
+    const found = await owned.catch((error: unknown) => { if (error instanceof OwnerUnknown) return error; throw error; });
+    if (found instanceof OwnerUnknown) return this.notOwned(res, key, kind, event, 502, `owner check unavailable: ${found.message}`);
+    if (found.owner) return true;
+    if (kind === 'hook' && event) this.options.unowned?.(key, event);
+    return this.notOwned(res, key, kind, event, 403, found.why ? `owner check failed: ${found.why}` : 'owner check failed');
+  }
+
+  /* Use only recognized event and call names in rejection logs. */
+  private notOwned(res: ServerResponse, key: string, kind: string, event: string | undefined, status: number, reason: string): false {
+    const label = kind === 'hook' ? hookEvent(event) : bridgeCallKind(kind);
+    this.options.ownerRejected?.(key, label, reason);
+    this.ownerFailures.reject(key, label, reason);
+    reply(res, status, '');
+    return false;
+  }
+
+  private peer(req: IncomingMessage): Peer {
     const peer: Peer = { port: req.socket.remotePort ?? 0, bridgePort: this.port };
     const hint = req.headers['x-hh-pid'];
     if (hint !== undefined) peer.pid = typeof hint === 'string' && /^[1-9][0-9]{0,9}$/.test(hint) ? Number(hint) : 0;
-    if (this.owns) Object.assign(peer, await (this.accepted.get(req.socket) ?? this.capture(peer)));
     return peer;
+  }
+
+  private async capturePeer(socket: Socket, peer: Peer): Promise<Peer> {
+    const original = this.accepted.get(socket);
+    if (!original?.atAccept && socket.destroyed) return { ...peer, acceptedInode: null };
+    const entry = original ?? { captured: this.capture(peer), atAccept: false };
+    this.accepted.set(socket, entry);
+    let keep = false;
+    try {
+      const proof = await entry.captured;
+      if (!entry.atAccept && socket.destroyed) return { ...peer, acceptedInode: null };
+      keep = proof.acceptedInode !== null;
+      return { ...peer, ...proof };
+    } finally {
+      if (!keep && this.accepted.get(socket) === entry) this.accepted.delete(socket);
+    }
   }
 
   private refused(req: IncomingMessage, res: ServerResponse, status: number, reason: string): void {
     const [, kind, secret, rawEvent] = (req.url ?? '').split('?')[0]!.split('/');
-    if (kind === 'hook') this.failures.reject(this.bySecret.get(secret ?? '') ?? null, HOOKS.has(rawEvent ?? '') ? rawEvent! : 'unknown', reason);
+    if (kind === 'hook') this.failures.reject(this.bySecret.get(secret ?? '') ?? null, hookEvent(rawEvent), reason);
     reply(res, status, '');
   }
 
@@ -245,8 +296,10 @@ export class Bridge {
     const [, kind, inPath, event] = path!.split('/');
     const key = this.agentAt(req, kind, inPath, event);
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
-    const peer = await this.peer(req);
+    const peer = this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
+    /* A check nobody waits for, at an address with nothing under it, fails nothing. */
+    void owned.catch(() => {});
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
     if (!attachmentPath(kind, event)) return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
@@ -254,10 +307,7 @@ export class Bridge {
        then, and goes on to Hornhoof as it comes. */
     const reading = kind === 'attach' ? null : readBody(req, MAX_BODY);
     void reading?.catch(() => {});
-    if (!(await owned)) {
-      if (kind === 'hook' && event) this.options.unowned?.(key, event);
-      return this.refused(req, res, 403, 'owner check failed');
-    }
+    if (!(await this.ownCall(res, key, kind, event, owned))) return;
     const body = reading ? await reading : Buffer.alloc(0);
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
@@ -531,6 +581,11 @@ function hookFailure(status: number): string {
 }
 
 const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+function bridgeCallKind(kind: string): string {
+  return kind === 'check' || kind === 'mcp' || kind === 'attach' ? kind : 'unknown';
+}
+
+const hookEvent = (event: string | undefined): string => (HOOKS.has(event ?? '') ? event! : 'unknown');
 const attachmentPath = (kind: string, event: string | undefined): boolean => kind !== 'attach' || event === undefined || event === 'file';
 
 function observedCall(body: Buffer): { name: string; input: unknown } | null {
