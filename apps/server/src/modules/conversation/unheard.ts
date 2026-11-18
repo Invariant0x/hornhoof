@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
-import { jobsOf } from '../nodes/messages.js';
+import { jobsOf } from '../nodes/jobs.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { withInputLock } from './decision-context.js';
 import { insertTurn, nodeOfAgent, onAgent, pump } from './queue.js';

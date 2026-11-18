@@ -1,3 +1,4 @@
+import { WORK_MEMORY_GB, TEST_MINUTES, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
@@ -13,8 +14,9 @@ import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { builtinMachine, liveNode, shownMachine } from '../nodes/nodes.js';
-import { onTask } from '../tasks/attachments.js';
-import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
+import { onTask } from '../tasks/file-policy.js';
+import { CLOSED, refuse, type Task, type Tx, type Wake } from '../tasks/state.js';
+import { note, published } from '../tasks/events.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
 import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
@@ -32,27 +34,13 @@ import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reu
 import { keepPartTimings } from './timings.js';
 import { heldMachines, holdsBuiltin, holdsMachine } from '../network/follow.js';
 import { builtinName } from '../nodes/builtin.js';
-
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
 type Department = typeof departments.$inferSelect;
 type Repo = NonNullable<Workspace['repo']>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
-
-/* The free memory a part of work needs unless its agent says. */
-export const WORK_MEMORY_GB = 2;
-/* The time a run gets by default, and at most. */
-export const TEST_MINUTES = 30;
-export const TEST_MINUTES_MAX = 120;
-/* Runs of one agent that may go on at once. */
-export const OPEN_RUNS = 3;
-/* A part that found no free machine this long ends, so its agent hears of it instead of waiting on. */
-export const WAIT_MS = 2 * 3_600_000;
 /* A machine that said nothing of a part this long past its time limit has lost it. */
 const LATE_MS = 2 * 60_000;
-/* A part whose machine is away this long runs again on another, and a part runs again at most this many times. */
-export const AWAY_MS = 3 * 60_000;
-export const RERUNS = 2;
 /* What a part keeps of its log's end for the result: its last lines. */
 const TAIL_LINES = 20;
 const TAIL_CHARS = 2000;
@@ -998,3 +986,4 @@ function sameRunTarget(run: Run, target: Awaited<ReturnType<typeof targetOf>>): 
   const scope = run.environmentSnapshot.description.repositoryScope;
   return scope.companyId === run.companyId && scope.repositoryOwnerId === target.department.id && scope.repoUrlHash === hashToken(target.repo.url);
 }
+export { WORK_MEMORY_GB, TEST_MINUTES, TEST_MINUTES_MAX, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';

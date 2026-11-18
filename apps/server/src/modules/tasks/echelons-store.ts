@@ -6,7 +6,7 @@ import { departments, pipelines, taskRoutes } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { catalogRoute, type StageRoute } from '../templates/load.js';
-import { refuse, type Task, type Tx } from './engine.js';
+import { refuse, type Task, type Tx } from './state.js';
 import { validScopePaths } from './review-schema.js';
 import { throughEchelons } from './turnkey.js';
 import { NO_DEPARTMENT_CHECKER, populateSecurityOwner, uncheckable } from './echelons-assign.js';

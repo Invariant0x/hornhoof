@@ -7,7 +7,7 @@ import { agentIdentity, checkerFor, stageStaff } from './echelons-assign.js';
 import { currentHanded } from './echelons-candidates.js';
 import { reviewEligibility, type CheckerIdentity } from './echelons-policy.js';
 import type { Route } from './echelons-store.js';
-import { refuse, type Task } from './engine.js';
+import { refuse, type Task } from './state.js';
 import { stuckRecipient } from './stuck-route.js';
 
 type Reader = Pick<Ctx, 'db'>;

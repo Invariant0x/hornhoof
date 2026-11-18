@@ -9,7 +9,7 @@ import { ApiError, loggable } from '../../errors.js';
 import { orchestratorOf, pump, windowNode } from '../conversation/queue.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { appendEvent, listEvents } from '../events/store.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableSubscriptions, spotIn, type Serving } from '../tools/staff.js';
 import { holderOf, holds, isOperations, leftOut, missingRoles, PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from './required.js';

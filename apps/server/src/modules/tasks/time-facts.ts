@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { jobs, people, requests, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { candidates, decisionOwner, openPersonRequests } from './decisions.js';
-import { requestSubject, type Task } from './engine.js';
+import { requestSubject, type Task } from './state.js';
 import { waitForSourceKey, type TaskWait } from './wait-state.js';
 import { prerequisiteOf } from './wait-views.js';
 

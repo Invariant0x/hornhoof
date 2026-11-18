@@ -2,7 +2,7 @@ import { MAX_OPEN_TASKS, type TaskStates } from '@hornhoof/protocol';
 import { and, asc, eq, notInArray } from 'drizzle-orm';
 import { only } from '../../db/selections.js';
 import { tasks } from '../../db/schema.js';
-import { CLOSED, type Tx } from './engine.js';
+import { CLOSED, type Tx } from './state.js';
 import { lastTaskNumber } from './numbers.js';
 
 /* The company's task numbers still open and the last number it gave, by which a node tells the worktrees of its closed tasks:

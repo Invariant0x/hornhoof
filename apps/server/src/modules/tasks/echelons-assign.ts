@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, departments, subscriptions } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import type { Task, Tx } from './engine.js';
+import type { Task, Tx } from './state.js';
 import type { Route } from './echelons-store.js';
 import { checkedProducer } from './echelons-candidates.js';
 import { modelCapability, modelProvider, reviewEligibility, sameChecker, type CheckerIdentity } from './echelons-policy.js';

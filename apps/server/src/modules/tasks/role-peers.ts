@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, subscriptions } from '../../db/schema.js';
 import { agentState } from '../conversation/queue.js';
-import type { Task } from './engine.js';
+import type { Task } from './state.js';
 
 /* What decides who else may take a piece of work. */
 export type Work = Pick<Task, 'productId'>;

@@ -14,7 +14,8 @@ import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type Agent
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
-import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, mayAsk, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, closeTask, comment, createTask, report, submit, updateTask, verdict } from './engine.js';
+import { CLOSED, listed, mayAsk, openAfter, refuse, taskSpot, type Moved, type Task } from './state.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';

@@ -12,7 +12,8 @@ import { repoAt } from '../departments/repository.js';
 import { keepCandidateAtTests, takeMainAtTests } from './echelons-main.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
 import { turnkeyTeamOf } from './turnkey.js';
-import { move, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
+import { move } from './engine.js';
+import { refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
 
 /* An agent whose tool list an earlier build gave still names its test runs, as that build asked: they are taken and left out
    until the next release, so its report does not fail on a field it was told to send. */

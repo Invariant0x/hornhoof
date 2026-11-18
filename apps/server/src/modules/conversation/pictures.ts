@@ -6,7 +6,9 @@ import type { Person } from '../../auth/session.js';
 import { attachments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
-import { checkPictureRoom, fileName, onDisk, pictureType, type Taken } from '../tasks/attachments.js';
+import { checkPictureRoom } from '../tasks/file-policy.js';
+import { fileName, pictureType, type Taken } from '../tasks/attachments.js';
+import { onDisk } from '../tasks/file-views.js';
 
 export const PICTURES_PER_MESSAGE = 10;
 /* A document, a table or an archive a person passes to an agent; the browser makes a big picture smaller first. */

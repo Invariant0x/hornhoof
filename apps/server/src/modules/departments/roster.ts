@@ -3,7 +3,7 @@ import { asc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, teams } from '../../db/schema.js';
 import { modelOnPlan } from '../agents/role-model.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import type { Role, TeamTemplate } from '../templates/load.js';
 import { runsTier, servingSubscriptions, spotIn, type HireLine } from '../tools/staff.js';
 import { deptName } from './templates.js';

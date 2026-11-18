@@ -7,7 +7,7 @@ import { actsAsCeo } from '../../auth/decisions.js';
 import { actorOf, requirePerson, type Person } from '../../auth/session.js';
 import { GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { refuse } from '../tasks/engine.js';
+import { refuse } from '../tasks/state.js';
 import { seesTask } from '../tasks/sight.js';
 import { createGoal, editGoal, goalLog, goalViews, loadGoal, setGoalStatus, type GoalChange, type GoalGuard } from './goals.js';
 import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';

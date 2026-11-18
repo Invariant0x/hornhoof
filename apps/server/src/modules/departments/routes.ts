@@ -21,7 +21,7 @@ import { ApiError } from '../../errors.js';
 import { delegationOf, lockedFor, standingPrincipal, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import { backOn } from '../tasks/wake.js';
 import { planFor, productRoster, rosterOf, templateRoster, templateTeams } from './roster.js';
 import { checkStaff, departmentOf, grantingSkillOn, HireLine, requiredState, servingSubscriptions, spotIn } from '../tools/staff.js';
@@ -35,7 +35,7 @@ import { checkFolderFree, repoView } from './repository.js';
 import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
-import { nextRevision } from '../tracker/edit.js';
+import { nextRevision } from '../tracker/revision.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });

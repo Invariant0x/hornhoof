@@ -7,7 +7,8 @@ import { currentCandidate, producedCandidate } from './echelons-candidates.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { move, refuse, type Moved, type Task } from './engine.js';
+import { move } from './engine.js';
+import { refuse, type Moved, type Task } from './state.js';
 import { captureReview, exactComparison, type Review } from './review-context.js';
 import { openTurnOf } from './turn-department.js';
 

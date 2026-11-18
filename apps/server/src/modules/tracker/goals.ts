@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import { agents, companies, departments, goalEvents, goals, people, tasks, type GoalStatus } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
-import { refuse, type Actor, type Tx } from '../tasks/engine.js';
+import { refuse, type Actor, type Tx } from '../tasks/state.js';
 import type { TaskPlace } from '../tasks/sight.js';
 import { logOf, type LogLine } from '../tasks/views.js';
 import { nudgeTrackerKeepers } from './nudge.js';

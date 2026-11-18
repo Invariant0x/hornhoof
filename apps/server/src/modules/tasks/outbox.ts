@@ -1,7 +1,7 @@
 import { and, asc, eq, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { pendingWakes } from '../../db/schema.js';
-import type { Tx, Wake, WakeWhy } from './engine.js';
+import type { Tx, Wake, WakeWhy } from './state.js';
 
 /* A wake nobody queued for a day is given up. */
 const GIVE_UP_MS = 24 * 3_600_000;

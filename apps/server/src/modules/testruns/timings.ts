@@ -4,7 +4,7 @@ import { basename, posix } from 'node:path';
 import type { Db } from '../../db/client.js';
 import { attachments, testPartTimings, testParts, testRuns } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import { logName } from './runs.js';
 
 const RUNNER_START = /\bRUN\s+v\S+\s+(\S.*?)\s*$/;

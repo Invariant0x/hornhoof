@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { canReach } from '../../auth/access.js';
 import { knowsAgentId, ownsPlace, seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { tasks } from '../../db/schema.js';
-import { taskSpot, type Task } from './engine.js';
+import { taskSpot, type Task } from './state.js';
 import type { TreeFacts } from './tree.js';
 import { maskWaits } from './wait-views.js';
 import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, type TaskLine } from './views.js';

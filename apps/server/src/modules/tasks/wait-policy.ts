@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, people, waitPolicies } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { departmentOwners } from './decisions.js';
-import type { Task, Tx } from './engine.js';
+import type { Task, Tx } from './state.js';
 
 /* The review after the one due, on the sequence its anchor and interval declare: a late sweep neither moves the sequence
    nor sends what it passed over, only counts it. Without repeats, none follows. */

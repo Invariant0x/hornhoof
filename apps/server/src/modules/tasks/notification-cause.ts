@@ -1,6 +1,6 @@
 import type { NotificationSource } from '@hornhoof/protocol';
 import type { TaskEventKind } from '../../db/schema.js';
-import type { Actor, Task, Wake } from './engine.js';
+import type { Actor, Task, Wake } from './state.js';
 
 /* Kept with the move, rather than inferred from a newer task log at delivery time. */
 export type WakeCause = {

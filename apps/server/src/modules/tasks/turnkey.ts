@@ -3,7 +3,8 @@ import type { Db } from '../../db/client.js';
 import type { Ctx } from '../../app.js';
 import { agents, teams } from '../../db/schema.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
+import { giver, refuse, type Moved, type Task, type Tx } from './state.js';
+import { move } from './engine.js';
 import { integrationTarget, requireInTurn, requireSameTurn } from './turn-integration.js';
 
 /* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never

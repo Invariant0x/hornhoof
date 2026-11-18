@@ -7,7 +7,7 @@ import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
-import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
+import { CLOSED, type Task, type Tx, type Wake } from './state.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
 const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.enum(ECHELON_STAGES).nullable(), candidateId: z.uuid().nullable(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });

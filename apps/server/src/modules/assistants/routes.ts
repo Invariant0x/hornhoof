@@ -15,7 +15,8 @@ import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.
 import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
-import { checkPictureRoom, keepTaken, received } from '../tasks/attachments.js';
+import { checkPictureRoom } from '../tasks/file-policy.js';
+import { keepTaken, received } from '../tasks/attachments.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { fileByLink, fileFor } from './files.js';
 import { sendForOwner } from './messages.js';

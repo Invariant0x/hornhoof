@@ -4,7 +4,8 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } f
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { agentState, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf } from '../conversation/queue.js';
+import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { turnAgain } from './again.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';

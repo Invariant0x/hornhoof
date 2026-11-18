@@ -6,7 +6,7 @@ import type { Person } from '../../auth/session.js';
 import { decisionOwner, type DecisionSubject } from '../../auth/decision-owner.js';
 import { departments, people } from '../../db/schema.js';
 import { candidates, decisionPerson } from '../tasks/decisions.js';
-import { refuse, type Tx } from '../tasks/engine.js';
+import { refuse, type Tx } from '../tasks/state.js';
 
 /* Who answers for work in a place nobody named one for: the person who takes the place's own decisions, by the rule its
    questions follow: its named owner, else the one person whose access lists it, else the CEO. */

@@ -1,7 +1,7 @@
 import type { Notification } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { agentParty, HORNHOOF, personParty, type MessageParty } from '../events/parties.js';
-import type { Actor, Task, Wake } from './engine.js';
+import type { Actor, Task, Wake } from './state.js';
 
 async function actorParty(ctx: Ctx, companyId: string, actor?: Actor): Promise<MessageParty> {
   if (actor?.personId) return personParty(ctx, companyId, actor.personId);

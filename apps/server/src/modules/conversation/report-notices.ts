@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, jobs } from '../../db/schema.js';
 import { incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from '../events/parties.js';
 import { publishEvent, type WithEvent } from '../events/store.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import type { TurnMessage } from './queue.js';
 import { quote } from './prompt.js';
 import type { deliverLockedInput } from './decision-context.js';

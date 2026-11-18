@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { improvements, improvementSubmissions, IMPROVEMENT_SCOPES, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import type { Tx } from '../tasks/engine.js';
+import type { Tx } from '../tasks/state.js';
 import { currentInvocation } from '../tools/calls.js';
 import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement, moveImprovementTx } from './store.js';
 

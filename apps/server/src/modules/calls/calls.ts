@@ -11,12 +11,13 @@ import { repoAt } from '../departments/repository.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
-import { CLOSED, note, published, refuse, type Task, type Wake } from '../tasks/engine.js';
+import { CLOSED, refuse, type Task, type Wake } from '../tasks/state.js';
+import { note, published } from '../tasks/events.js';
 import { keepWakes, wakeQueued } from '../tasks/outbox.js';
 import { cancelJob, wakeAll } from '../tasks/wake.js';
 import { taskFor } from '../testruns/runs.js';
 import type { ToolJob } from '../tools/job.js';
-import { onTask } from '../tasks/attachments.js';
+import { onTask } from '../tasks/file-policy.js';
 
 type Call = typeof oneShotCalls.$inferSelect;
 type Job = typeof jobs.$inferSelect;

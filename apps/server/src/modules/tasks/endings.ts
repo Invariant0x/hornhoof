@@ -2,10 +2,11 @@ import { and, eq, gte, inArray, lte, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, taskEvents } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { conversationOf, GONE_ALONG, onAgent } from '../conversation/queue.js';
+import { conversationOf, onAgent } from '../conversation/queue.js';
+import { GONE_ALONG } from '../conversation/constants.js';
 import { waitedForReturn } from '../nodes/connections.js';
 import { turnAgain } from './again.js';
-import { published, uncountedSinceMove } from './engine.js';
+import { published, uncountedSinceMove } from './events.js';
 import { repeatedTurn } from './wake-state.js';
 
 /* What an agent records on a task for what it was woken for: its work handed in, a verdict, a report, why it is blocked,

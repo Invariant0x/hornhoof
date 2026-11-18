@@ -1,3 +1,4 @@
+import { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, TURN_TIMEOUT_MS, INBOX_PROMPT, NOTHING_UNREAD, GONE_ALONG } from './constants.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
@@ -21,12 +22,13 @@ import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from 
 import { pickBuiltin } from '../nodes/builtin.js';
 import { shownAway } from '../nodes/machine-away.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
-import { jobsOf } from '../nodes/messages.js';
+import { jobsOf } from '../nodes/jobs.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { openAfter, startWork, type Tx } from '../tasks/engine.js';
+import { openAfter, type Tx } from '../tasks/state.js';
+import { startWork } from '../tasks/engine.js';
 import { openTaskNumbers } from '../tasks/open-numbers.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
@@ -49,17 +51,6 @@ import { nodesOnHold } from '../program-operator/not-started.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 import { fallbackMove } from '../subscriptions/fallback.js';
 import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
-
-/* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
-   keep the whole window, since they hold the department's and the company's picture. Their window is named outright too:
-   left to its own choice, Claude Code stops a session with a question whether to compact earlier, which nobody answers. */
-export const WORKER_COMPACT_WINDOW = 500_000;
-export const FULL_COMPACT_WINDOW = 1_000_000;
-
-/* Any turn may run as long as its work takes. This only ends one that hangs, a program frozen or waiting for input
-   nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
-export const TURN_TIMEOUT_MS = 2 * 3_600_000;
-
 export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: string };
 
 export type AgentState = FailureState & {
@@ -203,9 +194,6 @@ export async function wordsSettled(ctx: Ctx, node: NodeIdentity, agentId: string
   });
   await pump(ctx, agentId);
 }
-
-/* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
-export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
 /* withMessage: what is kept together with the message, or not at all. */
@@ -358,10 +346,6 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   await keepLetter(ctx, t, id, 'unread');
   return id;
 }
-
-/* What the turn that takes the inbox asks before it goes out, when its prompt is written from the inbox. */
-export const INBOX_PROMPT = 'Hornhoof: your inbox.';
-export const NOTHING_UNREAD = 'Nothing in the inbox was unread when this turn was due.';
 
 /* The one waiting turn of the agent that takes its inbox, made for the first letter that has none to wait for. */
 async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Promise<string> {
@@ -891,8 +875,6 @@ async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
 }
 
 const ALONG = 'Several things waited for you in line and go out together in this turn. Go through each of them:';
-/* What a turn that went out inside another one ended with: its own result is the other turn's. */
-export const GONE_ALONG = 'Went out with the turn before it.';
 
 /* The agent's other waiting turns that are due, of those which, oldest first. */
 function alongWith(ctx: Ctx, agentId: string, jobId: string, which: SQL | undefined) {
@@ -1359,3 +1341,4 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
 function forgetStartupValues(ctx: Ctx, started: readonly { id: string }[]): void {
   for (const job of started) forgetPrivateTurn(ctx.db, job.id);
 }
+export { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, TURN_TIMEOUT_MS, STOPPED_ON_PURPOSE, INBOX_PROMPT, NOTHING_UNREAD, GONE_ALONG } from './constants.js';

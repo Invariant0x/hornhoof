@@ -2,7 +2,7 @@ import { and, eq, isNotNull, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
 import { liveSubscription } from '../conversation/queue.js';
-import { CLOSED } from './engine.js';
+import { CLOSED } from './state.js';
 import { expireWait } from './external-wait.js';
 
 async function unavailableEmployee(ctx: Ctx, companyId: string, id: string): Promise<string | null> {

@@ -3,7 +3,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents } from '../../db/schema.js';
 import { liveSubscription } from '../conversation/queue.js';
-import { refuse } from './engine.js';
+import { refuse } from './state.js';
 
 export async function checkedWaitTarget(ctx: Ctx, companyId: string, waiter: string, on: RecordedWaitOn | undefined): Promise<RecordedWaitOn | undefined> {
   if (on?.kind !== 'employee') return on;

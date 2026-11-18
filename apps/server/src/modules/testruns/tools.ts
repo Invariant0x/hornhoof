@@ -5,13 +5,14 @@ import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { endOwnWait } from '../tasks/external-wait.js';
 import { taskByRef } from '../tasks/views.js';
-import { refuse } from '../tasks/engine.js';
+import { refuse } from '../tasks/state.js';
 import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
 import { repoAt } from '../departments/repository.js';
 import { harnessState } from './harness.js';
 import { FULL_RUN_MINUTES } from './describe.js';
-import { startRun, stopRun, taskFor, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
+import { startRun, stopRun, taskFor } from './runs.js';
+import { TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './constants.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const answer = (fn: () => Promise<string>) =>

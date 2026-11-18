@@ -4,8 +4,9 @@ import type { Spot } from '../../auth/access.js';
 import { agents, departments, pipelines, pipelineStages, tasks } from '../../db/schema.js';
 import { catalogRoute, type CatalogPipeline } from '../templates/load.js';
 import { deptName } from '../departments/templates.js';
-import { published, refuse, type Actor, type Task, type Tx } from '../tasks/engine.js';
-import { nextRevision } from './edit.js';
+import { published } from '../tasks/events.js';
+import { refuse, type Actor, type Task, type Tx } from '../tasks/state.js';
+import { nextRevision } from './revision.js';
 import { spotOf } from './responsible.js';
 
 type Pipeline = typeof pipelines.$inferSelect;

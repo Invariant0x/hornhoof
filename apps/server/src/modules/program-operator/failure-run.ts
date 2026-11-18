@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, programOperatorCases } from '../../db/schema.js';
-import { GONE_ALONG } from '../conversation/queue.js';
+import { GONE_ALONG } from '../conversation/constants.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
 

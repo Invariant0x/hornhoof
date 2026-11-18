@@ -3,7 +3,7 @@ import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'driz
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { CLOSED, type Task, type Tx } from './engine.js';
+import { CLOSED, type Task, type Tx } from './state.js';
 import { NUDGES, treeOwnerSince, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
 import { routeSnapshots } from './echelons-store.js';

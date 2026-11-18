@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import { goals } from '../../db/schema.js';
-import { refuse, type Task } from '../tasks/engine.js';
+import { refuse, type Task } from '../tasks/state.js';
 import { defaultPipelineOf, placeOnPipeline } from './pipelines.js';
 import { placeOwner, requireAnswersFor } from './responsible.js';
 

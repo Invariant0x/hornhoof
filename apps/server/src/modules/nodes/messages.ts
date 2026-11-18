@@ -1,6 +1,7 @@
+import { jobsOf } from './jobs.js';
 import { lastBytes, ToolPrivacy, type Limits, type NodeMessage } from '@hornhoof/protocol';
 import { hideCredentials } from '@hornhoof/protocol/redaction';
-import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
@@ -40,7 +41,6 @@ import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 import { phoneNodeGone } from '../phones/rpc.js';
-
 const OPEN_JOBS = ['queued', 'running'] as const;
 const LOAD_SEEN_MS = 60_000;
 const loadSeenAt = new WeakMap<Ctx, Map<string, number>>();
@@ -62,15 +62,6 @@ async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<voi
 }
 
 const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
-
-/* A node may only touch the jobs sent to it; a machine's built-in node those of API keys that went out to it. A job
-   from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
-export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
-  if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
-  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
-  const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
-  return and(ofKeys, here)!;
-}
 
 /* The turns that run on the node now, as Hornhoof has them. */
 async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
@@ -548,3 +539,4 @@ async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Pr
     default: return false;
   }
 }
+export { jobsOf } from './jobs.js';

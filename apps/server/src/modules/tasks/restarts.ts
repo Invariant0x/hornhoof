@@ -7,7 +7,7 @@ import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/tur
 import { turnAgain } from './again.js';
 import { when } from './silent.js';
 import { logTurnFact } from './turn-log.js';
-import { published } from './engine.js';
+import { published } from './events.js';
 import { repeatedTurn, type TaskWake } from './wake-state.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */

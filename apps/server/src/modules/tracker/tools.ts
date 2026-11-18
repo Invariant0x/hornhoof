@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, goals, GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { refuse, taskSpot, type Task } from '../tasks/engine.js';
+import { refuse, taskSpot, type Task } from '../tasks/state.js';
 import { seesTask } from '../tasks/sight.js';
 import { taskByRef } from '../tasks/views.js';
 import { catalogRoute, type Grant } from '../templates/load.js';

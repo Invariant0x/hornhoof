@@ -5,7 +5,7 @@ import { only } from '../../db/selections.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
-import { published } from './engine.js';
+import { published } from './events.js';
 import { when } from './silent.js';
 
 /* A turn on a task whose machine Hornhoof cannot reach is not failed for that: the work on that machine is kept, and

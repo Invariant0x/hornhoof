@@ -1,7 +1,7 @@
 import { inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { goals, people } from '../../db/schema.js';
-import type { Task } from '../tasks/engine.js';
+import type { Task } from '../tasks/state.js';
 import { timeFacts, type TimeFacts, type TimedTask, type WaitNames } from '../tasks/time-facts.js';
 import type { TaskWait } from '../tasks/wait-state.js';
 

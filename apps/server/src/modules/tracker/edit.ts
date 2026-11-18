@@ -1,12 +1,13 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { nextRevision } from './revision.js';
+import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { pipelineStages, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { note, published, refuse, taskSpot, type Actor, type Task, type Tx } from '../tasks/engine.js';
+import { note, published } from '../tasks/events.js';
+import { refuse, taskSpot, type Actor, type Task, type Tx } from '../tasks/state.js';
 import { holdPipelines, placeOnPipeline, stageGone } from './pipelines.js';
 import { requireAnswersFor } from './responsible.js';
 import { goalFor } from './task-fields.js';
-
 /* What may change of a task beside its work: its texts for people and what the tracker keeps. Who does it, its status, its
    place and its route change elsewhere. null takes a goal, a date or a pipeline off. */
 export type TaskEdit = {
@@ -65,8 +66,6 @@ async function stageOf(ctx: Pick<Ctx, 'db'>, task: Task, stageId: string | null)
 export type Seen = { version: number; revision: number };
 export const seenOf = (task: Pick<Task, 'version' | 'trackerRevision'>): Seen => ({ version: task.version, revision: task.trackerRevision });
 const sameAs = (task: Pick<Task, 'version' | 'trackerRevision'>, seen: Seen) => task.version === seen.version && task.trackerRevision === seen.revision;
-/* The next revision of what the tracker keeps, for every change of it. */
-export const nextRevision = () => sql`${tasks.trackerRevision} + 1`;
 
 /* An edit of what the tracker keeps, made only on the task as its writer saw it: a move of its work or another edit of it
    since then refuses it, so neither is written over. It gives no work and is no move of it: it wakes nobody, leaves what
@@ -102,3 +101,4 @@ export async function writeEdit(tx: Tx, actor: Actor, task: Task, edit: TaskEdit
   await note(tx, row!, { kind: 'edited', actor, data: { fields } });
   return row!;
 }
+export { nextRevision } from './revision.js';
