@@ -43,6 +43,21 @@ describe('templates', () => {
     }
   });
 
+  it('uses the existing design direction skill to keep generated pictures consistent and control their cost', () => {
+    expect(templates.roles.get('DSN-UI')?.skills).toContainEqual(expect.objectContaining({ id: 'dsn-design-direction', on: true }));
+    const direction = body('dsn-design-direction');
+    expect(direction).toMatch(/generating pictures[\s\S]*one look[\s\S]*approved references[\s\S]*character sheets/i);
+    expect(direction).toMatch(/included credits[\s\S]*before pay-per-use/i);
+    expect(direction).toMatch(/provider permits it and the account holder authorizes it[\s\S]*documented API or official connector/i);
+    expect(direction).toMatch(/spending limit[\s\S]*for the order[\s\S]*maker's current prompt guide[\s\S]*model's structure/i);
+    expect(direction).toMatch(/route, model, settings[\s\S]*actual cost[\s\S]*cost per accepted picture/i);
+  });
+
+  it('makes the design check compare the exact generated pictures with their approved references', () => {
+    expect(body('dsn-work-pipeline')).toMatch(/exact generated pictures[\s\S]*approved references[\s\S]*size they will be shown/i);
+    expect(body('dsn-brand-consistency')).toMatch(/generated pictures[\s\S]*approved references[\s\S]*character sheets/i);
+  });
+
   it('keeps deterministic testing in the testing policy and out of role identities', () => {
     expect(body('dev-testing-policy')).toMatch(/we test our program, not the operating system and not other programs/);
     expect(body('dev-testing-policy')).toMatch(/time in a test is virtual only/);

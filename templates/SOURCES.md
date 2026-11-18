@@ -42,6 +42,7 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | Frame.io [editing stages](https://workflow.frame.io/guide/editing-stages) and Adobe [J and L cuts](https://helpx.adobe.com/premiere/desktop/edit-projects/trim-clips/perform-j-cuts-and-l-cuts.html) | Facts only | Edit passes and sound carried across picture cuts. |
 | Runway [official connector](https://runway.com/mcp) and Google's [developer benefits](https://developers.google.com/profile/help/benefits?hl=en) | Facts only | Plans can include credits for authorized connectors or eligible developer use. |
 | Runway [video prompt guide](https://help.runwayml.com/hc/en-us/articles/39789879462419-Gen-4-Video-Prompting-Guide) and Google Cloud [video prompt guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/video-gen-prompt-guide) | Facts only | Model-specific prompt structures, image inputs and motion and sound controls. |
+| Runway [image references](https://help.runwayml.com/hc/en-us/articles/40042718905875-Creating-with-Gen-4-Image-References) | Facts only | Reusing approved subjects, settings and style references across pictures. |
 
 The development testing and environment procedures are project-owned adaptations. The current procedures define their use.
 
@@ -153,10 +154,10 @@ The development testing and environment procedures are project-owned adaptations
 | `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
 | `skills/dev-write-plan.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md; obra/superpowers skills/writing-plans/SKILL.md; anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md | Hornhoof |
 | `skills/dsn-accessibility-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md; wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md; affaan-m/ECC agents/a11y-architect.md | Hornhoof |
-| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md; anthropics/skills skills/brand-guidelines/SKILL.md | Hornhoof |
+| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md, anthropics/skills skills/brand-guidelines/SKILL.md and Runway image references | Hornhoof |
 | `skills/dsn-component-spec.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md; wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md | Hornhoof |
 | `skills/dsn-design-critique.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-critique/SKILL.md | Hornhoof |
-| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
+| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md and Runway documentation for image references and tool access | Hornhoof |
 | `skills/dsn-design-md.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-generic-ui-check.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-handoff.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md | Hornhoof |
@@ -167,7 +168,7 @@ The development testing and environment procedures are project-owned adaptations
 | `skills/dsn-ui-rules.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md; wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md | Hornhoof |
 | `skills/dsn-ux-copy.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md | Hornhoof |
 | `skills/dsn-visual-qa.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
-| `skills/dsn-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-work-pipeline.md` | Written for Hornhoof | Hornhoof's procedure, with Runway documentation for generated image references | Hornhoof |
 | `skills/fin-accruals.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/month-end-closer | Hornhoof |
 | `skills/fin-audit-support.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance | Hornhoof |
 | `skills/fin-budget-forecast.md` | Written for Hornhoof | msitarzewski/agency-agents finance/finance-fpa-analyst.md | Hornhoof |
