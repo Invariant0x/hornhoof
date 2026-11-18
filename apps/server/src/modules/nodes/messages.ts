@@ -34,7 +34,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { type Hello } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
-import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
+import { checkQueueLoad, nodeCheckQueueAway, releaseRestartedChecks, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { privateTurn } from '../tools/private-turns.js';
@@ -362,6 +362,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settleAndPlace(ctx, plan);
       }
+      releaseRestartedChecks(ctx, id, cut?.cause);
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }

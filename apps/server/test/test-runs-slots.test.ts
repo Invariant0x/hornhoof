@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { parseNodeMessage, type RunKind } from '@hornhoof/protocol';
+import { parseNodeMessage, type CheckQueueRequest, type RunKind } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, departments, machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
 import { checkQueueLoad, checkQueueSnapshot, closeCheckQueue, receiveCheckRequest, recordPartQueueWait } from '../src/modules/nodes/check-slots.js';
-import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { nodeIdentity, ownBuiltin } from '../src/modules/nodes/hub.js';
+import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { testsHello } from '../src/modules/testruns/runs.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { company, idle } from './test-runs-company.js';
@@ -43,6 +43,42 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
 }
 
 describe('reading a part that waits for a machine check slot', () => {
+  it.each(['built-in', 'ordinary'] as const)('releases old leases when a new %s node process greets the server', async kind => {
+    const s = await stand();
+    const ctx = s.c.app.ctx;
+    await s.release(0); await s.release(1); await s.release(2);
+    await s.c.db.update(nodes).set({ keyHash: 'recorded-node' }).where(eq(nodes.id, s.node!.id));
+    const builtin = ownBuiltin(ctx.config);
+    const restarted = kind === 'built-in' ? builtin : s.id;
+    const peer = kind === 'built-in' ? s.id : builtin;
+    const load = idle({ cpus: 1, load: 0, host: 'a'.repeat(64) });
+    vi.mocked(ctx.hub.loadOf).mockImplementation(() => ({ ...load, at: Date.now() }));
+    const stream = randomUUID();
+    const machineUpAt = '2026-11-18T08:00:00.000Z';
+    const first = { startedAt: '2026-11-18T08:57:00.000Z', machineUpAt, container: 'home-api' };
+    const next = { ...first, startedAt: '2026-11-18T10:16:00.000Z' };
+    const greet = (id: typeof restarted, boot = first) => handleNodeMessage(ctx, id, { type: 'hello', version: '0.32.1', loggedIn: true, stream, running: [], tests: s.parts.map(part => part.id), load, boot });
+    await greet(restarted); await greet(peer);
+    const old = { type: 'check.acquire' as const, id: randomUUID(), label: 'Describe product test environment' };
+    const waiting = { ...old, id: randomUUID() }, other = { ...old, id: randomUUID() };
+    const acquire = (id: typeof restarted, claim: CheckQueueRequest = old) => receiveCheckRequest(ctx, id, claim, sql`false`);
+    const snapshot = () => checkQueueSnapshot(ctx, peer);
+    await acquire(restarted); await acquire(restarted, waiting); await acquire(peer, other);
+    expect(snapshot()).toMatchObject({ capacity: 1, holders: [{ request: { id: old.id } }], queue: [{ request: { id: waiting.id } }, { request: { id: other.id } }] });
+
+    await handleNodeClose(ctx, restarted);
+    await greet(restarted);
+    await acquire(restarted, { ...old, resume: true });
+    expect(snapshot()?.holders.map(claim => claim.request.id)).toEqual([old.id]);
+
+    await handleNodeClose(ctx, restarted);
+    await greet(restarted, next);
+    const sent = vi.spyOn(ctx.hub, 'send');
+    await acquire(restarted, { ...old, resume: true });
+    expect(sent).toHaveBeenCalledWith(restarted, { type: 'check.state', id: old.id, state: 'ended', position: 0 });
+    expect(snapshot()).toMatchObject({ capacity: 1, holders: [{ request: { id: other.id } }], queue: [] });
+  });
+
   it('sends a quiet running part to Operations once through the program alarm inbox', async () => {
     const s = await stand();
     const { db } = s.c;

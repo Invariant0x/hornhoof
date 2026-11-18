@@ -1,7 +1,7 @@
 import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
 import { and, desc, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, nodes, machines, testParts } from '../../db/schema.js';
+import { jobs, nodes, machines, testParts, type RestartCause } from '../../db/schema.js';
 import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
@@ -67,6 +67,10 @@ export function endPartChecks(ctx: Ctx, id: NodeIdentity, partId: string, cleane
 
 export function reconcilePartChecks(ctx: Ctx, id: NodeIdentity, known: ReadonlySet<string>): void {
   queues.get(ctx)?.endParts(keyOf(id), partId => !known.has(partId), true);
+}
+
+export function releaseRestartedChecks(ctx: Ctx, id: NodeIdentity, cause: RestartCause | undefined): void {
+  if (cause === 'program' || cause === 'container' || cause === 'machine' || cause === 'update') queues.get(ctx)?.restart(keyOf(id));
 }
 
 /* A machine whose connection dropped keeps its leases while it may come back (#1060). */

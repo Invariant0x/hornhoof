@@ -64,10 +64,22 @@ export class CheckCoordinator {
 
   release(node: string, id: string): void {
     const entry = this.entries.get(`${node}:${id}`);
-    if (!entry) return;
+    if (entry) this.releaseEntry(entry);
+  }
+
+  private releaseEntry(entry: Entry): void {
     if (entry.state === 'queued') this.rememberEnd(entry);
     entry.stop.abort(new Error('Check released.'));
     entry.finish();
+  }
+
+  /* Leases belong to a node process. A new process proves the old one cannot resume its claims. */
+  restart(node: string): void {
+    for (const entry of this.entries.values()) {
+      if (entry.node !== node) continue;
+      entry.retired = true;
+      this.releaseEntry(entry);
+    }
   }
 
   endParts(node: string, matches: (partId: string) => boolean, cleaned: boolean): void {
@@ -75,7 +87,7 @@ export class CheckCoordinator {
       if (entry.node !== node) continue;
       const partId = checkPartId(entry.request);
       if (!partId || !matches(partId)) continue;
-      if (cleaned) this.release(node, entry.request.id);
+      if (cleaned) this.releaseEntry(entry);
       else this.retire(entry);
     }
   }
@@ -155,8 +167,8 @@ export class CheckCoordinator {
     if (entry.retired) return;
     entry.retired = true;
     this.options.send(entry.node, { type: 'check.state', id: entry.request.id, state: 'ended', position: 0 });
-    if (entry.state === 'queued') { this.release(entry.node, entry.request.id); return; }
-    this.later(() => this.release(entry.node, entry.request.id), CHECK_LEASE_MS);
+    if (entry.state === 'queued') { this.releaseEntry(entry); return; }
+    this.later(() => this.releaseEntry(entry), CHECK_LEASE_MS);
   }
 
   private tell(entry: Entry): void {

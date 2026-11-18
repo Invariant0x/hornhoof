@@ -110,6 +110,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Checks launched within a run part share its machine slot, cancelled parts clear their waiting checks, and a part that stops producing output or making progress alerts Operations once.
+- When a node starts a new process and reconnects, its old process's check slots free up immediately.
 
 ## [0.32.1] - 2026-11-17
 
