@@ -22,7 +22,7 @@ type Props = {
   places: TaskDepartments | undefined;
   pipelines: Pipeline[];
   tasks: TaskLine[];
-  counts: { waits: number; mine: number; working: number };
+  counts: { waits: number; failures: number; mine: number; working: number };
   onAddTask?: () => void;
   open: boolean;
   onClose: () => void;
@@ -119,6 +119,7 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, org, places, pipel
         <li><Item icon={<TrackerIcon name="waits" />} on={place.show === 'waits'} count={counts.waits} attention onClick={() => go({ show: 'waits', ...person })}>{words.waits}</Item></li>
         <li><Item icon={<TrackerIcon name="mine" />} on={mine} count={counts.mine} onClick={() => go({ ...person, view: 'list' })}>{words.mine}</Item></li>
         <li><Item icon={<TrackerIcon name="dates" />} on={place.show === 'company' && place.view === 'due'} onClick={() => go({ show: 'company', ...person, view: 'due' })}>{words.dates}</Item></li>
+        <li><Item icon={<TrackerIcon name="failure" />} on={place.show === 'failures'} count={counts.failures} attention onClick={() => go({ show: 'failures', ...person, view: 'list' })}>{words.failures}</Item></li>
       </ul>
       <h2>{words.people}</h2>
       <ul className="tr-items">

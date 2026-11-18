@@ -4,9 +4,11 @@ import { errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { useGoal, useGoals, useTasks } from '../tasks';
+import { humanStatus } from '../task-board';
 import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
 import { Progress } from './TaskBoard';
+import { WaitLine } from './TaskActivity';
 import { CardPath, Fact, goalChain, useEscapeCloses } from './TaskPanel';
 import { GoalForm } from './TrackerForms';
 import { dueText, momentText, trackerLine } from './tracker-words';
@@ -157,7 +159,8 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
             {serving.map(task => (
               <li key={task.id}>
                 <button className="linkish" type="button" onClick={() => onOpen(task.id)}>#{task.number} {task.title}</button>
-                <small>{t.tasks.states[task.status]}</small>
+                <small>{t.tracker.groups[humanStatus(task)]}</small>
+                <WaitLine task={task} />
               </li>
             ))}
           </ul>

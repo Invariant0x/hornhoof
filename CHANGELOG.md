@@ -7,9 +7,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 ### Fixed
+- Task lists, boards, cards, and turns show who needs to act, what work is running, when a timer fires, and why work failed.
+- The tracker counts failures separately and counts each task needing your answer once.
 - Tracker boards keep all columns in one row when they fit and stack every column in order when space runs short.
+- Pipeline board headings all start at the same edge, with the count after the name.
 - The task lists panel sits against the start edge below app navigation and fills the available height.
 - Tracker goal links get more room and underline on hover or keyboard focus.
+- Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
 - The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
 - A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
 ### Added

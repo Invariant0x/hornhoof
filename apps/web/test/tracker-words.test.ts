@@ -37,14 +37,14 @@ describe('what a task is waiting for', () => {
   const reviewer = { kind: 'agent', id: 'hana', name: 'Hana' } as const;
 
   it.each([
-    ['person', person, null, 'waits for an answer from Иван Король for 20 minutes', 'ждет ответа 20 минут (Иван Король)'],
-    ['after', owner, '#42', 'waits for #42 for 20 minutes', 'ждет задачу #42 уже 20 минут'],
-    ['review', reviewer, null, 'waits for Hana to review for 20 minutes', 'ждет проверки 20 минут (Hana)'],
-    ['review', owner, null, 'waits for a review for 20 minutes', 'ждет проверки 20 минут'],
-    ['run', owner, '108', 'waits for test run 108 for 20 minutes', 'ждет прогон тестов 108 уже 20 минут'],
-    ['run', owner, null, 'waits for a test run for 20 minutes', 'ждет прогон тестов уже 20 минут'],
-    ['external', null, 'Deployment', 'waits for 20 minutes: Deployment', 'ждет 20 минут: Deployment'],
-    ['external', reviewer, 'Deployment', 'waits for Hana for 20 minutes: Deployment', 'ждет действий 20 минут (Hana): Deployment'],
+    ['person', person, null, 'Waits for Иван Король for 20 minutes', 'Ждет 20 минут (Иван Король)'],
+    ['after', owner, '#42', 'After #42', 'После #42'],
+    ['review', reviewer, null, 'Hana is reviewing', 'Идет проверка (Hana)'],
+    ['review', owner, null, 'Review in progress', 'Идет проверка'],
+    ['run', owner, '108', 'Test run 108 is running', 'Идет прогон тестов 108'],
+    ['run', owner, null, 'Test running', 'Идут тесты'],
+    ['external', null, 'Deployment', 'Deployment', 'Deployment'],
+    ['external', reviewer, 'Deployment', 'Hana is on it: Deployment', 'В работе (Hana): Deployment'],
   ] as const)('names the target of a %s wait in both languages', (kind, who, reason, english, russian) => {
     const status: TaskLine['status'] = 'working';
     const task = { status, executor, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind, who, reason, since }] } };

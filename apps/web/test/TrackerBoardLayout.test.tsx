@@ -13,7 +13,7 @@ const pipeline = {
 afterEach(() => vi.unstubAllGlobals());
 
 it.each([
-  [null, ['Not started', 'In work', 'Review', 'Waits', 'Done']],
+  [null, ['Not started', 'In work', 'Review', 'Waits for a person', 'Failures', 'Done']],
   [pipeline, ['Not started', 'Build', 'Check', 'Ship', 'Done']],
 ] as const)('keeps all columns in one row or stacks them in the same order', (route, headings) => {
   let resize!: (width: number) => void;
@@ -22,6 +22,7 @@ it.each([
       resize = width => callback([{ contentRect: { width } }] as ResizeObserverEntry[], this as ResizeObserver);
     }
     observe() {}
+    unobserve() {}
     disconnect() {}
   });
   render(<LanguageProvider><TrackerBoard tasks={[]} all={[]} pipeline={route} cancelled={false} rows={rows} /></LanguageProvider>);
