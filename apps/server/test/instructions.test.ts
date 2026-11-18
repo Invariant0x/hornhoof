@@ -325,6 +325,12 @@ describe('renderInstructions', () => {
     expect(fileOf('DEV-REV', 'dev-review-diff')).toContain(`${rule} Such an assertion in a test is a finding.`);
   });
 
+  it("keeps a long override of a skill whole in the skill's file", () => {
+    const long = 'Test first. '.repeat(2000);
+    const { skills } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
+    expect(skills.find(f => f.name === 'dev-tdd')?.body).toBe(`# Test first\n\n${long}`);
+  });
+
   it('marks assignment and skill overrides without replacing or marking the role identity', () => {
     const { parts } = renderInstructions(T, agent({ overrides: { base: 'You own the API.', skills: { 'dev-tdd': 'Tests come first, always.' } } }), PLACE);
     expect(parts.find(p => p.kind === 'base')).toMatchObject({ text: ROLE.body, overridden: false });
