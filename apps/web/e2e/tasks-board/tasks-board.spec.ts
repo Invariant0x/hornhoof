@@ -81,6 +81,11 @@ for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
     await expect(list.getByRole('heading', { level: 2 }).first()).toHaveAccessibleName(new RegExp(`^${t.tracker.groups.working}:`));
     const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
     await expect(payments.getByRole('img', { name: 'Hana' })).toBeVisible();
+    await expect(payments.getByRole('img', { name: 'Ivan', exact: true })).toBeVisible();
+    if (width <= 760) {
+      await expect(payments.getByText('Hana', { exact: true })).toBeVisible();
+      await expect(payments.getByText('Ivan', { exact: true })).toBeVisible();
+    }
     await expect(payments).toContainText(GOALS[1]!.title);
     await expect(payments.getByRole('button', { name: t.tracker.list.subtasks(1, 3) })).toBeVisible();
     await inside(page, `list ${lang} ${skin} ${width}`);
@@ -167,9 +172,9 @@ for (const dir of ['ltr', 'rtl'] as const) {
     const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
     await row.locator('.tr-title').click();
     const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
-    await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[0]!.title);
     await openTaskAction(card, t, t.tasks.details);
-    await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
+    const path = card.getByRole('navigation', { name: t.tracker.card.path });
+    await expect(path.getByRole('listitem')).toHaveText([GOALS[0]!.title, GOALS[1]!.title]);
     const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
     if (dir === 'ltr') {
       expect(Math.round(1440 - (panel.x + panel.width))).toBe(16);
