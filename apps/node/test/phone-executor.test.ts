@@ -23,11 +23,12 @@ const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarch
 const editableField = (value: string) => tree('12:00').replace('••••••••', value).replace('password="true"', 'password="false"');
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
+function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { firstRead?: () => Promise<void>; fields?: string[]; failure?: boolean; failOn?: string; typingMs?: number; revokeOnType?: boolean; unplugOnType?: boolean } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
   let ticks = 0;
+  let readStarted = false;
   let unplugged = false;
   const adb = new PhoneAdb(async call => {
     calls.push(call);
@@ -37,7 +38,10 @@ function phone(png = SCREEN, serial = SERIAL, baseline = '', input: { fields?: s
     if (a.endsWith('getprop ro.serialno')) return Buffer.from('R58MIDENTITY\n');
     if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
-    if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
+    if (a.endsWith('uiautomator dump /dev/tty')) {
+      if (!readStarted) { readStarted = true; await input.firstRead?.(); }
+      return Buffer.from(input.fields?.shift() ?? tree(`12:0${ticks++}`));
+    }
     if (input.failure && call.input?.includes('input text')) throw new Error('ADB echoed a private value');
     if (input.failOn && call.input?.includes(input.failOn)) throw new Error('ADB echoed a private value');
     if (input.revokeOnType && call.input?.includes('input text')) void phones.handle({ type: 'phone.revoke', requestId: id(9), sessionId: SESSION, generation: 1, binding: grant.binding });
@@ -190,13 +194,32 @@ describe('phone messages on the execution node', () => {
     const p = phone(Buffer.alloc(0), SERIAL, '', { fields: [field(''), field('line 0\nline 1\nline 2\nline 3\n')], typingMs: 5000 });
     await p.open();
     await p.act(6, { kind: 'text', text: lines });
-    // Two calls use the 10 seconds; the third would start with no time left.
+    // Two calls use 10 seconds. A third full batch would consume the time reserved for readback.
     expect(p.reply(6)).toMatchObject({ status: 'partial', typing: { kind: 'typing_partial', next: 28 } });
     expect(p.reply(6)?.typing).toEqual({ kind: 'typing_partial', next: 28 });
     expect(p.shells()).toHaveLength(2);
     expect(lines.slice(28)).toBe('line 4\nline 5\nline 6\nline 7');
     await p.act(7, { kind: 'capture' });
     expect(p.reply(7)?.status).toBe('ok');
+    p.phones.close();
+  });
+
+  it('returns a continuation position before the deadline if an earlier action still holds the queue', async () => {
+    const entered = Promise.withResolvers<void>();
+    const blocker = Promise.withResolvers<void>();
+    const p = phone(Buffer.alloc(0), SERIAL, '', { firstRead: () => { entered.resolve(); return blocker.promise; } });
+    await p.open();
+    const capture = p.act(6, { kind: 'capture' });
+    await entered.promise;
+    const text = p.act(7, { kind: 'text', text: 'still queued' });
+    await vi.advanceTimersByTimeAsync(8000);
+    await text;
+    expect(p.reply(7)).toMatchObject({ status: 'failed', typing: { kind: 'typing_failed', next: 0 } });
+    blocker.resolve();
+    await capture;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.shells()).toEqual([]);
+    expect(p.reply(6)?.status).toBe('ok');
     p.phones.close();
   });
 

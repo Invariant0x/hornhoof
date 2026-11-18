@@ -2,11 +2,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { PhoneReply, toolPrivacy, type PhoneTypingIssue } from '@hornhoof/protocol';
+import { PhoneReply, toolPrivacy, type PhoneGrant, type PhoneServerMessage, type PhoneTypingIssue } from '@hornhoof/protocol';
 import { expect, it, vi } from 'vitest';
 import type { Ctx } from '../src/app.js';
 import { phoneAction } from '../src/modules/phones/queue.js';
 import { registerPhoneTools } from '../src/modules/phones/tools.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { phoneNodeMessage, phoneRequest } from '../src/modules/phones/rpc.js';
+import { PhoneAdb } from '../../node/src/phones/adb.js';
+import { PhoneExecutor } from '../../node/src/phones/executor.js';
 
 vi.mock('../src/modules/phones/queue.js', () => ({ phoneAction: vi.fn() }));
 
@@ -57,4 +61,69 @@ it('keeps typing metadata in the phone privacy policy and rejects free text in t
   expect(PhoneReply.safeParse({ ...base, typing: { kind: 'typing_failed', reason: 'echoed password' } }).success).toBe(false);
   expect(PhoneReply.safeParse({ ...base, typing: { kind: 'typing_dropped', missing: [{ start: 0, count: 1, text: 'password' }] } }).success).toBe(false);
   expect(PhoneReply.safeParse({ ...base, status: 'partial', typing: { kind: 'typing_partial', next: 4, rest: 'password' } }).success).toBe(false);
+});
+
+it('returns a partial typing position through the server before its request timer', async () => {
+  vi.useFakeTimers({ now: 0 });
+  const node = nodeIdentity(id);
+  const serial = 'R58MIDENTITY';
+  const grant: PhoneGrant = {
+    sessionId: id, generation: 1, binding: { phoneId: id, serial, hardwareKey: 'a'.repeat(64) },
+    expiresAt: new Date(30_000).toISOString(),
+  };
+  const text = Array.from({ length: 8 }, (_, n) => `line ${n}`).join('\n');
+  const limits: (number | undefined)[] = [];
+  let field = '';
+  const adb = new PhoneAdb(async call => {
+    const wait = async (duration: number) => {
+      await new Promise<void>(resolve => setTimeout(resolve, Math.min(duration, call.timeoutMs ?? duration)));
+      if (call.timeoutMs !== undefined && call.timeoutMs < duration) throw new Error('fake adb timed out');
+    };
+    if (call.args.at(-1) === '/dev/tty') {
+      await wait(field ? 2000 : 3000);
+      return Buffer.from(`<hierarchy><node text="${field}" class="android.widget.EditText" resource-id="field" focused="true" password="false" bounds="[0,0][100,100]"/></hierarchy>`);
+    }
+    if (call.input?.includes('input text')) {
+      limits.push(call.timeoutMs);
+      await wait(limits.length === 1 ? 6000 : 12000);
+      field += limits.length === 1 ? 'line 0&#10;line 1&#10;' : 'line 2&#10;line 3&#10;';
+    }
+    return Buffer.alloc(0);
+  });
+  const nodeReplies: { id: string; at: number }[] = [];
+  const executor = new PhoneExecutor({
+    adb: {
+      connect: async () => 'connected', pair: async () => 'paired',
+      devices: async () => [{ serial, status: 'device', model: null }], identity: async () => grant.binding.hardwareKey,
+      tree: adb.tree.bind(adb), type: adb.type.bind(adb), screenshot: async () => Buffer.alloc(0),
+      act: async () => {}, readiness: async () => [],
+    },
+    send(message) {
+      if (message.type !== 'phone.reply') return;
+      nodeReplies.push({ id: message.requestId, at: Date.now() });
+      phoneNodeMessage(ctx, node, message);
+    },
+  });
+  const ctx = {
+    db: { select: () => ({ from: () => ({ innerJoin: () => ({ where: async () => [{ id }] }) }) }) },
+    hub: {
+      isOnline: () => true,
+      send: (_node: typeof node, message: PhoneServerMessage) => { void executor.handle(message); return true; },
+    },
+  } as unknown as Ctx;
+  const requestId = '55555555-0000-4000-8000-000000000000';
+  try {
+    phoneNodeMessage(ctx, node, { type: 'hello', version: 'probe', loggedIn: true, running: [], phones: true });
+    await executor.handle({ type: 'phone.open', requestId: id, grant });
+    const request = phoneRequest(ctx, node, {
+      type: 'phone.action', requestId, sessionId: id, generation: 1, operation: { kind: 'text', text },
+    });
+    await vi.advanceTimersByTimeAsync(24_000);
+    expect(await request).toMatchObject({ status: 'partial', typing: { kind: 'typing_partial', next: 14 } });
+    expect(limits).toEqual([6000]);
+    expect(nodeReplies.find(reply => reply.id === requestId)).toEqual({ id: requestId, at: 11_000 });
+  } finally {
+    executor.close();
+    vi.useRealTimers();
+  }
 });
