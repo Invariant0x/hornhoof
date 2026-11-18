@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
@@ -258,6 +259,62 @@ describe('updater', () => {
     const s = stand();
     for (const id of ['b1', 'b2', 'b3', 'b4']) expect((await runOnce(s, ask(id))).status.state).toBe('done');
     expect(readdirSync(join(s.server, 'backups'))).toHaveLength(3);
+  });
+
+  /* Deleting a copy of the database cannot be undone, so no copy goes that a way back may still need. */
+  describe('the copies it keeps', () => {
+    const backups = (s: Stand) => join(s.server, 'backups');
+    const copies = (s: Stand) => readdirSync(backups(s)).filter(name => name.endsWith('.sql.gz')).sort();
+    const MIGRATED = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
+    /* Copies earlier updates left, the first the oldest by the time each file has. */
+    const earlier = (s: Stand, ids: string[], times: (i: number) => Date) => {
+      mkdirSync(backups(s), { recursive: true });
+      return ids.map((id, i) => {
+        const name = `hornhoof-2026010${i + 1}T000000Z-${id}.sql.gz`;
+        writeFileSync(join(backups(s), name), gzipSync(`-- a dump of the hornhoof database\n-- migrations 20\n-- copy ${id}\n`));
+        utimesSync(join(backups(s), name), times(i), times(i));
+        return name;
+      });
+    };
+
+    it('never deletes the copy its own update goes back to, whatever time the clock gave the others', async () => {
+      const s = stand();
+      /* Made while the clock ran years ahead, and set right since. */
+      const [, second, third] = earlier(s, ['e1', 'e2', 'e3'], i => new Date(2099, 0, i + 1));
+      const r = await runOnce(s, ask('k1'), MIGRATED);
+      expect(r.status).toMatchObject({ id: 'k1', state: 'rolled_back', step: 'finished' });
+      expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
+      const own = copies(s).find(name => name.endsWith('-k1.sql.gz'));
+      expect(own).toBeDefined();
+      expect(copies(s)).toEqual([second, third, own].sort());
+    });
+
+    it('deletes none when the copy of the update did not load, since an older one may be the only one that does', async () => {
+      const s = stand();
+      const before = earlier(s, ['e1', 'e2', 'e3'], i => new Date(2026, 0, i + 1));
+      const r = await runOnce(s, ask('k2'), { ...MIGRATED, STUB_RESTORE: 'fail' });
+      expect(r.status).toMatchObject({ id: 'k2', state: 'failed' });
+      expect(r.status.log).toContain('Could not put the database back from backups/');
+      const own = copies(s).find(name => name.endsWith('-k2.sql.gz'))!;
+      expect(copies(s)).toEqual([...before, own].sort());
+      /* The next update that ends on a database that works keeps the newest three again. */
+      expect((await runOnce(s, ask('k3'))).status.state).toBe('done');
+      expect(copies(s)).toEqual([before[2], own, copies(s).find(name => name.endsWith('-k3.sql.gz'))].sort());
+    });
+
+    it('counts no copy a stop cut short, and removes what it left', async () => {
+      const s = stand();
+      const before = earlier(s, ['e1', 'e2'], i => new Date(2026, 0, i + 1));
+      const stopped = await runOnce(s, ask('k4'), { STUB_STOP_IN: 'backup', STUB_MIGRATIONS: '0.4.0=20 0.4.1=22' });
+      expect(stopped.status).toMatchObject({ id: 'k4', state: 'running', step: 'backup' });
+      expect(copies(s)).toEqual(before);
+      const r = await runOnce(s, null, { STUB_MIGRATIONS: '0.4.0=20 0.4.1=22' });
+      expect(r.status).toMatchObject({ id: 'k4', state: 'done' });
+      expect(readdirSync(backups(s)).filter(name => !name.endsWith('.sql.gz'))).toEqual([]);
+      const own = copies(s).find(name => name.endsWith('-k4.sql.gz'))!;
+      expect(copies(s)).toEqual([...before, own].sort());
+      expect(gunzipSync(readFileSync(join(backups(s), own))).toString()).toContain('-- migrations 20\n');
+    });
   });
 
   it('runs each request once', async () => {

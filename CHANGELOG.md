@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- An update deletes an old copy of the database only once it has ended on a database that works, and never the copy it goes back to, whatever time the clock gave the others; a copy cut short by a restart no longer counts as one of the three it keeps.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

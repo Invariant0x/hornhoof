@@ -99,6 +99,7 @@ TAKE_OVER_WAIT="${HORNHOOF_TAKE_OVER_WAIT:-60}"
 TAKEN_OVER="This build's updater goes on with the update."
 # A Docker network as docker network inspect gives it: id|name|project|bridge|internal|subnet,gateway;...
 NETWORK_FORMAT='{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}'
+# How many copies of the database updates saved stay in backups/, as keep_backups keeps them.
 KEEP_BACKUPS=3
 # How often it looks whether a node is behind, and asks again after a server that gave no answer, in seconds.
 NODES_CHECK=30
@@ -400,29 +401,50 @@ services_without_node() {
 # The container of the app starts again; it may be gone by now, and then nothing does.
 start_app() { [ -z "$1" ] || docker start "$1" > /dev/null 2>&1 || true; }
 
-# The app stops first, so every change it confirmed is in the copy. A copy that fails leaves it running again.
+# The app stops first, so every change it confirmed is in the copy. A copy that fails leaves it running again. It is
+# written as .part and takes its name once whole, so a copy a stop cut short never counts as one; what such a copy left
+# goes with the next, as one update runs at a time.
 backup() {
   local db app file
   db=$(compose ps -q db 2> /dev/null || true)
   [ -n "$db" ] || return 1
   mkdir -p "$SERVER_DIR/backups"
+  rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz.part
   file="$SERVER_DIR/backups/hornhoof-$(date -u +%Y%m%dT%H%M%SZ)-$ID.sql.gz"
   app=$(compose ps -q app 2> /dev/null || true)
   compose stop app > /dev/null 2>&1 || true
-  (umask 077 && docker exec "$db" pg_dump -U hornhoof -d hornhoof | gzip > "$file") || {
-    rm -f "$file"
+  { (umask 077 && docker exec "$db" pg_dump -U hornhoof -d hornhoof | gzip > "$file.part") && mv "$file.part" "$file"; } || {
+    rm -f "$file.part"
     start_app "$app"
     return 1
   }
   BACKUP=$file
-  # A copy of the link's settings kept with an old database copy goes with it.
-  # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
-  ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old" "${old%.sql.gz}.tunnel.json"; done
   say "Saved the database to backups/$(basename "$file")."
   hand_backup || {
     drop_dump "$ID"
     say "Could not hand the database copy to the keeper for a backup."
   }
+}
+
+# The copies of the database updates saved in backups/, and when one goes. Deleting a copy cannot be undone, so only an
+# update that ended on a database a build runs on deletes any: the new build answered, or the build from before did, on
+# the database as it was or on the copy put back. It keeps KEEP_BACKUPS of them: its own, whatever time the clock gave
+# the others, and the newest of the others. An update that ended any other way deletes none, since the copy it made may
+# not load and an older one may then be the only one that does; neither does one that made no copy, as on a worker. The
+# public link's settings kept with a copy go with it.
+keep_backups() {
+  local kept=0 old
+  [ -n "$BACKUP" ] || return 0
+  [ ! -f "$BACKUP" ] || kept=1
+  # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
+  { ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz 2> /dev/null || true; } | while read -r old; do
+    [ "$old" != "$BACKUP" ] || continue
+    if [ "$kept" -lt "$KEEP_BACKUPS" ]; then
+      kept=$((kept + 1))
+    else
+      rm -f "$old" "${old%.sql.gz}.tunnel.json" || true
+    fi
+  done
 }
 
 # How many migrations the database has now; fails when it does not answer.
@@ -1084,6 +1106,7 @@ check_new() {
   step health "Waiting for the new server to answer."
   if healthy "$TARGET"; then
     warn_subnet_overlap
+    keep_backups
     stop_with "done" "Hornhoof runs $VERSION now." finished
     swap_updater "$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")"
     return 0
@@ -1114,6 +1137,7 @@ go_back() {
     back="Hornhoof runs the build from before the update again, with the database as it was saved before the update."
   fi
   if install "$PREVIOUS" "$BACK_APP" "$BACK_NODE" "$BACK_UPDATER" && healthy "$(commit_of "$BACK_APP")"; then
+    keep_backups
     stop_with rolled_back "$back" finished
   else
     stop_with failed "Could not go back to $PREVIOUS either. Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
