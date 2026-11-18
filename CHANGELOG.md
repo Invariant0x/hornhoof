@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- The file link check no longer fails about one run in sixteen, because it now changes a character of the signature that always counts.
+
 ## [0.34.0] - 2026-11-18
 
 ### Fixed
