@@ -8,7 +8,11 @@ import { keepWakes } from '../src/modules/tasks/outbox.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, mcp, nextOf, until, type FakeNode } from './helpers.js';
+import { ownDatabases } from './helpers-db.js';
 import { company } from './test-runs-company.js';
+
+/* One test adds a constraint to see a failed wake kept; a truncate does not undo that, so this file has its own databases. */
+ownDatabases();
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type Company = Awaited<ReturnType<typeof company>>;

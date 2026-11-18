@@ -115,7 +115,6 @@ describe('the employee card', () => {
     expect(card.skills.find((s: { id: string }) => s.id === 'hh-report-to-head')).toMatchObject({ on: true, locked: true, overridden: false, templateChanged: false });
     expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', 'assignment', ...role.skills.filter(s => s.on).map(() => 'skill')]);
     expect(card.raw).toBe(card.parts.map((p: { text: string }) => p.text).join('\n\n'));
-    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
     expect(card).not.toHaveProperty('instructions');
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(card.runsOn.map((r: { subscription: { id: string } }) => r.subscription.id)).toEqual([codex, orchestrator!.subscriptionId, teamKey]);
