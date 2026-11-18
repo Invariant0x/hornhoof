@@ -87,7 +87,7 @@ describe('staffing', () => {
     const be = options.roster.find((r: { role: string }) => r.role === 'DEV-BE');
     expect(be).toMatchObject({ title: 'Backend engineer', kind: 'member', perProduct: false });
     const fe = options.roster.find((r: { role: string }) => r.role === 'DEV-FE');
-    expect(fe).toMatchObject({ title: 'Frontend', kind: 'member', perProduct: false });
+    expect(fe).toMatchObject({ title: 'Interface developer', kind: 'member', perProduct: false });
     expect(be.skills).toContainEqual({ id: 'dev-engineering-rules', on: true, locked: false });
     expect(be.skills).toContainEqual({ id: 'hh-report-to-head', on: true, locked: true });
     expect(options.subscriptions.map((s: { id: string }) => s.id)).toEqual([c.olegCodex, c.orchestrator.subscriptionId, c.teamKey]);
