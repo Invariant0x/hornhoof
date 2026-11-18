@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { Bridge } from '../src/terminal/bridge.js';
-import { kimiProgram, prepareKimi } from '../src/terminal/programs.js';
+import { kimiProgram, prepareKimi } from '../src/providers/kimi-terminal.js';
 import { kimiAdapter } from '../src/providers/kimi.js';
 import { runJob } from '../src/runner.js';
 

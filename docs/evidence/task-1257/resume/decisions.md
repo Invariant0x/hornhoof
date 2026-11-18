@@ -1,5 +1,7 @@
 # Task 1257 resumed integration
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/evidence/task-1257/resume/decisions.md). These are historical results, not checks of the current release.
+
 The head confirmed preserving iv-no-confirm and excluding the deleted outbound implementation and universal new_kinds default from task 1112. All remaining standing head authority must use the current ruleOf signature. This transfer is complete; the excluded parts are listed in 1112/exclusions.md.
 
 The head then ordered task 1119 first, followed by the other accepted candidates, with each checked part fast-forwarded into turn-32. The release waits for all four parts. Current inspected target: 283e056f355026eb0f26841eea329825d79b8725.

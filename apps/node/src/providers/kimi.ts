@@ -6,7 +6,7 @@ import type { JobUser } from '../isolation.js';
 import { toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
-import { kimiPlanLimits } from '../terminal/programs.js';
+import { kimiPlanLimits } from './kimi-terminal.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';

@@ -1,33 +1,13 @@
+import { seesTask } from './visibility.js';
 import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { canReach } from '../../auth/access.js';
 import { knowsAgentId, ownsPlace, seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { tasks } from '../../db/schema.js';
-import { taskSpot, type Task } from './engine.js';
+import { type Task } from './state.js';
 import type { TreeFacts } from './tree.js';
 import { maskWaits } from './wait-views.js';
 import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, type TaskLine } from './views.js';
-
-/* What a person reads of tasks (auth/agent-view.ts): every task of the company, with every employee named in it and its
-   stages, as the tasks are the company's work. What an agent said in them is its own, for the people who open that agent;
-   what the repository says stays with the CEO's view and the owner of the task's department. Changing a task goes by who
-   acts on its work. Agents' own tools do not come this way. */
-
-export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId'>;
-
-/* Every task of the company, but the work of another person's assistant's own agent. */
-export function seesTask(viewer: Pick<AgentViewer, 'apart'>, task: TaskPlace): boolean {
-  return [task.assigneeAgentId, task.executorAgentId].every(id => !id || knowsAgentId(viewer, id));
-}
-
-/* Whether the person changes the task: the work of the agents they open in a place they reach, and what they gave themselves. */
-export function actsOnTask(viewer: AgentViewer, task: TaskPlace): boolean {
-  if (!canReach(viewer.access, taskSpot(task))) return false;
-  if (viewer.full || task.createdByPersonId === viewer.personId) return true;
-  return [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId].some(id => seesAgentId(viewer, id));
-}
-
 const shownRef = (viewer: AgentViewer, agent: AgentRef | null) => (agent && knowsAgentId(viewer, agent.id) ? agent : null);
 
 /* A wait says what its holder wrote, so it goes with whoever opens the holder, and whom it is on goes when that is someone
@@ -160,3 +140,5 @@ export function factsFor(viewer: AgentViewer, facts: TreeFacts, departmentId: st
     turns: facts.turns?.filter(t => knows(t.agentId)),
   };
 }
+export { seesTask, actsOnTask } from './visibility.js';
+export type { TaskPlace } from './visibility.js';

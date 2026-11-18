@@ -1,5 +1,5 @@
 import type { Ctx } from '../../app.js';
-import { refuse } from '../tasks/engine.js';
+import { refuse } from '../tasks/state.js';
 import type { TestRunMode } from './describe.js';
 import type { RepoAddress } from './refs.js';
 

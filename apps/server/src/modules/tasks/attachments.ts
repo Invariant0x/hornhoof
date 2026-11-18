@@ -1,8 +1,10 @@
+import { onDisk } from './file-views.js';
+import { PICTURE_BYTES, FILE_BYTES, smallerRoom, checkUploadRoom, checkPictureRoom, checkRoom, onTask, type UploadRoom } from './file-policy.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readdir, rm, stat, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -12,38 +14,23 @@ import { PRIVATE_TURN_LOST, type PrivateValues } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { agents, attachments, requests, tasks, turns } from '../../db/schema.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, sensitiveTurn } from '../events/store.js';
-import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
+import { jobOf, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
-import { refuse, type Task } from './engine.js';
-import { seesTask } from './sight.js';
-import { taskByRef } from './views.js';
+import { refuse, type Task } from './state.js';
+import { seesTask } from './visibility.js';
+import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
-
-/* A screenshot fits comfortably; a turn sends a few dozen at most. */
-export const PICTURE_BYTES = 3 * 1024 * 1024;
 const PER_TURN = 30;
-/* A file on a task: a build, a log or a data set fits, and the database still carries it. A bigger one lives on the disk
-   of the machine that took it, in the folder FILES_DIR names, under its id: its row keeps no bytes and its size, so it
-   counts in the company's room, and it is in no copy of the database and no backup. It goes after 30 days, and is lost
-   if that machine goes. */
-export const FILE_BYTES = 50 * 1024 * 1024;
-export const onDisk = sql<boolean>`(octet_length(${attachments.bytes}) = 0 and ${attachments.size} > 0)`;
 const NAME_LENGTH = 200;
-/* Every copy of the database carries the files, so one task holds this much and the company what its setting says. */
-export const TASK_FILES_BYTES = 500 * 1024 * 1024;
 /* The files of a turn go this long after it closed. */
 const KEEP_FILES_MS = 30 * 24 * 60 * 60 * 1000;
 /* A download leaves in pieces of this size, so the server never holds a whole file. */
 const PIECE_BYTES = 1024 * 1024;
-
-const GB = 1024 * 1024 * 1024;
-const sizeText = (bytes: number) => (bytes >= GB ? `${Number((bytes / GB).toFixed(1))} GB` : `${Math.ceil(bytes / 1024 / 1024)} MB`);
-const ELSEWHERE = 'Put a smaller file, or keep a big one outside Hornhoof and write where it is.';
 
 /* A file's name on its task: the last part of what was sent, never a folder, without control characters. */
 export function fileName(raw: string): string | null {
@@ -72,52 +59,12 @@ export function carriesFile(text: string): boolean {
 export const encodedHint = (task?: number) =>
   `This text carries an encoded file. Put the file on ${task ? `the task with hh-attach --task ${task} FILE` : 'the task it is for with hh-attach --task <task number> FILE'} and write its name instead: anyone downloads it with hh-fetch.`;
 
-/* An agent works on a task when it is a company employee (never a personal assistant) and runs the company, the task is
-   its department's, or it holds, does, checks or made it. */
-export const onTask = (job: RunJob, t: Task): boolean =>
-  job.agentKind !== 'assistant' &&
-  (job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId].includes(job.agentId));
-
-/* The files on a task, the newest under each name, without their bytes. */
-export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date; big: boolean }[]> {
-  const rows = await db
-    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, personId: attachments.personId, at: attachments.createdAt, big: onDisk })
-    .from(attachments)
-    .where(and(eq(attachments.taskId, taskId), isNull(attachments.operatorCaseId)))
-    .orderBy(desc(attachments.createdAt));
-  const newest = new Map<string, (typeof rows)[number] & { name: string }>();
-  for (const r of rows) if (r.name !== null && !newest.has(r.name)) newest.set(r.name, { ...r, name: r.name });
-  return [...newest.values()];
-}
-
 /* Only pictures a browser shows as pictures: no SVG, which can carry script. */
 export function pictureType(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | null {
   if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
   if (b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
   return null;
-}
-
-/* Where a commit of the task's repository can be seen: on GitHub, from the product's repository, else the department's. */
-export async function commitUrl(db: Db, task: Pick<Task, 'departmentId' | 'productId'>, commit: string | null): Promise<string | null> {
-  if (!commit) return null;
-  const ids = [task.productId, task.departmentId].filter((x): x is string => Boolean(x));
-  if (!ids.length) return null;
-  const rows = await db.select({ id: departments.id, repoUrl: departments.repoUrl }).from(departments).where(inArray(departments.id, ids));
-  const repo = ids.map(id => rows.find(r => r.id === id)?.repoUrl).find(Boolean);
-  if (!repo) return null;
-  const url = new URL(repo);
-  if (url.host !== 'github.com') return null;
-  return `https://github.com${url.pathname.replace(/\.git$/, '').replace(/\/$/, '')}/commit/${commit}`;
-}
-
-/* The pictures each request shows on its own, apart from those of its options, in the order they were sent. */
-export async function picturesOf(db: Db, rows: { id: string; options: RequestOption[] }[]): Promise<Map<string, string[]>> {
-  const ids = rows.map(r => r.id);
-  const found = ids.length
-    ? await db.select({ id: attachments.id, requestId: attachments.requestId }).from(attachments).where(and(inArray(attachments.requestId, ids), isNull(attachments.operatorCaseId))).orderBy(asc(attachments.createdAt))
-    : [];
-  return new Map(rows.map(r => [r.id, found.filter(a => a.requestId === r.id && !r.options.some(o => o.image === a.id)).map(a => a.id)]));
 }
 
 /* Removes the files on the tasks of turns closed 30 days or more before now, people's pictures sent as long ago or never
@@ -151,14 +98,8 @@ async function dropOldDisk(dir: string | undefined, cutoff: Date): Promise<void>
 /* A file as a request brings it: in memory up to FILE_BYTES, and a bigger one onto this machine's disk as it comes, never
    whole in memory. With no folder for files a bigger one is turned away. */
 export type Taken = { bytes: Buffer; size: number; disk?: string };
-export type UploadRoom = { bytes: number; full: () => ApiError };
-const smallerRoom = (a: UploadRoom, b: UploadRoom): UploadRoom => a.bytes <= b.bytes ? a : b;
 const fileRoom: UploadRoom = { bytes: FILE_BYTES, full: () => new ApiError(413, 'validation', `A file is at most ${FILE_BYTES / 1024 / 1024} MB here.`, 'file_too_big') };
 const pictureRoom: UploadRoom = { bytes: PICTURE_BYTES, full: () => new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid') };
-
-function checkUploadRoom(room: UploadRoom, size: number): void {
-  if (size > room.bytes) throw room.full();
-}
 
 /* The crossing chunk is inspected, never retained or written; closing the iterator leaves the tail unread. */
 async function* boundedUpload(body: unknown, room: UploadRoom): AsyncGenerator<Buffer> {
@@ -216,40 +157,6 @@ export async function fileStream(ctx: Pick<Ctx, 'db' | 'config'>, id: string, le
   const file = ctx.config.filesDir ? await open(join(ctx.config.filesDir, id)).catch(() => null) : null;
   if (!file) throw new ApiError(410, 'gone', 'A big file lives only on the machine that took it, and Hornhoof cannot reach it there now.', 'file_lost');
   return file.createReadStream();
-}
-
-/* What counts towards what the company keeps: files on tasks, chat files and people's pictures. */
-const kept = (companyId: string) => and(eq(attachments.companyId, companyId), or(isNotNull(attachments.taskId), isNotNull(attachments.personId), isNotNull(attachments.name)));
-
-const companyFull = (inCompany: number, limit: number) =>
-  new ApiError(413, 'validation', `The company's task files take ${sizeText(inCompany)} of the ${sizeText(limit)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`, 'attachment_invalid');
-
-const companyRoom = (used: number, limit: number): UploadRoom => ({ bytes: limit - used, full: () => companyFull(used, limit) });
-
-/* Refuses a person's picture of this size when the company has no room left for it, and returns the room left. */
-export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<UploadRoom> {
-  const [used] = await ctx.db.select({ company: sql<string>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(kept(companyId));
-  const inCompany = Number(used!.company);
-  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
-  checkUploadRoom(room, size);
-  return room;
-}
-
-/* Refuses a new file of this size on the task when the task or the company has no room left for it. */
-export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<UploadRoom> {
-  const [used] = await ctx.db
-    .select({
-      task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
-      company: sql<string>`coalesce(sum(${attachments.size}), 0)`,
-    })
-    .from(attachments)
-    .where(kept(companyId));
-  const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
-  const taskRoom: UploadRoom = { bytes: TASK_FILES_BYTES - onTask, full: () => new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid') };
-  const room = companyRoom(inCompany, ctx.config.taskFilesBytes);
-  checkUploadRoom(taskRoom, size);
-  checkUploadRoom(room, size);
-  return smallerRoom(taskRoom, room);
 }
 
 function personDownloadType(found: { name: string | null; mediaType?: string }): string {
@@ -581,3 +488,6 @@ async function uploadValues(db: Db, jobId: string) {
   if (!values && await sensitiveTurn(db, jobId, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
   return values;
 }
+export { PICTURE_BYTES, FILE_BYTES, TASK_FILES_BYTES, checkPictureRoom, checkRoom, onTask } from './file-policy.js';
+export type { UploadRoom } from './file-policy.js';
+export { onDisk, filesOf, commitUrl, picturesOf } from './file-views.js';

@@ -1,12 +1,11 @@
 import { apiEndpoint, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { jobs, subscriptions } from '../../db/schema.js';
+import { subscriptions } from '../../db/schema.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { nodeHeldFrom } from '../updates/drain.js';
-
 export const TEST_PROMPT = 'Reply with one word: ready';
 export const TEST_TIMEOUT_MS = 120_000;
 
@@ -56,10 +55,6 @@ const jobExtras = (job: JobToSend) => ({
   ...(job.call ? { call: true as const } : {}),
 });
 
-/* Jobs a node has or had: running ones, and test jobs and one-shot calls, which go out the moment they are made.
-   A queued conversation turn still waits in Hornhoof and goes out later. */
-export const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), inArray(jobs.kind, ['test', 'call'])));
-
 /* OpenRouter and a compatible API run only the models their connection was given, so a turn that names none takes the
    first: the program's own default is a model of its maker, which such an API may not have. */
 const secretOf = (ctx: Ctx, sub: { secretEnc: string | null }): string | null => (sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null);
@@ -91,3 +86,4 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     ...jobExtras(job),
   });
 }
+export { ON_NODE } from './requirements.js';

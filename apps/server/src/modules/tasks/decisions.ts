@@ -1,19 +1,19 @@
+import { candidates } from './decision-people.js';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
-import { canReach, WHOLE, withOwned } from '../../auth/access.js';
+import { canReach } from '../../auth/access.js';
 import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, machineAccess, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { agents, departments, machineAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
-import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
-import { seesTask, type TaskPlace } from './sight.js';
-
+import { requestSubject, taskSpot, type Request, type Task } from './state.js';
+import { seesTask, type TaskPlace } from './visibility.js';
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
    this person may take it (auth/decisions.ts). */
 
@@ -41,36 +41,6 @@ export type Decisions = {
   machines: MachineAway[];
   counts: Counts;
 };
-
-/* The company's active and invited people with what each reaches and owns, for owners. */
-export async function candidates(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Candidate[]> {
-  const rows = await ctx.db.select({ id: people.id, status: people.status, isOwner: people.isOwner, scopeKind: people.scopeKind }).from(people).where(eq(people.companyId, companyId));
-  const listed = rows.filter(p => p.scopeKind !== 'company').map(p => p.id);
-  const access = listed.length ? await ctx.db.select().from(personAccess).where(inArray(personAccess.personId, listed)) : [];
-  const owned = await ctx.db.select({ id: departments.id, ownerPersonId: departments.ownerPersonId }).from(departments).where(eq(departments.companyId, companyId));
-  const namedFor = (id: string) => owned.filter(d => d.ownerPersonId === id).map(d => d.id);
-  return rows.map(p => {
-    if (p.scopeKind === 'company') return { id: p.id, status: p.status, isOwner: p.isOwner, access: withOwned(WHOLE, namedFor(p.id)) };
-    const mine = access.filter(a => a.personId === p.id);
-    return {
-      id: p.id,
-      status: p.status,
-      isOwner: p.isOwner,
-      access: withOwned({ whole: false, departments: new Set(mine.flatMap(a => (a.departmentId ? [a.departmentId] : []))), teams: new Set(mine.flatMap(a => (a.teamId ? [a.teamId] : []))) }, namedFor(p.id)),
-    };
-  });
-}
-
-/* Each department's owner who counts now: named by the CEO, active and with access still. */
-export async function departmentOwners(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Map<string, string>> {
-  const everyone = await candidates(ctx, companyId);
-  return new Map(everyone.filter(p => p.status === 'active').flatMap(p => [...(p.access.owns ?? [])].map((department): [string, string] => [department, p.id])));
-}
-
-/* The addressee of a question uses the same ownership policy as its decision card. */
-export async function decisionPerson(ctx: Pick<Ctx, 'db'>, companyId: string, subject: DecisionSubject): Promise<string> {
-  return decisionOwner(subject, await candidates(ctx, companyId));
-}
 
 /* Whether a decision is held by a department's named owner other than this viewer. */
 function heldElsewhere(subject: DecisionSubject, everyone: readonly Candidate[], viewer: string): boolean {
@@ -186,3 +156,4 @@ export async function departmentNames(ctx: Pick<Ctx, 'db'>, ids: string[]): Prom
   if (!ids.length) return new Map();
   return new Map((await ctx.db.select().from(departments).where(inArray(departments.id, ids))).map(d => [d.id, d]));
 }
+export { candidates, decisionPerson, departmentOwners } from './decision-people.js';

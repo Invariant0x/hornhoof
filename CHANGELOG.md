@@ -76,6 +76,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Server task and conversation modules have explicit dependency boundaries, with a check that prevents circular imports.
+- Raw task evidence is kept in task attachments, browser captures stay in test output, and the module inventory names its release and how to reproduce it.
 - Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
 - Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
 - Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
@@ -99,6 +101,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 - A new agent program or one-shot call waits only after its machine's system killed a program for want of memory, until a report without one; Hornhoof's own memory and processor thresholds for agents are gone, and the machine's card and the agent's window say so in one line.
 - Nodes take turns from 0.5.0 on, and every node gets an agent's skills as files.
+- The node's provider and terminal code no longer load each other in a ring: each provider owns how its program runs in a terminal, and people's terminal views and a session's privacy have their own modules outside the terminal host.
 
 ## [0.32.1] - 2026-11-17
 

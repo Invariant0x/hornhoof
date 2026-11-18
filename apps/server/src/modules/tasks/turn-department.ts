@@ -1,7 +1,7 @@
 import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { departments, tasks, turns } from '../../db/schema.js';
-import type { Tx } from './engine.js';
+import type { Tx } from './state.js';
 import { lastTurnNumber } from './numbers.js';
 
 type Reader = Pick<Db, 'select'>;

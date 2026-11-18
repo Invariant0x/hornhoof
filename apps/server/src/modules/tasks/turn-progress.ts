@@ -4,7 +4,7 @@ import type { AgentViewer } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
 import { tasks, type turns } from '../../db/schema.js';
 import { countOnly } from '../../db/selections.js';
-import { seesTask } from './sight.js';
+import { seesTask } from './visibility.js';
 
 type CountedTurn = Pick<typeof turns.$inferSelect, 'id' | 'companyId'>;
 type ProgressTurn = CountedTurn & { number: number };

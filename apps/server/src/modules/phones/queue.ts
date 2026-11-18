@@ -1,22 +1,19 @@
+import { holding, phoneBinding } from './binding.js';
 import { randomUUID } from 'node:crypto';
-import { PHONE_LEASE_MS, type PhoneBinding, type PhoneOperation, type PhoneReply } from '@hornhoof/protocol';
+import { PHONE_LEASE_MS, type PhoneOperation, type PhoneReply } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, companyPhones, jobs, machines, nodes, phoneSessions } from '../../db/schema.js';
 import { nodeIdentity } from '../nodes/hub.js';
-import { taskByRef } from '../tasks/views.js';
+import { taskByRef } from '../tasks/lookup.js';
 import { pendingPhoneReadiness, refreshPhoneReadiness } from './readiness.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneNotConnected, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
 import { phoneConnection } from './presence.js';
 import { idOnly } from '../../db/selections.js';
-
 /* An employee or assistant that borrows a phone, and the turn it runs. */
 export type PhoneAgent = { id: string; companyId: string; jobId: string | null };
-
-export const holding = ['starting', 'active', 'revoking'] as const;
 const unfinished = ['queued', ...holding] as const;
-export const phoneBinding = (p: CompanyPhone): PhoneBinding => ({ phoneId: p.id, serial: p.serial, hardwareKey: p.hardwareKey });
 
 async function liveJob(ctx: Ctx, me: PhoneAgent) {
   if (!me.jobId) throw phoneGone();
@@ -174,3 +171,4 @@ export async function phoneAction(ctx: Ctx, me: PhoneAgent, id: string, operatio
   await activeSession(ctx, me, id);
   return reply;
 }
+export { holding, phoneBinding } from './binding.js';

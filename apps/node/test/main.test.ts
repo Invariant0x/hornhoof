@@ -20,7 +20,7 @@ import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { claudeProgram } from '../src/terminal/programs.js';
+import { claudeProgram } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';

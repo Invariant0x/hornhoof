@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi, writeClaudeTools } from '../src/terminal/programs.js';
+import { agyProgram, prepareAgy } from '../src/providers/antigravity-terminal.js';
+import { acceptClaudeDialogs, claudePlanLimits, claudeProgram, claudeTranscript, writeClaudeTools } from '../src/providers/claude-terminal.js';
+import { codexProgram, findRollout } from '../src/providers/codex-terminal.js';
+import { findKimiWire, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/providers/kimi-terminal.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 const AGENT_SECRET = '5ec7e7f00dc0ffee';

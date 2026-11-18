@@ -2,7 +2,7 @@ import { appendFileSync } from 'node:fs';
 import { UNHEARD_MS } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { restartRefusal, TurnWords } from '../src/terminal/program-restart.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
 import { atTypedWork, atWork, cleanups, SESSION, TEXT } from './terminal-host-receipts-helpers.js';

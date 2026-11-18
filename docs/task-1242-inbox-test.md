@@ -1,5 +1,7 @@
 # Task 1242: wait for inbox count reports
 
+Historical task report. Raw files named here are preserved in `task-1364-source-evidence.tar.gz`, attached to task 1364, with per-file SHA-256 values in `archive-manifest.json`. [Original report and neighboring artifacts](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1242-inbox-test.md). These are historical results, not checks of the current release.
+
 Status: DONE. Kind: bug. Risk: none. Branch: task-1242.
 Base: `11aa5777c4a5f74a550c0e53570ec35ebae39f53`. Tested code commit: `877f28cd0193da7b3f304aa09d9a8d46e9eda659`.
 
@@ -9,7 +11,7 @@ The only code change is in `apps/web/test/Inbox.test.tsx`. It waits for the actu
 
 ## Requirement to evidence
 
-- Original failure: [run 97 RED](task-1242-evidence/red-run-97.log), from task 1120's `tests-97-3.log`, pinned to the base above. The complete assertion says the callback's last call was undefined where 2 was expected at line 92. It fails before either mark button is clicked.
+- Original failure: [run 97 RED](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1242-evidence/red-run-97.log), from task 1120's `tests-97-3.log`, pinned to the base above. The complete assertion says the callback's last call was undefined where 2 was expected at line 92. It fails before either mark button is clicked.
 - Local baseline: `cd apps/web && npx --no-install vitest run test/Inbox.test.tsx`, three attempts, each exit 0 with 15 tests. See `baseline-01.log` through `baseline-03.log`. This does not establish a reliable local RED. The production callback lives in `useEffect([unread, onUnread])` in `apps/web/src/ui/Inbox.tsx`, after the DOM commit. DOM discovery and effect execution are different completion conditions; the original loaded run observed that gap. No focus or product defect is demonstrated.
 - Stability: the same named command, 10 consecutive fresh processes on the tested code commit, all exit 0, 15 tests each. See `repeat-01.log` through `repeat-10.log`. File execution took 530 to 629 ms per run; elapsed time is reported by the runner, never asserted in the test.
 - Build: `npm run build -w @hornhoof/web`, exit 0. Existing large-chunk warning only. See `build.log`.
@@ -17,7 +19,7 @@ The only code change is in `apps/web/test/Inbox.test.tsx`. It waits for the actu
 - Lint: `npx --no-install eslint apps/web/test/Inbox.test.tsx`, exit 0, no diagnostics. See `lint.log`.
 - Own review and security check: all checks remain, only their synchronization changes; no access, input, secret or dependency change. No blocking findings. The first `codex review --base 11aa5777c4a5f74a550c0e53570ec35ebae39f53` could not execute git because bwrap could not create a namespace; this is unavailable, not a pass. A second review of the pasted exact diff and relevant production context found no correctness or security defects, without shell access. Both logs and the review input are retained.
 
-Evidence and observed exit codes are recorded in [checks.json](task-1242-evidence/checks.json). The test SHA-256 is `30de042eb516b6f38469948130bb3fc0f064837e298e272cc982a487e1084220`. The evidence commit adds documentation and logs only, preserving that test fingerprint. The repository's exact-candidate `check:author` receipt is attached to task 1242 after this evidence commit.
+Evidence and observed exit codes are recorded in [checks.json](https://github.com/invariant0x/hornhoof/blob/509b469f086cf28f63ec4799ad6187498bf96da0/docs/task-1242-evidence/checks.json). The test SHA-256 is `30de042eb516b6f38469948130bb3fc0f064837e298e272cc982a487e1084220`. The evidence commit adds documentation and logs only, preserving that test fingerprint. The repository's exact-candidate `check:author` receipt is attached to task 1242 after this evidence commit.
 
 ## Limits and handoff
 

@@ -10,7 +10,7 @@ import { runNode } from '../src/main.js';
 import { kimiModels } from '../src/providers/kimi.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
-import { planToken } from '../src/terminal/programs.js';
+import { planToken } from '../src/providers/claude-terminal.js';
 import { readAccount } from '../src/account.js';
 import { claudeAdapter } from '../src/providers/claude.js';
 import { eventually } from '../../../test-support/eventually.mjs';

@@ -3,7 +3,8 @@ import type { Ctx } from '../../app.js';
 import { runsDepartment } from '../../auth/departments.js';
 import { people, tasks, type TaskPause } from '../../db/schema.js';
 import { requireTaskHead } from './echelons-update.js';
-import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx, type Wake } from './engine.js';
+import { CLOSED, loadTask, refuse, type Actor, type Moved, type Task, type Tx, type Wake } from './state.js';
+import { note, published } from './events.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 
 /* A paused task's own work refuses: its executor waits for the resume, which wakes it once. */

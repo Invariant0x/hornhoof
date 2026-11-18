@@ -10,7 +10,7 @@ import { asAgent, type JobUser } from './isolation.js';
 import { lastWords, plainOutput } from './program-exit.js';
 import { exitsCleanly } from './providers/process.js';
 import { HIDDEN, hideKeyLike, redact } from './redact.js';
-import { parentOf } from './terminal/host.js';
+import { parentOf } from './terminal/views.js';
 import { StreamMask } from './terminal/mask.js';
 import { envFile, type Tmux } from './terminal/tmux.js';
 

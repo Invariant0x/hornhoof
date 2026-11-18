@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
-import { claudeTranscript } from '../src/terminal/programs.js';
+import { claudeTranscript } from '../src/providers/claude-terminal.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { job, listsAtStart, onClock, untilOnClock } from './terminal-host-helpers.js';
 
@@ -61,7 +61,7 @@ function assistant({ operator = false } = {}) {
   });
   listsAtStart(host);
   /* Its owner has its window open, so the program stays up between turns. */
-  host['wanted'].set('watching', { key: KEY, size: { cols: 80, rows: 24 } });
+  host['viewSessions']['wanted'].set('watching', { key: KEY, size: { cols: 80, rows: 24 } });
   cleanups.push(async () => {
     clearInterval(host['operatorTimer'] ?? undefined);
     up = false;
