@@ -385,10 +385,12 @@ export function partFolders(root: string, msg: TestRun): { own: string; user: st
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
-/* Vitest's workers: a count the machine names, else as many as the part's share of the machine takes when it starts. */
+/* Vitest's workers: a count the machine names, or a share of the cores it names for Vitest, as 50%, else as many as the part's
+   share of the machine takes when it starts. */
 function partWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>): string {
-  const named = namedWorkers(options.env ?? process.env);
+  const env = options.env ?? process.env, named = namedWorkers(env), preset = env.VITEST_MAX_WORKERS?.trim();
   if (named !== null) return String(named);
+  if (preset) return preset;
   const machine = options.load === undefined || options.memFree === undefined ? machineLoad() : null;
   const cpus = options.cpus ?? availableParallelism(), load = options.load ?? machine!.load, memFree = options.memFree ?? machine!.memFree;
   return String(vitestWorkers(partShare({ cpus, load, memFree })));
