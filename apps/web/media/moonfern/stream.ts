@@ -1,3 +1,4 @@
+import type { Language } from '../../src/i18n';
 import { expect, type Page } from '@playwright/test';
 import type { StreamMessage } from '../../src/types';
 import { BASE_ISO } from './clock';
@@ -109,12 +110,13 @@ export function watchSceneErrors(page: Page): ErrorWatcher {
   };
 }
 
-export async function prepareScenePage(page: Page, nowIso = BASE_ISO): Promise<ErrorWatcher> {
+export async function prepareScenePage(page: Page, nowIso = BASE_ISO, language: Language = 'en', theme?: string): Promise<ErrorWatcher> {
   await page.clock.setSystemTime(new Date(nowIso));
-  await page.addInitScript(() => {
-    localStorage.setItem('hh-lang', 'en');
-    localStorage.removeItem('hh-theme');
-  });
+  await page.addInitScript(({ language, theme }) => {
+    localStorage.setItem('hh-lang', language);
+    if (theme) localStorage.setItem('hh-theme', theme);
+    else localStorage.removeItem('hh-theme');
+  }, { language, theme });
   await installLiveStream(page);
   return watchSceneErrors(page);
 }
