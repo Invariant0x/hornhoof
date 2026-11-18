@@ -14,7 +14,7 @@ import { refuse } from '../tasks/engine.js';
 import { TEST_MEMORY_GB } from '../departments/repository.js';
 import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
-import { planProductParts, type ProductPlan } from './plan-product.js';
+import { partSpread, planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
@@ -104,13 +104,12 @@ function planningCosts(history: PlanningHistory | null | undefined) {
     ...(history?.preparationMs ? { preparationMs: history.preparationMs } : {}) };
 }
 /* The full run checks a release, and a part of it that runs into its limit sends all of it again: unless the run asked for a limit, each
-   part has an hour, and the run goes out in two to four parts that each fit in it. */
+   part has an hour. */
 export const FULL_RUN_MINUTES = 60;
-const FULL_RUN_PARTS = { min: 2, max: 4 };
 function partLimitMs(run: Run, mode: RunMode): number {
   return mode?.mode === 'full' && run.environmentRequest?.minutes === undefined ? Math.max(run.timeoutMs, FULL_RUN_MINUTES * 60_000) : run.timeoutMs;
 }
-const spreadFor = (run: Run, mode: RunMode) => mode?.mode === 'full' ? { spread: { ...FULL_RUN_PARTS, ceilingMs: run.timeoutMs } } : {};
+const spreadFor = (run: Run, mode: RunMode) => partSpread(mode?.mode === 'full', run.timeoutMs);
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision, mode: RunMode): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };

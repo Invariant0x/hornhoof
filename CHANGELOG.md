@@ -47,6 +47,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The task lists panel sits against the start edge below app navigation and fills the available height.
 - Tracker goal links get more room and underline on hover or keyboard focus.
 - Long titles, names, and actions wrap inside tracker rows, cards, and turns at narrow widths.
+- A test run of a release goes out in as many parts as keep each within three quarters of its time limit by what its files took before, at once on free machines and one after another on one, so a run whose tests pass no longer runs into the limit with everything in one part; a part stopped at its limit no longer makes its machine look faster to the next plan.
 
 ### Added
 
