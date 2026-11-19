@@ -28,7 +28,7 @@ export const BriefingBody = z.object({ text: z.string().max(BRIEFING_TEXT_MAX), 
 /* How any repository is worked in, whatever its own files say. An agent reads it with the record that lists one. */
 const REPOSITORY_RULES =
   'Before you change a repository, read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md) and follow them on how its code is written, built and tested. ' +
-  'Use the repository rules for how its project is built and checked. The company’s authority and safety rules still govern what you may do. ' +
+  'Use the repository rules for how its project is built and checked. The company\'s authority and safety rules still govern what you may do. ' +
   'Work on the task branch. Integrate the exact checked revision once its release evidence is complete. Apply any approval the department explicitly requires. ' +
   'Commit as the repository names, and add no Co-Authored-By or other trailers.';
 

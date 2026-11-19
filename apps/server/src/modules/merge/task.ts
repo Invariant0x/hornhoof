@@ -110,7 +110,7 @@ export async function bodyOf(db: Db, mergeIds: string[]): Promise<string> {
   }
   parts.push(
     'What to do: read the conflicts with merge_conflicts and settle each with merge_pick (here keeps what this company has now, there takes the other side, value writes yours). ' +
-    'Get the CEO’s yes for an exact permanent deletion. Keep any protected values out of the task and conversation. Restore the work on its branches and tell the people whose tasks changed.',
+    'Get the CEO\'s yes for an exact permanent deletion. Keep any protected values out of the task and conversation. Restore the work on its branches and tell the people whose tasks changed.',
   );
   return parts.join('\n\n');
 }

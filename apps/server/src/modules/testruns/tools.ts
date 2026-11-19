@@ -43,7 +43,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        'Runs release checks on main, the repository’s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
+        'Runs release checks on main, the repository\'s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
         'A full release run can reuse passing results from the same release with matching reusable evidence. Without that evidence it runs the selected profile. A whole product run or the exact declared full command can publish hornhoof/tests on the pinned commit. ' +
         `Hornhoof pins the commit the branch is at now, readies the product's harness, and wakes you on the task with the result; with command it runs that command instead, split into up to ${MAX_TEST_PARTS} parts with {part} and {parts} in it.`,
       inputSchema: {
