@@ -44,25 +44,34 @@ it.each([
   expect(within(board).getAllByRole('region')).toEqual(columns);
 });
 
-it('uses compact type and allows text to wrap inside board cards', () => {
-  expect.soft(decl('.tr-card', 'line-height')).toBe('1.4');
+it('draws columns, pills and cards at the mockup sizes and lets their words wrap', () => {
+  /* .bcol: the panel's surface in a line, 8px inside; its head a pill, the count and the role at the end. */
+  expect.soft(decl('.tr-col', 'background')).toBe('var(--surface)');
+  expect.soft(decl('.tr-col', 'border')).toBe('1px solid var(--line)');
+  expect.soft(decl('.tr-col', 'padding')).toBe('8px');
+  expect.soft(decl('.tr-col-head', 'gap')).toBe('8px');
+  expect.soft(decl('.tr-col-head .tr-count', 'font')).toBe('13px var(--f-body)');
+  expect.soft(decl('.tr-col-who', 'font-size')).toBe('11.5px');
+  expect.soft(decl('.tr-col-who', 'margin-inline-start')).toBe('auto');
+  expect.soft(decl('.tr-columns', 'gap')).toBe('10px');
+  /* .bcard: a line around a cut card of the raised surface, 9px by 10px inside, 7px between its lines. */
+  expect.soft(decl('.tr-card', 'padding')).toBe('1px');
+  expect.soft(decl('.tr-card', 'background')).toBe('var(--line)');
+  expect.soft(decl('.tr-card', '--cut')).toBe('calc(8px * var(--cut-k))');
+  expect.soft(decl('.tr-card-body', 'background')).toBe('var(--surface2)');
+  expect.soft(decl('.tr-card-body', 'padding')).toBe('9px 10px');
+  expect.soft(decl('.tr-card-body', 'gap')).toBe('7px');
+  expect.soft(decl('.tr-card-title', 'font')).toBe('600 13.5px/1.3 var(--f-body)');
+  expect.soft(decl('.tr-card-meta', 'font-size')).toBe('12px');
+  expect.soft(decl('.tr-card-meta', 'gap')).toBe('10px');
+  expect.soft(decl('.tr-card-meta', 'flex-wrap')).toBe('wrap');
+  expect.soft(decl('.tr-card .tr-wait.person', 'color')).toBe('var(--pink-ink)');
   expect.soft(decl('.tr-card', 'overflow-wrap')).toBe('break-word');
-  expect.soft(decl('.tr-card-title', 'font-family')).toBe('var(--f-body)');
-  expect.soft(decl('.tr-card-title', 'font-size')).toBe('13px');
-  expect.soft(decl('.tr-card-title', 'font-weight')).toBe('500');
-  expect.soft(decl('.tr-card-title .linkish', 'min-block-size')).toBe('44px');
-  expect.soft(decl('.tr-card-title .tr-no', 'font-weight')).toBe('400');
-  expect.soft(decl('.tr-no', 'font-size')).toBe('12px');
-  expect.soft(decl('.tr-card-facts', 'font-size')).toBe('12px');
-  expect.soft(decl('.tr-card .tr-wait', 'font-size')).toBe('inherit');
   expect.soft(decl('.tr-card .tstate', 'font-size')).toBe('11px');
-  expect.soft(decl('.tr-card .tstate', 'padding')).toBe('2px 6px');
-  expect.soft(decl('.tr-card > .entry-actions > .act', 'font-size')).toBe('12px');
-  expect.soft(decl('.tr-card > .entry-actions > .act', 'padding')).toBe('4px 6px');
-  expect.soft(decl('.tr-card > .entry-actions > .act', 'inline-size')).toBe('max-content');
+  expect.soft(decl('.tr-card-body > .entry-actions > .act', 'font-size')).toBe('12px');
 });
 
-it.each([['status', null], ['pipeline', pipeline]] as const)('shares the title button with the task number on the %s board', (_board, route) => {
+it.each([['status', null], ['pipeline', pipeline]] as const)('opens the card from its title and its question on the %s board', (_board, route) => {
   const task: TaskLine = {
     ...TASK_DETAIL, parentId: null, status: 'waiting', pipelineId: pipeline.id, pipelineStageId: 'Build',
   };
@@ -71,9 +80,9 @@ it.each([['status', null], ['pipeline', pipeline]] as const)('shares the title b
     rows={{ selected: null, onOpenTask, asksYou: () => true }} /></LanguageProvider>);
   const card = within(screen.getByRole('article', { name: `#${task.number} ${task.title}` }));
   const title = card.getByRole('button', { name: task.title });
-  const number = card.getByText(`#${task.number}`);
-  expect(title).toContainElement(number);
-  fireEvent.click(number);
+  /* The mockup's card names the task by its title; its number is in the card's name for screen readers. */
+  expect(card.queryByText(`#${task.number}`)).toBeNull();
+  fireEvent.click(title);
   fireEvent.click(card.getByRole('button', { name: 'Open question' }));
   expect(onOpenTask.mock.calls).toEqual([[task.id], [task.id]]);
 });

@@ -7,7 +7,7 @@ sources: [coreyhaines31/marketingskills skills/ai-seo/SKILL.md, msitarzewski/age
 ---
 Use this ability to assess and improve how an assigned product appears in AI-assisted search. Inputs are the product facts, target audience, supported languages, page inventory and permitted research tools.
 
-1. Build 20 to 30 buyer questions from sales notes, support questions and search queries, covering the assigned languages.
+1. Choose buyer questions that cover the actual discovery decisions and assigned languages. Record why further questions would not change the conclusion.
 2. Establish a baseline with the assistants and search modes the assignment permits. Record the question, date, model or service, sources cited, whether the product appears and any false statements. Use the same question set for a comparable later measurement.
 3. Find questions the product can answer with evidence but lacks a useful page for. Propose a direct answer in the first two sentences, followed by supporting facts, sources and an update date.
 4. Make the answer easy to cite: descriptive headings, short paragraphs, comparison tables, definitions and the full product name.

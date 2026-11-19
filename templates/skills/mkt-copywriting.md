@@ -15,4 +15,6 @@ Use this ability to write an assigned page, article, email or announcement. Inpu
 6. Keep one main action, worded consistently.
 7. Provide two headline options and a short reason for the preferred one.
 
-Return a draft with its channel, language and claim sources. It remains a draft until approved for use. Publication is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; selecting this ability does not authorize sending or publishing.
+Label the draft's version and readiness. If publication is assigned, check it against the brief and follow the department's publication rule.
+
+For a video script, make the required events clear in the look and format of the brief.

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { Department, DepartmentTree, Employee } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
@@ -17,6 +18,8 @@ type Props = {
   tree: DepartmentTree;
   department: Department;
   onOpenTask(id: string): void;
+  /* Where the department keeps its zoom, with the other controls along its bottom; without it the zoom stands here. */
+  zoomSlot?: HTMLElement | null;
 };
 type Selection = { pick: TreePick; x: number; y: number };
 
@@ -409,7 +412,7 @@ export function TreeView(props: Props) {
           </>
         )}
       </div>
-      <ZoomBar k={view.k} onZoom={zoomAt} onFit={fit} />
+      {props.zoomSlot ? createPortal(<ZoomBar k={view.k} onZoom={zoomAt} onFit={fit} />, props.zoomSlot) : <ZoomBar k={view.k} onZoom={zoomAt} onFit={fit} />}
     </>
   );
 }

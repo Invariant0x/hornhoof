@@ -34,11 +34,13 @@ describe('the route of every department template', () => {
     }
   });
 
-  it('lists exactly the available pipelines and their uses in the orchestrator skill', () => {
-    const body = templates.skills.get('orch-pipelines')?.body ?? '';
-    const entries = [...body.matchAll(/^- `([a-z-]+)` (.+)$/gm)].map(([, key, line]) => [key, line]);
-    expect(entries.length).toBeGreaterThan(0);
-    expect(entries.sort()).toEqual([...templates.catalogs.values()].flatMap(catalog => catalog.pipelines.map(p => [p.key, `${p.name}. ${p.why}`])).sort());
+  it('reads current pipeline choices and defaults without a copied catalog', () => {
+    const body = templates.skills.get('orch-pipelines')!.body;
+    expect(body).toMatch(/live pipeline catalog[\s\S]*defaults/i);
+    expect(body).toMatch(/apply_pipeline in add mode[\s\S]*set_default/i);
+    for (const catalog of templates.catalogs.values()) {
+      for (const pipeline of catalog.pipelines) expect(body).not.toContain(pipeline.key);
+    }
   });
 
   it('keeps the stages of Development and the skill of each of its checks', () => {
@@ -62,13 +64,13 @@ describe('the route of every department template', () => {
       finance: [{ stage: 'review', fanOut: 3, judge: true }],
       home_devices: [],
       household: [],
+      video_production: [{ stage: 'development', fanOut: 2, judge: true }],
     });
   });
 
-  it.each(['hh-task-flow', 'hh-check-work', 'dev-review-diff', 'dev-security-review'])('points stage owners to one-shot briefing and how to use the judge in %s', id => {
-    const calls = templates.skills.get('hh-one-shot-calls')!;
-    const guidance = templates.skills.get(id)!.body.split('\n\n').find(part => part.includes(`the ability "${calls.title.en}"`));
-    expect(guidance).toMatch(/one-shot.*brief.*judge/);
+  it.each(['hh-task-flow', 'hh-check-work', 'dev-review-diff', 'dev-security-review'])('gives stage owners a brief and checked judgment in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/one-shot[^\n]*judge/i);
   });
 
   it('gives every department a route of its own, each with the work stage', () => {
@@ -93,10 +95,16 @@ describe('the route of every department template', () => {
       for (const { role } of team.members) {
         const carried = new Set([...templates.roles.get(role)!.skills.filter(skill => skill.on).map(skill => skill.id), ...team.skills]);
         for (const { stage, ability } of templates.stagesOf(team.department).stages) {
-          if (ability && stage !== 'cleanup') expect([...carried], `${team.id} ${role} ${stage}`).toContain(ability);
+          if (ability && stage !== 'cleanup' && ability !== 'fin-independent-recompute') expect([...carried], `${team.id} ${role} ${stage}`).toContain(ability);
         }
       }
     }
+  });
+
+  it('keeps independent recomputation on the checked Finance route', () => {
+    expect(templates.stagesOf('finance').stages.find(stage => stage.stage === 'review')?.oneShot?.judge).toMatch(/independent recomputations/);
+    expect(templates.teams.get('FIN-TEAM')!.skills).not.toContain('fin-independent-recompute');
+    expect(templates.roles.get('FIN-AUDIT')!.skills).toContainEqual(expect.objectContaining({ id: 'fin-independent-recompute', on: true }));
   });
 
   it('gives the turnkey team of Development the skills of every echelon: plan, review, security, tests and release', () => {
@@ -106,15 +114,15 @@ describe('the route of every department template', () => {
     ]);
   });
 
-  it('tells every member how a document is handed in, and every head how a result that passed its stages is accepted', () => {
-    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/task\.echelons says document[\s\S]*hh-attach[\s\S]*name no commit/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/stages of your department's route[\s\S]*reaches you once they passed[\s\S]*a document[\s\S]*"report" done true/);
-    expect(templates.skills.get('orch-company')!.body).toMatch(/every department's work goes through the stages of that department's own route[^.]*hands in a document in place of a commit/);
+  it('uses the declared result type for submission and acceptance', () => {
+    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/submit a document[\s\S]*hh-attach[\s\S]*name no commit/i);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/integrate the exact checked commit[\s\S]*"report" done true[\s\S]*document result/i);
+    expect(templates.skills.get('orch-company')!.body).toMatch(/declared document or repository form/);
   });
 
-  it('tells every member to push each commit and branch at once, and leaves the main branch and the layout to the head', () => {
-    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/Push every commit and every branch[^.]*as soon as[^.]*only on your machine[^.]*merges nothing into the main branch/);
-    expect(templates.skills.get('hh-head')!.body).toMatch(/push every branch at once[^.]*pushed branches go into the main branch[^.]*how the repository is laid out, you decide/);
+  it('pushes only to the assigned destination and leaves integration with the department', () => {
+    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/assigned writable destination[\s\S]*shared handoff/i);
+    expect(templates.skills.get('hh-head')!.body).toMatch(/department decides its integration destination, release timing and the layout/i);
   });
 
   it('marks a stage one-shot: how many calls run it at once, and the brief of the judge that reads their answers', () => {

@@ -9,4 +9,4 @@ kind: procedure
 3. **Prepare purchases**: when the family wants something bought, gather the items, quantities, seller, price and delivery details. Give the person the purchase step so they pay on their own account. Handle free orders as assigned under the notebook.
 4. **After a person places an order**, mark those items as handled and note anything that did not arrive.
 
-Never save or ask for card, bank or account secrets; the person pays in their own shop. Keep only the supplies and purchase history the assignment needs, private to the home, so repeat buys are quick. Do not infer private family details or access camera or microphone content to check supplies; content access needs a separate assignment and existing access. Return lists and proposed orders to your head.
+Use the minimum records needed for the supplies and purchase. Keep family details private. The person makes the payment with their own account. Keep credentials out of the records.

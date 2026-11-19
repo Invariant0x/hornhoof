@@ -254,7 +254,7 @@ describe('the history of a node connection', () => {
     expect(await stored(db)).toEqual([]);
   });
 
-  /* #1060: parts of runs went on the built-in node of home-api, and its drops were nowhere to be read. */
+  /* #1060: parts of runs went on the built-in node of test-server, and its drops were nowhere to be read. */
   it('writes the built-in node of a machine on that machine, with no node of its own, and how it ended', async () => {
     const lines: string[] = [];
     const { db, url, machineId } = await liveCompany({}, { level: 'info', stream: { write: (line: string) => void lines.push(line) } });

@@ -15,7 +15,7 @@ export async function waitCycles(ctx: Ctx, now: Date) {
   const rows = await ctx.db.select({ task: tasks, employee: agents }).from(tasks).innerJoin(agents, eq(agents.id, tasks.assigneeAgentId)).where(and(
     notInArray(tasks.status, [...CLOSED]), isNull(agents.removedAt), isNull(agents.switchedOffAt),
   ));
-  const edges = rows.flatMap(({ task, employee }) => task.externalWait?.on?.kind === 'employee' && new Date(task.externalWait.until) > now
+  const edges = rows.flatMap(({ task, employee }) => !task.externalWait?.work && task.externalWait?.on?.kind === 'employee' && new Date(task.externalWait.until) > now
     ? [{ from: employee.id, to: task.externalWait.on.employee, task, name: employee.name }] : []);
   return waitingCycles(edges);
 }

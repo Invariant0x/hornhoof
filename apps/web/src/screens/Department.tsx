@@ -9,7 +9,7 @@ import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, modelLine, Switch, STATUS_CLASS } from '../ui/Chip';
 import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
-import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
+import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
@@ -72,6 +72,8 @@ type Props = {
   /* Its Tasks button opens the tracker at this department. */
   onOpenTracker?(departmentId: string): void;
   onOpenDepartment?(id: string): void;
+  /* How wide the department's name stands beside the logo on a wide screen, for the top bar's tabs; 0 when it does not. */
+  onCrumbs?(px: number): void;
 };
 
 /* The agent window is on the right, settings and task details on the left. */
@@ -197,29 +199,53 @@ function DrawerHead({ title, onClose }: { title: string; onClose(): void }) {
   );
 }
 
-/* Wrapped actions determine the tree's floor and the ticker's remaining room. */
-function useDepartmentSpace(language: string, panel: Props['panel']) {
-  const root = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null);
-  const [space, setSpace] = useState({ right: 16, bottom: 228, tickerHidden: false });
+/* The zoom bar and the gap after it, along the bottom of a wide screen, where the ticker starts. */
+const ZOOM_ROOM = 212;
+
+/* A tool shown as its icon keeps its name as its label and tooltip. */
+const named = (icons: boolean, name: string) => (icons ? { 'aria-label': name, title: name } : {});
+
+/* Wrapped actions determine the tree's floor and the ticker's remaining room. On a phone the tools show as icons, and on a
+   wide screen too when their words do not fit between the zoom and the edge: what the words need is measured as they are
+   shown, once for each language and set of tools. On a phone the name of the department stands under the top bar and the
+   tree and drawers start under it; on a wide screen it stands beside the logo, and the top bar is told how wide it is. */
+function useDepartmentSpace(language: string, panel: Props['panel'], tools: string, onCrumbs?: (px: number) => void) {
+  const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
+  const [space, setSpace] = useState({ right: 16, bottom: 228, top: 116, tickerHidden: false });
+  const [icons, setIcons] = useState(false);
+  const need = useRef<{ words: string; px: number } | null>(null);
+  const words = `${language}|${tools}`;
   useLayoutEffect(() => {
     const el = root.current, acts = actions.current;
     if (!el || !acts) return;
     const measure = () => {
       const phone = window.innerWidth <= NARROW;
       const width = el.clientWidth || window.innerWidth;
+      if (!phone && !icons) need.current = { words, px: acts.scrollWidth };
+      else if (!phone && need.current?.words !== words) {
+        setIcons(false);
+        return;
+      }
+      setIcons(phone || (!!el.clientWidth && need.current!.px > width - ZOOM_ROOM - 16));
       const right = phone ? 16 : acts.offsetWidth + 32;
-      const bottom = phone && el.clientHeight ? el.clientHeight - acts.offsetTop + 8 : 228;
-      setSpace({ right, bottom, tickerHidden: !phone && width - right - 212 < 220 });
+      const bottom = phone && el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228;
+      const name = crumbs.current, title = name?.querySelector('h2');
+      const top = phone && name?.offsetHeight ? name.offsetTop + name.offsetHeight + 8 : 116;
+      setSpace({ right, bottom, top, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
+      onCrumbs?.(phone || !name ? 0 : name.offsetWidth + (title ? title.scrollWidth - title.clientWidth : 0));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = guardedResizeObserver(measure, 'department-actions');
     observer.observe(el);
     observer.observe(acts);
+    /* On a phone the dock grows with the words of the line in it. */
+    if (dock.current) observer.observe(dock.current);
     return () => observer.disconnect();
-  }, [language, panel]);
-  const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px` } as CSSProperties;
-  return { root, actions, style, tickerHidden: space.tickerHidden };
+  }, [panel, icons, words, onCrumbs]);
+  useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
+  const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
+  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden };
 }
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
@@ -231,7 +257,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
   return kept.length === entries.length ? switched : Object.fromEntries(kept);
 }
 
-export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions, onOpenTracker, onCrumbs }: Props) {
   useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
@@ -255,7 +281,8 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
-  const chrome = useDepartmentSpace(language, panel);
+  const chrome = useDepartmentSpace(language, panel, runs ? 'hire' : '', onCrumbs);
+  const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!drawer) return;
     /* An Escape the task panel over the drawer took closes only that panel. */
@@ -427,7 +454,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   return (
     <div className="dview" ref={chrome.root} style={chrome.style}>
       {tree && (workTree ? (
-        <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} />
+        <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} zoomSlot={zoomSlot} />
       ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
@@ -514,7 +541,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
 
       )}
 
-      <nav className="crumbs" aria-label={deptLabel(t, d)}>
+      <nav className="crumbs" ref={chrome.crumbs} aria-label={deptLabel(t, d)}>
         <button className="hbtn glass ib" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
           <BackIcon />
         </button>
@@ -524,21 +551,38 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
         </div>
       </nav>
 
-      <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>
-        <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
-        <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
-        <button className="hbtn glass" type="button" onClick={() => onOpenTracker?.(d.id)}>
-          {t.dept.tasksButton}
-        </button>
-        <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
-          {t.dept.about}
-        </button>
-        {/* The orchestrator's window is the whole company's; the owner hires from the roster here. */}
-        {runs && (
-          <button className="btn" type="button" onClick={company ? onHire : () => setDrawer('hire')}>
-            {t.dept.hire}
-          </button>
+      {/* The zoom, the line of what happened and the actions: along the bottom of a wide screen, one over the other on a phone. */}
+      <div className="dv-dock" ref={chrome.dock}>
+        {/* The schema's zoom, or the tree's, which the tree puts here. */}
+        <div className="dv-zoom" ref={setZoomSlot}>{!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}</div>
+        {/* An open panel takes the room the ticker needs. */}
+        {!panel && !chrome.tickerHidden && (
+          <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
+            <span className="live" />
+            {said && <span className="tt">{said.at}</span>}
+            <span key={said?.key ?? 0} className="tx in" title={said?.text ?? t.dept.hint}>
+              {said?.text ?? t.dept.hint}
+            </span>
+          </div>
         )}
+        <div className="dv-acts" ref={chrome.actions} data-fit={chrome.icons ? 'icons' : undefined} onPointerDown={e => e.stopPropagation()}>
+          <div className="dv-tools glass">
+            <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
+            <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
+            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}`} type="button" {...named(chrome.icons, t.dept.tasksButton)} onClick={() => onOpenTracker?.(d.id)}>
+              {chrome.icons ? <ListIcon /> : t.dept.tasksButton}
+            </button>
+            <button className={`hbtn glass${chrome.icons ? ' ib' : ''}${drawer === 'about' ? ' on' : ''}`} type="button" {...named(chrome.icons, t.dept.about)} aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
+              {chrome.icons ? <InfoIcon /> : t.dept.about}
+            </button>
+          </div>
+          {/* The orchestrator's window is the whole company's; the owner hires from the roster here. */}
+          {runs && (
+            <button className="btn" type="button" onClick={company ? onHire : () => setDrawer('hire')}>
+              {t.dept.hire}
+            </button>
+          )}
+        </div>
       </div>
 
       {drawer && (
@@ -601,17 +645,6 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
         </aside>
       )}
 
-      {!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}
-      {/* An open panel takes the room the ticker needs. */}
-      {!panel && !chrome.tickerHidden && (
-        <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
-          <span className="live" />
-          {said && <span className="tt">{said.at}</span>}
-          <span key={said?.key ?? 0} className="tx in" title={said?.text ?? t.dept.hint}>
-            {said?.text ?? t.dept.hint}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

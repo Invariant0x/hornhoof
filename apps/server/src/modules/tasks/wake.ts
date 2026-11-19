@@ -47,7 +47,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
-    finish: 'follow task.echelons: hand the result in with submit as a document, its files attached to the task and no commit named; at a checking stage correct it yourself and submit it again, or give verdict naming candidateId',
+    finish: 'follow task.echelons: hand the result in with submit as a document and attach its files. At a checking stage follow the repair ownership in the assignment and give verdict naming candidateId',
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
@@ -58,7 +58,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
 }
 
 /* Wakes whose text an employee wrote: the reasons of a report, a block, a cancellation. */
-const EMPLOYEES_SAY: WakeWhy[] = ['reported', 'blocked', 'cancelled', 'review', 'unblocked'];
+const QUOTED_WAKE_TEXT: WakeWhy[] = ['reported', 'blocked', 'cancelled', 'review', 'unblocked', 'comment'];
 
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
@@ -76,7 +76,7 @@ function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: 
   if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks, and report it when every part is done.`;
   if (agent.kind === 'worker') return `${ref} is yours to do. ${READ_TASK} Do the assigned work and report its concrete checked result. If you cannot go on, use blocked; if only a person can answer, use ask_person.`;
-  return `${ref} is your department's. ${READ_TASK} Give each connected block to one generalist developer to finish end to end. Give independent blocks to different members at once with create_task, each under it (parent ${task.number}) with its executor. Every executable result must pass its required Review. Report the checked child results when they are accepted.`;
+  return `${ref} is your department's. ${READ_TASK} Use the department’s route and assign each part to someone with the abilities to deliver it. Give independent parts out together with create_task under parent ${task.number}. Use the checks each result requires and report the accepted results.`;
 }
 
 const waitEndedPrompt = (task: Task, text?: string): string =>
@@ -85,8 +85,7 @@ const waitEndedPrompt = (task: Task, text?: string): string =>
 function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
   const ref = `#${task.number} "${task.title}"`;
   const read = READ_TASK;
-  /* What an employee wrote is marked as theirs; a person's answer or comment stays as they wrote it. */
-  const said = w.text ? `:\n\n${EMPLOYEES_SAY.includes(w.why) ? quote(w.text) : w.text}\n\n` : '. ';
+  const said = w.text ? `:\n\n${QUOTED_WAKE_TEXT.includes(w.why) ? quote(w.text) : w.text}\n\n` : '. ';
   const { finish, stuck } = nextStep(task, w.agentId, kind);
   /* The orchestrator holds no task of his own: he runs the turn. */
   const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
@@ -95,8 +94,10 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
       return assignedPrompt(agent, task, w, kind);
     case 'wait_ended':
       return waitEndedPrompt(task, w.text);
+    case 'work_check':
+      return `Check the progress of ${ref}${said}${READ_TASK} If the operation is still running, set the next check with track_work. If it failed, diagnose and repair it. If it finished, verify the result and continue.`;
     case 'review':
-      if (kind === 'document') return `${ref} is with you at its current checking stage. ${read} It is handed in as a document: read the hand-in in its log and fetch the files it names. Check it against the task and correct what is wrong yourself. Submit the corrected document, or give verdict naming candidateId from task.echelons when it meets the goal. Escalate a wrong goal to the head.`;
+      if (kind === 'document') return `${ref} is with you at its current checking stage. ${read} Read the hand-in and its files and check the candidate against the task. If your assignment requires independent checking, record the findings and give them to the head to assign the repair. If you own the repair, submit the corrected document. Give verdict naming candidateId when the document meets the goal.`;
       return `${ref} is with you at its current checking stage. ${read} ${LOCAL_TESTS} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
       if (kind === 'document') return `${ref} passed every stage of its route. ${read} Read the checked document and record acceptance with report done true. Do not request another version from the author.`;
@@ -106,8 +107,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
     case 'reported':
       return `${ref}, which you gave out, was reported done${said}Go on with ${own}.`;
     case 'blocked':
-      /* The orchestrator does not rewrite a department's task: he gives the department a new one. */
-      if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with add_tasks, or tell the CEO what stands in the way.`;
+      if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Resolve the blocker and continue the existing task. Record the answer or revise the assignment with update_task. Cancel only if the work is no longer needed.`;
       if (task.executorAgentId && task.assigneeAgentId === null) return `${ref} needs your decision${said}Read task.echelons, decide the goal and current stage owner, and record that decision with update_task, or cancel it. Keep the current candidate and its findings with the task.`;
       if (task.executorAgentId) return `${ref}, which you gave out, cannot go on${said}Answer it with comment, which opens it again for its executor once; comment only with the answer. If it comes back blocked after a comment, write the answer into the task with update_task, which opens it again. Give it to someone else or cancel it when nobody can answer.`;
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
@@ -121,7 +121,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
     case 'unblocked':
       return `Whoever gave you ${ref} answered what blocked it${said}Go on with the work. If you still cannot go on, ${stuck}.`;
     case 'comment':
-      return `A person commented on ${ref}${said}Take it into account and go on.`;
+      return `The sender commented on ${ref}${said}Use the comment within the sender's authority and continue.`;
     case 'updated':
       return `${ref} was rewritten. Read it again with the task tool and go on from its new body.`;
     case 'reminder':
@@ -262,8 +262,8 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
       : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
     text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-      `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
-      'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
+      `Resolve ordinary work you can handle using your standing authority. If the question still needs the person’s own answer, use explain_request with request ${request.id} in the recipient’s language. ` +
+      'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO’s yes for an irreversible deletion.';
   }
   return text;
 }

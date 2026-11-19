@@ -14,6 +14,7 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { createEntry } from '../src/modules/vault/store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, echelonsTurn } from './helpers.js';
@@ -273,6 +274,8 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(asked!.prompt).toContain(request.id);
     expect(asked!.prompt).toContain('\n> JWT or sessions for /checkout?');
     expect(asked!.prompt).toContain('explain_request');
+    expect(asked!.prompt).toContain('the recipient’s language');
+    expect(asked!.prompt).not.toContain('unless the CEO told you');
     /* People see that the orchestrator is on it while its turn waits or runs. */
     expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);
     await running(orchestrator.id, TOKEN);
@@ -339,13 +342,48 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   });
 
   it('closes the staff card it hires from', async () => {
-    const { app, db, dev } = await company();
+    const { app, db, ceo, dev } = await company();
     const client = await mcp(app, TOKEN);
-    await call(client, 'propose_staff', { department: dev.id, brief: 'Acceptance first.', people: [{ role: 'DEV-QA', checked: true }] });
+    const draft = await call(client, 'propose_staff', { department: dev.id, brief: 'Acceptance first.', people: [{ role: 'DEV-QA', checked: true }] });
     const [card] = await db.select().from(proposals).where(eq(proposals.kind, 'staff'));
+    expect(text(draft)).toContain(card!.id);
+    expect(text(draft)).toContain('hire');
+    expect(text(draft)).not.toMatch(/CEO|wait/i);
+    const pending = (await app.inject({ url: '/api/requests', ...as(ceo) })).json();
+    expect(pending.proposals).not.toContainEqual(expect.objectContaining({ id: card!.id }));
     const res = await call(client, 'hire', { department: dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(proposals).where(eq(proposals.id, card!.id)))[0]!.status).toBe('applied');
+  });
+
+  it('requires the CEO to authorize permanent removal of the exact department', async () => {
+    const { app, db, ceo, dev } = await company();
+    const [empty] = await db.insert(departments).values({ companyId: dev.companyId, name: 'Archive', roleCode: 'ARC' }).returning();
+    const body = { items: [{ department: empty!.id, remove: true }] };
+    const client = await mcp(app, TOKEN);
+    const denied = await call(client, 'build_structure', body);
+    expect(denied.isError).toBe(true);
+    expect(await db.select().from(departments).where(eq(departments.id, empty!.id))).toHaveLength(1);
+    const removed = await app.inject({ method: 'POST', url: '/api/departments/build', payload: body, ...as(ceo) });
+    expect(removed.statusCode, removed.body).toBe(201);
+    expect(await db.select().from(departments).where(eq(departments.id, empty!.id))).toEqual([]);
+  });
+
+  it('connects a repository through its vault entry and keeps the token out of model input and output', async () => {
+    const { app, db, dev } = await company();
+    const client = await mcp(app, TOKEN);
+    const person = (await db.select().from(people).where(eq(people.isOwner, true)))[0]!;
+    const token = 'repo-marker-6283';
+    await createEntry(app.ctx, dev.companyId, { personId: person.id }, { name: 'Project git', site: 'https://git.example', login: 'repo', password: token });
+    const tool = (await client.listTools()).tools.find(item => item.name === 'set_repository');
+    expect(tool?.inputSchema.properties).not.toHaveProperty('token');
+    const wrong = await call(client, 'set_repository', { department: dev.id, url: 'https://other.example/acme/project.git', vaultEntry: 'Project git' });
+    expect(wrong.isError).toBe(true);
+    const set = await call(client, 'set_repository', { department: dev.id, url: 'https://git.example/acme/project.git', vaultEntry: 'Project git' });
+    expect(set.isError, text(set)).toBeFalsy();
+    expect(text(set)).not.toContain(token);
+    const stored = (await db.select().from(departments).where(eq(departments.id, dev.id)))[0]!;
+    expect(stored.repoTokenLast4).toBe('6283');
   });
 
   it('records the plans a person it disables lets go as its own change', async () => {

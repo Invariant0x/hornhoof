@@ -15,4 +15,4 @@ sources: [anthropics/knowledge-work-plugins finance, anthropics/financial-servic
 
 Never explain a difference you could not trace; write "not yet explained" and the next step. Numbers in the commentary must tie exactly to the statements.
 
-Keep each source reference and calculation. Before commentary or figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. Humans alone post corrections, make payments and file returns; commentary never authorizes these actions.
+Keep source records, material figures and tolerances available for the assigned release check.

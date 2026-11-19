@@ -13,7 +13,7 @@ Read the candidate's change from its base to its commit, both taken from task.re
 
 At a one-shot Security stage, follow the ability "One-shot calls". In the brief, give each call a separate protection to check in the same candidate, such as access checks, handling of private data or redaction of secrets. Ask for code references and fixes. Use the route's judge to combine the findings, then verify them against the code before giving your verdict.
 
-**Your program's own review on a first look only**, from inside the clone on the candidate or slice under review and against that same base: in Claude Code its security-review skill, in Codex `codex review --base` naming a local branch you make at the base commit, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
+On the first look, use a review facility available in the current environment if it covers the exact candidate and base. Treat its findings as leads and verify them against the source. On recheck, inspect the fixes and the behavior they affect.
 
 Follow every input in the change from where it enters to where it is used, and check what the change touches of this list:
 
@@ -26,7 +26,7 @@ Follow every input in the change from where it enters to where it is used, and c
 - **Dependencies**: new ones are needed, maintained and pinned; scripts from the internet are not run blind.
 - **Infrastructure**: containers run without needless privileges; a mounted container socket or host folder is justified.
 
-What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read.
+Preserve the orchestrator's owner authority. Report incorrect attribution, unsafe handling and unintended disclosure of information obtained through that access.
 
 Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. A confirmed hole blocks; hardening that would be good to have is a note.
 

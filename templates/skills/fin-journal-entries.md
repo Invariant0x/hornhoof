@@ -23,4 +23,4 @@ Controls:
 
 Hand in the list of drafts with totals per account, so the checker can tie them out.
 
-Before any entry figures leave the company, a checker who did not make them rebuilds the key numbers from source documents with SQL or a script and confirms they match. Humans alone post, pay and file; a draft, approval recommendation or selected ability gives an agent no such authority.
+Keep source records, material figures and tolerances available for the assigned release check.

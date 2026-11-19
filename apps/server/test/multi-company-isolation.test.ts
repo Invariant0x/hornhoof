@@ -135,7 +135,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
   const PLAIN_NETS = 'n-def|hornhoof_default|hornhoof|172.18.0.0/16|false||plain n-int|hornhoof_internal|hornhoof|172.19.0.0/16|true||plain';
   const OLD_RUNNING = { STUB_RUNNING_SERVICES: 'db app node updater tunnel', STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.23.3' };
   const OLD_ENV = 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n';
-  /* As an install by hand of 0.24.0 left it on a-host: the settings name the subnets the networks have. */
+  /* A manual install from an earlier release may already name the subnets its networks use. */
   const NAMED_ENV = `${OLD_ENV}HORNHOOF_SUBNET=172.18.0.0/16\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`;
   const PREPARE = 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update';
   const DOWN = 'docker compose down --remove-orphans';

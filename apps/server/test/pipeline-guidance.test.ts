@@ -24,11 +24,13 @@ describe('pipeline guidance', () => {
     }
   });
 
-  it('wakes waiters when remote tests or work finish and keeps every wait bounded', () => {
+  it('tracks remote checks and work in progress and waits only for a named person', () => {
     for (const id of ['hh-task-flow', 'hh-head']) {
-      expect(body(id), id).toMatch(/run_tests[\s\S]*run_work/);
-      expect(body(id), id).toMatch(/deadline/);
-      expect(body(id), id).toMatch(/owner|holder/);
+      expect(body(id), id).toMatch(/run_tests[^.]*test_run[^.]*run_work[^.]*work_run/);
+      expect(body(id), id).toMatch(/in progress[\s\S]*owner[\s\S]*next (?:check|observation)/i);
+      expect(body(id), id).toMatch(/record a wait only[^.]*named person/i);
+      expect(body(id), id).toMatch(/assign[^.]*fail[^.]*repair/i);
+      expect(body(id), id).not.toMatch(/deadline|within two hours/i);
     }
   });
 

@@ -7,7 +7,7 @@ sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt
 ---
 You can report a result so its owner can act on the evidence.
 
-Write every report to a person or a head in ordinary words with spaces: a space between words, numbers, identifiers and signs, never glued together like "Full1656:reconcile44PASS".
+Write results, identifiers, quantities and outcomes in separate readable words.
 
 For completed `small: true` work, give a line with the change, checked version and result. Detailed reports, matrices and a shared turn review are included only when the assignment requires them. For a blocker or concern use this short structure:
 

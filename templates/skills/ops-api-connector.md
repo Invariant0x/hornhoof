@@ -15,6 +15,6 @@ Build the connector named in the assignment, within its approved actions and acc
 6. Add a smoke test making one harmless real call, such as reading one sandbox record, and checking its response shape. Run it through the approved check route on the exact candidate and keep the result.
 7. Update the connector entry with its version, allowed actions, users, limits, secret entry names, owner and smoke-test result.
 
-Provision supporting test runtimes or services only through the approved image or integration path. Verify pinned runtime fingerprints and readiness before advertising support; do not patch running containers. Product test code receives no host sockets or node credentials.
+Use the assigned service and runtime setup. Record whether the connector works at the expected boundary with its actual scoped credentials.
 
-Report supported and unsupported actions, credential entry names and test evidence. Changes touching access, root, permissions or secrets require an independent Security engineer's pass before shared merge on the exact candidate, including urgent, small, named work and review fixes. Follow other checks assigned by the task.
+Report supported actions, credential entry names and test evidence. Identify changes to trust boundaries and the checks required by the assigned route.

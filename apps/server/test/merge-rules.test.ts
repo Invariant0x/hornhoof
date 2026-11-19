@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HIDDEN } from '../src/db/agent-sql.js';
 import { factsOf, sameShape, type Facts, type Query } from '../src/modules/merge/facts.js';
-import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ceos, ceosConflict, isSecret, ruleOf } from '../src/modules/merge/rules.js';
+import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ceosConflict, isSecret, protectedSummary, ruleOf } from '../src/modules/merge/rules.js';
 import { nameOf, rangeWords, timeWords, valueWords } from '../src/modules/merge/words.js';
 import { openTestDb } from './helpers-db.js';
 
@@ -58,11 +58,11 @@ describe('the rule of each table in a merge', () => {
     /* What a person's guarded route alone writes is the CEO's too, hidden or not. */
     for (const name of ['requests', 'request_internal', 'proposals', 'approval_policies', 'wait_policies', 'task_waits']) expect([name, ceosConflict(name)]).toEqual([name, true]);
     for (const name of ['tasks', 'turns', 'agents', 'departments', 'jobs', 'notebook_notes', 'backlog_items']) expect([name, ceosConflict(name)]).toEqual([name, false]);
-    expect(['people', 'applied', 'sessions', 'a_table_of_another_build', 'tasks', 'jobs'].map(ceos)).toEqual([true, false, true, true, false, false]);
+    expect(['people', 'applied', 'sessions', 'a_table_of_another_build', 'tasks', 'jobs'].map(protectedSummary)).toEqual([true, false, true, true, false, false]);
   });
 
   it('carries over nothing that belongs to the machine that leads, and lets nothing run again', () => {
-    for (const name of ['node_codes', 'machine_tickets', 'pending_wakes', 'sign_in_attempts', 'link_tls', 'wait_notices', 'harness_builds', 'harness_products', 'program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals', 'telegram_replies']) {
+    for (const name of ['node_codes', 'machine_tickets', 'pending_wakes', 'sign_in_attempts', 'link_tls', 'wait_notices', 'harness_builds', 'harness_products', 'program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals', 'telegram_replies', 'telegram_chat_languages']) {
       expect([name, ruleOf(name).kind]).toEqual([name, 'skip']);
     }
     const closes = (table: string) => (CLOSING[table] ?? []).flatMap(closing => closing.open.map(open => [open, closing.to]));

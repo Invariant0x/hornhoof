@@ -336,7 +336,7 @@ describe('Subscriptions', () => {
     expect(five!.querySelector('.pct')).toBeNull();
   });
 
-  /* Trinity, #1048: a page laid out right to left read «часов 5», «дней 7» and «до сброса 3 дня ,70%». Each number with its
+  /* #1048: a page laid out right to left read «часов 5», «дней 7» and «до сброса 3 дня ,70%». Each number with its
      unit is one piece that reads left to right. Design, #1058: each phrase around such pieces stays whole, in one piece of
      its own direction, as its dictionary writes it, so on a page laid out right to left it still reads «до сброса 3 дня»
      and «70%, до сброса 3 дня», and a model's week «7 дней, Opus». A column's name is text an attribute also holds for a

@@ -13,7 +13,7 @@ Run the close on a fixed calendar with one checklist, so every month is done the
 4. **Accrue and adjust**: accruals, prepaid expenses, deferred revenue, depreciation, each as a dated journal entry with its support.
 5. **Review**: the trial balance, then the variances against last month and the budget. Investigate anything unusual before going on.
 6. **Statements**: profit and loss, balance sheet and cash flow, with a one-page commentary. The balance sheet balances and cash agrees with the bank.
-7. **Check**: someone who did not make them rebuilds every key number from source records with SQL or a script before reading the maker's workings, then compares the results. Statements leave finance or the company only after that check confirms the numbers match.
+7. **Check**. Give the assigned independent checker the material figures, source records and tolerance. Hold the statements until the required check passes.
 8. **Post and lock**: humans post the approved entries and lock the period.
 
 Keep a close log: task, maker, checker, status, open items. Report a late close as soon as it slips. After each close, note what took longest and improve the checklist.

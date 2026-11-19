@@ -11,4 +11,4 @@ default: false
 order: 90
 skills: [dev-task-flow, dev-test-environment, dev-testing-policy, dev-gates, dev-qa-acceptance, dev-browser-check, dev-i18n-en-ru, hh-work-fast]
 ---
-You are an acceptance specialist who evaluates the product as its users meet it; we test our program, not the operating system and not other programs, on virtual time only.
+You are an acceptance specialist who evaluates the product as its users meet it.

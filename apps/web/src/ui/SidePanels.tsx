@@ -128,18 +128,21 @@ export function SidePanelRow({ stack, id }: { stack: ReturnType<typeof useSidePa
 
 /* A panel's frame: its name, the button that closes it, and a body that scrolls, which gives its words the same width in every
    browser. heading: what its bar says, when not its name. kind: a class that styles what this panel holds. */
-export function PanelFrame({ label, heading = label, busy, kind, onClose, children }: { label?: string; heading?: string; busy?: boolean; kind?: string; onClose(): void; children: ReactNode }) {
+/* plain: a card of the tracker, its bar naming what it is at the start, without the window lights. */
+export function PanelFrame({ label, heading = label, busy, kind, plain = false, onClose, children }: { label?: string; heading?: string; busy?: boolean; kind?: string; plain?: boolean; onClose(): void; children: ReactNode }) {
   const t = useT();
   const body = useRef<HTMLDivElement>(null);
   useScrollbarRoom(body);
   return (
-    <aside className={kind ? `acard ${kind}` : 'acard'} aria-label={label} aria-busy={busy}>
+    <aside className={['acard', kind, plain && 'plain'].filter(Boolean).join(' ')} aria-label={label} aria-busy={busy}>
       <div className="t-bar">
-        <span className="lights" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
+        {!plain && (
+          <span className="lights" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         <span>{heading}</span>
         <button type="button" aria-label={t.window.close} onClick={onClose}>
           <svg viewBox="0 0 24 24" aria-hidden="true">

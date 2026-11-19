@@ -11,10 +11,9 @@ export const ORCHESTRATOR_INSTRUCTIONS =
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
 export const FIRST_CONTACT_ACTION = 'first_contact';
 
-/* The greeting when the CEO started from a ready-made template that brought its people: the company is complete, so
-   what is left is a subscription for whoever still waits for one, not hiring. */
+/* The template has at least one employee in each department. */
 export const FIRST_TURN_STAFFED =
-  'The CEO set the company up from a ready-made template, and it came complete: its departments already have their people, with their roles and skills. Greet the CEO by name, say in one line that the company is ready and that you can change its departments and people any time, and call "company" to see them. An employee whose provider is null waits for a subscription: if any do, say that connecting a subscription under Subscriptions, and the machine it runs on, is all that is left, and that they start on it by themselves. Do not offer to hire people and do not propose a structure or staff card; the company is already staffed.';
+  'Greet the CEO by name. The template created departments with employees. Check required roles, who is active and which plans and machines can run the requested work before calling the company ready. Use company and staffing_options for the current setup. Address gaps that affect the requested work.';
 
 /* The greeting for a company started from a template before templates brought their people: its departments already
    exist, so skip the interview and the structure card and go to staffing. */
@@ -97,7 +96,7 @@ export function answerInTelegram(author: { name: string }, standing: Standing, l
   const language = lang === 'ru' ? 'Russian' : 'English';
   return [
     `This is ${author.name} writing to you directly in Telegram. ${whoIs(author, standing)}`,
-    `Your last message of this turn goes to ${author.name} as your answer. Write it directly to them in ${language}. Keep it short and use plain text. Do not narrate your steps to them.`,
+    `Your last message of this turn goes to ${author.name} as your answer. Use the language of their own words. Write it directly to them in ${language} when their message does not establish a language. Keep it short and use plain text. Do not narrate your steps to them.`,
     `Files you attach to the chat in this turn with hh-attach --chat FILE go to their Telegram chat as documents too.`,
     `This answer goes to ${author.name} alone. Answer their own words here. Answer other people in their own turns.`,
   ].join(' ');

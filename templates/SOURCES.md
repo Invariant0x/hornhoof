@@ -1,6 +1,6 @@
 # Where these templates learned from
 
-Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules quotes unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, from "Every time you are asked to make a change follow:" to its end, as its README asks people to copy it. The lines above the quote are Hornhoof's own and win where the two differ: they bound the quote by the assigned task, touch the main line only when a task names it, make a report the result and its evidence, run quality tools only when assigned, question the premise after three failed fixes, and say how old data is treated before and after version 1.0. Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Each skill names its sources in its `sources` field as `<repo> <path>`.
+Role and skill texts are original adaptations of the sources below. The development engineering rules draw on unclebob/ub-mode's SKILL.md at commit 3da62bf3fcfd2034de41f30d920d2739e566171f. Each adapted skill identifies its source by repository and path.
 
 The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
@@ -17,8 +17,8 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
-| unclebob/ub-mode | none; its README asks to copy SKILL.md | The core engineering rules for development roles: make it work, then make it right, then follow practice. Kept word for word below a preface of Hornhoof's own that wins where they differ; dev-testing-policy says how a company applies them. |
-| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. T11 holds CRAP under 10 and duplicates under 0.8, and T4 sends surviving mutants to their authors; the assigned test engineer or QA runs them once per turn. |
+| unclebob/ub-mode | none; its README invites copying SKILL.md | Adapted engineering guidance on making a checked change and then simplifying it. |
+| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Sources for complexity, duplication and mutation measurements. |
 | affaan-m/ECC | MIT | Reviewer and security reviewer checklists, agent hardening, safety guard, cross-checks with several reviewers. Its rules for each language (style, patterns, security, testing) come with every node in /opt/hornhoof/rules, with its licence. |
 | msitarzewski/agency-agents | MIT | Domain knowledge for sales, finance, support, design and QA roles, such as the reality checker and evidence collector. |
 | wshobson/agents | MIT | Task coordination for teams, deployment pipelines, incident response, startup analysis. |
@@ -34,8 +34,17 @@ Each catalog has one department, a default pipeline key and an ordered list of p
 | alirezarezvani/claude-skills | MIT | Business development, partnerships, proposals, RFPs, SaaS metrics. |
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
+| ScreenSkills [director](https://www.screenskills.com/job-profiles/browse/film-and-tv-drama/development-film-and-tv-drama-job-profiles/director-film-and-tv-drama/) and [script supervisor](https://www.screenskills.com/skills-checklists/scripted-film-and-tv/script-supervisor-department/script-supervisor-skills/) | Facts only | Director and crew duties, continuity records, take decisions and editorial handoff. |
+| Sundance Collab [screenwriting](https://collab.sundance.org/catalog/Screenwriting-From-Outline-to-First-Draft-of-Your-Screenplay/April-2025) and Sundance Institute [exhibition guidance](https://www.sundance.org/wp-content/uploads/2023/10/2024-Technical-Specifications-For-Festival-Presentation.pdf) | Facts only | Story development and playback of the actual screening copy. |
+| Disney Animation [layout](https://www.disneyanimation.com/process/layout/) and [hand-drawn animation](https://disneyanimation.com/process/hand-drawn-animation/) | Facts only | Blocking, shot choices, early playback and timing of key drawings. |
+| The Science Behind Pixar [story and art](https://sciencebehindpixar.org/pipeline/story-and-art) | Facts only | Look development and the color script. |
+| University of Arkansas, Moving Pictures [cinematography](https://uark.pressbooks.pub/movingpictures/chapter/cinematography/) and [sound](https://uark.pressbooks.pub/movingpictures/chapter/sound/) | Facts only | Lens, light, dialogue, ambience and sound across edits. |
+| Frame.io [editing stages](https://workflow.frame.io/guide/editing-stages) and Adobe [J and L cuts](https://helpx.adobe.com/premiere/desktop/edit-projects/trim-clips/perform-j-cuts-and-l-cuts.html) | Facts only | Edit passes and sound carried across picture cuts. |
+| Runway [official connector](https://runway.com/mcp) and Google's [developer benefits](https://developers.google.com/profile/help/benefits?hl=en) | Facts only | Plans can include credits for authorized connectors or eligible developer use. |
+| Runway [video prompt guide](https://help.runwayml.com/hc/en-us/articles/39789879462419-Gen-4-Video-Prompting-Guide) and Google Cloud [video prompt guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/video-gen-prompt-guide) | Facts only | Model-specific prompt structures, image inputs and motion and sound controls. |
+| Runway [image references](https://help.runwayml.com/hc/en-us/articles/40042718905875-Creating-with-Gen-4-Image-References) | Facts only | Reusing approved subjects, settings and style references across pictures. |
 
-Development authors write a failing test before the change, run only affected tests in their own workspace, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage, CRAP and dryer once per release, on the turn's branch or a release branch; findings in logic return to authors as tasks, small fixes by the fast path, and the tester fixes a flaky or outdated test or an obvious trifle itself in a separate commit. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and run every test together once per release. This verification ownership adapts the development roles and skills below.
+The development testing and environment procedures are project-owned adaptations. The current procedures define their use.
 
 ## Every template
 
@@ -117,7 +126,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-deploy-rollback.md` | Written for Hornhoof | anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md; addyosmani/agent-skills skills/shipping-and-launch/SKILL.md; affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
 | `skills/dev-docs.md` | Written for Hornhoof | affaan-m/ECC agents/doc-updater.md; anthropics/knowledge-work-plugins engineering/skills/documentation/SKILL.md | Hornhoof |
 | `skills/dev-e2e-tests.md` | Written for Hornhoof | affaan-m/ECC skills/e2e-testing/SKILL.md; openai/skills skills/.curated/playwright/SKILL.md; obra/superpowers skills/systematic-debugging/condition-based-waiting.md | Hornhoof |
-| `skills/dev-engineering-rules.md` | unclebob/ub-mode SKILL.md word for word from "Every time you are asked to make a change follow:" to the end, at the commit named above; the lines above the quote are written for Hornhoof | unclebob/ub-mode SKILL.md | ub-mode names no licence, and its README asks people to copy SKILL.md; the lines above the quote: Hornhoof |
+| `skills/dev-engineering-rules.md` | Original adaptation | unclebob/ub-mode SKILL.md at the revision named above | ub-mode names no licence and its README invites copying SKILL.md; adaptation by Hornhoof |
 | `skills/dev-frontend-ui.md` | Written for Hornhoof | addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md; anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
 | `skills/dev-gates.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md; affaan-m/ECC skills/council-multi-model/SKILL.md; affaan-m/ECC skills/santa-method/SKILL.md | Hornhoof |
 | `skills/dev-i18n-en-ru.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -145,10 +154,10 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
 | `skills/dev-write-plan.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md; obra/superpowers skills/writing-plans/SKILL.md; anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md | Hornhoof |
 | `skills/dsn-accessibility-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md; wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md; affaan-m/ECC agents/a11y-architect.md | Hornhoof |
-| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md; anthropics/skills skills/brand-guidelines/SKILL.md | Hornhoof |
+| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md, anthropics/skills skills/brand-guidelines/SKILL.md and Runway image references | Hornhoof |
 | `skills/dsn-component-spec.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md; wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md | Hornhoof |
 | `skills/dsn-design-critique.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-critique/SKILL.md | Hornhoof |
-| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
+| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md and Runway documentation for image references and tool access | Hornhoof |
 | `skills/dsn-design-md.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-generic-ui-check.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dsn-handoff.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md | Hornhoof |
@@ -159,7 +168,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dsn-ui-rules.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md; wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md | Hornhoof |
 | `skills/dsn-ux-copy.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md | Hornhoof |
 | `skills/dsn-visual-qa.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
-| `skills/dsn-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-work-pipeline.md` | Written for Hornhoof | Hornhoof's procedure, with Runway documentation for generated image references | Hornhoof |
 | `skills/fin-accruals.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/month-end-closer | Hornhoof |
 | `skills/fin-audit-support.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance | Hornhoof |
 | `skills/fin-budget-forecast.md` | Written for Hornhoof | msitarzewski/agency-agents finance/finance-fpa-analyst.md | Hornhoof |
@@ -323,3 +332,20 @@ Development authors write a failing test before the change, run only affected te
 | `pipelines/operations.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/sales.md` | Written for Hornhoof | Generalized live company practice | Hornhoof |
 | `pipelines/support.md` | Written for Hornhoof | Hornhoof's own procedure | Hornhoof |
+| `roles/video_production/VID-BOARD.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-COLOR.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-EDIT.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-GEN.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-HEAD.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-KEEP.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-PM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-QA.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-REF.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-SOUND.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `roles/video_production/VID-WRITE.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `teams/video_production/VID-TEAM.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `echelons/video_production.md` | Written for Hornhoof | No outside source: Hornhoof's own text | Hornhoof |
+| `pipelines/video_production.md` | Written for Hornhoof | ScreenSkills, Sundance Institute and Frame.io for crew decisions, edit passes and export checks | Hornhoof |
+| `skills/vid-continuity.md` | Written for Hornhoof | ScreenSkills for continuity, take records and the handoff to the editor | Hornhoof |
+| `skills/vid-laws.md` | Written for Hornhoof | ScreenSkills and Sundance Institute for continuity and playback, and provider documentation for tool routes | Hornhoof |
+| `skills/vid-work-pipeline.md` | Written for Hornhoof | Film craft sources above for production and editing, and Runway and Google documentation for access, credits and prompts | Hornhoof |

@@ -20,7 +20,7 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   onTestFinished(() => { vi.useRealTimers(); });
   const [owner] = await c.db.select().from(people).where(eq(people.isOwner, true));
-  const [machine] = await c.db.insert(machines).values({ companyId: c.task.companyId, personId: owner!.id, machineKey: 'slot-host', hostname: 'home-api' }).returning();
+  const [machine] = await c.db.insert(machines).values({ companyId: c.task.companyId, personId: owner!.id, machineKey: 'slot-host', hostname: 'test-server' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.task.companyId, machineId: machine!.id, subscriptionId: turn.job.subscriptionId }).returning();
   const id = nodeIdentity(node!.id);
   vi.spyOn(c.app.ctx.hub, 'loadOf').mockImplementation(() => ({ ...idle({ cpus: 1, load: 0 }), at: Date.now() }));
@@ -30,7 +30,7 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
   await checkQueueLoad(c.app.ctx, id);
   const [privateTask] = hiddenHolder ? await c.db.insert(tasks).values({ ...c.task, id: randomUUID(), number: 2, departmentId: c.sales.id, assigneeAgentId: c.sam.id, executorAgentId: c.sam.id, createdByAgentId: c.sam.id, title: 'Private work' }).returning() : [];
   const runs = await c.db.insert(testRuns).values([1, 2, 3].map(number => ({ companyId: c.task.companyId, number, taskId: number === 1 && privateTask ? privateTask.id : c.task.id, agentId: number === 1 && hiddenHolder ? c.sam.id : c.bruno.id, jobId: turn.job.id, kind: number === 1 ? 'work' as const : kind, command: 'make check', timeoutMs: 60_000, status: 'running' as const }))).returning();
-  const parts = await c.db.insert(testParts).values(runs.map(run => ({ companyId: c.task.companyId, runId: run.id, part: 1, status: 'running' as const, nodeId: node!.id, machineId: machine!.id, machineName: 'home-api' }))).returning();
+  const parts = await c.db.insert(testParts).values(runs.map(run => ({ companyId: c.task.companyId, runId: run.id, part: 1, status: 'running' as const, nodeId: node!.id, machineId: machine!.id, machineName: 'test-server' }))).returning();
   const claims = parts.map(part => ({ type: 'check.acquire' as const, id: randomUUID(), label: `Run part ${part.id}` }));
   const since = new Date().toISOString();
   for (const claim of claims) await receiveCheckRequest(c.app.ctx, id, claim, sql`false`);
@@ -78,7 +78,7 @@ describe('reading a part that waits for a machine check slot', () => {
     vi.mocked(ctx.hub.loadOf).mockImplementation(() => ({ ...load, at: Date.now() }));
     const stream = randomUUID();
     const machineUpAt = '2026-11-18T08:00:00.000Z';
-    const first = { startedAt: '2026-11-18T08:57:00.000Z', machineUpAt, container: 'home-api' };
+    const first = { startedAt: '2026-11-18T08:57:00.000Z', machineUpAt, container: 'test-server' };
     const next = { ...first, startedAt: '2026-11-18T10:16:00.000Z' };
     const greet = (id: typeof restarted, boot = first) => handleNodeMessage(ctx, id, { type: 'hello', version: '0.32.1', loggedIn: true, stream, running: [], tests: s.parts.map(part => part.id), load, boot });
     await greet(restarted); await greet(peer);
@@ -164,8 +164,8 @@ describe('reading a part that waits for a machine check slot', () => {
   it.each(['tests', 'work'] as const)('shows the current holder and ordered queue for %s, and updates on release', async kind => {
     const s = await stand(kind);
     const part = (await s.read()).parts[0];
-    expect(part).toMatchObject({ queuePosition: 2, checkSlot: { machine: 'home-api', state: 'queued', capacity: 1, position: 2, holders: [{ kind: 'work', run: 1, task: s.c.task.number, part: 1, since: s.since }], ahead: [{ kind, run: 2, part: 1, position: 1 }] } });
-    expect(part.waiting).toContain('home-api');
+    expect(part).toMatchObject({ queuePosition: 2, checkSlot: { machine: 'test-server', state: 'queued', capacity: 1, position: 2, holders: [{ kind: 'work', run: 1, task: s.c.task.number, part: 1, since: s.since }], ahead: [{ kind, run: 2, part: 1, position: 1 }] } });
+    expect(part.waiting).toContain('test-server');
     expect(part.waiting).toContain('Work run 1');
     expect(part.waiting).toContain(`task ${s.c.task.number}`);
     expect(part.waiting).toContain(s.since);
