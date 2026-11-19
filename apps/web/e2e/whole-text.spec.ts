@@ -103,16 +103,111 @@ async function columnGaps(page: Page): Promise<number[]> {
 
 const overlap = (a: DOMRect | null, b: DOMRect | null) => !!a && !!b && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
 
-/* Zoomed all the way out, then in by the wheel to the scale asked for. */
+/* Zoomed all the way out by the zoom's button, then in by the wheel to the scale asked for, both about the middle of the
+   canvas: the schema stays where Show everything put it, and the picture of far zoom shows it. */
 async function zoomTo(page: Page, k: number) {
   await page.evaluate(k => {
     const out = document.querySelector<HTMLButtonElement>('.dview .zoom .zbtn')!;
     for (let i = 0; i < 20; i++) out.click();
-    document.querySelector<HTMLElement>('.dview .dcanvas')!.dispatchEvent(
-      new WheelEvent('wheel', { deltaY: -Math.log(k / 0.15) / 0.0015, clientX: 200, clientY: 200, bubbles: true, cancelable: true }),
-    );
+    const canvas = document.querySelector<HTMLElement>('.dview .dcanvas')!;
+    const at = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: -Math.log(k / 0.15) / 0.0015, clientX: at.left + canvas.clientWidth / 2, clientY: at.top + canvas.clientHeight / 2, bubbles: true, cancelable: true,
+    }));
   }, k);
   await expect(page.locator('.dview .zoom .zv')).toHaveText(`${Math.round(k * 100)}%`);
+}
+
+/* How tall a chip's name is drawn on the screen, its font by the scale of the view, and which lines of a chip that have
+   words do not show. */
+async function chipWords(page: Page): Promise<{ name: number; hidden: string[] }[]> {
+  return page.locator('.dview .frame .schip').evaluateAll(chips => {
+    const k = parseFloat(document.querySelector('.dview .zoom .zv')?.textContent ?? '') / 100;
+    return chips.map(chip => {
+      const name = chip.querySelector<HTMLElement>('.mn')!;
+      const hidden = ['.mn', '.st', '.r2', '.r3'].filter(line => {
+        const el = chip.querySelector<HTMLElement>(line);
+        return !!el && !!(el.textContent ?? '').trim() && (getComputedStyle(el).visibility !== 'visible' || !el.getClientRects().length);
+      });
+      return { name: parseFloat(getComputedStyle(name).fontSize) * k, hidden: hidden.map(line => `${(name.textContent ?? '').slice(0, 16)}: ${line}`) };
+    });
+  });
+}
+
+/* The parts of the schema's boxes the hint stands over, where the canvas shows them. */
+async function underHint(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const hint = document.querySelector('.dview .ticker')?.getBoundingClientRect();
+    const canvas = document.querySelector('.dview .dcanvas')!.getBoundingClientRect();
+    if (!hint) return [];
+    return [...document.querySelectorAll<HTMLElement>('.dview .shead, .dview .frame, .dview .dept-chip')].flatMap(box => {
+      const r = box.getBoundingClientRect();
+      const w = Math.min(r.right, canvas.right, hint.right) - Math.max(r.left, canvas.left, hint.left);
+      const h = Math.min(r.bottom, canvas.bottom, hint.bottom) - Math.max(r.top, canvas.top, hint.top);
+      return w > 1 && h > 1 ? [`${box.className.split(' ')[0]} ${(box.textContent ?? '').trim().slice(0, 24)}: ${Math.round(w)} by ${Math.round(h)} px`] : [];
+    });
+  });
+}
+
+/* How many lines of the hint show: those its boxes up to the hint itself do not clip. */
+async function hintLines(page: Page): Promise<number> {
+  return page.locator('.dview .ticker .tx').evaluate(el => {
+    let bottom = Infinity;
+    for (let box: HTMLElement | null = el as HTMLElement; box; box = box.classList.contains('ticker') ? null : box.parentElement) {
+      if (getComputedStyle(box).overflowY !== 'visible') bottom = Math.min(bottom, box.getBoundingClientRect().bottom);
+    }
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const tops = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0 && r.bottom <= bottom + 1).map(r => r.top);
+    return tops.filter((top, i) => tops.findIndex(other => Math.abs(other - top) < 2) === i).length;
+  });
+}
+
+/* Texts that would break a word with no hyphen: each breaks by the syllables of the page's language, with a hyphen, and a
+   text with spaces never breaks anywhere in a word, which only a text with none, such as a key or an address, may. */
+async function bareBreaks(page: Page, frames: string, texts: string): Promise<string[]> {
+  return page.evaluate(({ frames, texts }) => [...document.querySelectorAll<HTMLElement>(frames)].flatMap(frame =>
+    [...frame.querySelectorAll<HTMLElement>(texts)].flatMap(el => {
+      const text = (el.textContent ?? '').trim();
+      if (!text || !el.getClientRects().length) return [];
+      const style = getComputedStyle(el);
+      const hyphens = style.hyphens || style.getPropertyValue('-webkit-hyphens');
+      const at = `${el.className}: ${text.slice(0, 24)}`;
+      return [
+        ...(hyphens === 'auto' ? [] : [`${at}: hyphens ${hyphens}`]),
+        ...(/\s/.test(text) && (style.overflowWrap === 'anywhere' || ['break-all', 'break-word'].includes(style.wordBreak)) ? [`${at}: overflow-wrap ${style.overflowWrap}, word-break ${style.wordBreak}`] : []),
+      ];
+    }),
+  ), { frames, texts });
+}
+
+/* Right to left words that are letter-spaced, which tears the joined letters of Arabic apart. */
+async function spacedRtl(page: Page, frames: string): Promise<string[]> {
+  return page.evaluate(frames => {
+    const rtl = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
+    return [...document.querySelectorAll(frames)].flatMap(frame => {
+      const spaced: string[] = [];
+      const walk = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
+      for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+        const el = node.parentElement!, spacing = getComputedStyle(el).letterSpacing;
+        if (rtl.test(node.textContent ?? '') && el.getClientRects().length && spacing !== 'normal' && parseFloat(spacing) !== 0) spaced.push(`${el.className}: ${(node.textContent ?? '').trim().slice(0, 24)}: letter-spacing ${spacing}`);
+      }
+      return spaced;
+    });
+  }, frames);
+}
+
+/* Words of a line that no element inside it isolates from the words around them, as <bdi> does. */
+async function unisolated(page: Page, lines: string, words: string[]): Promise<string[]> {
+  return page.locator(lines).evaluateAll((all, words) => all.flatMap(line => words.filter(word => {
+    if (!(line.textContent ?? '').includes(word)) return false;
+    const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+      if (!(node.textContent ?? '').includes(word)) continue;
+      for (let up = node.parentElement; up && up !== line; up = up.parentElement) if (['isolate', 'isolate-override', 'plaintext'].includes(getComputedStyle(up).unicodeBidi)) return false;
+    }
+    return true;
+  })), words);
 }
 
 /* Every word of the head card, the role frames and the chips in its frame, each heading above its frame's first chip, one
@@ -185,11 +280,22 @@ for (const look of LOOKS) {
     expect.soft(cards.every(c => c.w === 280), 'the cards keep their width').toBe(true);
     for (const gap of await columnGaps(page)) expect.soft(gap, 'cards of a column stay apart').toBeGreaterThanOrEqual(32);
     if (look.script === 'en' || look.script === 'ru') expect.soft(cards[0]!.h, 'words that fit keep the old card').toBe(160);
+    /* The Head of Design's word for #1489 (#1539, N4 and N5): the page names its language, words break by its syllables
+       with a hyphen, and right to left words are never letter-spaced. */
+    expect.soft(await page.evaluate(() => document.documentElement.lang), 'the page names its language').toBe(look.lang);
+    expect.soft(await bareBreaks(page, '.map .dept .edge-in', '.dname, .cnt, .role, .detail, .now > span'), 'words of the map break with a hyphen').toEqual([]);
+    expect.soft(await spacedRtl(page, '.map .dept'), 'right to left words of the map are not letter-spaced').toEqual([]);
 
     /* The department: its head card, role frames and member chips, and the hint at its foot. */
     /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
     await page.locator('.map .dept').first().evaluate(card => (card as HTMLElement).click());
     await expect(page.locator('.dview .dcanvas')).toBeVisible();
+    await settle(page);
+    /* As it opens, before any press, by the Head of Design's word for #1489 (#1539, N3 and N1): a chip's name is drawn at
+       least 11 px tall and every line of every chip shows; a schema that does not fit is scrolled. */
+    const opened = await chipWords(page);
+    expect.soft(Math.min(...opened.map(c => c.name)), 'the department opens with chip names at least 11 px tall').toBeGreaterThanOrEqual(11);
+    expect.soft(opened.flatMap(c => c.hidden), 'the department opens with every line of a chip showing').toEqual([]);
     await page.locator('.dview .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
     const hint = page.locator('.dview .ticker .tx');
     await expect(hint).toBeVisible();
@@ -198,7 +304,10 @@ for (const look of LOOKS) {
     if (browserName === 'chromium') await shoot(page, info, `department-${name}`);
 
     const { head, chips } = await checkSchema(page);
-    expect.soft(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
+    const department = '.dview .dcanvas, .dview .ticker';
+    expect.soft(await bareBreaks(page, department, '.role, .hn, .meta, .st, .hx-task, .hc > span, .fn, .fa, .fc, .mn, .r2, .r3, .tx'), 'words of the department break with a hyphen').toEqual([]);
+    expect.soft(await spacedRtl(page, department), 'right to left words of the department are not letter-spaced').toEqual([]);
+    if (look.dir === 'rtl') expect.soft(await unisolated(page, '.dview .shead .meta', ['Opus 5.5', 'default effort']), 'the head\'s role line isolates its model and effort').toEqual([]);
     /* English fits the old boxes, so the schema stands exactly as it did. Russian cuts the model line of a chip by about a
        pixel in 0.34.4: there the head card and the chips may grow a line, only as far as the words need (checked above for
        every look). */
@@ -213,6 +322,10 @@ for (const look of LOOKS) {
     expect.soft(ticker!.x >= -1 && ticker!.x + ticker!.width <= view.width + 1 && ticker!.y >= -1 && ticker!.y + ticker!.height <= view.height + 1, 'the hint stands on the screen').toBe(true);
     const rects = await page.evaluate(() => ['.dview .ticker', '.dview .zoom', '.dview .dv-acts'].map(s => document.querySelector(s)?.getBoundingClientRect().toJSON() as DOMRect | null));
     expect.soft(overlap(rects[0]!, rects[1]!) || overlap(rects[0]!, rects[2]!), 'the hint clear of the zoom and the tools').toBe(false);
+    /* The Head of Design's word for #1489 (#1539, N2): the hint keeps its own room, so Show everything puts the schema
+       clear of it, and it takes at most three lines; a longer one folds to three and unfolds whole (at the end). */
+    expect.soft(await underHint(page), 'the hint stands over no part of the schema').toEqual([]);
+    expect.soft(await hintLines(page), 'the hint takes at most three lines').toBeLessThanOrEqual(3);
 
     /* Zoomed far out, where chips show colours: no word is cut or runs over a chip, and, by the head of Development's word
        for #1489, role names keep their size and the layout holds as it stood. */
@@ -222,6 +335,14 @@ for (const look of LOOKS) {
     const far = await checkSchema(page);
     expect.soft(far.head, 'far zoom keeps the head card').toEqual(head);
     expect.soft(far.chips, 'far zoom moves no chip').toEqual(chips);
+
+    /* Every word of the hint, unfolded by its own button where it folds. */
+    const unfold = page.locator('.dview .ticker [aria-expanded="false"]');
+    if (await unfold.count()) {
+      await unfold.first().click();
+      await settle(page);
+    }
+    expect.soft(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
 
     expect.soft(errors).toEqual([]);
   });
