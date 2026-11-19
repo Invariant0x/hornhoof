@@ -369,20 +369,23 @@ async function inView(page: Page, screen: Screen): Promise<{ under: string[]; wh
 }
 
 /* The bare canvas a person's hand presses and drags by dx, dy: clear of cards, chips, the handles of lines and what floats
-   over the canvas, where the drag stays on the screen, as much of it as the screen lets. Whether the world moved. */
+   over the canvas, where the drag stays on the part of the canvas the screen shows, as much of it as that lets. Whether the
+   world moved. */
 async function dragBy(page: Page, screen: Screen, dx: number, dy: number): Promise<boolean> {
   const start = await page.evaluate(({ canvas, floating, dx, dy }) => {
-    const box = document.querySelector(canvas)!.getBoundingClientRect();
+    let box = document.querySelector(canvas)!.getBoundingClientRect();
+    for (const room of document.querySelectorAll(`${canvas} > .map-room`)) box = room.getBoundingClientRect();
     const over = [...document.querySelectorAll(floating)].map(el => el.getBoundingClientRect());
     const busy = 'button, a, input, label, li, .dept, .chip, .hub, .shead, .sslot, .dept-chip, .pchip, .frame, .bend, [role="button"], [role="checkbox"]';
-    const reach = (from: number, by: number, end: number) => (by > 0 ? (end - 4 - from) / by : by < 0 ? (from - 4) / -by : 1);
+    const [left, top, right, bottom] = [Math.max(box.left, 0), Math.max(box.top, 0), Math.min(box.right, innerWidth), Math.min(box.bottom, innerHeight)];
+    const reach = (from: number, by: number, start: number, end: number) => (by > 0 ? (end - 4 - from) / by : by < 0 ? (from - start - 4) / -by : 1);
     let best: { x: number; y: number; f: number } | null = null;
-    for (let y = Math.max(box.top, 0) + 6; y < Math.min(box.bottom, innerHeight) - 6; y += 10) {
-      for (let x = Math.max(box.left, 0) + 6; x < Math.min(box.right, innerWidth) - 6; x += 10) {
+    for (let y = top + 6; y < bottom - 6; y += 10) {
+      for (let x = left + 6; x < right - 6; x += 10) {
         if (over.some(r => x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4)) continue;
         const hit = document.elementFromPoint(x, y);
         if (!hit || !hit.closest(canvas) || hit.closest(busy)) continue;
-        const f = Math.min(1, reach(x, dx, innerWidth), reach(y, dy, innerHeight));
+        const f = Math.min(1, reach(x, dx, left, right), reach(y, dy, top, bottom));
         if (!best || f > best.f) best = { x, y, f };
       }
     }
@@ -423,6 +426,39 @@ async function scrollToBlock(page: Page, screen: Screen, i: number): Promise<boo
     if ((await inView(page, screen)).whole.includes(i)) return true;
   }
   return (await inView(page, screen)).whole.includes(i);
+}
+
+/* Where a phone's canvas cuts what it shows, against the bars as they stand now: its top 8 px under the lowest bar along the
+   top, its bottom 8 px over the highest along the bottom, within 1 px, across the whole width in either direction. */
+const CUTS: Record<Screen, { cut: string; top: string; bottom: string; line: string }> = {
+  map: { cut: '.map .map-room', top: '.topbar > *', bottom: '.map .zoom, .map > .ticker, .map-arrange', line: '.map > .ticker .tx' },
+  department: { cut: '.dview .dcanvas', top: '.topbar > *, .dview .crumbs', bottom: '.dview .dv-dock :is(.zoom, .ticker, .dv-acts)', line: '.dview .ticker .tx' },
+};
+async function cutAt(page: Page, screen: Screen) {
+  return page.evaluate(({ cut, top, bottom }) => {
+    const rects = (s: string) => [...document.querySelectorAll(s)].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+    const c = document.querySelector(cut)!.getBoundingClientRect();
+    return { top: c.top, bottom: c.bottom, left: c.left, right: c.right, width: innerWidth, under: Math.max(...rects(top).map(r => r.bottom)), over: Math.min(...rects(bottom).map(r => r.top)) };
+  }, CUTS[screen]);
+}
+
+/* The head of Development's word for #1554: the cut follows the bars' real height, as measured, not a constant. As it stands
+   and again after the line of what happened grows by a long text, the cut stands 8 px clear of the bars, and nothing stands
+   under them. */
+async function cutFollowsBars(page: Page, screen: Screen) {
+  const check = async (when: string) => {
+    const at = await cutAt(page, screen);
+    expect.soft(Math.abs(at.top - (at.under + 8)), `${screen}, ${when}: the cut stands 8 px under the bars along the top`).toBeLessThanOrEqual(1);
+    expect.soft(Math.abs(at.bottom - (at.over - 8)), `${screen}, ${when}: the cut stands 8 px over the bars along the bottom`).toBeLessThanOrEqual(1);
+    expect.soft([at.left, at.right], `${screen}, ${when}: the cut runs across the whole width`).toEqual([0, at.width]);
+    expect.soft((await inView(page, screen)).under, `${screen}, ${when}: nothing under what floats over it`).toEqual([]);
+    return at;
+  };
+  const before = await check('as it stands');
+  await page.locator(CUTS[screen].line).first().evaluate((el, text) => { el.textContent = text; }, LONG_HINT);
+  await settle(page);
+  const after = await check('after the line grows');
+  expect.soft(before.over - after.over, `${screen}: the line grew taller, so the check means something`).toBeGreaterThan(10);
 }
 
 /* The canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen whole
@@ -630,10 +666,9 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     await page.evaluate(d => { document.documentElement.dir = d; }, look.dir);
     await settle(page);
   };
-  /* Pictures for Design: as it opens and after Show everything in every engine, at each edge in Chromium; none right to
-     left until the check machines have an Arabic font. */
+  /* Pictures for Design: as it opens and after Show everything in every engine, at each edge in Chromium. */
   const pictures = (page: Page, info: TestInfo, browserName: string, what: string) => async (where: string) => {
-    if (look.dir === 'rtl' || (browserName !== 'chromium' && where !== 'open' && where !== 'all')) return;
+    if (browserName !== 'chromium' && where !== 'open' && where !== 'all') return;
     await shoot(page, info, `${what}-${where}-${browserName}-${name}`);
   };
   const errorsOf = (page: Page) => {
@@ -664,10 +699,12 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     const all = await inView(page, 'map');
     expect.soft(all.under, 'Show everything puts nothing under what floats').toEqual([]);
     expect.soft(all.whole.length, 'Show everything shows every card and chip whole').toBe(await page.locator(BLOCKS.map).count());
+    await cutFollowsBars(page, 'map');
     expect.soft(errors).toEqual([]);
   });
 
-  if (look.dir === 'rtl' || look.script === 'cjk') continue;
+  /* The department in English, Russian and the long pseudo translation, and, by the head of Development's word, right to left. */
+  if (look.script === 'cjk') continue;
   test(`a department on a phone opens on its head card and scrolls clear of what floats: ${look.script}, ${look.dir}`, async ({ page, browserName }, info) => {
     const errors = errorsOf(page);
     await open(page);
@@ -690,6 +727,7 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
     const head = await page.locator(BLOCKS.department).evaluateAll(all => all.findIndex(el => el.matches('.shead')));
     expect.soft((await inView(page, 'department')).whole, 'the head card shows whole as it opens').toContain(head);
     await scrollsClear(page, 'department', shot);
+    await cutFollowsBars(page, 'department');
     expect.soft(errors).toEqual([]);
   });
 }
