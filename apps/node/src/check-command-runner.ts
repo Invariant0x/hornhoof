@@ -59,6 +59,11 @@ function install(path: string, body: string): void {
   writeFileSync(path, script, { mode: 0o755 });
 }
 
+/* hh-check reads this stream with Node's own fetch, which ends a body that stays silent for 300 s with the bare word
+   "terminated". A command may wait for its slot, or run under it in the agent's shell, far longer with nothing to say,
+   so the stream says it is alive well within that. */
+export const ALIVE_MS = 30_000;
+
 function send(res: ServerResponse, frame: object): boolean {
   return !res.destroyed && !res.writableEnded && res.write(`${JSON.stringify(frame)}\n`);
 }
@@ -112,6 +117,7 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
   assertCommandUser();
   const input = parseCommand(body);
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+  const alive = setInterval(() => send(res, { type: 'alive' }), ALIVE_MS);
   try {
     /* One that only waits runs in the agent's shell as it would with no queue, whatever it is. */
     if (input.wait && checkQueueOffline()) { send(res, { type: 'unavailable' }); return false; }
@@ -123,7 +129,7 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });
     return false;
-  } finally { res.end(); }
+  } finally { clearInterval(alive); res.end(); }
 }
 
 function output(stream: Readable, type: string, res: ServerResponse): void {

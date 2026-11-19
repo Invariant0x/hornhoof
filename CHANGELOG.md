@@ -9,6 +9,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- On a phone, the section tabs stay one even row of icons when their words do not fit, with the Tasks count on its icon.
+- On a phone, the department's tools stand in one row of icons with Hire at the end, and its hint wraps instead of being cut.
 - Development instructions keep the independent Security check before shared integration in every ability that can integrate changes.
 - Development instructions keep release checks tied to the exact commit and record why test selection had to use a fallback.
 - Review instructions tell reviewers to flag tests that cap the length of agent instructions or skills.
@@ -50,6 +52,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- The task tracker follows its approved design again: one line per task, the design's columns, subtasks as a tree, the design's left panel, board and graph, and a task card that opens over the list.
+- Goals have their own page in the tracker's left panel instead of cards above task lists.
+- Everything you can create in the tracker opens from its + next to Tasks.
 - Video briefs choose how shots are made, and the crew keeps usable drafts and recordings.
 - Video directors own one story line, the shot plan, performances and the final cut.
 - Video crews plan coverage, light and sound for the chosen look and keep continuity records that explain deliberate breaks.
@@ -59,6 +64,16 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Design teams use approved references and model guides when generating pictures, recommend the cheapest fitting route and check the exact images at their intended size.
 - The compatible assistant uses a generic name in People and in the documentation.
 - Public examples use invented names and machines, and internal test records are removed from the source tree.
+
+## [0.34.3] - 2026-11-19
+
+### Fixed
+
+- A machine check waiting for its slot, or running under one, no longer stops after five minutes with only the word "terminated".
+
+### Changed
+
+- Tests no longer fail for being slow: a test fails only on a wrong result, and a real hang is ended by the run's own limit.
 
 ## [0.34.2] - 2026-11-19
 
