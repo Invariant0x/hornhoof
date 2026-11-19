@@ -13,7 +13,7 @@ type WaitingProps = {
 
 export function Waiting({ what, detail }: WaitingProps) {
   return (
-    <div className="uprog waiting" role="status">
+    <div className="uprog under-way" role="status">
       <span className="waiting-mark spinner" aria-hidden="true" />
       <b>{what}</b>
       {detail && <span className="uprog-text">{detail}</span>}
