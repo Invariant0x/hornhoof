@@ -724,7 +724,9 @@ describe('what waits for people', () => {
 
   it('says so when nothing waits for people', async () => {
     shell('/tasks?show=people', { 'GET /api/tasks?status=all': [200, { tasks: [PAY, REFUND] }] });
-    const people = await screen.findByRole('region', { name: 'Waiting for people' });
+    /* Either list of what waits, so a tracker without this section fails here instead of waiting for it for ever. */
+    const people = await screen.findByRole('region', { name: /^Waiting for (you|people)$/ });
+    expect(people).toHaveAccessibleName('Waiting for people');
     expect(await within(people).findByText('Nothing waits for people.')).toBeInTheDocument();
     const side = screen.getByRole('navigation', { name: 'Task lists' });
     expect(within(side).getByRole('button', { name: 'Waiting for people 0' })).toBeInTheDocument();
