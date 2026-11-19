@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { taskRoute } from '../../test/task-route';
-import type { BacklogItem, Decisions, Employee, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TaskLogLine, TurnView } from '../../src/types';
+import type { BacklogItem, Decisions, Employee, GoalView, Me, Org, PersonView, Pipeline, TaskDepartments, TaskLine, TaskLogLine, TurnView, WaitingRequest } from '../../src/types';
 import { detail, ME, serveApi } from '../api';
 
 /* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six pieces of
@@ -132,6 +132,29 @@ export async function serveTasksBoard(page: Page, me: Me = ME) {
     return route.fallback();
   });
   return { reads };
+}
+
+/* The people of the company, each with a question of an agent: Max, a designer, is asked by name about card payments and only
+   he answers; Maria is asked, as Sales' person, about calling the shop owners back, which the CEO may take too; the CEO
+   keeps the question on the sign-in page. Added after serveTasksBoard, so these answers come first. */
+export const MAX_QUESTION = 'Which logo goes on the card form, the round one or the square one?';
+export const MARIA_QUESTION = 'Call the shops in the morning or after lunch?';
+export async function servePeopleWaits(page: Page) {
+  const person = (id: string, name: string, title: string, isOwner = false): PersonView =>
+    ({ id, name, email: `${name.toLowerCase()}@acme.test`, title, status: 'active', isOwner, access: { whole: true, departments: [], teams: [] } });
+  const people = [person(IVAN.id, IVAN.name, 'CEO', true), person(MARIA.id, MARIA.name, 'Head of sales'), person('p-max', 'Max', 'Designer')];
+  const asked = (id: string, title: string, text: string, over: Partial<WaitingRequest>): WaitingRequest => {
+    const on = TASKS.find(x => x.title === title)!;
+    return { ...DECISIONS.requests[0]!, id, text, task: { id: on.id, number: on.number, title: on.title, department: on.department }, ...over };
+  };
+  const requests = [
+    ...DECISIONS.requests,
+    asked('r2', 'Take card payments', MAX_QUESTION, { ownerPersonId: 'p-max', canAnswer: false, decidedBy: { kind: 'named_person', department: null } }),
+    asked('r3', 'Call the shop owners back', MARIA_QUESTION, { agent: { id: ROSA.id, name: ROSA.name }, ownerPersonId: MARIA.id, decidedBy: { kind: 'department_and_ceo', department: SALES } }),
+  ];
+  const decisions: Decisions = { ...DECISIONS, requests, counts: { byPerson: { [IVAN.id]: 1, [MARIA.id]: 1, 'p-max': 1 }, byAgent: { [HANA.id]: 2, [ROSA.id]: 1 }, total: 2 } };
+  await page.route('**/api/org', route => route.fulfill({ json: { ...ORG, people } }));
+  await page.route('**/api/requests', route => route.fulfill({ json: decisions }));
 }
 
 /* The shortest words a link of the tracker holds: the goal Refunds and the task Gift cards are called QA, and Hana in

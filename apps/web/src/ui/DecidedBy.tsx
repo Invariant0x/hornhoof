@@ -24,5 +24,8 @@ export function Decides({ locked, children }: { locked?: DecidedBy; children: Re
 /* A card's ticks and choices stay as they are once it is sent, or when this person may not take it. */
 export const frozenBy = (sent: boolean, locked: DecidedBy | undefined): boolean => sent || locked !== undefined;
 
+/* Whom a card waits for, on a list of what waits for more people than one; nothing elsewhere. */
+export const WaitsForNote = ({ text }: { text?: string }) => (text ? <p className="muted">{text}</p> : null);
+
 /* The CEO's own decisions: the orchestrator's cards and the computer. */
 export const CEO_DECIDES: DecidedBy = { kind: 'ceo_and_delegate', department: null };
