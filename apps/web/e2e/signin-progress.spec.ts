@@ -110,6 +110,14 @@ async function wholeInside(page: Page, shown: Locator, width: number) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+/* The turning mark stands before the words, on their first line, not above them. */
+async function expectBeside(mark: Locator, words: Locator) {
+  const [m, w] = await Promise.all([mark.boundingBox(), words.boundingBox()]);
+  expect(m!.x + m!.width).toBeLessThanOrEqual(w!.x);
+  expect(m!.y + m!.height / 2).toBeGreaterThan(w!.y);
+  expect(m!.y + m!.height / 2).toBeLessThan(w!.y + w!.height);
+}
+
 const EN: Look = { lang: 'en', theme: 'cyberpunk', width: 1440 };
 
 test.describe('a plan connecting after its sign-in code', () => {
@@ -125,6 +133,7 @@ test.describe('a plan connecting after its sign-in code', () => {
     await opened.connect('codex', connection('checking'));
     const shown = window.getByRole('group', { name: t.subs.connection.label('Codex'), exact: true });
     await expect(shown.locator('.waiting-mark')).toBeVisible();
+    await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.checking, { exact: true }));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.seconds(0)));
     await page.clock.fastForward(65_000);
@@ -273,6 +282,7 @@ for (const look of LOOKS) {
         await opened.connect('antigravity', connection('account'));
         await page.clock.fastForward(MINUTE + 5_000);
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.account);
+        await expectBeside(shown.locator('.waiting-mark'), shown.getByText(t.subs.connection.steps.account, { exact: true }));
       }
       if (state === 'failed') {
         await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
