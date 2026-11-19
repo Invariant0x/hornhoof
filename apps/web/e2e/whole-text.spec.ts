@@ -4,10 +4,10 @@ import { serveApi } from './api';
 import { captureWith } from './capture';
 import { LONG_HINT, wholeTextOrg, type Script } from './whole-text-data';
 
-/* The department cards of the map, the head card, role frames and member chips of a department's screen, and the hint at
-   its foot show every word: no ellipsis, no line clamp and no text cut off or standing out of its frame, in a long pseudo
-   translation, Japanese and right to left as in English and Russian, on a wide screen and on a phone. Where the words fit
-   the old boxes, the boxes keep their old sizes. Each check is soft, so a look goes through the map, the department and
+/* The department cards and people chips of the map, the head card, role frames and member chips of a department's screen,
+   and the hint at its foot show every word: no ellipsis, no line clamp and no text cut off or standing out of its frame, in
+   a long pseudo translation, Japanese and right to left as in English and Russian, on a wide screen and on a phone. Where
+   the words fit the old boxes, the boxes keep their old sizes. Each check is soft, so a look goes through the map, the department and
    far zoom, takes every picture and fails at its end with every cut it found. The run that takes the pictures names its
    phase and folder in WHOLE_TEXT_PHASE and WHOLE_TEXT_SHOTS. */
 test.describe.configure({ timeout: 180_000 });
@@ -271,6 +271,61 @@ async function checkSchema(page: Page) {
   return { head, chips };
 }
 
+/* The people chips of the map, the whole-company row on top and the department people beside and under the cards: what
+   each list is called, where it is, and the size of its chip before #1551. */
+const PEOPLE_ROWS = [
+  { what: 'a chip of the whole-company row', chips: '.map .chips > li', w: 160, h: 56 },
+  { what: 'a department person\'s chip', chips: '.map .dept-chips > li', w: 156, h: 48 },
+] as const;
+
+/* The chips of a list that stand in one row, by the top they share, each row's heights. */
+async function rowHeights(page: Page, chips: string): Promise<number[][]> {
+  const rows = new Map<number, number[]>();
+  for (const c of await placed(page, chips)) rows.set(c.y, [...(rows.get(c.y) ?? []), c.h]);
+  return [...rows.values()];
+}
+
+/* Blocks of the map that stand over each other, in the layout's own pixels: people chips, department cards and the hub. */
+async function overlaps(page: Page): Promise<string[]> {
+  const boxes = await page.locator('.map .chips > li, .map .dept-chips > li, .map .dept, .map .hub').evaluateAll(all => all.map(el => {
+    const box = el as HTMLElement;
+    return { name: `${box.className || box.tagName} ${(box.textContent ?? '').trim().slice(0, 16)}`, x: parseFloat(box.style.left), y: parseFloat(box.style.top), w: box.offsetWidth, h: box.offsetHeight };
+  }));
+  return boxes.flatMap((a, i) => boxes.slice(i + 1).flatMap(b => (
+    a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1 ? [`${a.name} over ${b.name}`] : []
+  )));
+}
+
+/* The map zoomed by the wheel so that these chips stand in the middle of the screen at 100%, or as near to it as they
+   all fit, for a picture in which their words read as a person reads them. A turn of the wheel zooms about the pointer, so
+   the pointer stands where the middle of the chips comes to the middle of the screen. */
+async function zoomToChips(page: Page, chips: string) {
+  for (let turn = 0; turn < 2; turn++) {
+    const done = await page.evaluate(chips => {
+      const map = document.querySelector<HTMLElement>('.map')!;
+      const rects = [...map.querySelectorAll(chips)].map(li => li.getBoundingClientRect());
+      const world = map.querySelector<HTMLElement>('.world')!;
+      const at = map.getBoundingClientRect();
+      const k = world.getBoundingClientRect().width / world.offsetWidth;
+      const left = Math.min(...rects.map(r => r.left)), right = Math.max(...rects.map(r => r.right));
+      const top = Math.min(...rects.map(r => r.top)), bottom = Math.max(...rects.map(r => r.bottom));
+      const goal = Math.min(1, ((at.width - 48) * k) / (right - left), ((at.height - 240) * k) / (bottom - top));
+      const f = goal / k;
+      /* Zooming by nothing moves nothing: the first turn steps out, the second comes to the goal. */
+      if (Math.abs(f - 1) < 0.05) {
+        map.dispatchEvent(new WheelEvent('wheel', { deltaY: Math.log(2) / 0.0015, clientX: at.left, clientY: at.top, bubbles: true, cancelable: true }));
+        return false;
+      }
+      const c = [(left + right) / 2, (top + bottom) / 2], v = [at.left + at.width / 2, at.top + at.height / 2];
+      const [x, y] = [0, 1].map(i => (v[i]! - f * c[i]!) / (1 - f));
+      map.dispatchEvent(new WheelEvent('wheel', { deltaY: -Math.log(f) / 0.0015, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      return true;
+    }, chips);
+    await settle(page);
+    if (done) return;
+  }
+}
+
 /* The API fixture, the company of these words, and the version the app root asks for and the updates its shell asks for
    once, which the fixture does not answer. */
 async function serve(page: Page, org: Org) {
@@ -384,6 +439,51 @@ for (const look of LOOKS) {
       await settle(page);
     }
     expect.soft(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
+
+    expect.soft(errors).toEqual([]);
+  });
+
+  /* The Head of Design's word for #1551: a people chip of the map takes its size from its words, which wrap and break by
+     the syllables of the page's language, and every chip of a row is as tall as the one of the most words. Chips whose
+     words fit keep their old boxes, and no chip comes over another or over a card. */
+  test(`every word on the map's people chips, one height for a row: ${look.script}, ${look.dir}, ${look.width}px`, async ({ page, browserName }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => {
+      if (m.type() === 'error') errors.push(m.text());
+    });
+    await page.setViewportSize({ width: look.width, height: look.width === 375 ? 812 : 900 });
+    await page.addInitScript(({ lang, dir }) => {
+      localStorage.setItem('hh-lang', lang);
+      document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = dir; });
+    }, look);
+    await serve(page, wholeTextOrg(look.script));
+    await page.goto('/');
+    await expect(page.locator('.map .dept')).toHaveCount(4);
+    await expect(page.locator('.map .chips > li')).toHaveCount(3);
+    await expect(page.locator('.map .dept-chips > li')).toHaveCount(6);
+    await page.evaluate(d => { document.documentElement.dir = d; }, look.dir);
+    await settle(page);
+
+    const chips = '.map .chips .chip, .map .dept-chips .chip';
+    expect.soft(await cutTexts(page, chips, 'b, small')).toEqual([]);
+    expect.soft(await bareBreaks(page, chips, 'b, small'), 'words of the people chips break with a hyphen').toEqual([]);
+    for (const row of PEOPLE_ROWS) {
+      for (const heights of await rowHeights(page, row.chips)) expect.soft(new Set(heights).size, `one height for the chips of a row: ${row.what}`).toBe(1);
+      const boxes = await placed(page, row.chips);
+      expect.soft(boxes.every(b => b.w === row.w), `${row.what} keeps its width`).toBe(true);
+      await grownOnlyForWords(page, row.what, row.chips, row.h);
+      if (look.script === 'en') expect.soft(boxes.map(b => b.h), `words that fit keep the old box: ${row.what}`).toEqual(boxes.map(() => row.h));
+    }
+    expect.soft(await overlaps(page), 'no chip over another or over a card').toEqual([]);
+    expect.soft(await cutTexts(page, '.map .dept .edge-in', '.dname, .cnt, .role, .detail, .now > span'), 'the cards keep every word beside the chips').toEqual([]);
+
+    await shoot(page, info, `map-people-${browserName}-${name}`);
+    for (const [part, list] of [['top', '.chips > li'], ['departments', '.dept-chips > li']] as const) {
+      await zoomToChips(page, list);
+      await shoot(page, info, `map-people-near-${part}-${browserName}-${name}`);
+    }
+    expect.soft(await cutTexts(page, chips, 'b, small'), 'every word near').toEqual([]);
 
     expect.soft(errors).toEqual([]);
   });
