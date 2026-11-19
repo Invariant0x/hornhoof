@@ -250,7 +250,7 @@ describe('what waits for people', () => {
 
   it('gives nothing before the first answer, and takes a server without merges', () => {
     expect(shownDecisions(undefined, 'everyone')).toEqual({ requests: [], proposals: [], merges: [] });
-    const { merges: _, ...older } = DECISIONS;
+    const older: Decisions = { requests: DECISIONS.requests, proposals: DECISIONS.proposals, counts: DECISIONS.counts };
     expect(shownDecisions(older, 'everyone').merges).toEqual([]);
   });
 
