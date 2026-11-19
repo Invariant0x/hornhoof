@@ -15,7 +15,7 @@ import { onAgent } from './line.js';
 const WORDS = {
   fixProject: 'Fix a problem in my project', checkSetup: 'Check that my project is ready to run',
   planLaunch: 'Plan my first launch', sketchProduct: 'Sketch the first product screen', findCustomers: 'Find people who might use my product',
-  pickProduct: 'Choose what to ship next', reviewScreens: 'Review a product’s screens',
+  pickProduct: 'Choose what to ship next', reviewScreens: 'Review a product\'s screens',
   reviewBills: 'Sort bills and check what is due', sortRequests: 'Sort customer requests', planRelease: 'Plan a product release',
   reviewSecurity: 'Review my project for security problems', triageReport: 'Sort a security report and plan the fix',
   sortIssues: 'Sort open issues', writeGuide: 'Write a guide for new contributors',
@@ -103,7 +103,7 @@ export function firstContactRoutes(app: FastifyInstance, ctx: Ctx): void {
     const previous = input.replyTo ? await answerOf(ctx, me, input.replyTo) : null;
     const prompt = [
       `First contact with one person. Answer only the sender (person id ${me.id}). Reply in ${input.language === 'ru' ? 'Russian' : 'English'}.`,
-      'Read the sender’s access in the company before sharing company information. Start the work requested and ask one question only when you need their answer.',
+      'Read the sender\'s access in the company before sharing company information. Start the work requested and ask one question only when you need their answer.',
       ...('offer' in input && input.offer === 'setUpPipeline' ? ['Use the ready pipeline catalog. Ask what work they want to set up, then offer the closest pipeline and apply their choice.'] : []),
       ...(previous?.replies.length ? [`Your last answer to this person:\n${quote(previous.replies.join('\n'))}`] : []),
       turnPrompt({ name: me.name, title: me.title }, quote(input.text)),

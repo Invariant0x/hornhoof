@@ -2389,7 +2389,7 @@ export const en = {
     waitTasks: 'Tasks that wait for you',
     waitTasksOf: (name: string) => `Tasks that wait for ${name}`,
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
-    list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', goal: 'Goal', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
+    list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
       group: (status: string, count: number) => `${status}: ${count}`,
       neededFor: (number: number, department: string) => `needed for #${number} ${department}`,
     },

@@ -14,6 +14,7 @@ import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type IntegrationTarget } from './turn-integration.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
+import { heldLineage } from '../testruns/compare.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
 
@@ -111,11 +112,11 @@ async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, co
   return entry!.id;
 }
 
-/* The commits of a comparison, or null where they could not all be read. */
+/* The commits of a comparison, however many files it lists, or null where they could not all be read. */
 async function commitsBetween(ctx: Reader, repo: Repo, base: string, head: string) {
   try {
     const compared = await ctx.readCompare?.(repo, { base, head }, 10_000);
-    return compared?.complete && compared.baseSha === base && compared.headSha === head && compared.commits ? compared.commits : null;
+    return (compared && heldLineage(compared, base, head)?.commits) ?? null;
   } catch {
     return null;
   }

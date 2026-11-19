@@ -2,8 +2,10 @@ import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/proto
 import type { Ctx } from '../../app.js';
 import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { and, eq, sql } from 'drizzle-orm';
+import { taskEvents } from '../../db/schema.js';
 import { reviewSkip, type AuthorReviewSkip } from './author-check.js';
-import { checkerFor, departmentHead, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
+import { checkerFor, departmentHead, keptFromReview, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 import { candidateReceivedAt } from './echelons-candidates.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
@@ -37,6 +39,14 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
   return { state, set: { status: 'open', assigneeAgentId: headId, silent: 0 }, wakes: [{ agentId: headId, taskId: task.id, why: 'reviewed' }] };
 }
 
+/* Whether a submission of the task once went past Review on an author check: a Tests return clears that skip from the route,
+   and every later candidate of the task still waits for independent Review. */
+async function usedAuthorReviewSkip(db: Ctx['db'], task: Task): Promise<boolean> {
+  const [skipped] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId),
+    eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data} ? 'authorCheckSkip'`)).limit(1);
+  return Boolean(skipped);
+}
+
 /* skipped: the checks passed over on the way, as nobody in the department can do them. */
 type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[]; authorCheckSkip?: AuthorReviewSkip };
 
@@ -45,12 +55,13 @@ export async function submittedHandoff(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 
   if (route.state.stage !== 'development') return forwardHandoff(ctx, task, route, candidate);
   const review = route.state.stages.find(step => step.stage === 'review' && step.status === 'pending');
   const risky = task.riskClass !== null && task.riskClass !== 'none';
+  const requireReview = await usedAuthorReviewSkip(ctx.db, task);
   if (risky && !route.state.stages.some(step => step.stage === 'security' && step.status === 'pending')) {
-    return forwardHandoff(ctx, task, route, candidate);
+    return forwardHandoff(ctx, task, route, candidate, requireReview);
   }
   const parsed = EchelonCandidate.safeParse(candidate);
   const skip = review && parsed.success ? await reviewSkip(ctx, task, parsed.data) : null;
-  if (!skip) return forwardHandoff(ctx, task, route, candidate);
+  if (!skip) return forwardHandoff(ctx, task, route, candidate, requireReview);
   const stages = route.state.stages.map(step => step === review
     ? { ...step, status: 'skipped' as const, reason: skip.reason, inputCandidateId: candidate.id }
     : step);
@@ -67,7 +78,7 @@ export async function reviewReplacement(ctx: Pick<Ctx, 'db'>, task: Task, route:
     }
     return step;
   });
-  return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate);
+  return forwardHandoff(ctx, task, { ...route, state: { ...route.state, stage: 'development', stages } }, candidate, true);
 }
 
 /* A candidate already in flight under the old policy must reach Review before it can be accepted. */
@@ -83,7 +94,15 @@ export async function reopenAuthorReview(ctx: Pick<Ctx, 'db' | 'bus'>, task: Tas
   return { task: row, wakes: next.wakes };
 }
 
-export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+const plannedOwner = (ownerId: string | null, excluded: ReadonlySet<string>): string | null => ownerId && !excluded.has(ownerId) ? ownerId : null;
+
+/* A stage with no eligible checker may be skipped where the department allows it, never a Review a legacy route must reopen. */
+async function skipsUnstaffed(db: Ctx['db'], task: Task, stage: EchelonStage, ability: string, security: Route['state']['security'], requireReview: boolean): Promise<boolean> {
+  if (requireReview && stage === 'review') return false;
+  return uncheckable(db, task, stage, ability, security);
+}
+
+export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate, requireReview = false): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
   if (!ahead.length && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
@@ -93,8 +112,11 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     const ability = route.state.abilities[next.stage];
     if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
     const received = await candidateReceivedAt(ctx.db, task, route, candidate, next.stage);
-    const owner = await checkerFor(ctx, task, received.producedBy, ability, next.ownerAgentId);
-    if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
+    /* A planned reviewer who produced a candidate of the lineage gives way to an independent one; with none, Review waits. */
+    const excluded = await keptFromReview(ctx.db, task, next.stage, candidate);
+    const named = plannedOwner(next.ownerAgentId, excluded);
+    const owner = await checkerFor(ctx, task, received.producedBy, ability, named, undefined, excluded);
+    if (!owner && await skipsUnstaffed(ctx.db, task, next.stage, ability, route.state.security, requireReview)) {
       stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
       skipped.push(next.stage);
       continue;

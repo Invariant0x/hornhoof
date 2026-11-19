@@ -22,7 +22,7 @@ function task(over: Partial<TaskLine> = {}): TaskLine {
 }
 
 function list(tasks: TaskLine[]) {
-  const rows = { selected: null, onOpenTask: vi.fn(), onOpenGoal: vi.fn() };
+  const rows = { selected: null, onOpenTask: vi.fn() };
   render(<LanguageProvider><TrackerList tasks={tasks} all={tasks} rows={rows} empty="Empty" /></LanguageProvider>);
   return rows;
 }
@@ -42,9 +42,8 @@ it('keeps the executor name and program color alongside a generalist mark and ma
   expect(call.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]')).toBeInTheDocument();
 });
 
-it('reads each task across one line, opens its goal and shows a late date', async () => {
-  const user = userEvent.setup();
-  const rows = list([task({ dueAt: '2020-01-01T00:00:00.000Z' })]);
+it('reads each task across one line and shows a late date', () => {
+  list([task({ dueAt: '2020-01-01T00:00:00.000Z' })]);
   expect(screen.getByText('Name', { selector: '.tr-head span' })).toBeInTheDocument();
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
   expect(within(row).getByText('Plan the mailing').compareDocumentPosition(within(row).getByText('#267')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -53,8 +52,15 @@ it('reads each task across one line, opens its goal and shows a late date', asyn
   expect(row.querySelector('.tr-meta')).toBeNull();
   expect(within(row).getByRole('img', { name: 'In work' })).toBeInTheDocument();
   expect(within(row).getByText(/1 Jan, late/)).toHaveClass('tp-late');
-  await user.click(within(row).getByRole('link', { name: goal.title }));
-  expect(rows.onOpenGoal).toHaveBeenCalledWith(goal.id);
+});
+
+/* The goal is the task card's to show: the list gives its width to the task's own words. */
+it('shows no goal in a task row', () => {
+  list([task()]);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  expect(within(row).queryByRole('link', { name: goal.title })).toBeNull();
+  expect(row).not.toHaveTextContent(goal.title);
+  expect(screen.queryByText('Goal', { selector: '.tr-head span' })).toBeNull();
 });
 
 it('collapses a status group, keeps the headings under the first pill and adds no task row of its own', async () => {
@@ -125,8 +131,6 @@ it('opens subtasks as a tree under the parent title and keeps child facts in the
   const inline = within(parent).getByRole('listitem', { name: '#268 Pick the recipients' });
   expect(inline).not.toHaveTextContent('Low');
   expect(within(inline).getByRole('img', { name: 'Max' })).toBeInTheDocument();
-  /* A subtask's goal is its task's: its cell stays empty, as in the mockup. */
-  expect(within(inline).queryByRole('link', { name: goal.title })).toBeNull();
   await user.click(toggle);
   expect(within(parent).queryByRole('listitem', { name: '#268 Pick the recipients' })).toBeNull();
   await user.click(toggle);
@@ -167,7 +171,7 @@ it('puts the count, number and wait note after the title on its line', () => {
 });
 
 it('draws the rows, rings, pills and chips at the mockup sizes', () => {
-  const desktop = 'tr-list (width > 640px)';
+  const desktop = 'tr-list (width > 960px)';
   expect.soft(decl('.tr-cells', 'grid-template-columns', desktop)).toBe('subgrid');
   /* td: 7px 8px around a 22px avatar, 13.5px, a line under each row, the cells in the middle of its height: a 37px row.
      What is pressed in a row is 24px high for a mouse (WCAG 2.5.8), so 6px above and below keep the row at 37px. Each cell
@@ -205,8 +209,7 @@ it('draws the rows, rings, pills and chips at the mockup sizes', () => {
   expect.soft(decl('.tr-group-head', 'margin')).toBe('14px 0 4px');
   expect.soft(decl('.tr-group-toggle', 'gap')).toBe('10px');
   expect.soft(decl('.tr-group-toggle .tr-count', 'font')).toBe('13px var(--f-body)');
-  /* .goal 12px; .late and the due date in ink or attention text. */
-  expect.soft(decl('.tr-goal-link', 'font-size')).toBe('12px');
+  /* .late and the due date in ink or attention text. */
   expect.soft(decl('.tr-row-line .tp-late', 'color')).toBe('var(--pink-ink)');
   expect.soft(decl('.tr-title', 'overflow-wrap')).toBe('anywhere');
   expect.soft(decl('.tr-title', 'font-weight')).toBe('400');
@@ -217,13 +220,14 @@ it.each([null, 'plan'])('shares the mockup column proportions with selection %s'
   const rows = { selected, onOpenTask: vi.fn() };
   render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  const desktop = 'tr-list (width > 640px)';
+  const desktop = 'tr-list (width > 960px)';
   const people = '.tr-cell.tr-cell-person';
   for (const name of [executor.name, responsible.name]) {
     expect.soft(within(row).getByRole('img', { name }).closest(people)).toBeInTheDocument();
   }
-  /* 44, 14, 14, 14 and 14 percent as shares, each never under what its words and marks need. */
-  expect.soft(decl('.tr-list-grid', 'grid-template-columns', desktop)).toBe('minmax(min-content, 44fr) repeat(4, minmax(min-content, 14fr))');
+  /* The task takes two thirds of the width, the executor, the responsible and the due date a ninth each, none under what
+     its words and marks need. */
+  expect.soft(decl('.tr-list-grid', 'grid-template-columns', desktop)).toBe('minmax(min-content, 6fr) repeat(3, minmax(min-content, 1fr))');
   /* An avatar is 22px: a circle for a person, a 4px square for an employee, with the page's colour around it. */
   expect.soft(decl('.tr-mark:is(.tr-avatar, .tr-executor)', 'min-inline-size')).toBe('22px');
   expect.soft(decl('.tr-mark:is(.tr-avatar, .tr-executor)', 'font')).toBe('600 10.5px var(--f-body)');
@@ -242,9 +246,8 @@ it('keeps complete names and labels with long task text in the stacked row', () 
   expect(within(row).getByText('Juno Vale')).toHaveClass('tr-id-name');
   expect(within(row).getByText('Max')).toHaveClass('tr-id-name');
   const facts = [...row.querySelectorAll('.tr-k')].map(label => label.textContent);
-  expect(facts).toEqual(['Executor', 'Responsible', 'Goal', 'Due']);
+  expect(facts).toEqual(['Executor', 'Responsible', 'Due']);
   expect([...document.querySelectorAll('.tr-head > span')].map(label => label.textContent)).toEqual(['Name', ...facts]);
-  expect(within(row).getByRole('link', { name: goal.title })).toBeInTheDocument();
 });
 
 it('groups person waits, active work, timers and failures by what each task needs', () => {
@@ -274,14 +277,6 @@ it('groups person waits, active work, timers and failures by what each task need
   expect(screen.getByRole('region', { name: 'Failures: 2' })).toHaveTextContent('Machine unavailable');
   expect(screen.getByRole('region', { name: 'Failures: 2' })).toHaveTextContent('Time ran out');
   expect(screen.getByRole('region', { name: 'Stopped: 1' })).toHaveTextContent('Stopped work');
-});
-
-it('gives a long goal its own text wrap and keeps the link name in full', () => {
-  const title = 'A goal '.repeat(20) + 'Identifier'.repeat(10);
-  list([task({ goal: { ...goal, title } })]);
-  const link = screen.getByRole('link', { name: title });
-  expect(link).toHaveAttribute('dir', 'auto');
-  expect(link).toHaveAttribute('href', expect.stringContaining('goal'));
 });
 
 it('surfaces a failed subtask in Failures as well as under its task', () => {

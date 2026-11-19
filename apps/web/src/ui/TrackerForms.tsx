@@ -372,9 +372,9 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
 
 /* A task for a department, from a person who gives it work: it goes to the department's head, named unless it is called
    after its role. */
-export function TrackerNewTask({ department, pipelineId, onCreated, onCancel }: { department: Department; pipelineId?: string | null; onCreated: (task: TaskDetail) => void; onCancel: () => void }) {
+export function TrackerNewTask({ department, pipelineId, onCreated, onCancel, place }: { department: Department; pipelineId?: string | null; onCreated: (task: TaskDetail) => void; onCancel: () => void; place?: ReactNode }) {
   const { language } = useLanguage();
   const head = department.employees.find(e => e.kind === 'head');
   if (!head) return null;
-  return <NewTask department={department} showPriority pipelineId={pipelineId} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} />;
+  return <NewTask department={department} showPriority pipelineId={pipelineId} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} place={place} />;
 }

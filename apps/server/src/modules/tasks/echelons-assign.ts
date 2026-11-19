@@ -6,7 +6,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './state.js';
 import type { Route } from './route-records.js';
-import { checkedProducer } from './echelons-candidates.js';
+import { checkedProducer, lineageProducers } from './echelons-candidates.js';
 import { modelCapability, modelProvider, reviewEligibility, sameChecker, type CheckerIdentity } from './echelons-policy.js';
 
 type Reader = { db: Ctx['db'] | Tx };
@@ -86,12 +86,21 @@ export async function stageStaff(db: Reader['db'], task: Task, named: string | n
     (roleKey === undefined || agent.roleKey === roleKey));
 }
 
+const NO_ONE: ReadonlySet<string> = new Set();
+
+/* Review checks the whole change, so nobody who produced a candidate of its lineage takes it, the original developer
+   included. The other stages check the producer of what they received. */
+export const keptFromReview = (db: Reader['db'], task: Task, stage: string | null, candidate: HandedCandidate | null): Promise<ReadonlySet<string>> =>
+  stage === 'review' ? lineageProducers(db, task, candidate) : Promise.resolve(NO_ONE);
+
+export const PRODUCER_REVIEW = 'Whoever produced a candidate of this task cannot review it. The head assigns an independent reviewer.';
+
 /* Selection never changes a subscription, model, employee or skill card. */
-export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null, roleKey?: string | null): Promise<CheckerIdentity | null> {
+export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null, roleKey?: string | null, excluded = NO_ONE): Promise<CheckerIdentity | null> {
   const staff = await stageStaff(ctx.db, task, named, roleKey);
   const eligible: CheckerIdentity[] = [];
   for (const agent of staff) {
-    if (!canCheckTask(agent, task, ability, named)) continue;
+    if (excluded.has(agent.id) || !canCheckTask(agent, task, ability, named)) continue;
     const identity = await agentIdentity(ctx.db, task.companyId, agent.id);
     if (identity && !reviewEligibility(producer, identity)) eligible.push(identity);
   }
@@ -122,6 +131,7 @@ export async function populateSecurityOwner(db: Reader['db'], task: Task, state:
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   const ability = route.state.stage ? route.state.abilities[route.state.stage] : undefined;
+  if (task.assigneeAgentId && (await keptFromReview(ctx.db, task, route.state.stage, candidate)).has(task.assigneeAgentId)) throw new ApiError(409, 'conflict', PRODUCER_REVIEW, 'task_invalid');
   const identity = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, candidate), ability, task.assigneeAgentId) : null;
   if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
   return identity;

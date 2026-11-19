@@ -19,7 +19,7 @@ async function checked<T>(run: () => Promise<T>) {
 /* The orchestrator's and Operations' look at any employee's program, and their hands on it. */
 export function registerProgramAccessTools(server: McpServer, ctx: Ctx, caller: OperatorCaller): void {
   server.registerTool('program_screen', {
-    description: 'Read another employee’s existing program screen: image, visible text, activity, open question and input line state. Secret values are masked. For your own program or a personal assistant, use its own recovery path. Use the returned snapshot once with program_keys while it is fresh.',
+    description: 'Read another employee\'s existing program screen: image, visible text, activity, open question and input line state. Secret values are masked. For your own program or a personal assistant, use its own recovery path. Use the returned snapshot once with program_keys while it is fresh.',
     inputSchema: { employee: z.uuid() },
   }, input => checked(async () => {
     const { png, ...view } = await readProgramView(ctx, caller, input);

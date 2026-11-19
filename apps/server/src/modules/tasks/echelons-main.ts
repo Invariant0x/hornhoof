@@ -1,6 +1,7 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { repoAt } from '../departments/repository.js';
+import { heldLineage, type CompareResult, type TreeAt } from '../testruns/compare.js';
 import type { RepoAddress } from '../testruns/refs.js';
 import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
@@ -17,23 +18,44 @@ import { openTurnOf } from './turn-department.js';
    Tests: its owner merges that line into the candidate's branch, hands the merge in here and checks it again. The turn
    takes a result only by fast-forward, so a candidate whose turn went on takes the turn in this way before it is accepted. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
-type Repository = { readCompare: NonNullable<Reader['readCompare']>; readCommit: NonNullable<Reader['readCommit']>; repo: RepoAddress & { branch: string }; turnBranch: string | null };
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit' | 'readTree'>>;
+type Repository = { readCompare: NonNullable<Reader['readCompare']>; readCommit: NonNullable<Reader['readCommit']>; readTree: Reader['readTree']; repo: RepoAddress & { branch: string }; turnBranch: string | null };
 
-/* The paths from base to head, when head holds base; anything else proves nothing. */
-async function changedPaths(at: Repository, base: string, head: string): Promise<string[]> {
-  let compared: Awaited<ReturnType<Repository['readCompare']>> | null = null;
+/* The paths from base to head, when head holds base: null where GitHub listed only part of them, as it does past 300 files,
+   which proves the line and no change. Anything else proves nothing. */
+async function changedPaths(at: Repository, base: string, head: string): Promise<string[] | null> {
+  let compared: CompareResult | null = null;
   try { compared = await at.readCompare(at.repo, { base, head }, 10_000); }
   catch { /* An unreadable comparison is refused below. */ }
-  if (!compared || !exactComparison(compared, base, head)) throw refuse(409, 'task_changed', `${head} does not hold ${base}, or the change between them could not be read.`);
-  return compared.paths;
+  if (!compared || !heldLineage(compared, base, head)) throw refuse(409, 'task_changed', `${head} does not hold ${base}, or the change between them could not be read.`);
+  return exactComparison(compared, base, head) ? compared.paths : null;
 }
 
-/* Where head holds base; an unreadable comparison holds nothing. */
+/* Where head holds base, however many files lie between them; an unreadable comparison holds nothing. */
 async function holds(at: Repository, base: string, head: string): Promise<boolean> {
   if (base === head) return true;
-  try { return exactComparison(await at.readCompare(at.repo, { base, head }, 10_000), base, head); }
+  try { return !!heldLineage(await at.readCompare(at.repo, { base, head }, 10_000), base, head); }
   catch { return false; }
+}
+
+/* What each file and submodule of a commit holds, by path, or the commit where GitHub could not name them all. */
+async function filesAt(at: Repository, commit: string): Promise<Map<string, string> | string> {
+  let tree: TreeAt | null = null;
+  try { tree = at.readTree ? await at.readTree(at.repo, commit, 10_000) : null; }
+  catch { /* An unreadable tree names nothing. */ }
+  if (!tree?.complete || !tree.entries) return commit;
+  return new Map(tree.entries.map(entry => [entry.path, `${entry.type} ${entry.mode} ${entry.sha}`]));
+}
+
+/* The paths the merge changes that the line did not bring, from the files of the four commits: what the merge holds other
+   than the candidate it replaces, where the new base holds the same as the old one. A tree GitHub cut short proves nothing. */
+async function beyondByFiles(at: Repository, parent: EchelonCandidate, candidate: EchelonCandidate, line: string): Promise<string[]> {
+  const read = await Promise.all([parent.baseCommit, candidate.baseCommit, parent.commit, candidate.commit].map(commit => filesAt(at, commit)));
+  const unread = read.find(files => typeof files === 'string');
+  if (unread !== undefined) throw refuse(409, 'task_changed', `GitHub lists at most 300 files of a comparison, and the files of ${unread} could not be read whole, so it cannot be proved that the merge brings only ${line}. Try again.`);
+  const [oldBase, newBase, oldCommit, newCommit] = read as [Map<string, string>, Map<string, string>, Map<string, string>, Map<string, string>];
+  const paths = [...new Set([...oldCommit.keys(), ...newCommit.keys()])].sort();
+  return paths.filter(path => oldCommit.get(path) !== newCommit.get(path) && oldBase.get(path) === newBase.get(path));
 }
 
 /* The head of a line as the repository says it now, or null where it cannot say. */
@@ -76,19 +98,24 @@ async function turnBranchOf(ctx: Reader, task: Task, department: { id: string; p
 async function repository(ctx: Reader, task: Task): Promise<Repository> {
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]) : null;
   if (!found || !ctx.readCompare || !ctx.readCommit) throw refuse(409, 'repo_invalid', 'The repository cannot be read here, so taking the main line in cannot be verified.');
-  return { readCompare: ctx.readCompare, readCommit: ctx.readCommit, repo: found.repo, turnBranch: await turnBranchOf(ctx, task, found.department) };
+  return { readCompare: ctx.readCompare, readCommit: ctx.readCommit, readTree: ctx.readTree, repo: found.repo, turnBranch: await turnBranchOf(ctx, task, found.department) };
 }
 
+/* Paths for a message: the first twenty, and how many more. */
+const named = (paths: string[]): string => paths.length > 20 ? `${paths.slice(0, 20).join(', ')} and ${paths.length - 20} more` : paths.join(', ');
+
 /* The merge keeps the branch and the candidate it replaces, its base moves along the line it took in, and it changes nothing
-   that line did not bring: a base off the line would hide the candidate's own change from the checks. */
+   that line did not bring: a base off the line would hide the candidate's own change from the checks. Where GitHub lists
+   every file of both comparisons their paths prove it; where it cuts either short, the files of the four commits do. */
 async function requireLineTaken(ctx: Reader, task: Task, parent: EchelonCandidate, candidate: EchelonCandidate): Promise<Record<string, unknown>> {
   if (candidate.branch !== parent.branch) throw refuse(409, 'task_changed', 'Taking the main line in keeps the candidate branch.');
   if (candidate.baseCommit === parent.baseCommit) throw refuse(409, 'task_invalid', 'Name the newer main or turn commit you took in as review.baseCommit.');
   const at = await repository(ctx, task);
-  const brought = new Set(await changedPaths(at, parent.baseCommit, candidate.baseCommit));
+  const brought = await changedPaths(at, parent.baseCommit, candidate.baseCommit);
   const line = await lineTaken(at, candidate.baseCommit, candidate.commit);
-  const beyond = (await changedPaths(at, parent.commit, candidate.commit)).filter(path => !brought.has(path));
-  if (beyond.length) throw refuse(409, 'task_invalid', `The merge changes what ${line.branch} did not bring: ${beyond.join(', ')}. Take in only ${line.branch}; a failed check of the candidate's own change is reported with done false.`);
+  const merged = await changedPaths(at, parent.commit, candidate.commit);
+  const beyond = brought && merged ? merged.filter(path => !brought.includes(path)) : await beyondByFiles(at, parent, candidate, line.branch);
+  if (beyond.length) throw refuse(409, 'task_invalid', `The merge changes what ${line.branch} did not bring: ${named(beyond)}. Take in only ${line.branch}; a failed check of the candidate's own change is reported with done false.`);
   const moved = { from: parent.baseCommit, to: candidate.baseCommit };
   return line.turn ? { tookTurn: { branch: line.branch, ...moved } } : { tookMain: moved };
 }

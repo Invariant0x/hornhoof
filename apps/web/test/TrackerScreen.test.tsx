@@ -498,6 +498,20 @@ describe('making work in a department', () => {
     expect(await card('#25 Refund API')).toBeInTheDocument();
   });
 
+  it('makes a task from the + on any page, asking which department gets it', async () => {
+    const user = userEvent.setup();
+    const made = detail(line({ id: 't25', number: 25, title: 'Refund API', status: 'open' }));
+    const calls = shell('/tasks?show=waits', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
+    await screen.findByRole('region', { name: 'Waiting for you' });
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New task' }));
+    expect(screen.getByLabelText('Department')).toHaveDisplayValue('Development');
+    expect(screen.getByText('Dana, the head, gets it and splits it among the department.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Title'), 'Refund API');
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/tasks')?.body).toMatchObject({ title: 'Refund API', department: 'd2' }));
+    expect(await card('#25 Refund API')).toBeInTheDocument();
+  });
+
   it('gives a group task its pipeline and the priority chosen in the form', async () => {
     const user = userEvent.setup();
     const made = detail(line({ id: 't25', number: 25, title: 'New payment option', pipelineId: 'pl1', priority: 'high' }));
@@ -609,6 +623,22 @@ it('fits the lists directly beside the main header with its breadcrumb, viewer a
   expect(header?.lastElementChild).toContainElement(screen.getByRole('searchbox', { name: 'Search tasks' }));
   expect(screen.getByRole('group', { name: 'View' })).toContainElement(screen.getByRole('radio', { name: 'Board' }));
   expect(screen.getByRole('group', { name: 'Filters' })).toContainElement(screen.getByRole('combobox', { name: 'Status' }));
+});
+
+/* The CEO sees on Waits for me what agents ask the people the CEO decides for too, as the assistant CEO's question, and the
+   cards Hornhoof kept: the count beside it is what the page shows. */
+it('counts on Waits for me everything the page shows under it', async () => {
+  shell('/tasks?show=waits', {
+    'GET /api/requests': [200, decisions([{
+      id: 'r2', text: 'Which header?', kind: 'question', task: { ...LOGIN, department: LOGIN.department }, ownerPersonId: 'p-assistant', canAnswer: true,
+      agent: BRUNO, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt,
+    }])],
+    'GET /api/wait-cards': [200, { cards: [{ id: 'c1', about: 'late', taskId: null, number: null, kind: null, level: null, at: LOGIN.createdAt, turn: null, tag: null }], next: null }],
+  });
+  const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+  await within(waiting).findByText('Which header?');
+  const side = screen.getByRole('navigation', { name: 'Task lists' });
+  expect(within(side).getByRole('button', { name: 'Waits for me 2' })).toBeInTheDocument();
 });
 
 it('counts a task with a question once and counts failed tasks separately', async () => {

@@ -1,14 +1,15 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { APP, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, JQ, killProcessGroup, pidAlive, runOnce, type Stand, stand, startLoop, UPDATER_DIGESTS } from './updater-fixture.js';
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
+const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const NOW_SEC = 1_795_000_000;
 const CLOCK = { STUB_COMPUTER_NOW: String(NOW_SEC) };
@@ -45,7 +46,7 @@ describe('updater, the computer', () => {
   };
   const later = () => NOW_SEC + 3600;
 
-  it('logs and ignores shared computer files while a keeper request runs', async () => {
+  it('removes old computer files, logging only the count, while a keeper request runs', async () => {
     const s = stand();
     const shared = join(s.control, 'computer');
     mkdirSync(shared);
@@ -58,9 +59,9 @@ describe('updater, the computer', () => {
     expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-keeper']);
     expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-shared'));
     expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-old'));
-    expect(r.out).toContain('Computer request refused: it came from the shared control folder.');
+    expect(r.out).toContain('Removed 2 files from the old computer queue.');
     expect(r.out).not.toMatch(/private sample|shared\.json/);
-    expect(readdirSync(shared).sort()).toEqual(['old.started', 'shared.json']);
+    expect(readdirSync(shared)).toEqual([]);
     expect(answer(s, 'keeper')).toEqual({ id: 'keeper', exit: 0, output: 'ran: recorded sample\n' });
   });
 
@@ -76,9 +77,175 @@ describe('updater, the computer', () => {
     const r = await runOnce(s, null, env);
     expect(r.code).toBe(0);
     expect(r.calls.filter(call => call.startsWith('docker'))).toEqual([]);
-    expect(r.out.match(/Computer request refused: it came from the shared control folder\./g)).toHaveLength(1);
+    expect(r.out.match(/Removed 2 files from the old computer queue\./g) ?? []).toHaveLength(1);
     expect(r.out).not.toMatch(/private sample|dropped/);
-    expect(readdirSync(shared).sort()).toEqual(['dropped.json', 'k1.started']);
+    expect(readdirSync(shared)).toEqual([]);
+  });
+
+  it('publishes an answer without using the predictable temporary file', async () => {
+    const s = stand();
+    command(s, 'sample', 'recorded sample');
+    const leftover = join(s.computerControl, 'computer', 'sample.out.json.new');
+    writeFileSync(leftover, 'recorded leftover');
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(answer(s, 'sample')).toMatchObject({ exit: 126 });
+    expect(lstatSync(join(s.computerControl, 'computer', 'sample.out.json')).mode & 0o777).toBe(0o644);
+    expect(existsSync(leftover)).toBe(true);
+    expect(readFileSync(leftover, 'utf8')).toBe('recorded leftover');
+  });
+
+  /* A link to a file that is there, and one to a file that is not, which root would otherwise create. */
+  it.each([
+    { marker: 'sample.out.json', contents: 'recorded contents' },
+    { marker: 'sample.started', contents: 'recorded contents' },
+    { marker: 'sample.out.json', contents: null },
+    { marker: 'sample.started', contents: null },
+  ])('refuses a keeper request with a linked $marker whose target holds $contents', async ({ marker, contents }) => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const target = join(s.dir, 'recorded-target');
+    if (contents !== null) writeFileSync(target, contents);
+    const link = join(s.computerControl, 'computer', marker);
+    symlinkSync(target, link);
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Computer request refused: its answer or start marker is a link.');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(existsSync(target) ? readFileSync(target, 'utf8') : null).toBe(contents);
+  });
+
+  /* Bash sets PWD from the path it resolved before it entered a folder, so a link the keeper swaps in between goes unseen
+     there. The system's own pwd says where the updater really is: here it says somewhere else for the folders named. */
+  function elsewhere(s: Stand, folders: string) {
+    const tools = join(s.dir, 'elsewhere');
+    mkdirSync(tools);
+    writeFileSync(join(tools, 'pwd'), `#!/bin/sh\ncase "$(/bin/pwd -P)" in ${folders}) echo /elsewhere ;; *) exec /bin/pwd "$@" ;; esac\n`, { mode: 0o755 });
+    return { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
+  }
+
+  it('works in no queue that the system places elsewhere, old or new', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c5', 'recorded sample');
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    writeFileSync(join(shared, 'old.json'), 'recorded old request');
+    const r = await runOnce(s, null, elsewhere(s, '*/computer'));
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).not.toContain('old computer queue');
+    expect(readdirSync(join(s.computerControl, 'computer'))).toEqual(['c5.json']);
+    expect(readdirSync(shared)).toEqual(['old.json']);
+  });
+
+  it('publishes no answer from a private folder that the system places elsewhere, and keeps the mark', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c6', 'recorded sample');
+    const r = await runOnce(s, null, elsewhere(s, '*/.answer.*'));
+    expect(r.calls.filter(c => c.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-c6']);
+    expect(r.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(readdirSync(join(s.computerControl, 'computer')).sort()).toEqual(['c6.json', 'c6.started']);
+  });
+
+  it('clears only old queue entries without following file or directory links', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    const elsewhere = join(s.dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    const sample = join(elsewhere, 'sample.json');
+    writeFileSync(sample, 'recorded contents');
+    symlinkSync(elsewhere, shared);
+    const linked = await runOnce(s, null, env);
+    expect(linked.code).toBe(0);
+    expect(linked.out).not.toContain('old computer queue');
+    expect(readFileSync(sample, 'utf8')).toBe('recorded contents');
+
+    rmSync(shared);
+    mkdirSync(shared);
+    symlinkSync(sample, join(shared, 'old.json'));
+    writeFileSync(join(shared, 'old.out.json'), '{}');
+    writeFileSync(join(shared, 'old.out.json.new'), '{}');
+    mkdirSync(join(shared, 'directory.json'));
+    writeFileSync(join(shared, 'notes'), 'recorded notes');
+    const cleaned = await runOnce(s, null, env);
+    expect(cleaned.code).toBe(0);
+    expect(cleaned.out).toContain('Removed 3 files from the old computer queue.');
+    expect(cleaned.out).not.toContain('old.json');
+    expect(readdirSync(shared).sort()).toEqual(['directory.json', 'notes']);
+    expect(readFileSync(sample, 'utf8')).toBe('recorded contents');
+  });
+
+  it('writes the computer heartbeat where the keeper can read it', async () => {
+    const s = stand();
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(existsSync(join(s.computerControl, 'alive'))).toBe(true);
+    expect(existsSync(join(s.control, 'alive'))).toBe(true);
+  });
+
+  it('leaves a linked computer heartbeat and its target alone', async () => {
+    const s = stand();
+    const target = join(s.dir, 'recorded-target');
+    symlinkSync(target, join(s.computerControl, 'alive'));
+    expect((await runOnce(s, null, env)).code).toBe(0);
+    expect(lstatSync(join(s.computerControl, 'alive')).isSymbolicLink()).toBe(true);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  /* Bash opens a redirect target through a link without O_EXCL once it has seen something there that is not a regular
+     file, so the keeper could swap a link in at that moment. A missing heartbeat is made in a private folder and renamed
+     into place instead: here a link appears at the last moment before that rename, and the rename replaces it. */
+  it('makes a missing computer heartbeat in a private folder and renames it over a link put there at the last moment', async () => {
+    const s = stand();
+    const outside = join(s.dir, 'outside');
+    mkdirSync(outside);
+    const target = join(outside, 'recorded-target');
+    const tools = join(s.dir, 'racing');
+    mkdirSync(tools);
+    const moves = join(s.dir, 'moves');
+    writeFileSync(
+      join(tools, 'mv'),
+      `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
+        `case "$last" in ../alive) ln -s '${target}' ../alive ;; esac\nexec /bin/mv "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = await runOnce(s, null, { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` });
+    expect(r.code).toBe(0);
+    expect(readFileSync(moves, 'utf8')).toContain('./alive ../alive');
+    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(existsSync(target)).toBe(false);
+    expect(readdirSync(s.computerControl).filter(name => name.startsWith('.alive.'))).toEqual([]);
+  });
+
+  /* The app can write the control folder and so make its own heartbeat there fail; that never stops the updater, nor the
+     keeper's heartbeat in the computer volume. */
+  it('starts and writes the computer heartbeat when the app links its own heartbeat where nothing can be made', async () => {
+    const s = stand();
+    const target = join(s.dir, 'missing', 'recorded-target');
+    symlinkSync(target, join(s.control, 'alive'));
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
+    expect(existsSync(join(s.dir, 'missing'))).toBe(false);
+  });
+
+  it('keeps the computer heartbeat going after the app breaks its own heartbeat', async () => {
+    const s = stand();
+    const keeper = join(s.computerControl, 'alive');
+    /* No watch: the heartbeat's wait passes at once, as a wait the updater makes outside a command does here. */
+    startLoop(s);
+    await eventually(() => existsSync(keeper));
+    rmSync(join(s.control, 'alive'), { force: true });
+    symlinkSync(join(s.dir, 'missing', 'recorded-target'), join(s.control, 'alive'));
+    rmSync(keeper);
+    await eventually(() => existsSync(keeper));
+    expect(lstatSync(keeper).isFile()).toBe(true);
+    expect(existsSync(join(s.dir, 'missing'))).toBe(false);
   });
 
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {
@@ -159,6 +326,43 @@ describe('updater, the computer', () => {
     expect(r.calls).toEqual(['docker rm -f hornhoof-computer-c7']);
     expect(answer(s, 'c7')).toMatchObject({ id: 'c7', exit: 125, output: expect.stringContaining('The updater restarted while this command ran') });
     expect(existsSync(join(s.computerControl, 'computer', 'c7.started'))).toBe(false);
+  });
+
+  /* A full volume, as mktemp meets it: the answer's private folder cannot be made. Every other mktemp works. */
+  function onFullVolume(s: Stand) {
+    const full = join(s.dir, 'full-volume');
+    mkdirSync(full);
+    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\n[ "$1" != -d ] || exit 1\nexec /usr/bin/mktemp "$@"\n', { mode: 0o755 });
+    return { ...env, PATH: `${full}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
+  }
+
+  it('never runs a command a second time when its answer cannot be written', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c3', 'recorded sample');
+    const first = await runOnce(s, null, onFullVolume(s));
+    expect(first.calls.filter(c => c.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-c3']);
+    expect(first.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(answer(s, 'c3')).toBeNull();
+    expect(existsSync(join(s.computerControl, 'computer', 'c3.started'))).toBe(true);
+    /* The next look finds the mark and answers that the command was stopped: it never starts it again. */
+    const next = await runOnce(s, null, env);
+    expect(next.calls.filter(c => c.startsWith('docker start'))).toHaveLength(1);
+    expect(answer(s, 'c3')).toMatchObject({ id: 'c3', exit: 125, output: expect.stringContaining('The updater restarted while this command ran') });
+    expect(existsSync(join(s.computerControl, 'computer', 'c3.started'))).toBe(false);
+  });
+
+  it('answers a closed machine at the next look when its answer cannot be written', async () => {
+    const s = stand();
+    access(s, NOW_SEC - 1);
+    command(s, 'c4', 'recorded sample');
+    const first = await runOnce(s, null, onFullVolume(s));
+    expect(first.code).toBe(0);
+    expect(first.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(answer(s, 'c4')).toBeNull();
+    const next = await runOnce(s, null, env);
+    expect(next.calls.filter(c => c.startsWith('docker'))).toEqual([]);
+    expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 126 });
   });
 
   it('stops a command it started whose request the app took back', async () => {

@@ -1,6 +1,10 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { taskEvents, taskRoutes, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
+import { ApiError } from '../../errors.js';
 import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
 import { commitApprovalRequired, exactCommitApproval } from './commit-approval.js';
 import { NO_DEPARTMENT_CHECKER } from './echelons-assign.js';
@@ -12,7 +16,7 @@ import { requireTestsReport } from './echelons-tests.js';
 import { requireTaskHead } from './echelons-update.js';
 import { giver, refuse, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
-import { exactComparison } from './review-context.js';
+import { heldLineage } from '../testruns/compare.js';
 import { headOf, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
 import { ReviewSha } from './review-schema.js';
 
@@ -46,14 +50,58 @@ function matchesObservedHead(value: ObservedHead, branch: string, commit: string
 async function requireInclusion(ctx: Reader, repository: Repository, candidate: string, integration: string): Promise<void> {
   if (integration === candidate) return;
   const comparison = await ctx.readCompare?.(repository, { base: candidate, head: integration }, 10_000);
-  if (!comparison || !exactComparison(comparison, candidate, integration)) throw new Error('inclusion unproved');
+  if (!comparison || !heldLineage(comparison, candidate, integration)) throw new Error('inclusion unproved');
 }
 
-/* Read-only proof of a fast-forward of the turn branch to the exact candidate, already made through the authorized Git route. */
-async function intoTurn(ctx: Reader, target: IntegrationTarget & { turn: NonNullable<IntegrationTarget['turn']> }, candidate: EchelonCandidate, input: AcceptanceInput) {
-  if (input.integrationCommit !== candidate.commit) {
-    throw refuse(409, 'task_invalid', `${target.branch} takes a candidate only by fast-forward, so the integration commit is the candidate's own, ${candidate.commit}. A merge on ${target.branch} is no checked result: fast-forward ${target.branch} to the candidate, or, where ${target.branch} went on, take it into the candidate and have that checked.`);
+type TurnTarget = IntegrationTarget & { turn: NonNullable<IntegrationTarget['turn']> };
+/* What an acceptance into a turn records: the candidate's own commit there, or the merge a take-in brought it there in. */
+const TakeInAcceptance = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), integration: z.object({ branch: z.string(), commit: ReviewSha }) });
+
+/* Whether the accepted result of a code task proves that its checked candidate, at merge on the candidate branch, joined the
+   turn: its route is done with every required stage, and its last report accepted that very candidate into the turn branch. */
+async function acceptedAt(db: Ctx['db'], other: Task, target: TurnTarget, branch: string, merge: string): Promise<boolean> {
+  const [route] = await db.select().from(taskRoutes).where(and(eq(taskRoutes.taskId, other.id), eq(taskRoutes.companyId, other.companyId)));
+  if (!route || route.state.resultKind !== 'code' || route.state.phase !== 'done' || !requiredStagesComplete(route)) return false;
+  const [report] = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, other.id), eq(taskEvents.companyId, other.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
+  const accepted = TakeInAcceptance.safeParse(report?.data.acceptedCandidate);
+  if (!accepted.success || accepted.data.integration.branch !== target.branch || accepted.data.integration.commit !== merge || accepted.data.routeRevision !== route.revision) return false;
+  try {
+    const candidate = await currentCandidate(db, other, route);
+    if (candidate.id !== accepted.data.candidateId || candidate.commit !== merge || candidate.branch !== branch) return false;
+    await requireTestsReport(db, other, route, candidate, route.revision - 1);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) return false;
+    throw error;
   }
+}
+
+/* The task of the department that took this turn into the candidate's branch and joined the turn with that checked merge. */
+async function takeInOf(db: Ctx['db'], task: Task, target: TurnTarget, candidate: EchelonCandidate, merge: string): Promise<Task | null> {
+  const joined = await db.select().from(tasks).where(and(eq(tasks.companyId, task.companyId), eq(tasks.turnId, target.turn.id), eq(tasks.status, 'done'), ne(tasks.id, task.id),
+    sql`exists (select 1 from ${taskEvents} where ${taskEvents.taskId} = ${tasks.id} and ${taskEvents.kind} = 'report' and ${taskEvents.data}->'acceptedCandidate'->>'commit' = ${merge})`));
+  for (const other of joined) if (await acceptedAt(db, other, target, candidate.branch, merge)) return other;
+  return null;
+}
+
+/* A candidate the turn went on from cannot reach it by fast-forward. A take-in merges the turn into the candidate's branch, has
+   that merge checked and accepts it into the turn: the candidate is in the turn once that merge holds it and the turn holds the
+   merge, and its acceptance names the take-in. */
+async function throughTakeIn(ctx: Reader, task: Task, target: TurnTarget, candidate: EchelonCandidate, merge: string) {
+  const takeIn = await takeInOf(ctx.db, task, target, candidate, merge);
+  if (!takeIn) {
+    throw refuse(409, 'task_invalid', `${target.branch} takes a candidate only by fast-forward, so the integration commit is the candidate's own, ${candidate.commit}, or the merge an accepted take-in of ${candidate.branch} brought into ${target.branch}. A merge on ${target.branch} is no checked result: fast-forward ${target.branch} to the candidate, or, where ${target.branch} went on, take it into the candidate and have that checked.`);
+  }
+  try { await requireInclusion(ctx, target.repo, candidate.commit, merge); }
+  catch { throw refuse(409, 'task_changed', `${merge}, which #${takeIn.number} brought into ${target.branch}, does not hold the candidate ${candidate.commit}, or that could not be read.`); }
+  await requireInTurn(ctx, target, merge, head => `#${takeIn.number} brought ${merge} into ${target.branch}, which is at ${head} now: fast-forward ${target.branch} to it, then accept this result.`);
+  return { branch: target.branch, commit: merge, approval: null, autoProof: null, observedAt: new Date().toISOString(), takeIn: { taskId: takeIn.id, number: takeIn.number } };
+}
+
+/* Read-only proof of a fast-forward of the turn branch to the exact candidate, already made through the authorized Git route,
+   or of the take-in that brought it there. */
+async function intoTurn(ctx: Reader, task: Task, target: TurnTarget, candidate: EchelonCandidate, input: AcceptanceInput) {
+  if (input.integrationCommit !== candidate.commit) return throughTakeIn(ctx, task, target, candidate, input.integrationCommit);
   const source = await headOf(ctx, target.repo, candidate.branch);
   if (source !== candidate.commit) throw refuse(409, 'task_changed', 'The source changed after the checks, or it cannot be read.');
   const { branch } = target;
@@ -97,7 +145,7 @@ async function observedIntegration(ctx: Reader, task: Task, candidate: EchelonCa
   const target = await integrationTarget(ctx, task);
   if (!target) throw refuse(409, 'repo_invalid', 'The result has no repository to verify.');
   const turn = target.turn;
-  return { turn, integration: turn ? await intoTurn(ctx, { ...target, turn }, candidate, input) : await intoMain(ctx, task, target, candidate, input) };
+  return { turn, integration: turn ? await intoTurn(ctx, task, { ...target, turn }, candidate, input) : await intoMain(ctx, task, target, candidate, input) };
 }
 
 export async function acceptCandidate(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: AcceptanceInput | undefined): Promise<Moved> {

@@ -31,6 +31,15 @@ describe('a repair preserves the assigned candidate history', () => {
     expect((await f.detail()).log.filter(row => row.kind === 'submitted')).toHaveLength(1);
   });
 
+  it('proves a repair holds the candidate by the line of a comparison whose files GitHub capped at 300', async () => {
+    const f = await submitted();
+    f.atCommit(FIX);
+    const compare = f.ctx.readCompare!;
+    f.ctx.readCompare = async (repo, refs, timeout) => refs.base === HEAD ? { complete: false, reason: 'too-many-files', lineage: { baseSha: HEAD, headSha: refs.head, commits: [] } } : compare(repo, refs, timeout);
+    await submit(f.ctx, f.reviewer.id, f.task.id, code);
+    expect((await f.detail()).log.findLast(row => row.kind === 'submitted')?.data).toMatchObject({ candidate: { commit: FIX, baseCommit: BASE } });
+  });
+
   it('ignores a comment that copies a candidate identity over the immutable submission', async () => {
     const f = await submitted();
     const candidate = f.event.data.candidate as Record<string, unknown>;

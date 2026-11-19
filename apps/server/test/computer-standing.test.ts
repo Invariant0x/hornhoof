@@ -133,17 +133,18 @@ it('carries a standing command from the authenticated route to an updated pinned
   const keeperDir = join(controlDir, 'keeper');
   const computerControl = join(keeperDir, 'computer-control');
   mkdirSync(keeperDir);
-  const alive = join(controlDir, 'alive');
-  writeFileSync(alive, '');
-  utimesSync(alive, new Date(), new Date());
+  const now = new Date('2026-11-10T10:00:00.000Z');
   const carrier = new ComputerCarrier({
-    controlDir, dir: keeperDir, machine: c.machine.networkId!, pin: () => c.publicKey, trustApp: false, log: () => {},
+    dir: keeperDir, machine: c.machine.networkId!, pin: () => c.publicKey, trustApp: false, log: () => {}, now: () => now,
     ask: async (method, url, payload) => {
       const res = await c.app.inject({ method, url, ...c.keeper, payload: JSON.stringify(payload), headers: { ...c.keeper.headers, 'content-type': 'application/json' } });
       return { status: res.statusCode, body: res.body ? res.json() : null };
     },
   });
   carrier.prepare();
+  const alive = join(computerControl, 'alive');
+  writeFileSync(alive, '');
+  utimesSync(alive, now, now);
   await carrier.tick();
   const by = { remoteAddress: c.keeper.remoteAddress, headers: { [VIA]: c.machine.id } };
   expect((await c.app.inject({ url: '/api/network/computer?standing=1&updater=1', ...by })).statusCode).toBe(403);
