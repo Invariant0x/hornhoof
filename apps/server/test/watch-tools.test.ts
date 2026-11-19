@@ -10,6 +10,7 @@ import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
+import { keepUndelivered } from '../src/modules/conversation/undelivered.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -704,5 +705,64 @@ describe('tools a skill grants', () => {
     expect.soft(out.stops, 'stops').toEqual([expect.objectContaining({ agent: 'Bruno', text: 'Which payment provider?' })]);
     expect.soft(out.undelivered, 'undelivered').toEqual([expect.objectContaining({ agent: 'Bruno', reason: 'switched_off' })]);
     for (const word of ['Ava', 'landlord', 'diary', 'deposit', 'agent_not_ready']) expect.soft(JSON.stringify(out)).not.toContain(word);
+  });
+
+  it("leave out a message an employee could not deliver to a person's own assistant, which names that assistant", async () => {
+    const { app, db, acme, sub, hana, bruno } = await company(['ops-failure-review']);
+    const [ava] = await db.insert(agents).values({ companyId: acme.id, kind: 'assistant', name: 'Ava', model: '', subscriptionId: sub.id }).returning();
+    const sender = { companyId: acme.id, agentId: bruno.id };
+    await keepUndelivered(app.ctx, sender, { reason: 'personal_assistant', recipient: ava!.id, task: null });
+    await keepUndelivered(app.ctx, sender, { reason: 'switched_off', recipient: hana.id, task: null });
+    /* An id goes in with capitals too, and its refusal keeps it as it was written. */
+    const client = await mcp(app, TOKEN);
+    expect((await call(client, 'message_employee', { employee: ava!.id.toUpperCase(), text: 'Hello.' })).isError).toBe(true);
+
+    const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text);
+    expect(out.undelivered).toEqual([expect.objectContaining({ agent: 'Bruno', recipient: hana.id, to: 'Hana', reason: 'switched_off' })]);
+    for (const word of [ava!.id, ava!.id.toUpperCase(), 'Ava', 'personal_assistant']) expect.soft(JSON.stringify(out)).not.toContain(word);
+  });
+
+  /* An employee's work on a task a person's own assistant holds or does is that person's work too, as task views keep it. */
+  it("leave out an employee's failed turns, stumbles, stops and undelivered words on a task a person's own assistant holds or does", async () => {
+    const { app, db, acme, sub, dev, hana, bruno, task } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const [ava] = await db.insert(agents).values({ companyId: acme.id, kind: 'assistant', name: 'Ava', model: '', subscriptionId: sub.id }).returning();
+    const [held, done] = await db.insert(tasks).values([
+      { companyId: acme.id, number: 900, title: 'Letter to the landlord', departmentId: dev.id, status: 'working', assigneeAgentId: ava!.id },
+      { companyId: acme.id, number: 901, title: 'Receipt for the landlord', departmentId: dev.id, status: 'working', assigneeAgentId: bruno.id, executorAgentId: ava!.id },
+    ]).returning();
+    const turn = { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const, error: 'timeout' };
+    const [onHeld] = await db.insert(jobs).values([
+      { ...turn, taskId: held!.id, tail: 'Dear landlord, about the rent', finishedAt: ago(15) },
+      { ...turn, taskId: done!.id, tail: 'Private diary of the owner', finishedAt: ago(14) },
+      { ...turn, taskId: task.id, tail: 'npm test hung', finishedAt: ago(30) },
+      { ...turn, tail: 'out of memory', finishedAt: ago(31) },
+    ]).returning();
+    const event = (jobId: string | null, kind: 'tool' | 'tool_result', data: object) => ({ companyId: acme.id, agentId: bruno.id, jobId, kind, data, createdAt: ago(13) });
+    const undelivered = (reason: string) => ({ ok: false, summary: `Not delivered: reason ${reason}, recipient ${hana.id}, task none.`, undelivered: { reason, recipient: hana.id, task: null } });
+    await db.insert(agentEvents).values([
+      event(onHeld!.id, 'tool_result', { ok: false, summary: 'bash: line 1: rg: command not found' }),
+      event(onHeld!.id, 'tool', { name: 'Bash', input: 'pip install --user landlordpkg' }),
+      event(onHeld!.id, 'tool_result', undelivered('agent_not_ready')),
+      event(null, 'tool_result', { ok: false, summary: 'bash: line 1: ps: command not found' }),
+      event(null, 'tool', { name: 'Bash', input: 'pip install --user pyyaml' }),
+      event(null, 'tool_result', undelivered('switched_off')),
+    ]);
+    await db.insert(requests).values([
+      { companyId: acme.id, taskId: held!.id, agentId: bruno.id, kind: 'question', text: 'Should the letter name the deposit?', createdAt: ago(12) },
+      { companyId: acme.id, taskId: done!.id, agentId: bruno.id, kind: 'stuck', text: 'Stuck on the deposit receipt.', createdAt: ago(12) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', createdAt: ago(11) },
+    ]);
+
+    const out = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text);
+    expect.soft(out.failed, 'failed').toEqual([
+      expect.objectContaining({ agent: 'Bruno', task: task.number, tail: 'npm test hung' }),
+      expect.objectContaining({ agent: 'Bruno', task: null, tail: 'out of memory' }),
+    ]);
+    expect.soft(out.missing, 'missing').toEqual([expect.objectContaining({ what: 'ps', agents: ['Bruno'] })]);
+    expect.soft(out.installed, 'installed').toEqual([expect.objectContaining({ command: 'pip install --user pyyaml', agents: ['Bruno'] })]);
+    expect.soft(out.stops, 'stops').toEqual([expect.objectContaining({ agent: 'Bruno', text: 'Which payment provider?' })]);
+    expect.soft(out.undelivered, 'undelivered').toEqual([expect.objectContaining({ agent: 'Bruno', reason: 'switched_off' })]);
+    for (const word of ['landlord', 'diary', 'deposit', 'agent_not_ready', '"task":900', '"task":901']) expect.soft(JSON.stringify(out)).not.toContain(word);
   });
 });
