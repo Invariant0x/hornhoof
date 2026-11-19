@@ -42,11 +42,22 @@ const SIGHT = { status: tasks.status, departmentId: tasks.departmentId, assignee
 /* A person's own assistant works for that person alone, not for the company: what watches the company reads only its
    employees. */
 const employees = () => ne(agents.kind, 'assistant');
+const assistantsOf = (companyId: string) => and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant'));
 
 /* Every task but the work of a person's own assistant, held or done, as task views keep it (tasks/visibility.ts). */
 function employeesTasks(db: Db, companyId: string) {
-  const assistants = db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
+  const assistants = db.select(idOnly(agents)).from(agents).where(assistantsOf(companyId));
   return and(...[tasks.assigneeAgentId, tasks.executorAgentId].map(id => or(isNull(id), notInArray(id, assistants))));
+}
+
+/* What an employee did on no task or on the company's work: its work on a task an assistant holds or does is that
+   person's work too. */
+const employeesWork = (db: Db, companyId: string) => and(employees(), employeesTasks(db, companyId));
+
+/* A message to a person's own assistant that did not go in names that assistant, so it stays out too. */
+function notToAssistants(db: Db, companyId: string) {
+  const assistants = db.select({ id: sql<string>`${agents.id}::text` }).from(agents).where(assistantsOf(companyId));
+  return notInArray(sql`${agentEvents.data}->'undelivered'->>'recipient'`, assistants);
 }
 
 /* Who reads failures, to know whose work it may open. */
@@ -286,7 +297,7 @@ async function undeliveredSince(ctx: Pick<Ctx, 'db'>, companyId: string, since: 
     .innerJoin(agents, eq(agents.id, agentEvents.agentId))
     .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-    .where(and(eq(agentEvents.companyId, companyId), employees(), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, gte(agentEvents.createdAt, since)))
+    .where(and(eq(agentEvents.companyId, companyId), employeesWork(ctx.db, companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, notToAssistants(ctx.db, companyId), gte(agentEvents.createdAt, since)))
     .orderBy(desc(agentEvents.seq))
     .limit(UNDELIVERED_MAX);
   const staff = new Map((await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.companyId, companyId))).map(a => [a.id, a.name]));
@@ -409,7 +420,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-          .where(and(eq(jobs.companyId, job.companyId), employees(), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
+          .where(and(eq(jobs.companyId, job.companyId), employeesWork(db, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
@@ -448,7 +459,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .innerJoin(agents, eq(agents.id, agentEvents.agentId))
             .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
             .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-            .where(and(eq(agentEvents.companyId, job.companyId), employees(), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
+            .where(and(eq(agentEvents.companyId, job.companyId), employeesWork(db, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
             .orderBy(desc(agentEvents.seq))
             .limit(STUMBLES_MAX)
             .then(rows => seenBy(rows, reader));
@@ -459,7 +470,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .from(requests)
           .innerJoin(agents, eq(agents.id, requests.agentId))
           .innerJoin(tasks, eq(tasks.id, requests.taskId))
-          .where(and(eq(requests.companyId, job.companyId), employees(), inArray(requests.kind, ['question', 'stuck']), gte(requests.createdAt, since)))
+          .where(and(eq(requests.companyId, job.companyId), employeesWork(db, job.companyId), inArray(requests.kind, ['question', 'stuck']), gte(requests.createdAt, since)))
           .orderBy(desc(requests.createdAt))
           .limit(STOPS_MAX);
         const stops = [];
