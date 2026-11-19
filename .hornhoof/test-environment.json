@@ -620,6 +620,17 @@
       },
       {
         "globs": [
+          "apps/node/fonts/**"
+        ],
+        "suiteIds": [
+          "node"
+        ],
+        "tests": [
+          "apps/node/test/image.test.ts"
+        ]
+      },
+      {
+        "globs": [
           "vitest.product.config.mjs",
           "vitest.config.mjs",
           "scripts/test/workspace-cwd.mjs",
