@@ -7,6 +7,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.4] - 2026-11-19
+
 ### Fixed
 
 - On a phone, the section tabs stay one even row of icons when their words do not fit, with the Tasks count on its icon.
