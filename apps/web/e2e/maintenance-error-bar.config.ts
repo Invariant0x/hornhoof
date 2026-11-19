@@ -4,7 +4,9 @@ import { defineConfig } from '@playwright/test';
 import { browserPort } from './browser-port';
 
 /* The bars of the shell during an update, in all three engines, on prepared browser executables and a Vite server of this
-   checkout. Workers inherit the runner's chosen port instead of recomputing it from their PID. */
+   checkout. Workers inherit the runner's chosen port instead of recomputing it from their PID. The release's browser suites
+   run the spec in Chromium by playwright.config.ts; its full run runs it here in Firefox and WebKit, as the browser-engines
+   suite of .hornhoof/test-environment.json. */
 process.env.HORNHOOF_BROWSER_PORT ??= String(browserPort(process.pid, 4500));
 const port = process.env.HORNHOOF_BROWSER_PORT;
 const origin = `http://127.0.0.1:${port}`;
@@ -13,6 +15,8 @@ export default defineConfig({
   testDir: '.',
   testMatch: 'maintenance-error-bar.spec.ts',
   outputDir: 'results/maintenance-error-bar',
+  /* Each look is a page of its own, so the workers a run gives share the looks of the file between them. */
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   /* The spec says itself that a test has no limit; expectations, actions and navigation have none either (0). */
