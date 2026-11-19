@@ -207,6 +207,38 @@ for (const look of FULL) {
   });
 }
 
+/* Where the last character of each hint of the card stands on its line: its sentences are English or Russian, which run left
+   to right, so that end is the right side of the line, after the last word, on a page of either direction. A page that runs
+   right to left must not put the full stop or the closing bracket of such a sentence before its first word (#1482). */
+async function hintEnds(card: Locator): Promise<{ text: string; atEnd: boolean }[]> {
+  const ends = await card.evaluate(root => [...root.querySelectorAll('.part-note:not(.fallback-model), .empty > span')].map(el => {
+    const texts: Text[] = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) if ((node as Text).data.trim()) texts.push(node as Text);
+    const last = texts.at(-1)!;
+    const at = last.data.trimEnd().length - 1;
+    const mark = document.createRange();
+    mark.setStart(last, at);
+    mark.setEnd(last, at + 1);
+    const glyph = mark.getBoundingClientRect();
+    const whole = document.createRange();
+    whole.selectNodeContents(el);
+    const line = [...whole.getClientRects()].filter(r => r.width > 0 && r.bottom > glyph.top + 1 && r.top < glyph.bottom - 1);
+    return { text: (el.textContent ?? '').trim(), atEnd: glyph.right >= Math.max(...line.map(r => r.right)) - 1 };
+  }));
+  return ends.sort((a, b) => a.text.localeCompare(b.text));
+}
+
+for (const look of [...FULL.filter(look => look.dir === 'rtl'), { lang: 'en', theme: 'light', width: 1440, dir: 'ltr' }, { lang: 'ru', theme: 'light', width: 375, dir: 'ltr' }] as Look[]) {
+  test(`ends each hint of the card with its last character after its last word, in ${lookName(look)}`, async ({ page }) => {
+    const t = MESSAGES[look.lang];
+    const { card, errors } = await opened(page, look);
+    const hints = [t.subs.fallbacksHint, t.cards.noAgentsHint, t.subs.signedInOnce('Ivan', 1)].sort((a, b) => a.localeCompare(b));
+    expect(await hintEnds(card)).toEqual(hints.map(text => ({ text, atEnd: true })));
+    expect(errors).toEqual([]);
+  });
+}
+
 const EMPTY = FULL.filter(look => look.dir === 'ltr');
 
 for (const look of EMPTY) {
