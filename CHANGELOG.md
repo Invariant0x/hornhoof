@@ -14,6 +14,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
 - Japanese names and titles on the map's people chips break between phrases, so no single character is left alone on a line.
 - When one employee's plate on the work tree grows with new words, the lanes under it move down without drawing their chips again.
+- On a phone the map opens with the people chips' names as readable as the cards' names, 11 px or more.
 
 ## [0.39.1] - 2026-11-19
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOAT_GAP, SIDE_GAP, freeRoom, keptToEdges, scrollRange, type Edges, type View } from '../src/ui/canvas';
-import { MAP_READABLE_K, mapView } from '../src/screens/Map';
+import { MAP_READABLE_K, PHONE_MAP_READABLE_K, mapView } from '../src/screens/Map';
 import { rulesFor } from './css';
 
 /* The Head of Design's rule for #1539 (19.11), for #1554: a canvas that does not fit opens readable and scrolls, and the
@@ -78,6 +78,15 @@ describe('mapView', () => {
     const whole = mapView(room, company, true);
     expect(whole.k).toBeCloseTo(311 / 1200, 10);
     expect(whole.x + company.x0 * whole.k).toBeCloseTo(room.x0, 10);
+  });
+
+  /* Design's note on #1596, for #1597: on a phone the people chips' names open as readable as the cards' names must. */
+  it('opens a phone\'s map with its people chip names 11 px tall and its card names larger, centred across on the hub', () => {
+    const opened = mapView(room, company, false, PHONE_MAP_READABLE_K);
+    expect(Number(rulesFor('.chip b')[0]!.decls['font-size']!.replace('px', '')) * opened.k).toBe(11);
+    expect(20 * opened.k).toBeGreaterThan(11);
+    expect(opened.x + ((company.x0 + company.x1) / 2) * opened.k).toBeCloseTo((room.x0 + room.x1) / 2, 10);
+    expect(mapView(room, company, true, PHONE_MAP_READABLE_K)).toEqual(mapView(room, company, true));
   });
 
   it('opens a map taller than the room at its top', () => {

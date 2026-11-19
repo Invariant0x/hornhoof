@@ -723,6 +723,17 @@ for (const look of LOOKS.filter(l => l.width === 375)) {
       return all.map(el => parseFloat(getComputedStyle(el).fontSize) * k);
     });
     expect.soft(Math.min(...names), 'the map opens with card names at least 11 px tall').toBeGreaterThanOrEqual(10.99);
+    /* Design's note on #1596, for #1597: the name of every people chip in view as the map opens is as readable as a card's. */
+    const chipNames = await page.locator('.map .chip b').evaluateAll(all => {
+      const world = document.querySelector<HTMLElement>('.map .world')!, room = document.querySelector('.map .map-room')!.getBoundingClientRect();
+      const k = world.getBoundingClientRect().width / world.offsetWidth;
+      return all.filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.bottom > room.top && r.top < room.bottom && r.right > room.left && r.left < room.right;
+      }).map(el => parseFloat(getComputedStyle(el).fontSize) * k);
+    });
+    expect.soft(chipNames.length, 'the map opens with people chips in view').toBeGreaterThan(0);
+    expect.soft(Math.min(...chipNames), 'the map opens with people chip names at least 11 px tall').toBeGreaterThanOrEqual(10.99);
     await scrollsClear(page, 'map', shot);
 
     await page.locator('.map .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
