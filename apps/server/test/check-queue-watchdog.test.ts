@@ -3,8 +3,11 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
+import type { SaidLoad } from '../src/modules/nodes/hub.js';
+import { CHECK_LEASE_MS, LOAD_MS } from '@hornhoof/protocol';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
-import { checkQueueLoad } from '../src/modules/nodes/check-slots.js';
+import { checkQueueLoad, checkQueueSnapshot } from '../src/modules/nodes/check-slots.js';
 import { jobs } from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
@@ -101,4 +104,45 @@ describe('a machine check lease and the frames heard from the machine', () => {
     await new Promise(done => setImmediate(done));
     expect(states(late.id)).toEqual(['ended']);
   });
+});
+
+it('accepts a fresh socket order, discards a late snapshot from its replaced socket and keeps lease IDs out of the machine reply', async () => {
+  const c = await failureCompany();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+  const start = Date.now();
+  const machine = { cpus: 1, load: 0, memFree: 1e9, memTotal: 2e9, tests: 0, jobs: 0 };
+  let stored: SaidLoad | null = null;
+  vi.spyOn(c.ctx.hub, 'report').mockImplementation((_id, load) => { stored = { ...load, at: Date.now() }; });
+  vi.spyOn(c.ctx.hub, 'loadOf').mockImplementation(() => stored);
+  let linkId = 'old';
+  vi.spyOn(c.ctx.hub, 'isCurrentLink').mockImplementation((_id, seen) => seen === linkId);
+  const report = (sequence: number, ids: string[]) => ({ type: 'load' as const, ...machine, checkLeases: { sequence, ids } });
+  const receive = (sequence: number, ids: string[]) => receiveNodeMessage(c.ctx, BUILTIN, report(sequence, ids), { linkId, receivedAt: Date.now() });
+  const a = randomUUID(), b = randomUUID();
+  await receive(99, []);
+  vi.setSystemTime(start + CHECK_LEASE_MS + 1);
+  await receive(100, []);
+  await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.acquire', id: a, label: 'build' });
+  await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.acquire', id: b, label: 'lint' });
+  const holds = () => checkQueueSnapshot(c.ctx, BUILTIN)?.holders.map(entry => entry.request.id);
+  expect(holds()).toEqual([a]);
+
+  vi.setSystemTime(Date.now() + LOAD_MS + 2);
+  const previous = { linkId, receivedAt: Date.now() - 1 };
+  linkId = 'new';
+  await receive(1, [a, b]);
+  // Its handler may have started before the socket was replaced and finish after the new socket reported.
+  await handleNodeMessage(c.ctx, BUILTIN, report(101, []), new Date(), previous);
+  expect(holds()).toEqual([a]);
+
+  const response = await c.app.inject({ url: '/api/machines', ...c.as(c.ceo) });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ builtin: { load: machine } });
+  expect(response.body).not.toContain('checkLeases');
+  expect(response.body).not.toContain(a);
+  expect(response.body).not.toContain(b);
+
+  await receive(2, [b]);
+  expect(holds()).toEqual([b]);
 });

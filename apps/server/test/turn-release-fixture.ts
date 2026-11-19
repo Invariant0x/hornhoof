@@ -35,7 +35,7 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
     const repo = repoAt(at.url);
     const branch = 'branch' in want ? want.branch : `task-${want.task}`;
     const commitSha = repo.heads[branch] ?? repo.tags[branch];
-    return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.` };
+    return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.`, missing: true };
   };
   ctx.readCompare = async (at, want) => {
     const repo = repoAt(at.url);

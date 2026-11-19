@@ -56,6 +56,7 @@ import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
 import { heldJobs } from './held-jobs.js';
 import { nodeLog } from './node-log.js';
+import { AuthorChecks } from './author-check.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -378,6 +379,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let workError: string | null | undefined = workAtStart === null ? null : undefined;
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
+  const authorChecks = new AuthorChecks(dir, testUser, partUser, emit);
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: { has: partId => outbox.doneParts().includes(partId) }, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => checks.refused() ?? noRunsBecause(testUser, browserError);
   const tellStatus = () => {
@@ -422,6 +424,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (terminal) live = await terminal.tmux.livePrograms();
   };
   const liveNow = () => (live ? { live } : {});
+  let checkSequence = 0;
+  const checkLeases = () => ({ sequence: ++checkSequence, ids: checks.leaseIds() });
   /* The node stops once Hornhoof has heard of its removal, not before. */
   const removal = removalWatch(() => outbox.owes('removed'), () => stop());
 
@@ -436,6 +440,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onOpen(next, acks, tools) {
       send = next;
       online = true;
+      checkSequence = 0;
       outside.opened(next, tools);
       confirmed = acks;
       host?.closeViews();
@@ -444,7 +449,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, phoneList: true, phoneBaseline: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), checkLeases: checkLeases(), ...liveNow(), tests, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -471,6 +476,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
+    if (m.type === 'author_check.run') return authorChecks.start(m);
     if (isProgramControl(m)) return applyProgramControl(m, checks, host);
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
@@ -759,7 +765,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* Calls that wait for memory look again as the node looks at its machine. */
     calls.look();
     void recheckWork();
-    void lookLive().then(() => send?.({ type: 'load', ...said, ...liveNow() }));
+    void lookLive().then(() => send?.({ type: 'load', ...said, ...liveNow(), checkLeases: checkLeases() }));
   }, loadMs);
   reporting.unref();
 
@@ -767,6 +773,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
     phones.close();
+    authorChecks.stop();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);

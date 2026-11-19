@@ -6,7 +6,7 @@ export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly st
 export const PRIVATE_TOOLS = {
   entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: ['password', 'code'] } },
   save: { name: 'vault_save', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: [] } },
-  phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },
+  phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: ['typing'] } },
   delegate: { name: 'use_tool', _meta: { delegatesTool: true } },
 } as const;
 

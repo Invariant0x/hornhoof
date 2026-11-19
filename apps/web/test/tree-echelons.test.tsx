@@ -23,14 +23,15 @@ function card(language = 'en', workflow = ECHELON_WORKFLOW, activity: Department
 describe('the current echelon on a tree card', () => {
   it.each(['en', 'ru'])('shows the current route and attributed findings in %s', language => {
     card(language);
+    const stages = language === 'ru' ? ['Архитектура', 'Разработка', 'Проверка', 'Безопасность', 'Тесты'] : ['Architecture', 'Development', 'Review', 'Security', 'Tests'];
     const route = screen.getByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
-    expect(within(route).getAllByRole('listitem').map(step => step.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
-    expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
+    expect(within(route).getAllByRole('listitem').map(step => step.querySelector('b')!.textContent)).toEqual(stages);
+    expect(route.querySelector('[aria-current="step"]')).toHaveTextContent(stages[2]!);
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita');
     const findings = screen.getByRole('region', { name: language === 'ru' ? 'Находки по этапам' : 'Findings by stage' });
-    expect(findings).toHaveTextContent('Review');
-    expect(findings).toHaveTextContent('Security');
-    expect(findings).not.toHaveTextContent('Cleanup');
+    expect(findings).toHaveTextContent(stages[2]!);
+    expect(findings).toHaveTextContent(stages[3]!);
+    expect(findings).not.toHaveTextContent(language === 'ru' ? 'Уборка лишнего' : 'Cleanup');
     expect(screen.queryByText(/Review of the turn|Ревью хода/)).not.toBeInTheDocument();
   });
 

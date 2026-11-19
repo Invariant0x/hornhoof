@@ -12,7 +12,8 @@ export const LANGUAGES: { id: Language; name: string }[] = [
   { id: 'ru', name: 'Русский' },
 ];
 
-const DICTIONARIES: Record<Language, Messages> = { en, ru };
+/* Every language the product ships, by its id. */
+export const DICTIONARIES: Record<Language, Messages> = { en, ru };
 const KEY = 'hh-lang';
 
 const isLanguage = (v: string | null | undefined): v is Language => v === 'en' || v === 'ru';

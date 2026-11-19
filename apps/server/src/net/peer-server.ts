@@ -382,7 +382,8 @@ export class PeerServer {
   }
 
   /* A path of a planned switch: its body is read whole, as JSON and no longer than a hello, and what handles it gives
-     the answer. What it wants done after the answer is done once the stream that carried it has ended. */
+     the answer. What it wants done after the answer is done once the stream that carried it has ended, and at once
+     when that stream was gone before the answer: what was asked is done by then, whether or not the peer hears it. */
   private async answerSwitch(stream: ServerHttp2Stream, peer: Peer, method: 'GET' | 'POST', path: string): Promise<void> {
     const { switches } = this.opts;
     if (!switches) return answerEmpty(stream, 404);
@@ -400,7 +401,7 @@ export class PeerServer {
       }
     }
     const answer = await switches.handle(peer, method, path, body).catch(() => null);
-    if (isGone(stream)) return;
+    if (isGone(stream)) return answer?.after?.();
     if (!answer) return answerEmpty(stream, 500);
     const said = JSON.stringify(answer.body);
     if (answer.after) stream.once('close', answer.after);

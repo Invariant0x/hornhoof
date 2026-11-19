@@ -89,6 +89,20 @@ describe("the check on the orchestrator's SQL", () => {
     await expect(checkAgentSql(text)).rejects.toEqual(refusedFor(name));
   });
 
+  it.each([
+    'pg_advisory_lock', 'pg_advisory_lock_shared', 'pg_advisory_xact_lock', 'pg_advisory_xact_lock_shared',
+    'pg_try_advisory_lock', 'pg_try_advisory_lock_shared', 'pg_try_advisory_xact_lock', 'pg_try_advisory_xact_lock_shared',
+    'pg_advisory_unlock', 'pg_advisory_unlock_shared', 'pg_advisory_unlock_all',
+  ])('refuses a SQL reader call to %s', async name => {
+    const arg = name === 'pg_advisory_unlock_all' ? '' : '1';
+    await expect(checkAgentSql(`SELECT ${name}(${arg})`)).rejects.toEqual(refusedFor(name));
+  });
+
+  it('recognizes an advisory lock function through the parsed name', async () => {
+    await expect(checkAgentSql('SELECT pg_catalog."pg_advisory_xact_lock"(1)')).rejects.toEqual(refusedFor('pg_advisory_xact_lock'));
+    await expect(checkAgentSql("SELECT 'pg_advisory_xact_lock', lower('Ready')")).resolves.toBeUndefined();
+  });
+
   /* Each place is one a list of node kinds could forget. */
   it.each([
     'WITH d AS (DELETE FROM agents WHERE pg_reload_conf() RETURNING id) SELECT * FROM d',

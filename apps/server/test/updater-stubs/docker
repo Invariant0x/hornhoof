@@ -381,7 +381,7 @@ case "$1 $2" in
         case " $* " in
           *' --entrypoint bash '*)
             printf '%s' "${!#}" > "$STUB_STATE/computer-command"
-            [ -z "${STUB_CLOSE_ON_CREATE:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
+            [ -z "${STUB_CLOSE_ON_CREATE:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_COMPUTER_CONTROL_DIR/computer.json"
             echo cid-computer ;;
           *) echo "cid-$(ref_tag "$2")" ;;
         esac ;;

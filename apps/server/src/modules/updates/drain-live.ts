@@ -122,8 +122,9 @@ async function nodeSignAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[
   return latest([ctx.hub.lastSeenAt(node), ctx.hub.loadOf(node)?.at, await persistedNodeSignAt(ctx, node), ...reportedAt, ...activity.values()]) ?? takenAt;
 }
 
-/* A test part runs until the time of its run is up, and the grace after it. */
-const partLive = (now: number) => (p: RunningPart): boolean => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
+/* An uncapped part stays live while its node reports in. A capped part also gets the grace after its limit. */
+const partLive = (now: number) => (p: RunningPart): boolean =>
+  p.timeoutMs === 0 ? p.startedAt !== null : (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
 
 function jobLive(ctx: Ctx, job: RunningJob, externalUntil: string | null, activityAt: number | undefined, now: number): boolean {
   if (job.kind !== 'conversation') return job.timeoutMs === 0 || jobTakenAt(job) + job.timeoutMs > now;

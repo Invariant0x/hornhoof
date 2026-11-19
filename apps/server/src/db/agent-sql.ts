@@ -26,7 +26,7 @@ export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => P
    the link runs. And the count of failed sign-ins, as a row taken out of it would give a guesser more tries. The keys of
    git hosts Hornhoof creates repositories with too: a row put there would send a new repository and its key to another
    account. */
-export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames'];
+export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'revoked_certificate_serials', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames'];
 /* Columns that hold a password, a token or a key, or private words: Operations reads none of them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {

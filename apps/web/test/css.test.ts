@@ -81,14 +81,17 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   expect(decl('.ast.alarm', 'background')).toBe('var(--red)');
   expect(decl('.ast.alarm', 'color')).toBe('var(--on-red)');
   for (const frame of ['.schip:has(.ast.alarm) > .edge', '.shead:has(.ast.alarm) > .edge', '.tview .lchip:has(.ast.alarm)']) expect(decl(frame, 'background')).toBe('var(--red)');
-  /* The tree's shared fixed-size Chip keeps the state badge visible and clips only long text on its single status line. */
+  /* The tree's shared Chip keeps the state badge whole: on one line where it fits, else wrapped inside its frame, and the
+     task's words wrap after it. */
   expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
   expect(decl('.ast', 'flex')).toBe('none');
   expect(decl('.ast', 'white-space')).toBe('nowrap');
   expect(decl('.schip .r3 .ast', 'margin-right')).toBe('6px');
-  expect(decl('.schip .r3', 'white-space')).toBe('nowrap');
-  expect(decl('.schip .r3', 'overflow')).toBe('hidden');
-  expect(decl('.schip .r3', 'text-overflow')).toBe('ellipsis');
+  expect(decl('.schip .r3 .ast', 'max-width')).toBe('100%');
+  expect(decl('.schip .r3 .ast', 'white-space')).toBe('normal');
+  expect(decl('.schip .r3', 'white-space')).toBeUndefined();
+  expect(decl('.schip .r3', 'overflow')).toBeUndefined();
+  expect(decl('.schip .r3', 'text-overflow')).toBeUndefined();
 });
 
 it('wraps question materials and keeps their viewer and actions inside the available width', () => {

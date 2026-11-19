@@ -51,12 +51,18 @@ test('the publish job moves exactly those images, by digest, and the app image l
   assert.match(images.publish, /"ghcr\.io\/invariant0x\/\$1:latest" \| jq -r '\.digest \/\/ empty'[^]*if \[ "\$digest" != "\$2" \]; then\n[^]*exit 1\n/);
 });
 
+/* The images, publish and release jobs each ask scripts/version-out.mjs, with the workflow's token, whether the version is out. */
+const looksWith = (step, job) => {
+  assert.match(step, new RegExp(`\\n {8}run: node scripts/version-out\\.mjs ${job}\\n`));
+  assert.match(step, /GITHUB_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  assert.doesNotMatch(step, /gh api|git rev-parse/);
+};
+
 test('a commit on main whose version is out already moves nothing and fails nothing', () => {
   const steps = images.publish.split(/^ {6}- /m).slice(1);
   const look = steps.findIndex(step => /id: fresh\n/.test(step));
   assert.ok(look > 0, 'the publish job looks whether its version is out');
-  assert.match(steps[look], /gh api "repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/v\$version"/);
-  assert.match(steps[look], /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  looksWith(steps[look], 'publish');
   assert.ok(images.publish.indexOf('id: fresh') < images.publish.indexOf('id: built'), 'it looks before it finds the images');
   for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new' \}\}/, step.split('\n')[0]);
 });
@@ -75,8 +81,7 @@ test('a push to main builds the images of a new version only, and a run by hand 
   const steps = images.images.split(/^ {6}- /m).slice(1);
   const look = steps.findIndex(step => /id: fresh\n/.test(step));
   assert.equal(look, 1, 'the images job looks right after its checkout');
-  assert.match(steps[look], /if \[ "\$EVENT" = push \] && gh api "repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/v\$version"/);
-  assert.match(steps[look], /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  looksWith(steps[look], 'images');
   for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new'/, step.split('\n')[0]);
 });
 
@@ -86,6 +91,17 @@ test('one run at a time builds or moves the images of a branch, and none cancels
 
 test('a version is released only after its images went out', () => {
   assert.match(images.release, /needs: publish/);
+});
+
+test('the release job looks whether the version is released, and makes the release, with its tag when it has none, only when it is not', () => {
+  const steps = images.release.split(/^ {6}- /m).slice(1);
+  const look = steps.findIndex(step => /id: fresh\n/.test(step));
+  assert.ok(look > 0, 'the release job looks whether its version is released');
+  looksWith(steps[look], 'release');
+  const make = steps.slice(look + 1);
+  assert.equal(make.length, 1);
+  assert.match(make[0], /^name: Create the release, and its tag when it has none\n {8}if: \$\{\{ steps\.fresh\.outputs\.version == 'new' \}\}\n/);
+  assert.match(make[0], /gh release create "v\$version" --target "\$GITHUB_SHA" /);
 });
 
 test('the publish job moves tags on the runner and with the BuildKit the build variables name, as the images are built', () => {
@@ -159,7 +175,7 @@ test('the tests run in the parts the first job chose, and as the whole suite in 
 
 /* hornhoof.org/install.sh is the command the website gives, so it follows each release. */
 test('a new release starts the workflow that puts its installer on the website, which maintainers may also run from main', () => {
-  const step = images.release.slice(images.release.indexOf('Create the version tag and release'));
+  const step = images.release.slice(images.release.indexOf('Create the release, and its tag when it has none'));
   assert.ok(step.indexOf('gh workflow run installer-site.yml') > step.indexOf('gh release create'), step);
   assert.match(images.release, /actions: write/);
   assert.match(read('installer-site.yml'), /^on:\n {2}workflow_dispatch:\n/m);

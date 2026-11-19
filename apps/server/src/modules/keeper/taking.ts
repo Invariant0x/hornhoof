@@ -178,23 +178,26 @@ export type TakerOptions = {
   log: (line: string) => void;
 };
 
+/* What is done the first time it is asked, and never again. */
+function once(act: () => void): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    act();
+  };
+}
+
 /* In the follow keeper of the machine the server moves to: it answers the keeper that hands the server over. An offer
    is taken only from the machine its link names as the leader, and only while its copy is ready and follows; the go
    only from the machine that offered, before the deadline and while its apply worker runs. With the go written down
    and its subscription stopped, the keeper ends and starts again as the one that takes over. The deadline is counted
    on this machine's own clock from the moment the offer came, so two clocks that differ change nothing. */
 export class Taker {
-  /* This keeper was told to end, once. */
-  private ended = false;
+  /* The keeper ends, to start again as the one that takes the server; however often this is asked, it ends once. */
+  private readonly end = once(() => this.opts.exit());
 
   constructor(private readonly opts: TakerOptions) {}
-
-  /* The keeper ends, to start again as the one that takes the server; however often this is asked, it ends once. */
-  private end(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.opts.exit();
-  }
 
   private now(): number {
     return this.opts.now?.() ?? Date.now();
@@ -340,6 +343,10 @@ export class Promoter {
   private probedAt = -Infinity;
   private promoted = false;
   private failing = false;
+  /* This keeper gave the server back, and is to end: it never leads on, beside the machine that leads again. */
+  private gaveBack = false;
+  /* The keeper ends, to start again as one that follows; however often this is asked, it ends once. */
+  private readonly end = once(() => this.opts.exit());
 
   constructor(private readonly opts: PromoterOptions) {}
 
@@ -415,7 +422,7 @@ export class Promoter {
     if (written || taking.phase === 'promoted') return { status: 409, body: await saidOf(this.opts.sql, taking) };
     const gave = taking.phase !== 'aborted';
     const state = await this.giveBack(taking, null);
-    return { status: 200, body: state, ...(gave ? { after: () => this.opts.exit() } : {}) };
+    return { status: 200, body: state, ...(gave ? { after: () => this.end() } : {}) };
   }
 
   private async lookOnce(): Promise<void> {
@@ -428,6 +435,13 @@ export class Promoter {
       return;
     }
     if (taking.phase === 'promoted') this.promoted = true;
+    /* A give-back of this keeper's ends it also when the word to end was lost, with the answer to the machine that
+       called the move off or with a step that failed: its subscription follows again first, and it never leads on
+       what it wrote down, not even once that is old enough to forget. */
+    if (taking.phase === 'aborted' && this.gaveBack) {
+      if (!(await opts.subscription.enabled())) await opts.subscription.enable();
+      return this.end();
+    }
     const termWritten = taking.phase === 'go' ? await ownTerm(opts.sql, taking, opts.machine.networkId) : false;
     const { registered, foreign } = taking.phase === 'go' && !termWritten ? await this.named(taking) : { registered: false, foreign: false };
     const step = nextTakeStep({ now: this.now(), taking, termWritten, registered, probed: this.probed, appLeads: opts.appLeads(), foreign });
@@ -439,7 +453,7 @@ export class Promoter {
     if (step.do === 'promote') return this.promote(taking);
     if (step.do === 'abort') {
       await this.giveBack(taking, step.why);
-      return opts.exit();
+      return this.end();
     }
     if (step.do === 'done') {
       const term = await termOf(opts.sql);
@@ -550,7 +564,10 @@ export class Promoter {
      again, and what is written down says the old leader leads under its next term. */
   private async giveBack(taking: Taking, why: Taking['why']): Promise<TakeState> {
     const gave = taking.phase !== 'aborted';
-    if (gave) await this.opts.tunnel.stop();
+    if (gave) {
+      this.gaveBack = true;
+      await this.opts.tunnel.stop();
+    }
     const state = await abortNow(this.paths(), taking, false, why);
     if (gave) this.opts.log(`Gave the server back to ${taking.from.hostname || 'the machine that led'}: ${why === 'no_link' ? "hornhoof.org did not give this machine the company's name in time" : 'that machine called the move off'}.`);
     return state;

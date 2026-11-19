@@ -31,7 +31,7 @@ async function open(page: Page, lang: 'en' | 'ru', info?: TestInfo, width?: numb
   await page.evaluate(() => document.fonts.ready);
 }
 
-/* Sizes are read without the canvas' zoom. Long text stays clipped inside a fixed chip. */
+/* Sizes are read without the canvas' zoom. Every word stays: a plate is at least the chip's size and grows with its lines. */
 const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .lchip').evaluateAll((plates: HTMLElement[]) => plates.map(plate => {
   const parts = [...plate.querySelectorAll<HTMLElement>('*')].filter(el => !(el instanceof SVGElement));
   const font = (selector: string) => {
@@ -48,6 +48,17 @@ const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .
        those two layers draw no part of the plate, so their display none hides nothing of it. Every other part is checked. */
     hidden: parts.filter(el => !el.matches('.halo > .halo-glow, .halo > .halo-ring') && getComputedStyle(el).display === 'none').map(el => el.className),
     rows: [...plate.querySelectorAll<HTMLElement>('.mn, .r2, .r3')].map(el => ({ className: el.className, whiteSpace: getComputedStyle(el).whiteSpace, textOverflow: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflow })),
+    /* Whether any of its lines of words takes a second line: a run of words that wraps, or a part of a row that goes under
+       the rest of it. */
+    wrapped: (() => {
+      const lines = (tops: number[]) => tops.sort((a, b) => a - b).filter((top, i, all) => !i || top - all[i - 1]! >= 8).length;
+      const texts = document.createTreeWalker(plate, NodeFilter.SHOW_TEXT), words = document.createRange();
+      for (let text = texts.nextNode(); text; text = texts.nextNode()) {
+        words.selectNodeContents(text);
+        if (lines([...words.getClientRects()].filter(r => r.width).map(r => r.top)) > 1) return true;
+      }
+      return [...plate.querySelectorAll<HTMLElement>('.r1, .hx')].some(row => lines([...row.children].map(part => part.getBoundingClientRect().top)) > 1);
+    })(),
   };
 }));
 
@@ -87,7 +98,7 @@ async function expectBadgesHoldTheirText(page: Page) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
-      test(`plates of a full department keep their natural size in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
+      test(`plates of a full department show all their words in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
         test.setTimeout(180_000);
         await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
         await page.addInitScript(({ lang, theme }) => {
@@ -118,15 +129,17 @@ for (const lang of ['en', 'ru'] as const) {
         expect.soft(inFrame(frame, await box(labs.locator('.lchip.tk.turn'))), 'the turn branch is on the screen').toBe(true);
         expect.soft(inFrame(frame, await box(page.locator('svg[role="group"] .via.k'))), 'the fork of the turn is on the screen').toBe(true);
 
-        /* Every agent uses the same fixed chip and clipped text. */
+        /* Every agent uses the same chip, as wide as ever and at least as tall, with all of its words. */
         for (const plate of all) expect.soft(plate.hidden, `nothing of ${plate.name}'s plate is hidden`).toEqual([]);
+        for (const plate of all) expect.soft(plate.clipped, `nothing of ${plate.name}'s plate is cut`).toEqual([]);
         for (const plate of plates) {
           expect.soft(plate.fonts, `${plate.name}'s plate keeps its type`).toEqual(FONTS);
-          expect.soft(plate.size, `${plate.name}'s plate has the fixed size`).toEqual([PLATE.width, PLATE.height]);
+          expect.soft(plate.size[0], `${plate.name}'s plate keeps its width`).toBe(PLATE.width);
+          expect.soft(plate.size[1], `${plate.name}'s plate is at least the chip's height`).toBeGreaterThanOrEqual(PLATE.height);
           for (const row of plate.rows) {
-            expect.soft(row.whiteSpace, `${plate.name}'s text stays on one line`).toBe('nowrap');
-            expect.soft(row.textOverflow, `${plate.name}'s text is clipped with an ellipsis`).toBe('ellipsis');
-            expect.soft(row.overflow, `${plate.name}'s text does not stretch its chip`).toBe('hidden');
+            expect.soft(row.whiteSpace, `${plate.name}'s text wraps`).toBe('normal');
+            expect.soft(row.textOverflow, `${plate.name}'s text ends in no ellipsis`).toBe('clip');
+            expect.soft(row.overflow, `${plate.name}'s text is not cut`).toBe('visible');
           }
         }
         const of = (name: string) => labs.locator('.dept-chip').filter({ has: page.locator('.mn, b', { hasText: new RegExp(`^${name}`) }) });
@@ -144,19 +157,25 @@ for (const lang of ['en', 'ru'] as const) {
         await card('Oleg', LONG_ROLE);
         await card('Ostap', LONG_WAIT);
         await expect.soft(labs.locator('.lchip.tk.main')).toContainText(LONG_BRANCH);
-        const size = (name: string) => plates.find(p => p.name === name)!.size;
         expect.soft(all.find(p => p.name === 'turn-4')!.size, 'the turn plate is its natural size').toEqual([PLATE.width, 40]);
-        for (const name of ['Nora', 'Lena', 'Mark', LONG_NAME, 'Ostap']) expect.soft(size(name), `${name}'s long or short text keeps the fixed size`).toEqual([PLATE.width, PLATE.height]);
+        /* Words that fit their lines keep the chip's size; more lines make it taller, the long name's too. */
+        for (const plate of plates) {
+          if (plate.wrapped) expect.soft(plate.size[1], `${plate.name}'s plate grows with its lines`).toBeGreaterThan(PLATE.height);
+          else expect.soft(plate.size, `${plate.name}'s plate is the chip's size`).toEqual([PLATE.width, PLATE.height]);
+        }
+        expect.soft(plates.find(p => p.name === LONG_NAME)!.wrapped, 'the long name takes more lines').toBe(true);
 
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
         await expectBadgesHoldTheirText(page);
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the page itself does not scroll sideways').toBe(true);
 
-        /* A longer task title changes only its clipped text, never the chip or the rows below. */
+        /* A longer line makes only its own plate taller, and the rows under it move down by as much. */
+        const short = await box(of('Nora')), gap = (await box(of('Oleg'))).y - short.y;
         await of('Nora').locator('.r2').evaluate((title, text) => { title.textContent = text; }, ` ${LONG_TITLE}`);
-        expect.soft(size('Nora')).toEqual([PLATE.width, PLATE.height]);
-        expect.soft((await box(of('Oleg'))).y - (await box(of('Nora'))).y).toBe(96);
+        await expect.poll(async () => (await box(of('Nora'))).height, { message: "Nora's plate grows with the long line", timeout: 10_000 }).toBeGreaterThan(short.height);
+        const nora = await box(of('Nora'));
+        await expect.poll(async () => Math.abs((await box(of('Oleg'))).y - nora.y - (gap - short.height + nora.height)), { message: 'the plates under it move down', timeout: 10_000 }).toBeLessThanOrEqual(1);
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
 

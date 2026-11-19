@@ -75,13 +75,13 @@ describe('reading a commit from a repository', () => {
     commitOn(dir, 'task-5-b');
     const url = await host(dir);
     expect(await readCommit({ url, token: '' }, { task: 5 })).toEqual({ problem: expect.stringContaining('task-5-a, task-5-b') });
-    expect(await readCommit({ url, token: '' }, { task: 6 })).toEqual({ problem: expect.stringContaining('task-6') });
+    expect(await readCommit({ url, token: '' }, { task: 6 })).toEqual({ problem: expect.stringContaining('task-6'), missing: true });
   });
 
   it('says a named branch is missing rather than taking another', async () => {
     const dir = repository();
     commitOn(dir, 'task-5-checkout');
-    expect(await readCommit({ url: await host(dir), token: '' }, { branch: 'task-5' })).toEqual({ problem: expect.stringContaining('no branch task-5') });
+    expect(await readCommit({ url: await host(dir), token: '' }, { branch: 'task-5' })).toEqual({ problem: expect.stringContaining('no branch task-5'), missing: true });
   });
 
   /* A tag is no branch: what it points at says so, and a shared test run takes no tag for a release branch. */
@@ -118,7 +118,7 @@ describe('reading a commit from a repository', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-refs-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     git(dir, 'init', '--quiet', '--initial-branch=main');
-    expect(await readCommit({ url: await host(dir), token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main') });
+    expect(await readCommit({ url: await host(dir), token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main'), missing: true });
   });
 
   it('asks for the refs under the address as it is saved, with or without a slash at its end', async () => {
@@ -171,20 +171,28 @@ describe('reading a commit from a repository', () => {
     expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('not a git repository') });
   });
 
-  it('ends on a broken answer instead of reading on', async () => {
+  it('refuses a broken answer instead of treating the branch as absent', async () => {
     const url = await serve((_req, res) => {
       res.writeHead(200, { 'content-type': ADVERTISEMENT });
       res.end('zzzz not lines at all 0000');
     });
-    expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main') });
+    expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('branch list was incomplete') });
   });
 
-  it('finds no branch in an answer with no body', async () => {
+  it('requires the advertisement after the service header before reporting a missing branch', async () => {
+    const url = await serve((_req, res) => {
+      res.writeHead(200, { 'content-type': ADVERTISEMENT });
+      res.end('001e# service=git-upload-pack\n0000');
+    });
+    expect(await readCommit({ url, token: '' }, { task: 5 })).toEqual({ problem: expect.stringContaining('branch list was incomplete') });
+  });
+
+  it('refuses an answer with no branch list', async () => {
     const url = await serve((_req, res) => {
       res.writeHead(204, { 'content-type': ADVERTISEMENT });
       res.end();
     });
-    expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main') });
+    expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('branch list was incomplete') });
   });
 
   it('stops reading an answer that will not end, at its limit', async () => {

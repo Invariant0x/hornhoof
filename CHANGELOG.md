@@ -7,6 +7,24 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- A version whose tag reaches GitHub with main still gets its images built, published and released: a version counts as out only once its images are published, and as released once its tag has a release.
+- When GitHub or the image registry answers with an error or cannot be reached, a release stops and says why, and leaves the latest images and the releases as they are.
+
+### Changed
+
+- A computer can run several test parts at once when its memory and cores fit their workers, with an optional upper limit in `MAX_RUNS_PER_HOST`.
+- Test parts renew their time budget as they produce output or results. The node stops a silent part using its files' recorded times, or when the part reaches an explicit upper limit.
+- A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
+- A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
+
+## [0.34.5] - 2026-11-19
+
+### Fixed
+
+- Department cards, the head card, role frames and the hint show every word and grow taller instead of cutting text.
+
 ## [0.34.4] - 2026-11-19
 
 ### Fixed

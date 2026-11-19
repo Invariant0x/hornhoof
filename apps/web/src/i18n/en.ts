@@ -702,12 +702,16 @@ export const en = {
     fallbackAddLabel: (name: string) => `Add a fallback plan for ${name}`,
     fallbackModel: "The role's model",
     fallbackModelLabel: (plan: string) => `Model on ${plan}`,
+    /* The label over a fallback plan's model field. */
+    fallbackModelField: 'Model',
     fallbackUp: 'Higher',
     fallbackDown: 'Lower',
     fallbackRemove: 'Remove',
     fallbackUpLabel: (plan: string) => `Move ${plan} higher`,
     fallbackDownLabel: (plan: string) => `Move ${plan} lower`,
     fallbackRemoveLabel: (plan: string) => `Remove ${plan} from the fallback plans`,
+    /* Said to a screen reader once a fallback plan moved and the move is saved. */
+    fallbackMoved: (plan: string, place: number) => `${plan} is now number ${place} of the fallback plans.`,
     runTest: 'Run a test',
     runTestLabel: (name: string) => `Run a test on ${name}`,
     testing: 'Checking. This can take up to two minutes.',

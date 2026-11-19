@@ -104,7 +104,7 @@ const numberOf = (msg: ProgramNodeMessage): number | null => {
 };
 
 /* Provenance created by the server for the socket, never a field of its frames. */
-export type NodeTransport = Readonly<{ linkId: string }>;
+export type NodeTransport = Readonly<{ linkId: string; receivedAt?: number }>;
 
 type HubOptions = {
   pingMs: number;
@@ -209,7 +209,8 @@ export class NodeHub {
       return chain;
     }
     const current = () => this.sockets.get(key) === entry && !entry.refused;
-    const deliver = () => (current() ? this.opts.onMessage(id, msg, { linkId: entry.link }) : Promise.resolve());
+    const transport = { linkId: entry.link, receivedAt: entry.heardAt };
+    const deliver = () => (current() ? this.opts.onMessage(id, msg, transport) : Promise.resolve());
     const report = (err: unknown) => this.opts.onError?.(err);
     if (isAwaitedFrame(msg)) {
       void deliver().catch(report);

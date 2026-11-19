@@ -268,7 +268,10 @@ async function crapperStage(context) {
   }
   showJudged(judged, context.ports.log);
   context.numbers.worstCrap = worstCrap(judged);
-  return crapperOutcome(judged, groups);
+  const outcome = crapperOutcome(judged, groups);
+  const noGrowth = groups.every(group => !context.plan.grown[group.cwd]?.length);
+  return outcome.status === 'passed' && context.numbers.worstCrap === null && noGrowth
+    ? { ...outcome, reason: 'no_new_or_grown_functions' } : outcome;
 }
 
 async function dryerStage(context) {
@@ -297,7 +300,7 @@ function stageLine({ name, status, exitCode, reason }, seconds) {
 }
 
 function finished(sha, scope, stages, numbers) {
-  const record = { version: 1, submissionCommit: sha, checkCommit: sha, scope, stages: stages.map(({ name, status, exitCode }) => ({ name, status, exitCode, partId: null })), numbers };
+  const record = { version: 1, submissionCommit: sha, checkCommit: sha, scope, stages: stages.map(({ name, status, exitCode, reason }) => ({ name, status, exitCode, ...(reason ? { reason } : {}), partId: null })), numbers };
   return { stages, numbers, record };
 }
 
@@ -325,5 +328,6 @@ export async function runStages(input, ports) {
   }
   context.numbers.changedLines = changedLineNumbers(context);
   const whole = (input.selection.packages ?? []).some(item => item.mode === 'whole-package');
-  return finished(input.sha, { kind: whole ? 'package' : 'changed', paths: input.plan.changes.map(change => change.path), leftToFullRun }, stages, context.numbers);
+  const comparedPaths = [...new Set(input.plan.changes.flatMap(change => change.previousPath ? [change.path, change.previousPath] : [change.path]))];
+  return finished(input.sha, { kind: whole ? 'package' : 'changed', paths: comparedPaths, leftToFullRun }, stages, context.numbers);
 }

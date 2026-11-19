@@ -1,3 +1,4 @@
+import { REVIEW_SKIP_ENABLED, requestAuthorCheck } from './author-check.js';
 import { idOnly } from '../../db/selections.js';
 import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
@@ -226,6 +227,7 @@ class TaskTools {
   }
 
   private registerExecutionTools(): void {
+    this.registerAuthorCheck();
     this.registerSubmit();
     this.registerBlocked();
     this.registerVerdict();
@@ -663,7 +665,7 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
+        description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
       },
       async input =>
@@ -759,11 +761,24 @@ class TaskTools {
     );
   }
 
+  private registerAuthorCheck(): void {
+    this.server.registerTool('check_author', {
+      description: REVIEW_SKIP_ENABLED
+        ? 'Requests check:author on the pushed Development candidate. The server pins the candidate and the current turn or main base. The node records the result on the task. Use the returned baseCommit for submit after this check finishes.'
+        : 'Disabled. Submit the candidate for Review.',
+      inputSchema: z.strictObject({ task: Ref }),
+    }, async ({ task: ref }) => this.run(async () => {
+      const { task } = await this.find(ref);
+      const result = await requestAuthorCheck(this.ctx, this.job.agentId, this.job.id, task.id);
+      return { text: JSON.stringify(result) };
+    }));
+  }
+
   private registerSubmit(): void {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again, unless its previous Review was skipped on an author receipt. A new commit then needs Review. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
       async ({ task: ref, summary, evidence, review, operationId }) =>

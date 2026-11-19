@@ -92,7 +92,7 @@ describe('one commit for a whole run', () => {
   it.each([
     { name: 'that failed on the pinned commit', end: { ok: false, exitCode: 1, error: 'failed', commit: TEST_COMMIT }, why: 'exit code 1' },
     { name: 'that never reached a commit', end: { ok: false, exitCode: null, error: 'clone_failed', commit: null }, why: 'the pinned commit could not be fetched' },
-    { name: 'that ran out of time before saying where it was', end: { ok: false, exitCode: null, error: 'timeout', commit: null }, why: 'did not end within' },
+    { name: 'whose operation timed out in a run without an upper limit', end: { ok: false, exitCode: null, error: 'timeout', commit: null }, why: 'an operation took too long' },
     { name: 'whose command was killed on the pinned commit', end: { ok: false, exitCode: null, error: 'failed', commit: TEST_COMMIT }, why: 'it failed' },
     { name: 'whose node names no reason', end: { ok: false, exitCode: 2, error: null, commit: TEST_COMMIT }, why: 'exit code 2' },
   ])('keeps its own reason for a part $name', async ({ end, why }) => {

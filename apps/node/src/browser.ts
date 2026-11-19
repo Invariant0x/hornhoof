@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, type Stats } from 'node:fs';
+import { chmodSync, closeSync, constants, cpSync, existsSync, fstatSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, type Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type SystemFiles } from './isolation.js';
@@ -19,6 +19,7 @@ const STARTUP_TOOLS: { bin: string; args: string[] }[] = [
   ...['gh', 'shellcheck', '/usr/bin/time', 'strings', 'patch', 'ss', 'objdump'].map(bin => ({ bin, args: ['--version'] })),
 ];
 const MAX_REASON_LENGTH = 240;
+const MAX_LOCKFILE_BYTES = 16 * 1024 * 1024;
 const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const PLAYWRIGHT_PACKAGES = ['@playwright/test', 'playwright', 'playwright-core'] as const;
 /* The folder of the shared browsers that holds the Playwright packages the node installed, one folder for each version. */
@@ -93,9 +94,17 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 const versionOfEntry = (entry: unknown): string | null => safeVersion(asRecord(entry)?.version);
 
+function parseJsonRecord(text: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 function readJsonRecord(file: string): Record<string, unknown> | null {
   try {
-    return asRecord(JSON.parse(readFileSync(file, 'utf8')));
+    return parseJsonRecord(readFileSync(file, 'utf8'));
   } catch {
     return null;
   }
@@ -108,8 +117,8 @@ function versionInPackagesMap(packages: Record<string, unknown>, name: string): 
   return versionOfEntry(hit?.[1]);
 }
 
-function versionInNpmLock(file: string): string | null {
-  const lock = readJsonRecord(file);
+function versionInNpmLock(text: string): string | null {
+  const lock = parseJsonRecord(text);
   if (!lock) return null;
   const packages = asRecord(lock.packages);
   const deps = asRecord(lock.dependencies);
@@ -120,29 +129,79 @@ function versionInNpmLock(file: string): string | null {
   return null;
 }
 
-function versionInTextLock(file: string, pattern: RegExp): string | null {
-  if (!existsSync(file)) return null;
+// An absent lockfile allows fallback. A refused npm lockfile still takes precedence.
+function readLockfile(file: string): string | null | undefined {
   try {
-    const match = pattern.exec(readFileSync(file, 'utf8'));
-    return safeVersion(match?.[1]);
-  } catch {
-    return null;
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || stat.size > MAX_LOCKFILE_BYTES) return null;
+
+      // Allow one byte to detect growth after the size check and reject a partial read of the file.
+      const buffer = Buffer.allocUnsafe(stat.size + 1);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const count = readSync(fd, buffer, offset, buffer.length - offset, null);
+        if (count === 0) return buffer.toString('utf8', 0, offset);
+        offset += count;
+      }
+      return null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : null;
   }
+}
+
+function versionInPnpmLock(lock: string): string | undefined {
+  let packageIndent = Infinity;
+  let fieldIndent = Infinity;
+  for (const rawLine of lock.split('\n')) {
+    const line = rawLine.trimStart();
+    if (!line || line.startsWith('#')) continue;
+    const indent = rawLine.length - line.length;
+
+    // Stay inside a Playwright entry and read only its immediate fields.
+    if (indent <= packageIndent) {
+      packageIndent = /^(['"]?)(?:@playwright\/test|playwright)\1:$/.test(line.trimEnd()) ? indent : Infinity;
+      fieldIndent = Infinity;
+    } else if (indent <= fieldIndent) {
+      fieldIndent = indent;
+      const version = /^version:[ \t]*['"]?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(line)?.[1];
+      if (version) return version;
+    }
+  }
+  return undefined;
+}
+
+function versionInYarnLock(lock: string): string | undefined {
+  let playwrightEntry = false;
+  for (const rawLine of lock.split('\n')) {
+    const line = rawLine.trimEnd();
+    if (playwrightEntry) {
+      const version = /^[ \t]+version[ \t]+["']?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(line)?.[1];
+      if (version) return version;
+    }
+
+    // Yarn Classic can group several selectors on one header line.
+    playwrightEntry = line.endsWith(':') && /^[^\s#]/.test(line)
+      && line.slice(0, -1).split(',').some(selector =>
+        /^["']?(?:@playwright\/test|playwright)@[^"':]+["']?$/.test(selector.trim()));
+  }
+  return undefined;
 }
 
 export function playwrightVersionIn(repoDir: string): string | null {
   for (const name of ['package-lock.json', 'npm-shrinkwrap.json']) {
-    if (existsSync(join(repoDir, name))) return versionInNpmLock(join(repoDir, name));
+    const lock = readLockfile(join(repoDir, name));
+    if (lock !== undefined) return lock ? versionInNpmLock(lock) : null;
   }
-  const pnpm = versionInTextLock(
-    join(repoDir, 'pnpm-lock.yaml'),
-    /(?:@playwright\/test|playwright)['"]?:\s*\n(?:\s+[^\n]+\n)*?\s+version:\s*['"]?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/,
-  );
+  const pnpmLock = readLockfile(join(repoDir, 'pnpm-lock.yaml'));
+  const pnpm = pnpmLock && safeVersion(versionInPnpmLock(pnpmLock));
   if (pnpm) return pnpm;
-  return versionInTextLock(
-    join(repoDir, 'yarn.lock'),
-    /["']?(?:@playwright\/test|playwright)@[^"'\n:]+["']?:\n\s+version\s+["']?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/,
-  );
+  const yarnLock = readLockfile(join(repoDir, 'yarn.lock'));
+  return yarnLock ? safeVersion(versionInYarnLock(yarnLock)) : null;
 }
 
 function readPackageVersion(pkgDir: string): string | null {

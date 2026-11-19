@@ -1,4 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { checkRelease } from '../release/check.mjs';
+import { readProject } from '../release/project.mjs';
+import { beyondVersionAndNotes } from './release-commit.mjs';
 
 /* global fetch, AbortSignal */
 
@@ -8,7 +14,9 @@ const READ_MS = 20_000;
 const COMMIT = /^[0-9a-f]{40}$/;
 const env = process.env;
 
-export const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+/* What git prints, whole: a file's text keeps its last line ending, so a change there counts. */
+const gitText = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] });
+export const git = (...args) => gitText(...args).trim();
 
 const headers = () => ({ accept: 'application/vnd.github+json', authorization: `Bearer ${env.GITHUB_TOKEN}`, 'x-github-api-version': '2022-11-28' });
 
@@ -19,22 +27,73 @@ async function markOn(sha) {
   return (await res.json()).statuses.find(status => status.context === CONTEXT)?.state ?? null;
 }
 
+const parentsOf = sha => git('rev-list', '--parents', '-n', '1', sha).split(' ').slice(1);
+
 /* The second parent of a merge that holds exactly what that parent holds, so that its mark speaks for the merge. A merge
    that brings in anything more, as a conflict resolved by hand does, has no such parent. */
-function sameAsSecondParent(sha) {
-  const parents = git('rev-list', '--parents', '-n', '1', sha).split(' ').slice(1);
+function sameAsSecondParent(sha, parents) {
   if (parents.length !== 2) return null;
   return git('rev-parse', `${sha}^{tree}`) === git('rev-parse', `${parents[1]}^{tree}`) ? parents[1] : null;
 }
 
-/* The commit's own mark says it all when it has one; only a commit without one looks at its second parent. */
+/* Each path the commit changes over its parent with the letter git gives it. A moved file is one deleted and one added. */
+function changesOver(parent, sha) {
+  const fields = gitText('diff', '--name-status', '-z', '--no-renames', parent, sha).split('\0');
+  const changes = [];
+  for (let at = 0; at + 1 < fields.length; at += 2) changes.push({ status: fields[at], path: fields[at + 1] });
+  return changes;
+}
+
+/* The files the release check reads: the package.json files of the root and of its workspaces, and the notes. No folder
+   name starts with a dot, so none is .. and every file stays in the folder it is written to. */
+const RELEASE_CHECK_READS = /^(?:package\.json|CHANGELOG\.md|[^/.][^/]*\/[^/.][^/]*\/package\.json)$/;
+
+/* The release check reads the versions and the notes, the only files such a commit changes, and runs in the tests' first
+   part: so it runs here instead, on those files of the commit written out of git. It then says the same of a commit
+   whether or not it is the one checked out, as the choice of tests asks of the commits before it. Null when it passed. */
+function releaseCheckProblem(sha) {
+  const root = mkdtempSync(join(tmpdir(), 'hh-release-check-'));
+  try {
+    for (const path of git('ls-tree', '-r', '--name-only', '-z', sha).split('\0').filter(path => RELEASE_CHECK_READS.test(path))) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), gitText('show', `${sha}:${path}`));
+    }
+    checkRelease(readProject(root), { local: true });
+    return null;
+  } catch (error) {
+    return `its release check fails: ${error.message}`;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/* The one parent of a commit that changes only the versions and the release notes, so that its mark speaks for the release
+   commit too; otherwise why not. A merge never has one: what it brings in was checked against another parent. */
+function releaseParent(sha, parents) {
+  if (parents.length !== 1) return { why: parents.length ? 'it is a merge' : 'it is the first commit' };
+  const [parent] = parents;
+  const beyond = beyondVersionAndNotes(changesOver(parent, sha), path => ({ before: gitText('show', `${parent}:${path}`), after: gitText('show', `${sha}:${path}`) }));
+  if (beyond) return { why: beyond };
+  const problem = releaseCheckProblem(sha);
+  return problem ? { why: problem } : { parent };
+}
+
+async function borrowed(how, parent) {
+  const theirs = await markOn(parent);
+  return { proved: theirs === 'success', why: `${how} ${parent}, which has ${CONTEXT} = ${theirs ?? 'nothing'}.` };
+}
+
+/* The commit's own mark says it all when it has one. Only a commit without one takes the mark of the commit its tests stand
+   on: the second parent of a merge with its tree, or the parent of a release commit. */
 export async function proved(sha) {
   const own = await markOn(sha);
   if (own) return { proved: own === 'success', why: `${sha} has ${CONTEXT} = ${own}.` };
-  const parent = sameAsSecondParent(sha);
-  if (!parent) return { proved: false, why: `${sha} has no ${CONTEXT}.` };
-  const theirs = await markOn(parent);
-  return { proved: theirs === 'success', why: `${sha} has the tree of its second parent ${parent}, which has ${CONTEXT} = ${theirs ?? 'nothing'}.` };
+  const parents = parentsOf(sha);
+  const second = sameAsSecondParent(sha, parents);
+  if (second) return borrowed(`${sha} has the tree of its second parent`, second);
+  const release = releaseParent(sha, parents);
+  if (release.parent) return borrowed(`${sha} changes only versions and release notes, and its release check passed, over its parent`, release.parent);
+  return { proved: false, why: `${sha} has no ${CONTEXT}, and takes none from a parent: ${release.why}.` };
 }
 
 /* What the mark says: the whole suite passed, or the tests the change since a passed commit reaches did. Either way every

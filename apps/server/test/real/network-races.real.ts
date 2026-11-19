@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
@@ -9,6 +9,7 @@ import { hashToken } from '../../src/crypto/tokens.js';
 import { APP_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
 import { certificates, companies, machines, people } from '../../src/db/schema.js';
 import { claimRenewal, hostIdOf, issueTicket, lockLiveMachine, revokeMachineRows } from '../../src/modules/network/join.js';
+import { joinMessage } from '../../src/modules/network/join-proof.js';
 import { certify, makeAuthorityOnce } from '../../src/modules/network/store.js';
 import { setUpCompany, TEST_SECRET, until } from '../helpers.js';
 import { poolOf, realDatabase, sessionsWaitingOnALock, type RealDatabase } from './pg.js';
@@ -47,6 +48,14 @@ afterAll(async () => {
 });
 
 const newKey = (): string => generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+function signedJoin(ticket: string, machineKey: string) {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const networkId = hostIdOf(machineKey);
+  const signKey = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const signature = sign(null, Buffer.from(joinMessage(ticket, networkId)), privateKey).toString('base64');
+  return { ticket, networkId, signKey, signature };
+}
 
 /* A worker of the network with one certificate, as a join leaves it. */
 async function worker(name: string) {
@@ -128,7 +137,7 @@ describe("the lock on a machine's row", () => {
     const [row] = await db.insert(machines).values({ companyId, personId, machineKey, hostname: 'leaving' }).returning();
     const ticket = await issueTicket(db, row!.id);
     const holder = await holding(MACHINE_ROW, [row!.id]);
-    const join = app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId: hostIdOf(machineKey), signKey: newKey() } });
+    const join = app.inject({ method: 'POST', url: '/api/network/join', payload: signedJoin(ticket, machineKey) });
     const disconnect = other.transaction(async tx => {
       const now = new Date();
       await tx.update(machines).set({ revokedAt: now }).where(eq(machines.id, row!.id));
@@ -141,13 +150,13 @@ describe("the lock on a machine's row", () => {
     expect(await liveCertificates(row!.id)).toEqual([]);
   });
 
-  it('gives two joins of one ticket at once one certificate and one refusal', async () => {
+  it('gives two identical signed joins one certificate and one refusal', async () => {
     const machineKey = 'joining-0001-abcd';
     const [row] = await db.insert(machines).values({ companyId, personId, machineKey, hostname: 'joining' }).returning();
     const ticket = await issueTicket(db, row!.id);
-    /* Two keepers with a key each: the one that comes second is not the one that used the ticket. */
+    const payload = signedJoin(ticket, machineKey);
     const holder = await holding('SELECT 1 FROM machine_tickets WHERE ticket_hash = $1 FOR UPDATE', [hashToken(ticket)]);
-    const joins = [0, 1].map(() => app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId: hostIdOf(machineKey), signKey: newKey() } }));
+    const joins = [0, 1].map(() => app.inject({ method: 'POST', url: '/api/network/join', payload }));
     await untilWaiting(2);
     await holder.query('COMMIT');
     const answers = await Promise.all(joins);
