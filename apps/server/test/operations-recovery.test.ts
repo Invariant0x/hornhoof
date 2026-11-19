@@ -140,7 +140,8 @@ describe('what Operations are told', () => {
       const [agent] = await c.db.select().from(agents).where(eq(agents.id, id));
       const told = renderInstructions(c.ctx.templates, agent!, await placeOf(c.db, agent!)).raw;
       expect(told, agent!.roleKey!).toContain('stop_employee');
-      expect(told, agent!.roleKey!).toMatch(/never ask a person to stop a turn/i);
+      expect(told, agent!.roleKey!).toMatch(/For a stalled turn with failed progress, stop with stop_employee, then verify the queue\./);
+      expect(told, agent!.roleKey!).toMatch(/Ask the account holder only for an action reserved to them/);
       expect(told, agent!.roleKey!).not.toContain('An old text of its own.');
     }
     const role = c.ctx.templates.roles.get('OPS-HEAD')!;

@@ -184,7 +184,7 @@ describe('a department that keeps no repository', () => {
     const { task } = await f.create({ paths: undefined });
     const told = (agentId: string, why: 'assigned' | 'review' | 'reviewed') => wakePrompt({ kind: 'worker' }, { ...task, assigneeAgentId: agentId }, { agentId, taskId: task.id, why }, 'document');
     expect(told(f.author.id, 'assigned')).toContain('hand the result in with submit as a document');
-    expect(told(f.checker.id, 'review')).toContain('give verdict naming candidateId');
+    expect(told(f.checker.id, 'review')).toContain('Give verdict naming candidateId when the document meets the goal.');
     expect(told(f.checker.id, 'review')).not.toMatch(/branch|commit/);
     expect(told(f.head.id, 'reviewed')).toContain('record acceptance with report done true');
   });

@@ -8,9 +8,8 @@ import { humanStatus } from '../task-tree';
 import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
 import { useLoadFailure } from './LoadFailure';
-import { Progress } from './TaskBoard';
 import { STATE_CLASS, WaitLine } from './TaskActivity';
-import { Answers, CardBar, CardPath, DueDay, Fact, goalChain, StatusPill, useEscapeCloses } from './TaskPanel';
+import { Answers, CardBar, CardPath, Fact, goalChain, StatusPill, useEscapeCloses } from './TaskPanel';
 import { GoalForm } from './TrackerForms';
 import { dueText, momentText, trackerLine } from './tracker-words';
 
