@@ -115,6 +115,22 @@ describe('Department view', () => {
     expect(diamonds.every(mark => mark.classList.contains('idle'))).toBe(true);
   });
 
+  /* 0.34.2 took the department structure list away: a department with routes opens on its staff schema, and no switch
+     leads to a list of its routes and stages (#1477). */
+  it('opens a department with routes on its staff schema, with no structure list to switch to', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const build = { id: 'build', parentId: null, name: 'Build the change', ownerRole: 'DEV-BE', owner: null, position: 0, echelon: 'development' };
+    const pipelines = [{ id: 'r1', department: { id: dev!.id, name: 'Development' }, name: 'Software changes', why: '', archived: false, isDefault: true, version: 1, stages: [build] }];
+    shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [{ ...dev!, pipelines }] }] });
+    await flyIn(user);
+    expect(screen.getByRole('region', { name: 'Department schema' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Department structure' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Software changes' })).toBeNull();
+    expect(screen.queryByText('Build the change')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Staff map' })).toBeNull();
+  });
+
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
   it('keeps the words of a department with no head and no employees in their own direction', () => {
     mockApi({});

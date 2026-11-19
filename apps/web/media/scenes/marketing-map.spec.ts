@@ -25,9 +25,9 @@ const ALL_SHAPES = [
 const SHAPES = ALL_SHAPES.filter(shape => !process.env.MEDIA_SHAPE || shape.name === process.env.MEDIA_SHAPE);
 const CLOSE = 100;
 
-/* The build in the corner of the map: the 0.34.1 release whose screens the cut shows (release-0.34.1 at e7348386), not the
-   older build the README scenes name. */
-const RELEASE = { version: '0.34.1', commit: 'e734838' };
+/* The build in the corner of the map: the 0.34.2 release whose screens the cut shows (main at c42c502b), not the older
+   build the README scenes name. */
+const RELEASE = { version: '0.34.2', commit: 'c42c502' };
 
 /* Development with some agents at work on named tasks and some plainly idle, so the map and the department show both. */
 const IDLE = new Set(['dev-perf', 'dev-8', 'dev-2', 'dev-4', 'dev-test']);
@@ -102,12 +102,12 @@ async function mapWindow(page: Page, viewport: { width: number; height: number }
   return { x: 0, y: top, width: viewport.width, height: bottom - top };
 }
 
-/* A spot of bare map, where a press pulls the map and opens nothing, nearest the wanted one. */
+/* A spot of bare map or bare department schema, where a press pulls the canvas and opens nothing, nearest the wanted one. */
 async function bareSpot(page: Page, near: Point): Promise<Point> {
   const spot = await page.evaluate(({ x, y }) => {
     const bare = (px: number, py: number) => {
       const el = document.elementFromPoint(px, py);
-      return !!el && (el.classList.contains('map') || el.classList.contains('world'));
+      return !!el && ['map', 'dcanvas', 'world'].some(name => el.classList.contains(name));
     };
     for (let r = 0; r < 300; r += 6) {
       for (let a = 0; a < 360; a += 15) {
@@ -267,21 +267,21 @@ for (const shape of SHAPES) {
     }
     await still(page, shape.name, '3-speed');
 
-    /* 4. Its whole structure: the way every change goes, stage by stage, a square for each agent and a diamond for each
-       one-shot call, the calls starting one after another. */
+    /* 4. Its whole structure on the staff schema: the way every change goes, stage by stage, a square for each agent and a
+       diamond for each one-shot call, the calls starting one after another. The hand pulls the schema along the way. */
     film.mark('structure');
     await film.glide(middleOf(await boxOf(panel.getByRole('button', { name: 'Close', exact: true }))), 500);
     await film.click();
     await film.until(async () => !(await panel.isVisible()));
-    const structure = page.locator('.dv-structure');
-    await expect(structure).toBeVisible();
-    const frame = await boxOf(structure);
-    await film.glide({ x: Math.round(frame.x + frame.width - 30), y: Math.round(frame.y + frame.height * 0.45) }, 500);
+    const schema = page.getByRole('region', { name: 'Department schema', exact: true });
+    await expect(schema).toBeVisible();
+    const area = await boxOf(schema);
+    await film.glide(await bareSpot(page, { x: Math.round(area.x + area.width * 0.75), y: Math.round(area.y + area.height * 0.85) }), 500);
     await rest(400);
     const latest = snapshots[2]!;
-    const review = page.locator('.dv-stage').filter({ has: page.getByRole('heading', { name: 'Review', exact: true }) });
-    const reviewTop = await review.evaluate((el, box) => el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop, await structure.elementHandle());
-    await film.scroll(structure, Math.max(0, reviewTop - 40), 1400);
+    const review = schema.getByRole('group', { name: 'Review', exact: true });
+    const call = middleOf(await boxOf(review));
+    await film.drag(Math.round(area.x + area.width / 2 - call.x), Math.round(area.y + area.height * 0.4 - call.y), 1400);
     api.setOrg(withCalls(latest.org, reviewCalls(latest.now, ['running', 'running', 'running'])));
     await pushStream(page, { type: 'org' });
     await rest(800);
@@ -289,9 +289,17 @@ for (const shape of SHAPES) {
     await pushStream(page, { type: 'org' });
     await rest(700);
     await expect(review.locator('.worker-mark[data-worker-kind="ghost"]')).toHaveCount(4);
+    /* Whole on screen. The take's clock stands between frames, so the page's own visibility checks never run. */
+    const shown = await boxOf(review);
+    expect(shown.x >= area.x && shown.y >= area.y && shown.x + shown.width <= area.x + area.width && shown.y + shown.height <= area.y + area.height).toBe(true);
     await still(page, shape.name, '4-structure');
-    const end = await structure.evaluate(el => el.scrollHeight - el.clientHeight);
-    await film.scroll(structure, end, 1200);
+    /* On towards the end of the way, the later stages and the report to the head, as far as one pull from the right edge
+       goes while the hand stays on the screen. It takes the schema just under the stage frames, clear of the header above
+       and the zoom and buttons below, which stay where they are. */
+    const right = await schema.locator('.frame').evaluateAll(frames => Math.max(...frames.map(f => f.getBoundingClientRect().right)));
+    const grip = await bareSpot(page, { x: Math.round(area.x + area.width * 0.85), y: Math.round(shown.y + shown.height + 48) });
+    await film.glide(grip, 400);
+    await film.drag(Math.min(0, Math.max(Math.round(area.x + area.width - 24 - right), Math.round(area.x + 24 - grip.x))), 0, 1200);
     await rest(400);
     await still(page, shape.name, '5-structure-end');
 
