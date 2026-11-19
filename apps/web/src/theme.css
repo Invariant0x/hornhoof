@@ -924,10 +924,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
    among them. Every word wraps inside its card, however narrow. */
 .plan-connection, .stalled { display: grid; gap: 8px; min-width: 0; }
 .stalled p { margin: 0; }
-.waiting > b, .waiting > .uprog-text, .stalled p { min-width: 0; overflow-wrap: anywhere; }
-/* The words stay beside the mark and wrap there; how long it has taken goes under them. */
-.waiting > b { flex: 1 1 0; }
-.waiting > .uprog-text { flex-basis: 100%; }
+.under-way > b, .under-way > .uprog-text, .stalled p { min-width: 0; overflow-wrap: anywhere; }
+/* The words stay beside the mark and wrap there; how long it has taken goes under them. Its own name, as the tracker's
+   .waiting is a section of work waiting for people. */
+.under-way > b { flex: 1 1 0; }
+.under-way > .uprog-text { flex-basis: 100%; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
