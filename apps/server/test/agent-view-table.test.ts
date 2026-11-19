@@ -253,7 +253,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
   'POST /api/recovery', 'GET /api/recovery', 'POST /api/recovery/restore', 'POST /api/recovery/challenge', 'PUT /api/recovery/bundles/:id',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
-  'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/models', 'POST /api/subscriptions/:id/models', 'GET /api/subscriptions/:id/tokens', 'GET /api/tokens', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
+  'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/models', 'POST /api/subscriptions/:id/models', 'GET /api/subscriptions/:id/tokens', 'GET /api/tokens', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/connecting/cancel', 'POST /api/subscriptions/:id/connecting/retry', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
   'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'GET /install.ps1', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
   'GET /robots.txt', 'GET /.well-known/acme-challenge/*',
 ];
