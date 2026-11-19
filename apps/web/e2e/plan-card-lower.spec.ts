@@ -245,13 +245,14 @@ for (const width of [1440, 375]) {
     const { card, errors } = await opened(page, look);
     const foot = card.locator('.plan-card-actions');
     const remove = foot.getByRole('button', { name: en.subs.removeLabel('Kimi'), exact: true });
-    const before = await box(foot.locator('.form-foot'));
+    /* Where a piece stands in the card, which keeps its place however far the page scrolled to show the focus. */
+    const inCard = async (piece: Locator) => (await box(piece)).y - (await box(card)).y;
     await remove.focus();
+    const before = await inCard(foot.locator('.form-foot'));
     await page.keyboard.press('Enter');
     await expect(foot.getByText(en.subs.removeAsk('Kimi'))).toBeVisible();
     await expect(foot.locator('.form-foot')).toHaveCount(0);
-    const question = await box(foot.locator('.ask'));
-    expect(Math.abs(question.y - before.y), 'the question stands where the foot stood').toBeLessThanOrEqual(1);
+    expect(Math.abs(await inCard(foot.locator('.ask')) - before), 'the question stands where the foot stood').toBeLessThanOrEqual(1);
     const cancel = foot.getByRole('button', { name: en.common.cancel, exact: true });
     await expect(cancel).toBeFocused();
     await foot.screenshot({ path: info.outputPath(`remove-question-${fileName(look)}-${browserName}.png`) });
@@ -272,6 +273,8 @@ for (const width of [1440, 375]) {
       const inside = await page.evaluate(() => Boolean(document.activeElement?.closest(':is(.plan-settings, .plan-fallbacks, .plan-card-actions)')));
       if (!inside) break;
       const named = await page.evaluate(() => document.activeElement!.getAttribute('aria-label') ?? document.activeElement!.textContent ?? '');
+      /* Past the page's last control Firefox leaves the focus where it was, as it goes to the browser's own bar. */
+      if (named === seen.at(-1)) break;
       seen.push(named);
       expect(await focusRing(page), `the ring of ${named}`).toBe('ring');
       if (named === en.subs.fallbackModelLabel('Codex, Product research')) await page.locator(':focus').evaluate(el => el.closest('.entry')!.scrollIntoView({ block: 'center' }));
