@@ -252,7 +252,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const subject = asked.success ? await structureSubject(db, me.companyId, asked.data) : CARD;
     const on = await cardDecision(me, subject);
     const body = BuildBody.parse(req.body);
-    if (body.items.some(item => 'department' in item && item.remove) && (!me.isOwner || me.via || me.assistant)) {
+    /* Removing a whole department is for good and the CEO's own; an empty product goes by its department's decision. */
+    const gone = body.items.flatMap(item => ('department' in item && item.remove ? [item.department] : []));
+    const whole = gone.length ? await db.select(idOnly(departments)).from(departments).where(and(inArray(departments.id, gone), eq(departments.companyId, me.companyId), isNull(departments.parentId))) : [];
+    if (whole.length && (!me.isOwner || me.via || me.assistant)) {
       throw new ApiError(403, 'forbidden', 'The CEO must approve this permanent deletion.', 'deletion_needs_ceo');
     }
 
