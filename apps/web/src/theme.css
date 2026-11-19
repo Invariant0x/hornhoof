@@ -283,7 +283,7 @@ select:disabled { opacity: .55; }
 .shell { position: relative; height: 100%; }
 .topbar {
   position: absolute; z-index: 10; top: 12px; left: 16px; right: 16px;
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px;
+  display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: start; gap: 8px;
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
@@ -297,12 +297,18 @@ select:disabled { opacity: .55; }
 .tabs.glass { border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .tabs button {
   height: 100%; padding: 0 14px; border: 0; background: none; cursor: pointer;
-  font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted);
+  font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap;
   box-shadow: inset 0 -2px 0 transparent;
 }
 .tabs button + button { border-inline-start: 1px solid var(--line); }
 .tabs button:hover { color: var(--ink); }
 .tabs button.on { color: var(--cyan-ink); background: var(--glow); box-shadow: inset 0 -2px 0 var(--cyan); }
+/* When the words of the tabs do not fit one line, each tab is its icon: cells of the strip's height with the icon in the
+   middle, in the tab's own colour, and the count of what waits on the icon's corner. */
+.tabs svg { display: block; flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: butt; stroke-linejoin: miter; }
+.tabs svg .cf { fill: currentColor; stroke: none; }
+.tabs[data-fit="icons"] button { position: relative; display: flex; align-items: center; justify-content: center; min-inline-size: 44px; }
+.tabs[data-fit="icons"] .nav-count { position: absolute; inset-block-start: 4px; inset-inline-start: calc(50% + 4px); margin: 0; }
 .tb-right { justify-self: end; display: flex; align-items: center; gap: 8px; }
 .account { position: relative; }
 .avatar { width: 44px; height: 44px; cursor: pointer; color: var(--ink); font-family: var(--f-display); font-size: 15px; font-weight: 600; }
@@ -987,15 +993,14 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   .dialog.about .facts dd { margin-block-end: 8px; }
 }
 
-/* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter and put a name of
-   several words on two lines, each word whole, so every tab stands whole in the strip, the account button stays in view
-   and the page itself never scrolls sideways. A strip still too long, of a longer language, scrolls inside itself. */
+/* On a phone the header stays one row: the mark gives its place to the tabs, which start the row, and the account button
+   stays in view. Tabs as icons share the whole row beside it in equal cells. */
 @media (max-width: 420px) {
   .topbar { left: 12px; right: 12px; gap: 6px; grid-template-columns: minmax(0, 1fr) auto; }
   .tb-brand { display: none; }
-  .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { flex: 0 1 auto; min-width: min-content; padding: 0 6px; font-size: 12px; line-height: 1.2; white-space: normal; overflow-wrap: normal; }
+  .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0; }
+  .tabs[data-fit="icons"] { justify-self: stretch; }
+  .tabs[data-fit="icons"] button { flex: 1 1 0; padding: 0; }
 }
 
 /* The structure card in the orchestrator's window. */
@@ -1424,17 +1429,26 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .pchip .pn span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-empty { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
 /* The department's name next to the logo, its actions bottom right and the drawer they open at the left. */
-.crumbs { position: absolute; z-index: 3; top: 12px; left: 68px; display: flex; align-items: center; gap: 8px; height: 44px; max-width: calc(50% - 280px); min-width: 0; }
+.crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: center; gap: 8px; height: 44px; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
 .crumbs h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--cyan-ink); }
 .crumb { display: flex; align-items: center; gap: 10px; height: 44px; box-sizing: border-box; min-width: 0; padding: 0 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
 /* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
    that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */
 @media (min-width: 761px) { .body.with-window .dv-acts, .body.with-task .dv-acts { left: 212px; right: auto; } }
-.hbtn { height: 44px; padding: 0 16px; box-sizing: border-box; color: var(--ink); font-family: var(--f-display); font-size: 14px; font-weight: 600; cursor: pointer; }
+.hbtn { height: 44px; padding: 0 16px; box-sizing: border-box; color: var(--ink); font-family: var(--f-display); font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .hbtn:hover { border-color: var(--line2); }
 .hbtn.on { color: var(--cyan-ink); box-shadow: inset 0 -2px 0 var(--cyan); }
 .dv-acts .btn { min-height: 44px; }
+/* The zoom, the line of what happened and the actions: on a wide screen each keeps its own place along the bottom. */
+.dv-dock, .dv-zoom { display: contents; }
+/* The tools in words stand apart. As icons they make one strip of 44 px cells drawn like the section tabs, and Hire stands
+   after them at the end of the row, on a row of its own when it does not fit. */
+.dv-tools { display: contents; }
+.dv-acts[data-fit="icons"] .dv-tools { display: flex; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
+.dv-acts[data-fit="icons"] .dv-tools > .hbtn { border: 0; background: none; }
+.dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
+.dv-acts[data-fit="icons"] > .btn { margin-inline-start: auto; padding-block: 8px; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
@@ -1658,15 +1672,29 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
-  .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
-  .dview .ticker { left: 16px; right: 16px; }
-  .dv-acts { left: 16px; right: 16px; bottom: 124px; flex-wrap: wrap; }
-  /* The hint of an empty map stands whole above the buttons, which may wrap to several rows: across the width, 16px above
-     the top of the buttons as the map measures it. */
+  /* The name of the department stands under the top bar and wraps its words; the tree and the drawers start under it, as the
+     department measures it. */
+  .crumbs { top: 64px; inset-inline-start: 16px; max-width: calc(100% - 32px); height: auto; align-items: flex-start; }
+  .crumb { height: auto; min-height: 44px; flex-wrap: wrap; padding-block: 8px; }
+  .crumbs h2 { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
+  .dv-acts { flex-wrap: wrap; }
+  /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
+     its top as the map measures it. */
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
   .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
+  .dv-drawer { top: var(--tree-top, 116px); }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-inline-start: 0; }
+  /* The dock stands across the bottom: the zoom at its end with out, in and Show everything, the line of what happened
+     across the width with all its words, and the row of tools and Hire. Its own gaps take no touch from the schema. */
+  .dv-dock { position: absolute; z-index: 3; inset-inline: 16px; inset-block-end: 16px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .dv-dock > * { pointer-events: auto; }
+  .dv-dock .zoom, .dv-dock > .ticker, .dv-dock > .dv-acts { position: static; }
+  .dv-dock .zoom { align-self: flex-end; max-inline-size: none; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
+  .dv-dock .zv { display: none; }
+  .dv-dock > .ticker { transform: none; max-width: none; align-items: flex-start; padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); white-space: normal; overflow: visible; }
+  .dv-dock .ticker .live { margin-block-start: calc((1lh - 7px) / 2); }
+  .dv-dock .ticker .tx { overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
 }
 @media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }
 
@@ -2576,7 +2604,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .dv-drawer.spd .pr-fail p { margin: 0; color: var(--red); }
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (max-width: 760px) {
-  .tview { top: 116px; right: 16px; bottom: var(--tree-bottom, 228px); }
+  .tview { top: var(--tree-top, 116px); right: 16px; bottom: var(--tree-bottom, 228px); }
   .tview .tv-card { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; }
   .tview .tv-card-in { max-height: min(440px, 76vh); }
   .tview .lgd-b span { display: none; }

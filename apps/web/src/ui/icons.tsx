@@ -160,6 +160,32 @@ export function SpeedIcon() {
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="gb" pathLength="4" d="M3 17A9 9 0 0 1 21 17"/><path className="gl" pathLength="3" d="M3 17A9 9 0 0 1 18.36 10.64"/><path d="M1.5 21H22.5M12 17l4.2-4.2"/><rect className="kf" x="10.2" y="15.2" width="3.6" height="3.6"/></svg>);
 }
 
+/* Lines of a list, for tasks. The icons below stand for a section or a tool when its words do not fit; their names say what
+   they are. */
+export function ListIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><rect className="cf" x="2.5" y="4.5" width="3" height="3"/><rect className="cf" x="2.5" y="10.5" width="3" height="3"/><rect className="cf" x="2.5" y="16.5" width="3" height="3"/><path d="M9 6H21.5M9 12H21.5M9 18H21.5"/></svg>);
+}
+
+/* An i in a cut frame, for what a place is about. */
+export function InfoIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2.5h10L21.5 7v10L17 21.5H7L2.5 17V7z"/><path className="c" d="M12 10.5V17.5"/><rect className="cf" x="10.75" y="6.25" width="2.5" height="2.5"/></svg>);
+}
+
+/* Two people, one behind the other. */
+export function PeopleIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 4.5h3L12 6v3l-1.5 1.5h-3L6 9V6z"/><path d="M2.5 21v-3.5L5 15h8l2.5 2.5V21"/><path className="c" d="M15 4.5h1.5L18 6v3l-1.5 1.5H15M18 15h1l2.5 2.5V21"/></svg>);
+}
+
+/* A plug, for the subscriptions and keys the company connects. */
+export function PlugIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 2.5V7M15.5 2.5V7"/><path d="M5 7h14v5l-3.5 3.5h-7L5 12z"/><path className="c" d="M12 15.5V21.5"/></svg>);
+}
+
+/* A computer screen on its stand, for machines. */
+export function MachineIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 4H20l1.5 1.5V16h-19z"/><path className="c" d="M12 16V20.5M7 20.5H17"/></svg>);
+}
+
 const TRACKER_ICONS = {
   failure: <><path d="M8 2 15 14H1L8 2Z" /><path d="M8 6v3m0 2v1" /></>,
   waits: <><rect x="2" y="4" width="12" height="8" /><path d="m2 4 6 5 6-5" /></>,
