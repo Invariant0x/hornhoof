@@ -307,7 +307,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
   }, [panel, icons, words, onCrumbs, tickerHidden]);
   useEffect(() => () => onCrumbs?.(0), [onCrumbs]);
   const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px`, '--tree-top': `${space.top}px` } as CSSProperties;
-  return { root, dock, actions, crumbs, style, icons, tickerHidden: space.tickerHidden };
+  return { root, dock, actions, crumbs, style, icons, top: space.top, tickerHidden: space.tickerHidden };
 }
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
@@ -364,21 +364,25 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     size.current = s;
   }, [s]);
 
-  /* Opens at a readable size from the left when the schema is wider than the screen; Fit shows all of it. */
+  /* Opens at a readable size from the left when the schema is wider than the screen; Fit shows all of it. The head card
+     opens no higher than the room under the department's name, as the department measures it: on a phone the name stands
+     under the top bar, and under any bars of the shell over the department too, and the head card opens 8 px under it. */
+  const roomTop = chrome.top;
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current;
       if (!el || !el.clientWidth) return;
       const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const padTop = 76, padBottom = 76, padX = 48;
+      const top = Math.max(padTop, roomTop);
       const bw = size.current.right + 80, bh = size.current.h + 40;
-      const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
+      const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - top - padBottom) / bh, 1));
       const k = whole || fitK >= START_K ? fitK : START_K;
       const x = k === fitK ? (width - bw * k) / 2 + 40 * k : padX + 40 * k;
-      const y = k === fitK ? padTop + (el.clientHeight - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
-      setView({ k, x: left + x, y, smooth: true });
+      const y = k === fitK ? top + (el.clientHeight - top - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
+      setView({ k, x: left + x, y: Math.max(roomTop, y), smooth: true });
     },
-    [covered, panel, setView],
+    [covered, panel, roomTop, setView],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card
