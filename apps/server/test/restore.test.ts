@@ -3,16 +3,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as age from 'age-encryption';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import type { FastifyRequest } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, assistants, certificates, computerRuns, departments, invites, machineAccess, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions } from '../src/db/schema.js';
+import { agents, assistants, certificates, computerRuns, departments, invites, machineAccess, machines, nodes, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, subscriptions } from '../src/db/schema.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { CHOICE_FILE } from '../src/modules/merge/kept.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { identify } from '../src/modules/nodes/socket.js';
 import { appOn, as, invitePerson, ownPlan, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
 import { backupCompany, from, MACHINE_ID, OWN } from './helpers-backups.js';
 import { openTestDb, prepareSharedDatabase } from './helpers-db.js';
@@ -348,6 +351,60 @@ describe('a restore from a backup', () => {
     /* Each key is the row the old database closed with, its signing secret sealed as it was stored. */
     expect(await keys()).toEqual(closing);
     expect(await db.select().from(assistants).where(eq(assistants.personId, madeSince.personId))).toEqual([]);
+  });
+
+  it("keeps a node's key cleared or replaced since the bundle closed, and a key that still works working", async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const plan = await ownPlan(db, owner!.email!);
+    const node = async (name: string, subscriptionId: string | null = null) => {
+      const [machine] = await db.insert(machines).values({ companyId: owner!.companyId, personId: owner!.id, machineKey: name, networkId: hashToken(name), role: 'worker' }).returning();
+      const key = `${name}-${randomUUID()}`;
+      const [row] = await db.insert(nodes).values({ companyId: owner!.companyId, machineId: machine!.id, subscriptionId, keyHash: hashToken(key), status: 'ready' }).returning();
+      return { id: row!.id, key };
+    };
+    /* What the node socket asks of a key before it lets a node in. */
+    const opens = async (key: string) => (await identify(app.ctx, { headers: { authorization: `Bearer ${key}` } } as FastifyRequest))?.kind === 'node';
+    const keys = async () => (await db.select({ id: nodes.id, keyHash: nodes.keyHash }).from(nodes)).sort((a, b) => a.id.localeCompare(b.id));
+    const planStatus = async () => (await db.select({ status: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.status;
+    const [signedOut, gone, replaced, kept] = [await node('signed-out', plan), await node('gone'), await node('replaced'), await node('kept')];
+    const bundled = await db.select().from(nodes);
+    const bundledKeys = await keys();
+    /* Since the bundle, one node signed out, the row of another went as a plan's reset takes its nodes, and a third joined
+       again with a new key; the old database closes with that. */
+    await handleNodeMessage(app.ctx, { kind: 'node', nodeId: signedOut.id, keyHash: hashToken(signedOut.key) }, { type: 'removed' });
+    await db.delete(nodes).where(eq(nodes.id, gone.id));
+    const newer = `replaced-${randomUUID()}`;
+    await db.update(nodes).set({ keyHash: hashToken(newer) }).where(eq(nodes.id, replaced.id));
+    expect(await planStatus()).toBe('waiting_machine');
+    const closing = await keys();
+    const carry = Object.values(((await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] }).rows[0]!)[0] as Carry;
+    /* The restored database has the nodes of the bundle, and their plan as it was then. */
+    await db.delete(nodes);
+    await db.insert(nodes).values(bundled);
+    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, plan));
+    expect(await opens(signedOut.key)).toBe(true);
+
+    /* A carry of an updater from before says nothing of the nodes' keys, and leaves them as the bundle has them. */
+    const { nodeKeys, ...fromBefore } = carry;
+    await applyCarry(app.ctx, fromBefore);
+    expect(await keys()).toEqual(bundledKeys);
+    /* A node made after the bundle is not in the restored database, and its key opens nothing there. */
+    const madeSince = `made-since-${randomUUID()}`;
+    await applyCarry(app.ctx, { ...carry, nodeKeys: [...nodeKeys ?? [], { id: randomUUID(), keyHash: hashToken(madeSince) }] });
+    expect(await opens(signedOut.key)).toBe(false);
+    expect(await opens(gone.key)).toBe(false);
+    expect(await opens(replaced.key)).toBe(false);
+    expect(await opens(newer)).toBe(true);
+    expect(await opens(kept.key)).toBe(true);
+    expect(await opens(madeSince)).toBe(false);
+    /* Each node has the key the old database closed with; one that lost its key signs in again, and its plan waits for a
+       machine as it did then. */
+    expect((await keys()).filter(row => closing.some(was => was.id === row.id))).toEqual(closing);
+    expect((await db.select({ status: nodes.status }).from(nodes).where(inArray(nodes.id, [signedOut.id, gone.id]))).map(row => row.status)).toEqual(['needs_login', 'needs_login']);
+    expect((await db.select({ status: nodes.status }).from(nodes).where(eq(nodes.id, kept.id)))[0]!.status).toBe('ready');
+    expect(await planStatus()).toBe('waiting_machine');
   });
 
   it('keeps who holds the data and the link', async () => {

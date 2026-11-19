@@ -82,8 +82,9 @@ describe('the carry of a restore', () => {
     expect(key(active!.id)).toMatchObject({ recipient: 'age1active', linkPrint: 'ab'.repeat(32), linkName: 'acme', linkUrl: 'https://acme.hornhoof.org', madeBy: owner!.id, retiredAt: null });
     expect(new Date(key(active!.id).madeAt).getTime()).toBe(active!.madeAt.getTime());
     expect(new Date(key(retired!.id).retiredAt!).getTime()).toBe(retired!.retiredAt!.getTime());
-    /* No assistant has a key yet. */
+    /* No assistant and no node has a key yet. */
     expect(carry.assistantKeys).toEqual([]);
+    expect(carry.nodeKeys).toEqual([]);
   });
 
   it('takes who holds the data and the link', async () => {
