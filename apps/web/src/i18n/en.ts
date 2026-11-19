@@ -77,6 +77,8 @@ export const en = {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
     tooLong: 'Taking longer than usual',
+    /* What to do about a screen's data that takes longer than usual. */
+    stillComing: 'It may still come. Try again, or wait a little longer.',
     somethingWrong: 'Something went wrong.',
     next: 'Next',
     back: 'Back',

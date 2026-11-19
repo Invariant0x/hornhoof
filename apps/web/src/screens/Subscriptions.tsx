@@ -2,6 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
+import { LoadState, useLoad } from '../ui/Loading';
 import { PlanConnection } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -532,6 +533,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   }, []);
 
   const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure, commandsFailure } = usePlanCommands(live);
+  /* The plans come with the shared indicator where they will stand, and say why when they do not. */
+  const plansLoad = useLoad([{ data: subs, failure: readFailure, load }]);
   /* Where this person connects an API key: anywhere with the whole company, else only in the departments they run. */
   const places = me.person.scopeKind === 'company' ? null : apiPlaces ?? [];
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
@@ -668,7 +671,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
-      <LoadFailure failure={readFailure ?? commandsFailure} />
+      <LoadFailure failure={subs ? readFailure ?? commandsFailure : commandsFailure} />
+      <LoadState load={plansLoad} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}

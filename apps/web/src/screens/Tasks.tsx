@@ -12,6 +12,7 @@ import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
+import { LoadState, useLoad } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -46,6 +47,9 @@ type Props = {
    anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
    screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
 const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
+/* A server without goals and pipelines yet answers that it has none. */
+const noGoals = (f: unknown) => f instanceof ApiFailure && f.status === 404;
+
 function useRowInSight(selected: string | null) {
   const last = useRef(selected);
   useLayoutEffect(() => {
@@ -407,9 +411,13 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const sideId = useId();
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
-  const { tasks, failure } = useTasks({ status: 'all' });
+  const { tasks, failure, load: loadTasks } = useTasks({ status: 'all' });
   const updateSaysIt = useUpdateSaysIt();
-  const { goals: goalList, failure: goalsFailure } = useGoals();
+  const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
+  /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
+     without goals yet answers that it has none. */
+  const tasksLoad = useLoad([{ data: tasks, failure, load: loadTasks }]);
+  const goalsLoad = useLoad([{ data: goalList ?? (noGoals(goalsFailure) ? [] : undefined), failure: noGoals(goalsFailure) ? null : goalsFailure, load: loadGoals }]);
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
@@ -537,7 +545,8 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
   const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = mainFailure ?? shownLoadFailure(tracked(goalsFailure), updateSaysIt) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
+  /* What the work and the goals did not bring stands where they would; a failure of what is already shown stands on top. */
+  const broken = shownLoadFailure(placesFailure, updateSaysIt) ?? (tasks ? shownLoadFailure(failure, updateSaysIt) : null) ?? (goalList ? shownLoadFailure(tracked(goalsFailure), updateSaysIt) : null) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
   const clearPerson = () => onPlace({ ...place, personId: undefined });
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
@@ -655,7 +664,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}
               {goalList ? <TrackerGoals goals={shownGoals} label={departmentId ? t.tracker.side.goals : t.tracker.side.allGoals} empty={t.tracker.noGoals} onOpenGoal={onOpenGoal} />
-                : !goalsFailure && <p className="muted" role="status">{t.common.loading}</p>}
+                : <LoadState load={goalsLoad} />}
               {makeHere}
             </>
           )
@@ -674,7 +683,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               </div>
               {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
               {makeHere}
-              {!tasks && broken === null && <p className="muted" role="status">{t.common.loading}</p>}
+              {!tasks && <LoadState load={tasksLoad} />}
               {tasks && (
                 view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={false} rows={rows} />

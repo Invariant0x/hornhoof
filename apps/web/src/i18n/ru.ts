@@ -111,6 +111,7 @@ export const ru: Messages = {
   common: {
     loading: 'Загрузка…',
     tooLong: 'Дольше обычного',
+    stillComing: 'Данные еще могут прийти. Попробуйте еще раз или подождите еще немного.',
     somethingWrong: 'Что-то пошло не так.',
     next: 'Далее',
     back: 'Назад',
