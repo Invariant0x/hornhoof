@@ -6,8 +6,10 @@ import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 const code = (review: object = {}) => ({ summary: 'Keep totals.', evidence: 'Focused checks passed.', review: { baseCommit: BASE, ...review } });
 const NOT_OWN = 'The repository has no branch task-1 or task-1-... Push the task\'s branch, or name the branch to test.';
 
-/* The fixture's repository has only the given branches; the task's own branch name is not among them. */
-async function onBranches(heads: Record<string, string>) {
+/* The fixture's repository has only the given branches and its main line at the base; the task's own branch name is not
+   among them. */
+async function onBranches(given: Record<string, string>) {
+  const heads: Record<string, string> = { main: BASE, ...given };
   const f = await fixture();
   const asked: CommitWanted[] = [];
   f.ctx.readCommit = async (_repo, want) => {

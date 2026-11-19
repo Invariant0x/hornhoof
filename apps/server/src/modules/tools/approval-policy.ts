@@ -17,6 +17,7 @@ import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { isAutonomousReleaseEnabled, tryAutonomousCommitApproval } from '../tasks/autonomous-release.js';
 import { commitApprovalRequired } from '../tasks/commit-approval.js';
+import { uncheckedInRelease, uncheckedWords } from '../tasks/releases.js';
 import { decisionPerson } from '../tasks/decision-people.js';
 import { ask, type Ask } from '../tasks/engine.js';
 import { comment } from '../tasks/comments.js';
@@ -104,19 +105,27 @@ function approvalCard(asked: Asked, kind: string, topic: 'task' | 'release', tex
   };
 }
 
-async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
-  if (carriesFile(asked.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+/* The rule, or autonomous release, may let an exact commit go without a person. A release that brings what no check covers
+   never goes so: a person approves it on a card that names that. */
+async function commitLetGo(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
   if (!(await commitApprovalRequired(ctx.db, job.companyId, task.departmentId))) {
     refusePaused(task);
     return proceedWithoutApproval(ctx, job, task, asked, 'commit', 'the department asks no approval for commit');
   }
   const auto = await tryAutonomousCommitApproval(ctx, task, job.agentId, commit, asked.text);
-  if (auto) {
-    await wakeAll(ctx, auto.moved.wakes);
-    return say(auto.text);
-  }
+  if (!auto) return null;
+  await wakeAll(ctx, auto.moved.wakes);
+  return say(auto.text);
+}
+
+async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
+  if (carriesFile(asked.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  const unchecked = await uncheckedInRelease(ctx, task, commit);
+  const letGo = unchecked?.length ? null : await commitLetGo(ctx, job, task, commit, asked);
+  if (letGo) return letGo;
   const said = proofLine(await commitProof(ctx.db, task, commit));
-  await askPerson(ctx, job, task, approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}`, commit));
+  const named = unchecked?.length ? `\n\n${uncheckedWords(unchecked)}` : '';
+  await askPerson(ctx, job, task, approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}${named}`, commit));
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it. ${said}`);
 }
 
@@ -201,7 +210,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'Follows the approval policy of the task\'s department. A channel with no rule needs no approval. When the policy lets the work go, the task log records it. Otherwise the department\'s owner (with none, the CEO) is asked and the task waits for their answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this work is in the limit\'s unit. text: what you want to do. link: an https page where it can be seen. ' +
-        'For an exact commit to main, send its full SHA. Exact commits share one kind and have no amount. If autonomous release is on, it can approve a main integration with a whole green run, an independent PASS verdict and a verified fast-forward path. Otherwise the commit rule says whether to ask a person.',
+        'For an exact commit to main, send its full SHA. Exact commits share one kind and have no amount. If autonomous release is on, it can approve a main integration with a whole green run, an independent PASS verdict and a verified fast-forward path. Otherwise the commit rule says whether to ask a person. A release that brings what no check covers always asks a person, on a card that names it.',
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,
