@@ -74,13 +74,14 @@ for (const lang of LOOK_LANGUAGES) for (const skin of SKINS) for (const width of
     await open(page, lang, width, '/tasks?show=people', skin);
     const people = page.getByRole('region', { name: t.tracker.peopleWaits.title });
     await expect(people.locator('article.req', { hasText: MAX_QUESTION })).toContainText(t.tracker.peopleWaits.waitingFor('Max'));
-    /* Each card and its words stay inside the main area, nothing cut short, and the page never scrolls sideways. */
+    /* Each card and its words stay inside the main area, nothing cut short, and the page never scrolls sideways. A closed
+       select shows its choice on one line, as every select of the app does. */
     const frame = (await page.locator('.tr-main').boundingBox())!;
     for (const box of await people.locator('article.req, article.req header > *, .tr-waits li').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
       expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
       expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
     }
-    expect(await page.locator('.tracker *').evaluateAll(els => els.filter(e => getComputedStyle(e).textOverflow === 'ellipsis').length)).toBe(0);
+    expect(await page.locator('.tracker :not(select)').evaluateAll(els => els.filter(e => getComputedStyle(e).textOverflow === 'ellipsis').length)).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     if (browserName === 'chromium') await capture(page, info, `${lang}-${skin}-${width}`);
   });
