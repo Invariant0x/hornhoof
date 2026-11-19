@@ -83,12 +83,18 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('button')).toHaveLength(4);
   });
 
-  it('draws the card as the mockup drawer over the tracker and the full screen on a phone', () => {
+  it('draws the card as the mockup drawer beside the tracker and the full screen on a phone', () => {
     const drawer = '.body.tracker-page ~ .acard.at-end';
-    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-card-size')).toBe('460px');
+    expect.soft(decl(':root', '--tracker-strips-room')).toBe('32px');
+    expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
     expect.soft(decl(drawer, 'inset-inline-end', '(min-width: 761px)')).toBe('0');
-    /* Minimized windows keep their strips at the right edge in reach beside it. */
-    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('32px');
+    /* The page ends where the card starts, so the work reflows beside it instead of running under it. */
+    expect.soft(decl('.body.tracker-page:has(~ .acard.at-end)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-card-size)');
+    /* Minimized windows keep their strips at the right edge in reach beside it, and the page ends before both. */
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('var(--tracker-strips-room)');
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page:has(~ .acard.at-end):dir(ltr)', 'inset-inline-end', '(min-width: 761px)'))
+      .toBe('calc(var(--tracker-card-size) + var(--tracker-strips-room))');
     expect.soft(decl(drawer, 'border-inline-start', '(min-width: 761px)')).toBe('1px solid var(--line2)');
     expect.soft(decl(drawer, 'inset', '(max-width: 760px)')).toBe('68px 0 0');
     expect.soft(decl('.body.with-task .tracker', 'padding-inline-end', '(min-width: 1100px)')).toBeUndefined();

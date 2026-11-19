@@ -171,7 +171,7 @@ it('puts the count, number and wait note after the title on its line', () => {
 });
 
 it('draws the rows, rings, pills and chips at the mockup sizes', () => {
-  const desktop = 'tr-list (width > 960px)';
+  const desktop = 'tr-list (width > 640px)';
   expect.soft(decl('.tr-cells', 'grid-template-columns', desktop)).toBe('subgrid');
   /* td: 7px 8px around a 22px avatar, 13.5px, a line under each row, the cells in the middle of its height: a 37px row.
      What is pressed in a row is 24px high for a mouse (WCAG 2.5.8), so 6px above and below keep the row at 37px. Each cell
@@ -220,7 +220,7 @@ it.each([null, 'plan'])('shares the mockup column proportions with selection %s'
   const rows = { selected, onOpenTask: vi.fn() };
   render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
   const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
-  const desktop = 'tr-list (width > 960px)';
+  const desktop = 'tr-list (width > 640px)';
   const people = '.tr-cell.tr-cell-person';
   for (const name of [executor.name, responsible.name]) {
     expect.soft(within(row).getByRole('img', { name }).closest(people)).toBeInTheDocument();

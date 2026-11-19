@@ -131,12 +131,15 @@ const FAR_K = 0.55;
 /* The Head of Design's word for #1489: a department opens with its chips read at once, their 13.5 px names drawn 11 px tall or
    more, on a phone too; a schema that does not fit so opens at this size from its left edge, and the canvas scrolls it. */
 export const READABLE_K = 0.82;
+/* The schema opens this far from the top of the screen, and at least this far inside its canvas, which starts under the band
+   of the top bar and the department's name (#1556): top is how far down the screen the canvas starts. */
+const TOP_ROOM = 76, CANVAS_EDGE = 8;
 
 /* Where the schema stands in the room of its canvas, from the canvas's left, as wide and tall as it is, with what its bottom
    keeps for the zoom, the line of what happened as tall as that may grow and the tools. Whole, between the top bar and that
    room, when Show everything asks for it or when it fits so at a readable size; otherwise readable, from its top left. */
-export function schemaView(room: { left: number; width: number; height: number; bottom: number }, size: { right: number; h: number }, whole: boolean) {
-  const padTop = 76, padBottom = Math.max(76, room.bottom), padX = 48;
+export function schemaView(room: { left: number; width: number; height: number; bottom: number; top?: number }, size: { right: number; h: number }, whole: boolean) {
+  const padTop = Math.max(CANVAS_EDGE, TOP_ROOM - (room.top ?? 0)), padBottom = Math.max(76, room.bottom), padX = 48;
   const bw = size.right + 80, bh = size.h + 40;
   const fitK = Math.max(MIN_K, Math.min((room.width - padX * 2) / bw, (room.height - padTop - padBottom) / bh, 1));
   const k = whole || fitK >= READABLE_K ? fitK : READABLE_K;
@@ -438,7 +441,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       const el = box.current;
       if (!el || !el.clientWidth) return;
       const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
-      setView({ ...schemaView({ left, width, height: el.clientHeight, bottom: fitBottom.current }, size.current, whole), smooth: true });
+      setView({ ...schemaView({ left, width, height: el.clientHeight, bottom: fitBottom.current, top: el.offsetTop }, size.current, whole), smooth: true });
     },
     [covered, panel, setView, fitBottom],
   );
