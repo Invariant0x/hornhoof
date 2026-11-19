@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-11-19
+
+### Fixed
+
+- The phone readiness check keeps the screen visibly bright, at about 40% of the phone's own brightness range, and never lowers a brightness a person set higher.
+
 ## [0.39.0] - 2026-11-19
 
 ### Fixed
