@@ -149,6 +149,23 @@ describe('Map', () => {
     expect(decl('button.dept', '-webkit-hyphens')).toBe('auto');
   });
 
+  /* Design's note on #1574 (#1580): a Japanese chip breaks between its phrases, not inside one. The browser finds Japanese
+     phrases only in text marked Japanese, and kana is written only in Japanese; text of kanji alone may be Chinese and is left
+     to the page's language. */
+  it('marks the words of a people chip Japanese when they hold kana, so they break between phrases', async () => {
+    const people = [
+      { ...PEOPLE[0]!, name: 'レナ', title: '財務と経理の責任者' },
+      { ...PEOPLE[1]!, name: 'ミラ', title: '最高経営責任者' },
+    ];
+    mockApi({ 'GET /api/org': [200, { ...ORG, people }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByText('レナ');
+    const words = [...container.querySelectorAll('.chips .chip :is(b, small)')].map(el => [el.textContent, el.getAttribute('lang')]);
+    expect(Object.fromEntries(words)).toEqual({ レナ: 'ja', 財務と経理の責任者: 'ja', ミラ: 'ja', 最高経営責任者: null });
+    for (const selector of ['.chip b:lang(ja)', '.chip small:lang(ja)']) expect.soft(decl(selector, 'word-break'), selector).toBe('auto-phrase');
+    expect(decl('.chip span', 'hyphens'), 'the other languages keep their hyphens').toBe('auto');
+  });
+
   it('shows the orchestrator, the company people and the empty state on first run', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const { container } = render(<MapScreen {...PROPS} />);
