@@ -8,12 +8,14 @@ import { note } from './events.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { taskByRef } from './lookup.js';
 import { keepSnapshot } from './pipeline-report.js';
-import { commitApprovalRequired, exactCommitApproval } from './commit-approval.js';
+import { commitApprovalRequired, commitApprovalSaying, exactCommitApproval } from './commit-approval.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, recordOfTag, type IntegrationTarget } from './turn-integration.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
+import { openTurnOf } from './turn-department.js';
+import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
@@ -75,6 +77,18 @@ const allPartsPassed = (run: ReleaseRun, parts: { status: string }[]): boolean =
 
 const needsPerson = (task: Task, commit: string, why: string) =>
   refuse(403, 'decision_not_allowed', `The department requires approval of exactly ${commit}. Use ask_person with that commit on #${task.number}.${why}`);
+
+/* The words that name on an approval card what a release brings that no check covers, the same each time for the same
+   list: a release that brings any takes only the approval of a card that named exactly what it brings unchecked now. */
+export function uncheckedWords(uncovered: string[]): string {
+  const lines = [...uncovered].sort();
+  return `What this release brings that no check covers (${lines.length}):\n${lines.map(line => `- ${line}`).join('\n')}\nApprove it only if you accept each of these.`;
+}
+
+/* A release that brings what no check covers reaches main only once a person approved a card that named exactly that,
+   whatever the commit rule of its department, and autonomous release never approves it. */
+const unseen = (task: Task, commit: string, uncovered: string[], autonomous: boolean) =>
+  refuse(403, 'decision_not_allowed', `A person approves exactly ${commit} before main moves, on a card that names what it brings that no check covers, whatever the department's commit rule. Use ask_person with that commit on #${task.number}: Hornhoof names it on the card.${autonomous ? ' Autonomous release needs proof for each change, and this one brings what was not: ' : ' It brings what was not checked: '}${uncovered.join(' ')}`);
 
 /* The department has autonomous release on, held so a switch of its people waits for the record, for a repository whose main
    line is main. */
@@ -198,6 +212,62 @@ async function coverage(ctx: Reader, repo: Repo, base: string, commit: string, r
   return uncovered;
 }
 
+/* The results of the turn the release R holds, and what R brings over main at base that no check of theirs covers. */
+async function broughtBy(ctx: Reader, turn: Turn, repo: Repo, base: string, commit: string) {
+  const results = await acceptedResults(ctx.db, turn);
+  const held = await heldBy(ctx, repo, commit, results);
+  return { results, held, uncovered: await coverage(ctx, repo, base, commit, held) };
+}
+
+/* The repository and the open turn of the department of task, where it releases turns: none for a product or a part of a
+   department that keeps a repository of its own, or a department with no open turn. It opens none. */
+async function openRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productId' | 'departmentId'>): Promise<{ repo: Repo; turn: Turn } | null> {
+  const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]) : null;
+  if (!found || found.department.parentId) return null;
+  const turn = await openTurnOf(ctx.db, task.companyId, found.department.id);
+  return turn ? { repo: found.repo, turn } : null;
+}
+
+/* Main's head under commit, where commit is a release of the turn branch: the branch holds it, main does not yet, and main can
+   go to it by fast-forward. None otherwise, or where any of that could not be read. */
+async function mainUnder(ctx: Reader, repo: Repo, branch: string, commit: string): Promise<string | null> {
+  const [head, base] = [await headOf(ctx, repo, branch), await headOf(ctx, repo, repo.branch)];
+  if (!head || !base || base === commit) return null;
+  const releases = await branchHolds(ctx, repo, head, commit) && !(await branchHolds(ctx, repo, base, commit)) && await branchHolds(ctx, repo, commit, base);
+  return releases ? base : null;
+}
+
+/* What a release of commit by the department of task brings that no check covers, as its approval card names it: null where
+   commit is no release of its department's open turn, or where that could not be read. Recording the release reads it again
+   and refuses on its own. */
+export async function uncheckedInRelease(ctx: Reader, task: Pick<Task, 'companyId' | 'productId' | 'departmentId'>, commit: string): Promise<string[] | null> {
+  const at = await openRelease(ctx, task);
+  const base = at ? await mainUnder(ctx, at.repo, `turn-${at.turn.number}`, commit) : null;
+  return at && base ? (await broughtBy(ctx, at.turn, at.repo, base, commit)).uncovered : null;
+}
+
+type ReleaseAt = { task: Task; turn: Turn; repo: Repo; commit: string; uncovered: string[] };
+type ReleaseApproval = { approvalRequestId: string | null; canLog: boolean };
+
+/* A person saw what nobody checked: the newest approval of R whose card named exactly that. */
+async function seenApproval(db: Ctx['db'] | Tx, { task, turn, repo, commit, uncovered }: ReleaseAt, hold: boolean): Promise<ReleaseApproval> {
+  const approvalRequestId = await commitApprovalSaying(db, task.companyId, task.id, commit, uncheckedWords(uncovered));
+  if (approvalRequestId) return { approvalRequestId, canLog: false };
+  const autonomous = await commitApprovalRequired(db, task.companyId, turn.departmentId, hold) && await autonomousOn(db, turn.departmentId!, repo, hold);
+  throw unseen(task, commit, uncovered, autonomous);
+}
+
+/* What lets R go to main: where it brings what no check covers, a person's approval of a card that named exactly that; else a
+   person's approval of R, a department that asks none, or autonomous release, which logs it. Read again, held, as it is recorded. */
+async function releaseApproval(db: Ctx['db'] | Tx, at: ReleaseAt, hold = false): Promise<ReleaseApproval> {
+  if (at.uncovered.length) return seenApproval(db, at, hold);
+  const { task, turn, commit } = at;
+  const approvalRequestId = await exactCommitApproval(db, task.companyId, task.id, commit);
+  if (approvalRequestId || !(await commitApprovalRequired(db, task.companyId, turn.departmentId, hold))) return { approvalRequestId, canLog: false };
+  if (!(await autonomousOn(db, turn.departmentId!, at.repo, hold))) throw needsPerson(task, commit, '');
+  return { approvalRequestId, canLog: true };
+}
+
 type Compared = { sha: string; parents: string[] };
 
 /* The commits over main that turnkey work brings, from the commit the branch of each was at as its holder closed it (tips) and
@@ -258,23 +328,11 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!(await branchHolds(ctx, target.repo, input.commit, base))) throw refuse(409, 'task_invalid', `${input.commit} does not hold ${target.repo.branch} at ${base}, so main cannot go to it by fast-forward. Take ${target.repo.branch} into ${target.branch} first.`);
   const [owner] = await ctx.db.select(idOnly(departments)).from(departments).where(eq(departments.id, turn.departmentId!));
   await requireFullRun(ctx.db, turn, target.branch, owner!.id, input.runId, input.commit);
-  const results = await acceptedResults(ctx.db, turn);
-  const held = await heldBy(ctx, target.repo, input.commit, results);
-  const uncovered = await coverage(ctx, target.repo, base, input.commit, held);
+  const { results, held, uncovered } = await broughtBy(ctx, turn, target.repo, base, input.commit);
   const released: ReleasedTask[] = held.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts, ...(r.turnkey ? { report: r.turnkey.report } : {}) }));
   const left = results.filter(r => !held.includes(r)).map(r => r.task.number);
-  const checkApproval = async (db: Ctx['db'] | Tx, hold = false) => {
-    const approvalRequestId = await exactCommitApproval(db, companyId, task.id, input.commit);
-    if (approvalRequestId || !(await commitApprovalRequired(db, companyId, turn.departmentId, hold))) return { approvalRequestId, canLog: false };
-    const on = await autonomousOn(db, turn.departmentId!, target.repo, hold);
-    const canLog = on && uncovered.length === 0;
-    if (!canLog) {
-      const why = on ? ` Autonomous release needs proof for each change, and this one brings what was not: ${uncovered.join(' ')}` : '';
-      throw needsPerson(task, input.commit, why);
-    }
-    return { approvalRequestId, canLog };
-  };
-  await checkApproval(ctx.db);
+  const at: ReleaseAt = { task, turn, repo: target.repo, commit: input.commit, uncovered };
+  await releaseApproval(ctx.db, at);
   const record = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
@@ -282,7 +340,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     const still = await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id));
     if (still.length !== results.length || still.some(row => !results.some(r => r.task.id === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
     await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
-    const { approvalRequestId, canLog } = await checkApproval(tx, true);
+    const { approvalRequestId, canLog } = await releaseApproval(tx, at, true);
     const autonomousReleaseId = canLog ? await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released) : null;
     if (canLog && !autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work.');
     const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, runId: input.runId, tasks: released, taskId: task.id, approvalRequestId, autonomousReleaseId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered }).returning();

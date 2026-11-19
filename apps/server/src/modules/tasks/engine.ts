@@ -9,6 +9,7 @@ import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { writeEdit, type TaskEdit } from '../tracker/edit.js';
 import { holdPlace } from '../tracker/pipelines.js';
 import { submitAtTests, testsReport, type Verification } from './echelons-tests.js';
+import { requireBaseOnLine } from './echelons-main.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
@@ -407,7 +408,7 @@ function requireSubmissionStage(task: Task, route: Route): void {
 }
 
 /* The commit as it is handed in: read from the repository, inside the paths the head approved, and on top of what the
-   stage received. */
+   stage received. Development names the base every later stage keeps, so it starts on a line its department releases. */
 async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route, r: Submission) {
   const prior = route.state.candidateId ? await currentCandidate(ctx.db, task, route) : null;
   const checkerStage = route.state.stage !== 'development';
@@ -416,6 +417,7 @@ async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route
   if (prior && checkerStage) await checkingIdentity(ctx, task, route, prior);
   const candidate = producedCandidate(route, producer, review);
   if (prior) await requireRepairHistory(ctx, task, prior, candidate);
+  if (!checkerStage) await requireBaseOnLine(ctx, task, candidate.baseCommit);
   return { input: checkerStage ? prior : null, candidate, review };
 }
 
