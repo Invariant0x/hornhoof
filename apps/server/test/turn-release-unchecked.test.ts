@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, approvalPolicies, departments, requests } from '../src/db/schema.js';
 import { answer, ask } from '../src/modules/tasks/engine.js';
@@ -30,8 +30,8 @@ const requireApproval = (f: Releasing) =>
 const autonomous = (f: Releasing) => f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
 
-/* The newest question on the release task, as the person reads it. */
-const card = async (f: Releasing) => (await f.db.select().from(requests).where(eq(requests.taskId, f.release.id)).orderBy(desc(requests.createdAt)).limit(1))[0];
+/* The open question on the release task, as the person reads it. */
+const card = async (f: Releasing) => (await f.db.select().from(requests).where(and(eq(requests.taskId, f.release.id), eq(requests.status, 'open'))).orderBy(desc(requests.createdAt)).limit(1))[0];
 /* The release holder asks for the approval of R with a tool, and the person approves the card it opened. */
 async function askedAndApproved(f: Releasing, tool: 'ask_person' | 'request_approval' = 'ask_person') {
   const asked = tool === 'ask_person'

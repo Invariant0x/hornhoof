@@ -119,6 +119,10 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
+/* What the release of the commit an approval is asked of brings that no check covers; a choice names no commit. */
+const uncheckedAsked = (ctx: Ctx, task: Task, commit?: string, options?: unknown[]): Promise<string[] | null> =>
+  commit && !options?.length ? uncheckedInRelease(ctx, task, commit) : Promise.resolve(null);
+
 /* An approval of a commit that the department's rule or autonomous release lets go, where it does. A release that brings
    what no check covers always goes to a person, who sees that on the card. */
 async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[], unchecked?: string[] | null) {
@@ -488,7 +492,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'With commit, an unset rule needs no approval. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'With commit, an unset rule needs no approval, except for a release that brings what no check covers: a person approves it on a card that names exactly that. An approval card shows which passed test run checked that commit, or that none did. If its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           'Ask a person when their own judgment or information is indispensable. Resolve ordinary work through the responsible department or the orchestrator. Only irreversible deletion needs the CEO\'s yes. Keep credentials out of the question and answer; ask the person to save a missing sign-in in the vault and name the entry.',
         inputSchema: {
           task: Ref,
@@ -511,7 +515,7 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
-          const unchecked = commit && !options?.length ? await uncheckedInRelease(this.ctx, task, commit) : null;
+          const unchecked = await uncheckedAsked(this.ctx, task, commit, options);
           const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options, unchecked);
           if (reply) return reply;
           if (commit && person) throw refuse(400, 'task_invalid', 'The department\'s commit rule determines who approves it.');
@@ -653,7 +657,7 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
         inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },

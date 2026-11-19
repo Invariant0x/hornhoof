@@ -210,7 +210,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'Follows the approval policy of the task\'s department. A channel with no rule needs no approval. When the policy lets the work go, the task log records it. Otherwise the department\'s owner (with none, the CEO) is asked and the task waits for their answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this work is in the limit\'s unit. text: what you want to do. link: an https page where it can be seen. ' +
-        'For an exact commit to main, send its full SHA. Exact commits share one kind and have no amount. If autonomous release is on, it can approve a main integration with a whole green run, an independent PASS verdict and a verified fast-forward path. Otherwise the commit rule says whether to ask a person.',
+        'For an exact commit to main, send its full SHA. Exact commits share one kind and have no amount. If autonomous release is on, it can approve a main integration with a whole green run, an independent PASS verdict and a verified fast-forward path. Otherwise the commit rule says whether to ask a person. A release that brings what no check covers always asks a person, on a card that names it.',
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,
