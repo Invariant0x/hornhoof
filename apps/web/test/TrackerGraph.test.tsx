@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { Crumb, GraphNode } from '../src/tracker';
 import type { GoalView } from '../src/types';
@@ -38,5 +38,28 @@ describe('the graph canvas', () => {
     fireEvent.wheel(container.querySelector('.tr-map')!, { deltaY: 10000, clientX: 5000, clientY: 5000 });
     rerender(graph([node('g2', 'Second root')], [], 'Sales'));
     expect(transform(container)).toBe(placed);
+  });
+
+  describe('when a font arrives after the nodes are drawn', () => {
+    const own = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const measured = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+    afterEach(() => {
+      if (own) Object.defineProperty(document, 'fonts', own);
+      else delete (document as { fonts?: unknown }).fonts;
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', measured);
+    });
+
+    it('measures its nodes again, so the tree is laid out with their words in the font they show in', () => {
+      const fonts = new EventTarget();
+      Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+      /* A node's words take more room in the fallback font than in its own. */
+      let height = 140;
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return (this as HTMLElement).dataset.node ? height : 0; } });
+      const { container } = render(graph([node('g1', 'First root', [node('g2', 'Under it')])], []));
+      const tall = container.querySelector('.tr-wires')!.getAttribute('height');
+      height = 120;
+      act(() => { fonts.dispatchEvent(new Event('loadingdone')); });
+      expect(Number(container.querySelector('.tr-wires')!.getAttribute('height'))).toBeLessThan(Number(tall));
+    });
   });
 });

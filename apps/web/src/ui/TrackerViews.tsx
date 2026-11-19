@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, isClosed, taskWaits, type Asks, type TaskTree } from '../task-tree';
 import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed } from '../tracker';
@@ -299,6 +299,14 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
   const world = useRef<HTMLDivElement>(null);
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map());
   const layout = layoutTree(forest, id => heights.get(id));
+  /* A font that arrives after the nodes are drawn changes their heights: they are measured again then. */
+  const [, setFontsIn] = useState(0);
+  useEffect(() => {
+    const fonts = document.fonts as FontFaceSet | undefined;
+    const again = () => setFontsIn(n => n + 1);
+    fonts?.addEventListener?.('loadingdone', again);
+    return () => fonts?.removeEventListener?.('loadingdone', again);
+  }, []);
   useLayoutEffect(() => {
     const measured = new Map(heights);
     for (const el of world.current?.querySelectorAll<HTMLElement>('[data-node]') ?? []) {
