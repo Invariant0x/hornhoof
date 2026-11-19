@@ -191,6 +191,9 @@ it.each([null, 'plan'])('sizes the people columns to their badges with selection
   );
   expect.soft(decl(people, 'min-inline-size', desktop)).toBe('min-content');
   expect.soft(decl('.tr-cell-person .tr-mark', 'white-space', desktop)).toBe('nowrap');
+  /* A column heading keeps its words whole, so a narrow people column widens to its heading instead of splitting it by letters. */
+  expect.soft(decl('.tr-head > span', 'overflow-wrap', desktop)).toBe('normal');
+  expect.soft(decl('.tr-head > span', 'min-inline-size', desktop)).toBe('min-content');
   expect(row.firstElementChild?.classList.contains('on')).toBe(Boolean(selected));
 });
 
@@ -251,4 +254,11 @@ it('surfaces a failed subtask while its parent stays folded', () => {
   const failures = screen.getByRole('region', { name: 'Failures: 1' });
   expect(within(failures).getByRole('listitem', { name: '#268 Check the addresses' })).toHaveTextContent('Test run #42 failed');
   expect(within(screen.getByRole('region', { name: 'In work: 1' })).getByRole('button', { name: 'Subtasks: 0 of 1 done' })).toHaveAttribute('aria-expanded', 'false');
+});
+
+/* A goal card shows its bar across the whole card and its count on one line under it, not squeezed beside the bar. */
+it('stacks the progress of a goal card under its title across the card', () => {
+  expect(decl('.tr-goals .goal-progress', 'grid-template-columns')).toBe('minmax(0, 1fr)');
+  expect(decl('.tr-goals .goal-progress', 'max-width')).toBe('none');
+  expect(decl('.tr-goals .goal-progress small', 'overflow-wrap')).toBe('normal');
 });
