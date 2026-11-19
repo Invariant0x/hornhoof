@@ -2522,6 +2522,10 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .req-form > .btn { justify-self: start; }
 .req-commit { justify-self: start; padding: 4px 8px; background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .req-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.req-unchecked { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.req-unchecked p { margin: 0; }
+.req-unchecked-title { font-weight: 600; }
+.req-unchecked ul { display: grid; gap: 4px; margin: 0; padding-inline-start: 18px; }
 .req-pics { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .req-pics img { display: block; max-width: min(280px, 100%); max-height: 180px; width: auto; height: auto; object-fit: contain; border: 1px solid var(--line); box-sizing: border-box; }
 .req-link { justify-self: start; min-width: 0; overflow-wrap: anywhere; }
