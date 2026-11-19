@@ -74,17 +74,44 @@ function offTheLines(at: Repository, base: string, main: string, turn: string | 
   return refuse(409, 'task_changed', `${off}; nor does ${at.turnBranch}${where}. Take in the main line or ${at.turnBranch}, and name the commit you took in as review.baseCommit.`);
 }
 
-/* The line the merge took in: the main line where it holds the new base, else the open turn of the task's department where
-   that holds it. The merge then holds the turn's head as well, as the turn takes the candidate only by fast-forward; a turn
-   of another department is no line of this task. */
-async function lineTaken(at: Repository, base: string, commit: string): Promise<{ branch: string; turn: boolean }> {
+type Held = { branch: string; head: string; turn: boolean };
+type Heads = { main: string; turn: string | null };
+
+/* The line that holds base as the repository says it now: the main line where its head holds it, else the open turn of the
+   task's department where its head does, however many files lie between them. Where neither does, or could not tell, the
+   heads it read. A turn of another department is no line of this task. */
+async function lineHolding(at: Repository, base: string): Promise<Held | Heads> {
   const main = await headOfLine(at, at.repo.branch);
   if (!main) throw refuse(409, 'repo_invalid', `The main line ${at.repo.branch} could not be read. Try again.`);
-  if (await holds(at, base, main)) return { branch: at.repo.branch, turn: false };
+  if (await holds(at, base, main)) return { branch: at.repo.branch, head: main, turn: false };
   const turn = at.turnBranch ? await headOfLine(at, at.turnBranch) : null;
-  if (!at.turnBranch || !turn || !(await holds(at, base, turn))) throw offTheLines(at, base, main, turn);
-  if (!(await holds(at, turn, commit))) throw refuse(409, 'task_changed', `${at.turnBranch} went on to ${turn}, which ${commit} does not hold. Take ${at.turnBranch} in again: it takes the candidate only by fast-forward.`);
-  return { branch: at.turnBranch, turn: true };
+  if (at.turnBranch && turn && (await holds(at, base, turn))) return { branch: at.turnBranch, head: turn, turn: true };
+  return { main, turn };
+}
+
+/* The line the merge took in: the main line where it holds the new base, else the open turn of the task's department where
+   that holds it. The merge then holds the turn's head as well, as the turn takes the candidate only by fast-forward. */
+async function lineTaken(at: Repository, base: string, commit: string): Promise<{ branch: string; turn: boolean }> {
+  const line = await lineHolding(at, base);
+  if (!('branch' in line)) throw offTheLines(at, base, line.main, line.turn);
+  if (line.turn && !(await holds(at, line.head, commit))) throw refuse(409, 'task_changed', `${line.branch} went on to ${line.head}, which ${commit} does not hold. Take ${line.branch} in again: it takes the candidate only by fast-forward.`);
+  return { branch: line.branch, turn: line.turn };
+}
+
+/* Why a candidate may not start from base: neither line its department releases holds it, so the commits between that line
+   and base would reach the turn with the candidate, and from there main, though no stage saw them. */
+function unreleasedBase(at: Repository, base: string, heads: Heads) {
+  const turn = !at.turnBranch ? '' : heads.turn ? ` nor ${at.turnBranch} at ${heads.turn}` : ` nor ${at.turnBranch}, which could not be read,`;
+  const lines = at.turnBranch ? `${at.repo.branch} or ${at.turnBranch}` : at.repo.branch;
+  return refuse(409, 'task_invalid', `Neither ${at.repo.branch} at ${heads.main}${turn} holds the base ${base}, or that could not be read. Review, Security and Tests see only the change after the base, so the commits between ${lines} and ${base} would join the turn with this candidate unchecked. Name as review.baseCommit the commit of ${lines} the branch starts from: commits of the branch's own under it are part of the change.`);
+}
+
+/* A candidate starts from a line its department releases: the head of the main line or of the open turn of the task's
+   department, or a commit one of them holds. Its checks see only what comes after the base. */
+export async function requireBaseOnLine(ctx: Reader, task: Task, base: string): Promise<void> {
+  const at = await repository(ctx, task);
+  const line = await lineHolding(at, base);
+  if (!('branch' in line)) throw unreleasedBase(at, base, line);
 }
 
 /* The open turn of the task's own department, which its results join: none for a product or a part of a department that

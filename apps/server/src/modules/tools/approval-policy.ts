@@ -17,6 +17,7 @@ import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { isAutonomousReleaseEnabled, tryAutonomousCommitApproval } from '../tasks/autonomous-release.js';
 import { commitApprovalRequired } from '../tasks/commit-approval.js';
+import { uncheckedInRelease, uncheckedWords } from '../tasks/releases.js';
 import { decisionPerson } from '../tasks/decision-people.js';
 import { ask, type Ask } from '../tasks/engine.js';
 import { comment } from '../tasks/comments.js';
@@ -104,19 +105,27 @@ function approvalCard(asked: Asked, kind: string, topic: 'task' | 'release', tex
   };
 }
 
-async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
-  if (carriesFile(asked.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+/* The rule, or autonomous release, may let an exact commit go without a person. A release that brings what no check covers
+   never goes so: a person approves it on a card that names that. */
+async function commitLetGo(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
   if (!(await commitApprovalRequired(ctx.db, job.companyId, task.departmentId))) {
     refusePaused(task);
     return proceedWithoutApproval(ctx, job, task, asked, 'commit', 'the department asks no approval for commit');
   }
   const auto = await tryAutonomousCommitApproval(ctx, task, job.agentId, commit, asked.text);
-  if (auto) {
-    await wakeAll(ctx, auto.moved.wakes);
-    return say(auto.text);
-  }
+  if (!auto) return null;
+  await wakeAll(ctx, auto.moved.wakes);
+  return say(auto.text);
+}
+
+async function requestCommitApproval(ctx: Ctx, job: ToolJob, task: Task, commit: string, asked: Asked) {
+  if (carriesFile(asked.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  const unchecked = await uncheckedInRelease(ctx, task, commit);
+  const letGo = unchecked?.length ? null : await commitLetGo(ctx, job, task, commit, asked);
+  if (letGo) return letGo;
   const said = proofLine(await commitProof(ctx.db, task, commit));
-  await askPerson(ctx, job, task, approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}`, commit));
+  const named = unchecked?.length ? `\n\n${uncheckedWords(unchecked)}` : '';
+  await askPerson(ctx, job, task, approvalCard({ ...asked, amount: undefined }, 'commit', 'release', `${asked.text}\n\nHornhoof checked as this was asked. ${said}${named}`, commit));
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it. ${said}`);
 }
 

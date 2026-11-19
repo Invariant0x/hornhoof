@@ -21,10 +21,22 @@ export async function commitApprovalRequired(db: Pick<Db, 'select'>, companyId: 
   return approvalNeeded(rule, { amount: null, known: Boolean(known) });
 }
 
+const approvalsOf = (companyId: string, taskId: string, commit: string, requestId?: string) =>
+  and(eq(requests.companyId, companyId), eq(requests.taskId, taskId), eq(requests.commit, commit), acceptedAnswer, requestId ? eq(requests.id, requestId) : undefined);
+
 export async function exactCommitApproval(db: Pick<Db, 'select'>, companyId: string, taskId: string, commit: string, requestId?: string): Promise<string | null> {
   const [approval] = await db.select(idOnly(requests)).from(requests)
     .leftJoin(agents, eq(agents.id, requests.answeredByAgentId))
-    .where(and(eq(requests.companyId, companyId), eq(requests.taskId, taskId), eq(requests.commit, commit), acceptedAnswer, requestId ? eq(requests.id, requestId) : undefined))
+    .where(approvalsOf(companyId, taskId, commit, requestId))
     .orderBy(desc(requests.answeredAt)).limit(1);
   return approval?.id ?? null;
+}
+
+/* The newest approval of the exact commit whose card said words, as the person who approved it read them. */
+export async function commitApprovalSaying(db: Pick<Db, 'select'>, companyId: string, taskId: string, commit: string, words: string, requestId?: string): Promise<string | null> {
+  const approvals = await db.select({ id: requests.id, text: requests.text }).from(requests)
+    .leftJoin(agents, eq(agents.id, requests.answeredByAgentId))
+    .where(approvalsOf(companyId, taskId, commit, requestId))
+    .orderBy(desc(requests.answeredAt));
+  return approvals.find(approval => approval.text.includes(words))?.id ?? null;
 }

@@ -26,7 +26,7 @@ import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskLines, type TaskDetail } from './views.js';
 import { taskByRef } from './lookup.js';
 import { editTurn, giveTasks, turnName, turnRows, type Scope } from './turns.js';
-import { recordRelease } from './releases.js';
+import { recordRelease, uncheckedInRelease, uncheckedWords } from './releases.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
@@ -104,11 +104,13 @@ type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?
 const HumanRecipient = z.uuid().describe('The person who can supply the missing answer, by id. For a missing sign-in, ask them to add it to the vault and give only the entry name.');
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
-   is asked, which the answer says again as it comes. */
-async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string): Promise<{ text: string; told: string }> {
+   is asked, which the answer says again as it comes, and the approval of a release names what it brings that no check covers. */
+async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string, unchecked?: string[] | null): Promise<{ text: string; told: string }> {
   if (!commit) return { text: question, told: '' };
   const said = proofLine(await commitProof(db, task, commit));
-  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}` };
+  const named = unchecked?.length ? `\n\n${uncheckedWords(unchecked)}` : '';
+  const told = unchecked?.length ? ` The card names what the release brings that no check covers: ${unchecked.length}.` : '';
+  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}${named}`, told: ` ${said}${told}` };
 }
 
 /* Keep the outgoing question with the person responsible for its decision card. */
@@ -117,8 +119,10 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
-  if (!commit || options?.length) return null;
+/* An approval of a commit that the department's rule or autonomous release lets go, where it does. A release that brings
+   what no check covers always goes to a person, who sees that on the card. */
+async function commitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[], unchecked?: string[] | null) {
+  if (!commit || options?.length || unchecked?.length) return null;
   if (!(await commitApprovalRequired(ctx.db, task.companyId, task.departmentId))) {
     mayAsk(task, agentId);
     refusePaused(task);
@@ -507,7 +511,8 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
-          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          const unchecked = commit && !options?.length ? await uncheckedInRelease(this.ctx, task, commit) : null;
+          const reply = await commitReply(this.ctx, task, this.job.agentId, question, commit, options, unchecked);
           if (reply) return reply;
           if (commit && person) throw refuse(400, 'task_invalid', 'The department\'s commit rule determines who approves it.');
           const recipient = person ? await this.questionRecipient(person) : undefined;
@@ -516,7 +521,7 @@ class TaskTools {
           }
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-          const { text, told } = await questionWords(this.db, task, question, commit);
+          const { text, told } = await questionWords(this.db, task, question, commit, unchecked);
           const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit, approval: { channel: 'commit', kind: 'commit', amount: null } } : {}), images, options: ways, link: link ?? null, topic, ...(recipient ? { recipientPersonId: recipient } : {}), ...(plan ? { plan } : {}) });
           await recordQuestion(this.ctx, this.job, task, { kind, text, topic: commit ? 'release' : topic, ...(recipient ? { recipient } : {}) });
           return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
