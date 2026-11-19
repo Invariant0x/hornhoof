@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine } from '../src/types';
+import type { GoalView, Me, Org, Pipeline, TaskDetail, TaskLine, TaskLogLine, WaitingRequest } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TURN } from './api-mock';
 import { decl } from './css';
 import { taskRoute } from './task-route';
@@ -664,6 +664,80 @@ it('counts a task with a question once and counts failed tasks separately', asyn
   expect(screen.getByRole('heading', { level: 1, name: 'Failures' })).toBeInTheDocument();
   expect(list).toHaveTextContent('Lost machine');
   expect(list).not.toHaveTextContent('Fix the login page');
+});
+
+/* Max, a person of the company, is asked by name on the card payments, and only he answers; Ivan, the CEO looking, is asked
+   by name on the refund button; the login page's question is for anyone, Maria's as her department's, and Ivan may take it
+   too. The login page also waits for Ivan himself. */
+describe('what waits for people', () => {
+  const MAX = { id: 'p-max', name: 'Max' };
+  const WITH_MAX: Org = { ...ORG, people: [...ORG.people, { ...ORG.people[1]!, id: MAX.id, name: MAX.name, email: 'max@acme.test', title: 'Designer' }] };
+  const asked = (id: string, task: TaskLine, text: string, over: Partial<WaitingRequest>): WaitingRequest => ({
+    id, kind: 'question', text, task: { id: task.id, number: task.number, title: task.title, department: DEV }, ownerPersonId: IVAN.id, canAnswer: true,
+    agent: { id: BRUNO.id, name: BRUNO.name }, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt, ...over,
+  });
+  const BY_NAME = { kind: 'named_person' as const, department: null };
+  const FOR_MAX = asked('r-max', PAY, 'Which bank for the cards?', { ownerPersonId: MAX.id, canAnswer: false, decidedBy: BY_NAME });
+  const FOR_IVAN = asked('r-ivan', REFUND, 'How much may a refund be?', { decidedBy: BY_NAME });
+  const FOR_ANYONE = asked('r-any', LOGIN, 'Which header?', { ownerPersonId: MARIA.id, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+  const routes = { 'GET /api/org': [200, WITH_MAX], 'GET /api/requests': [200, decisions([FOR_MAX, FOR_IVAN, FOR_ANYONE])] };
+  const articles = (region: HTMLElement) => within(region).getAllByRole('article').map(a => a.getAttribute('aria-label'));
+
+  it("leaves a question asked of another person by name out of the viewer's own list and count, and keeps the rest", async () => {
+    shell('/tasks?show=waits', routes);
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await within(waiting).findByText('Which header?');
+    expect(articles(waiting)).toEqual(['#23 Refund button', '#24 Fix the login page']);
+    expect(waiting).not.toHaveTextContent('Which bank for the cards?');
+    /* The refund button's question and the login page, which waits for Ivan and asks a question too, once. */
+    const side = screen.getByRole('navigation', { name: 'Task lists' });
+    expect(within(side).getByRole('button', { name: 'Waits for me 2' })).toBeInTheDocument();
+  });
+
+  it("keeps a question asked of a person by name in that person's filter", async () => {
+    shell('/tasks?show=waits&person=p-max', routes);
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(await within(waiting).findByText('Decisions for Max')).toBeInTheDocument();
+    expect(articles(waiting)).toEqual(['#21 Take card payments']);
+  });
+
+  it('lists everything that waits for people in the company, each card with whom it waits for, and counts it', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?show=waits', routes);
+    const side = await screen.findByRole('navigation', { name: 'Task lists' });
+    await screen.findByText('Which header?');
+    await user.click(within(side).getByRole('button', { name: 'Waiting for people 3' }));
+    expect(screen.getByRole('heading', { level: 1, name: 'Waiting for people' })).toBeInTheDocument();
+    const people = screen.getByRole('region', { name: 'Waiting for people' });
+    expect(articles(people)).toEqual(['#21 Take card payments', '#23 Refund button', '#24 Fix the login page']);
+    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Waiting for: Max');
+    expect(within(people).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Waiting for: Ivan');
+    expect(within(people).getByRole('article', { name: '#24 Fix the login page' })).toHaveTextContent('Waiting for: Maria');
+    /* Max's question shows who answers it instead of a way to answer. */
+    expect(within(people).getByRole('article', { name: '#21 Take card payments' })).toHaveTextContent('Only the person asked can answer.');
+    /* The tasks that wait for a person, here the login page for Ivan. */
+    const tasks = within(people).getByRole('heading', { name: 'Tasks that wait for people' }).parentElement!;
+    expect(tasks).toHaveTextContent('#24 Fix the login page');
+    expect(tasks).toHaveTextContent('Waits for Ivan');
+    expect(screen.queryByRole('region', { name: 'Waiting for you' })).not.toBeInTheDocument();
+  });
+
+  it('says so when nothing waits for people', async () => {
+    shell('/tasks?show=people', { 'GET /api/tasks?status=all': [200, { tasks: [PAY, REFUND] }] });
+    const people = await screen.findByRole('region', { name: 'Waiting for people' });
+    expect(await within(people).findByText('Nothing waits for people.')).toBeInTheDocument();
+    const side = screen.getByRole('navigation', { name: 'Task lists' });
+    expect(within(side).getByRole('button', { name: 'Waiting for people 0' })).toBeInTheDocument();
+  });
+
+  it('shows the section only to people who see the whole company', async () => {
+    shell('/tasks?show=people', routes, listed('p1', 'Ivan'));
+    const side = await screen.findByRole('navigation', { name: 'Task lists' });
+    expect(await screen.findByRole('region', { name: 'Waiting for you' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
+    expect(within(side).queryByRole('button', { name: /^Waiting for people/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Waiting for people' })).not.toBeInTheDocument();
+  });
 });
 
 it('shows a failed run in Turns with the full task title and no question action', async () => {
