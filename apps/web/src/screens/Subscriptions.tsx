@@ -506,6 +506,9 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
+/* What could not load, said on top of the page: the plans' own failure stands where they would until they came. */
+const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
+
 export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const t = useT();
   const { language } = useLanguage();
@@ -671,7 +674,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
-      <LoadFailure failure={subs ? readFailure ?? commandsFailure : commandsFailure} />
+      <LoadFailure failure={failureOnTop(subs, readFailure, commandsFailure)} />
       <LoadState load={plansLoad} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 

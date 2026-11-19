@@ -12,7 +12,7 @@ import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
-import { LoadState, useLoad } from '../ui/Loading';
+import { LoadState, useLoad, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -47,8 +47,21 @@ type Props = {
    anchoring moves it: overflow-anchor: none, and WebKit has none). Only when the row or card of that task would leave the
    screen, as the titles above it wrap anew, does the page scroll, as little as brings it whole into sight. */
 const rowOf = (id: string) => [...document.querySelectorAll<HTMLElement>('.tracker [data-task]')].find(row => row.dataset.task === id) ?? null;
-/* A server without goals and pipelines yet answers that it has none. */
-const noGoals = (f: unknown) => f instanceof ApiFailure && f.status === 404;
+/* A server without goals and pipelines yet answers that it has none, which is no failure. */
+const noneYet = (f: unknown) => f instanceof ApiFailure && f.status === 404;
+const tracked = (f: unknown) => (noneYet(f) ? null : f);
+
+/* The goals as a part of the tracker's load: a server without goals yet has none. */
+const goalsPart = (goals: unknown, failure: unknown, load: () => unknown): LoadPart => ({ data: goals ?? (noneYet(failure) ? [] : undefined), failure: tracked(failure), load });
+
+type TrackerReads = { places: unknown; tasks: unknown; tasksFailure: unknown; goals: unknown; goalsFailure: unknown; pipelinesFailure: unknown };
+
+/* What the tracker could not load, said on top of the page. What the work and the goals did not bring stands where they
+   would instead, while they have not come. */
+function brokenOf(r: TrackerReads, updateSaysIt: boolean): unknown {
+  const shown = (f: unknown) => shownLoadFailure(f, updateSaysIt);
+  return shown(r.places) ?? (r.tasks ? shown(r.tasksFailure) : null) ?? (r.goals ? shown(tracked(r.goalsFailure)) : null) ?? shown(tracked(r.pipelinesFailure));
+}
 
 function useRowInSight(selected: string | null) {
   const last = useRef(selected);
@@ -417,7 +430,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
      without goals yet answers that it has none. */
   const tasksLoad = useLoad([{ data: tasks, failure, load: loadTasks }]);
-  const goalsLoad = useLoad([{ data: goalList ?? (noGoals(goalsFailure) ? [] : undefined), failure: noGoals(goalsFailure) ? null : goalsFailure, load: loadGoals }]);
+  const goalsLoad = useLoad([goalsPart(goalList, goalsFailure, loadGoals)]);
   const { pipelines: pipelineList, failure: pipelinesFailure } = usePipelines();
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState('');
@@ -542,11 +555,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   })();
 
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
-  const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
   const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
-  /* What the work and the goals did not bring stands where they would; a failure of what is already shown stands on top. */
-  const broken = shownLoadFailure(placesFailure, updateSaysIt) ?? (tasks ? shownLoadFailure(failure, updateSaysIt) : null) ?? (goalList ? shownLoadFailure(tracked(goalsFailure), updateSaysIt) : null) ?? shownLoadFailure(tracked(pipelinesFailure), updateSaysIt);
+  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, updateSaysIt);
   const clearPerson = () => onPlace({ ...place, personId: undefined });
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
