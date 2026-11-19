@@ -19,15 +19,17 @@ test('a change stays in its group: the frontend, the backend and the node leave 
   assert.ok(unitsOf('node').filter(unit => node.has(unit)).length <= unitsOf('node').length / 2, 'one file of the node should not rerun most of its tests');
 });
 
-test('the Git mirror compares author-check paths without loading their files', () => {
+test('the Git mirror and the node author runner leave the driver in the pinned checkout', () => {
   const graph = fingerprint.testGraph(input);
   const mirror = graph.closure('apps/node/src/test-mirror.ts');
   assert.ok(mirror.has('apps/node/src/author-patch.ts'));
   assert.ok(!mirror.has('scripts/author-check.mjs'));
   assert.ok(!mirror.has('scripts/author-check/select.mjs'));
   const author = graph.closure('apps/node/src/author-check.ts');
-  assert.ok(author.has('scripts/author-check.mjs'));
-  assert.ok(author.has('scripts/author-check/select.mjs'));
+  assert.ok(author.has('apps/node/src/test-mirror.ts'));
+  assert.ok(!author.has('scripts/author-check.mjs'));
+  assert.ok(!author.has('scripts/author-check/select.mjs'));
+  assert.ok(graph.closure('scripts/test/author-check.test.mjs').has('scripts/author-check/select.mjs'));
 });
 
 /* The painter, as the SQL parser, loaded its package in its worker by a name the graph cannot read, so a test that reached it took
