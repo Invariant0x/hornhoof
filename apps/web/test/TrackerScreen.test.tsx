@@ -155,12 +155,12 @@ describe('My tasks and View as', () => {
     const list = await main();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('My tasks');
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
-    expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Waits for Maria' })).not.toBeInTheDocument();
   });
 
   it("keeps the map's way to another person's decisions for anyone, among the decisions they see", async () => {
     shell('/tasks?show=waits&person=p2', {}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
-    expect(await screen.findByText('Decisions for Maria')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Maria' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
   });
 
@@ -697,8 +697,43 @@ describe('what waits for people', () => {
   it("keeps a question asked of a person by name in that person's filter", async () => {
     shell('/tasks?show=waits&person=p-max', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
-    expect(await within(waiting).findByText('Decisions for Max')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Max' })).toBeInTheDocument();
+    await within(waiting).findByText('Which bank for the cards?');
     expect(articles(waiting)).toEqual(['#21 Take card payments']);
+  });
+
+  it("names the person of a filter in the page's title alone, and Me takes the filter off", async () => {
+    const user = userEvent.setup();
+    shell('/tasks?show=waits&person=p-max', routes);
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    await within(waiting).findByText('Which bank for the cards?');
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for Max' })).toBeInTheDocument();
+    /* Everything that waits for other people is in Waiting for people, so the list has neither a second line naming the
+       person nor a way to everyone's decisions. */
+    expect(waiting).not.toHaveTextContent('Decisions for Max');
+    expect(screen.queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
+    expect(articles(screen.getByRole('region', { name: 'Waiting for you' }))).toEqual(['#23 Refund button', '#24 Fix the login page']);
+  });
+
+  it('names Waiting for people once, in the title of the page', async () => {
+    shell('/tasks?show=people', routes);
+    /* Either list of what waits, so a tracker without this section fails here instead of waiting for it for ever. */
+    const people = await screen.findByRole('region', { name: /^Waiting for (you|people)$/ });
+    expect(people).toHaveAccessibleName('Waiting for people');
+    await within(people).findByText('Which bank for the cards?');
+    expect(screen.getAllByRole('heading', { name: 'Waiting for people' }).map(h => h.tagName)).toEqual(['H1']);
+  });
+
+  it('keeps the heading of Waiting for people below the results of a search, which come between it and the title', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?show=people', routes);
+    const people = await screen.findByRole('region', { name: /^Waiting for (you|people)$/ });
+    await within(people).findByText('Which bank for the cards?');
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'Refund');
+    expect(screen.getByRole('region', { name: 'Found tasks' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Waiting for people' })).getByRole('heading', { level: 2, name: 'Waiting for people' })).toBeInTheDocument();
   });
 
   it('lists everything that waits for people in the company, each card with whom it waits for, and counts it', async () => {
