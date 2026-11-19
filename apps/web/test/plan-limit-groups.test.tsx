@@ -5,7 +5,7 @@ import type { Limits, SubView } from '../src/types';
 import { LimitMeters } from '../src/ui/PlanLimits';
 import { limitState, stateOf } from '../src/ui/subscription';
 import { ME, SUBS } from './api-mock';
-import { lists, openAll, rowOf, waitFor } from './subscriptions-helpers';
+import { lists, openAll, openCards, rowOf, waitFor } from './subscriptions-helpers';
 
 /* A plan whose provider keeps its limits by model group, as Antigravity's /usage tells them (#1589): its Claude and GPT
    models used their week while its Gemini models have most of theirs. Made-up numbers. */
@@ -61,6 +61,23 @@ describe('a plan that keeps its limits by model group', () => {
     expect(within(row).getByText('Ready')).toBeInTheDocument();
     const week = [...row.querySelectorAll('td')].find(td => td.textContent?.includes('Gemini Models: 6%'));
     expect(week?.textContent).toMatch(/Gemini Models: 6%, resets in .*Claude and GPT models: 100%, resets in /);
+  });
+
+  it('says on the card and in the list which window a group does not have, and which one is not known yet', async () => {
+    /* Gemini names every window it has and has no five hours; Claude and GPT told only their week. */
+    const weekOnly = { ...GEMINI, windows: [GEMINI.windows[1]!] };
+    const untold = { ...OTHERS, complete: false, windows: [OTHERS.windows[1]!] };
+    serve({ ...AGY, limits: { ...GROUPED, groups: [weekOnly, untold] } });
+    render(<Subscriptions me={ME} />);
+    const row = await waitFor(() => rowOf('Antigravity'));
+    const five = [...row.querySelectorAll('td')].find(td => td.textContent?.includes('Gemini Models: Not on this plan'));
+    expect(five?.textContent).toMatch(/Claude and GPT models: (?!Not on this plan)\S/);
+    expect(five?.querySelectorAll('.bar')).toHaveLength(0);
+    openCards();
+    const card = rowOf('Antigravity');
+    const fiveHours = (group: string) => within(card).getByRole('heading', { name: `Limits: ${group}` }).closest('section')!.querySelector('.gauge .g-f b')!.textContent;
+    expect(fiveHours('Gemini Models')).toBe('Not on this plan');
+    expect(fiveHours('Claude and GPT models')).not.toBe('Not on this plan');
   });
 
   it("shows an employee the group of its own model, and every group for a model of none known", () => {
