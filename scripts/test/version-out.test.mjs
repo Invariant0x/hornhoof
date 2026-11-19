@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { digestOf, imageOf, namedBy, platformOf, revisionIn, signIn, tokenIn, tokenRealm, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
+import { digestOf, imageOf, namedBy, platformOf, rateNote, revisionIn, signIn, tokenIn, tokenRealm, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
+/* global Response, Buffer, URL */
 
 const SHA = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
@@ -94,7 +95,14 @@ test("the token is asked for with the workflow's token as a basic sign-in, and w
 test('the registry gives its token as token or access_token, and nothing else counts as one', () => {
   assert.equal(tokenIn({ token: 'pull' }), 'pull');
   assert.equal(tokenIn({ access_token: 'pull' }), 'pull');
+  assert.equal(tokenIn({ token: '', access_token: 'pull' }), 'pull');
   for (const body of [{}, { token: '' }, { token: 7 }, null]) assert.throws(() => tokenIn(body), { message: 'the registry gave no token' }, JSON.stringify(body));
+});
+
+test("GitHub's rate limit is named when GitHub says it is used up, and only then", () => {
+  assert.equal(rateNote(new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0' } })), ', as its rate limit is used up');
+  assert.equal(rateNote(new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '12' } })), '');
+  assert.equal(rateNote(new Response(null, { status: 500 })), '');
 });
 
 test('a digest the registry names is a sha256 one, or the lookup ends', () => {

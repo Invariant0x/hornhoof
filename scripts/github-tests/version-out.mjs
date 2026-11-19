@@ -74,7 +74,7 @@ async function bodyOf(res, who, path) {
 }
 
 /* GitHub says so in its headers when a 403 or 429 comes from its rate limit. */
-const rateNote = res => (res.headers.get('x-ratelimit-remaining') === '0' ? ', as its rate limit is used up' : '');
+export const rateNote = res => (res.headers.get('x-ratelimit-remaining') === '0' ? ', as its rate limit is used up' : '');
 
 /* One object of the repository through GitHub's API, null when GitHub has none. */
 async function fromGitHub(path) {
@@ -88,7 +88,7 @@ async function fromGitHub(path) {
 
 /* What a git object of GitHub's API names, when it is a commit or a tag object; anything else ends the lookup. */
 export function namedBy(tag, object) {
-  if (!['commit', 'tag'].includes(object?.type) || !COMMIT.test(object?.sha ?? '')) throw new Error(`the tag ${tag} is not on a commit`);
+  if (!['commit', 'tag'].includes(object?.type) || !COMMIT.test(object.sha)) throw new Error(`the tag ${tag} is not on a commit`);
   return object;
 }
 
@@ -125,7 +125,7 @@ export function tokenRealm(challenge, registry) {
 export const signIn = (actor, token) => (token ? { authorization: `Basic ${Buffer.from(`${actor || 'github-actions'}:${token}`).toString('base64')}` } : {});
 
 export function tokenIn(body) {
-  const token = body?.token ?? body?.access_token;
+  const token = body?.token || body?.access_token;
   if (typeof token !== 'string' || !token) throw new Error('the registry gave no token');
   return token;
 }
@@ -167,7 +167,7 @@ async function required(path, accept, what) {
 }
 
 export function digestOf(reference, what) {
-  if (!DIGEST.test(reference?.digest ?? '')) throw new Error(`the registry names no ${what}`);
+  if (!DIGEST.test(reference?.digest)) throw new Error(`the registry names no ${what}`);
   return reference.digest;
 }
 
