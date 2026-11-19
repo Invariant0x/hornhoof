@@ -25,9 +25,10 @@ import { OneShotMarks } from '../ui/TaskWorkflow';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, CY, FT, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { arrowD, FW, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
+import { useNaturalHeight } from '../ui/natural-height';
 
 export { employeeGroups };
 
@@ -94,13 +95,21 @@ type Seen = Map<string, SeenState>;
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
 
-function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
+/* What the boxes of the schema say, so the screen measures them again when it changes and not for anything else. */
+function schemaWords(d: Department, language: 'en' | 'ru'): string {
+  const people = d.employees.map(e => [e.name, e.title?.[language], e.kind, e.status, e.on, e.model, e.modelName, e.effort, e.provider, e.timer, e.task?.number, e.task?.title, e.context !== null].join('|'));
+  const roles = d.roles.map(r => [r.title[language], r.description[language], r.schema].join('|'));
+  return [language, d.name, d.roleCode, ...people, ...roles, ...d.teams.map(team => team.name), ...(d.calls ?? []).map(c => c.stage)].join('\n');
+}
+
+/* h: as tall as the schema made it for its words. */
+function HeadCard({ d, head, h, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; h: number; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
   const t = useT();
   const { language } = useLanguage();
-  const style = { left: 0, top: 0, width: HW, height: HH };
+  const style = { left: 0, top: 0, width: HW, height: h };
   if (!head)
     return (
-      <div className="shead empty" style={style}>
+      <div className="shead empty head-card" style={style}>
         <Edge cut={14} corner>
           <span className="hr">
             <AgentIcon />
@@ -113,7 +122,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
     );
   const role = head.title?.[language];
   return (
-    <div className={`sslot${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
+    <div className={`sslot head-card${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
       <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
         <Edge cut={14} corner halo>
           <span className="hr">
@@ -291,9 +300,15 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     return () => document.removeEventListener('keydown', close);
   }, [drawer]);
 
-  const s = useMemo(() => schemaLayout(d, reach.length), [d, reach.length]);
-  const paths = useMemo(() => stepPaths(s), [s]);
   const box = useRef<HTMLDivElement>(null);
+  /* The head card, every chip and every role's heading are as tall as the one with the most words needs: measured when the
+     words change or the schema comes back from the tree, never for a drag or a zoom. */
+  const words = `${tree}\n${schemaWords(d, language)}`;
+  const headNeed = useNaturalHeight(box, '.head-card', '.head-card .edge-in > *', words, 'department-head');
+  const chipNeed = useNaturalHeight(box, '.frame .dept-chip', '.frame .schip .edge-in > *', words, 'department-chips');
+  const headingNeed = useNaturalHeight(box, '.frame .fh', '.frame .fh > *', words, 'department-headings');
+  const s = useMemo(() => schemaLayout(d, reach.length, { head: headNeed, chip: chipNeed, heading: headingNeed }), [d, reach.length, headNeed, chipNeed, headingNeed]);
+  const paths = useMemo(() => stepPaths(s), [s]);
   const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
   const covered = panel ? COVER[panel] : 0;
 
@@ -462,7 +477,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
           <section aria-labelledby={`${id}-members`} className="slayer">
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}${f.oneShot ? ' frame-calls' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: s.size.ft, width: FW, height: f.h }}>
               <FrameHeading frame={f} language={language} canGive={canGive} calls={d.calls} />
               {f.role && canGive && (
                 <input
@@ -475,7 +490,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
                   onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
-              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - FT} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
+              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.size.ft} h={s.size.chip} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
             </div>
           ))}
           </section>
@@ -487,7 +502,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             ))}
             {lines('pl')}
             {s.gates.map(g => (
-              <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
+              <path key={g.x} className="gd" d={`M ${g.x} ${s.size.cy - 7} L ${g.x + 7} ${s.size.cy} L ${g.x} ${s.size.cy + 7} L ${g.x - 7} ${s.size.cy} Z`} />
             ))}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
@@ -496,7 +511,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             ))}
           </svg>
           {s.gates.map(g => (
-            <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
+            <span key={g.x} className="gl" style={{ left: g.x, top: s.size.cy + 12 }}>
               {t.dept.gate(g.n)}
             </span>
           ))}
@@ -513,6 +528,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
             <HeadCard
               d={d}
               head={s.head && shown(s.head)}
+              h={s.size.head}
               stats={stats}
               on={!!s.head && selected === s.head.id}
               flash={!!s.head && flashing.has(s.head.id)}

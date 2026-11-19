@@ -1459,6 +1459,10 @@ describe('deptLayout', () => {
     expect(tall(6).rows).toEqual([-228, 0, 228]);
     expect(tall(12).rows).toEqual([-570, -342, -114, 114, 342, 570]);
     expect(tall(5).spots.map(s => [s.w, s.h])).toEqual(Array(5).fill([280, 196]));
+    /* Two rows of cards too tall for the corners move apart as far as the cards need. */
+    const rowsOf = (spots: ReturnType<typeof deptLayout>) => [...new Set(spots.map(s => s.y + s.h / 2 - spots[0]!.path[0]![1]))];
+    expect(rowsOf(deptLayout(4, 430))).toEqual([-231, 231]);
+    expect(rowsOf(deptLayout(6, 430))).toEqual([-462, 0, 462]);
     for (const n of [2, 5, 6, 12]) {
       const { spots } = tall(n);
       for (const a of spots)

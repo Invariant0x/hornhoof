@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUS, CY, FHEAD, FT, FW, G, GS, HH, HW, PH, PW, PY, REP, schemaLayout, stepPaths } from '../src/screens/schema';
+import { BUS, CH, CY, FHEAD, FT, FW, G, GS, HH, HW, PH, PW, PY, REP, RY, schemaLayout, stepPaths } from '../src/screens/schema';
 import { taskRoute } from './task-route';
 import type { Department, DeptRole, Employee } from '../src/types';
 import type { Point } from '../src/ui/wires';
@@ -271,5 +271,49 @@ describe('the department schema', () => {
       }
       for (const chip of chips) expect(touches([lx - 80, ly - 9], [lx + 80, ly + 9], chip)).toBe(false);
     }
+  });
+});
+
+describe('the department schema as tall as its words', () => {
+  const sizes = (s: ReturnType<typeof schemaLayout>) => s.size;
+
+  it.each([
+    ['no sub-units', () => dept(TEAM, ROLES)],
+    ['nine sub-units', grown],
+  ])('keeps the old sizes and places while the words fit them, with %s', (_, make) => {
+    const before = schemaLayout(make(), 2);
+    expect(sizes(before)).toEqual({ head: HH, chip: CH, heading: FHEAD, row: PY, bus: BUS, ry: RY, cy: CY, ft: FT });
+    /* Words that need no more, or at most a pixel more, than the old boxes change nothing. */
+    for (const need of [{ head: 0, chip: 0, heading: 0 }, { head: 172.4, chip: 83.8, heading: 81 }, { head: HH + 1, chip: CH + 1, heading: FHEAD - 12 }]) {
+      expect(schemaLayout(make(), 2, need)).toEqual(before);
+    }
+  });
+
+  it.each([
+    ['no sub-units', () => dept(TEAM, ROLES)],
+    ['nine sub-units', grown],
+  ])('grows the head card, every chip and every heading to the tallest one\'s words and keeps every gap, with %s', (_, make) => {
+    const s = schemaLayout(make(), 2, { head: 260.4, chip: 131.2, heading: 150 });
+    const z = sizes(s);
+    /* In whole pixels; a heading leaves 12 below it, as chips do between them, and 1 for the frame's line above it. */
+    expect([z.head, z.chip, z.heading, z.row]).toEqual([261, 132, 163, 144]);
+    expect([z.bus - z.head, z.ry - z.bus, z.cy - z.bus, z.ft - z.cy]).toEqual([BUS - HH, RY - BUS, CY - BUS, FT - CY]);
+    for (const f of s.frames) {
+      f.members.forEach((m, i) => {
+        expect(m.y).toBe(z.ft + z.heading + i * z.row);
+        expect(m.cy).toBe(m.y + z.chip / 2);
+      });
+      const last = f.members[f.members.length - 1];
+      if (last) expect(z.ft + f.h).toBeGreaterThanOrEqual(last.y + z.chip + 8);
+      if (f.members.length) expect(s.lines).toContainEqual({ cls: 'tr', pts: [[f.x + 10, z.bus], [f.x + 10, last!.cy]] });
+    }
+    /* The head's drop leaves its card's bottom, the bus runs under it, and the report comes into the card. */
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[s.hx, z.head], [s.hx, z.bus]] });
+    const [ex, ey] = s.report!.pts[s.report!.pts.length - 1]!;
+    expect((ex === s.hx + HW / 2 && ey > 0 && ey < z.head) || (ey === z.head && ex > s.hx - HW / 2 && ex < s.hx + HW / 2)).toBe(true);
+    for (const g of s.lines.filter(l => l.cls === 'gate')) expect(g.pts[0]![1]).toBe(z.ry + 16);
+    expect(s.h).toBe(z.ft + Math.max(...s.frames.map(f => f.h)));
+    const first = s.frames.find(f => f.members.length)!;
+    expect(stepPaths(s).toMember(first.members[0]!.e.id)).toEqual([[s.hx, z.head - 30], [s.hx, z.bus], [first.x + 10, z.bus], [first.x + 10, first.members[0]!.cy], [first.members[0]!.x + 14, first.members[0]!.cy]]);
   });
 });

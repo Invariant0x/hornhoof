@@ -26,6 +26,7 @@ import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
+import { useNaturalHeight } from '../ui/natural-height';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -580,7 +581,13 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }, [layout.bends, bending]);
   /* The department whose card the pointer or the keyboard is on, so the hub shows its turn. */
   const [pointed, setPointed] = useState<string | null>(null);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends) : null), [org, layout.placed, moving, bends]);
+  /* Every card of the map is as tall as the one with the most words needs: measured when the words change, never for a drag. */
+  const cardWords = org ? [language, ...org.departments.map(d => [deptLabel(t, d), deptDetail(t, d), d.current ? `${d.current.number} ${d.current.title}` : '', d.employees.length, d.agents.total, JSON.stringify(d.turnProgress ?? null)].join('|'))].join('\n') : '';
+  const cardNeed = useNaturalHeight(box, '.dept', '.dept .edge-in > *', cardWords, 'map-cards');
+  const arr = useMemo(
+    () => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends, cardNeed) : null),
+    [org, layout.placed, moving, bends, cardNeed],
+  );
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;

@@ -131,6 +131,42 @@ describe('the map while departments work in the turn', () => {
   });
 });
 
+describe('cards as tall as their words need', () => {
+  const company = (n: number): Org => ({ ...ORG4, departments: Array.from({ length: n }, (_, i) => dept({ id: ID(i + 1), name: `Department ${i + 1}` })) });
+
+  it('keeps the map exactly as it is while the words fit the cards', () => {
+    for (const need of [0, 120, 160]) expect(arrangeMap(ORG4, {}, {}, need)).toEqual(arrangeMap(ORG4));
+  });
+
+  it('gives every card the height the tallest one needs, in whole pixels, with its width, and keeps the rows 32 apart', () => {
+    for (const n of [2, 4, 6, 9]) {
+      const arr = arrangeMap(company(n), {}, {}, 429.2);
+      expect(arr.depts.map(d => [d.w, d.h])).toEqual(Array(n).fill([280, 430]));
+      for (const d of arr.depts) expect(blockOf(arr, deptKey(d.id))).toEqual({ x: d.x, y: d.y, w: 280, h: 430 });
+      for (const a of arr.depts)
+        for (const b of arr.depts)
+          if (a !== b && a.x === b.x) expect(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)).toBeGreaterThanOrEqual(32);
+      /* Each trace ends in the middle of its card's near side, the people stand clear above the top row, and every line
+         keeps clear of the blocks it does not join. */
+      for (const d of arr.depts) expect(d.path[d.path.length - 1]).toEqual([d.x < 600 ? d.x + d.w : d.x, d.y + d.h / 2]);
+      const topRow = Math.min(...arr.depts.map(d => d.y));
+      for (const p of arr.top) expect(topRow - (p.y + p.h)).toBe(28);
+      for (const w of ways(arr)) expect(crossesOthers(arr, w.pts, w.ends ?? [])).toBe(false);
+    }
+  });
+
+  it('grows a card taller than its turn strip needs, and keeps a moved card where it was put', () => {
+    const working: Org = { ...ORG4, turn: { id: 'u3', number: 3, goal: 'Ship payments' }, departments: ORG4.departments.map((d, i) => ({ ...d, turnProgress: i ? null : { turnNumber: 3, done: 1, total: 2 } })) };
+    expect(arrangeMap(working, {}, {}, 180).depts.map(d => d.h)).toEqual(Array(4).fill(196));
+    const arr = arrangeMap(working, { [deptKey(D1)]: { x: 100, y: 700 } }, {}, 250);
+    const sales = blockOf(arr, deptKey(D1));
+    expect(sales).toEqual({ x: 100, y: 700, w: 280, h: 250 });
+    const trace = arr.depts.find(d => d.id === D1)!.path;
+    expect(square(trace)).toBe(true);
+    expect(onEdge(trace[trace.length - 1]!, sales)).toBe(true);
+  });
+});
+
 describe('a block moved on the map', () => {
   it('takes a department to where it was put, with its docked people, and runs its lines there at right angles', () => {
     const before = arrangeMap(ORG4);
