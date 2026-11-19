@@ -5,7 +5,7 @@ import { agents, teams } from '../../db/schema.js';
 import { changeRoute, type Route } from './route-records.js';
 import { giver, refuse, type Moved, type Task, type Tx } from './state.js';
 import { move } from './transitions.js';
-import { integrationTarget, requireInTurn, requireSameTurn } from './turn-integration.js';
+import { branchHolds, integrationTarget, requireInTurn, requireSameTurn, type IntegrationTarget } from './turn-integration.js';
 
 /* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never
    per-task run_tests), never enters the echelons and calls no other member of the department onto its work. The mark is
@@ -34,11 +34,27 @@ export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'exe
 export const turnkeyWork = (task: Pick<Task, 'number'>) =>
   refuse(409, 'task_invalid', `#${task.number} is turnkey work: its holder does it end to end alone and closes it with report, so no echelon takes it.`);
 
-type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
+type Reader = Parameters<typeof move>[0] & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged'>>;
+
+/* What the holder of turnkey work names as it closes it: the exact commit it checked and took into the turn branch by
+   fast-forward, and the commit of main or the turn branch its branch started from. A release counts as checked only the
+   first-parent line from that commit down to that start: a commit someone else made under it or on top of it stays unchecked. */
+export type TurnkeyChecked = { commit: string; baseCommit: string };
+
+type Own = { branch: string; commitSha: string };
+
+const unnamed = (task: Task, own: Own, branch: string) => refuse(400, 'task_invalid', `Name what you checked as you close #${task.number}: turnkey.commit, the exact commit of ${own.branch} you checked and fast-forwarded ${branch} to, and turnkey.baseCommit, the commit of main or ${branch} your branch started from. A release counts as checked only the first-parent line from that commit down to that start.`);
+
+/* The commit named is one of the work's own branch, and it holds the start named: else the line between them is nobody's. The
+   turn branch holds that commit, so it holds the start too. */
+async function requireNamed(ctx: Reader, repo: IntegrationTarget['repo'], own: Own, named: TurnkeyChecked): Promise<void> {
+  if (!(await branchHolds(ctx, repo, own.commitSha, named.commit))) throw refuse(409, 'task_changed', `${own.branch} is at ${own.commitSha}, which does not hold ${named.commit}. Name the commit of ${own.branch} you checked.`);
+  if (!(await branchHolds(ctx, repo, named.commit, named.baseCommit))) throw refuse(409, 'task_invalid', `${named.commit} does not hold ${named.baseCommit}. Name as turnkey.baseCommit the commit of main or the turn branch your branch started from.`);
+}
 
 /* Where turnkey work of a department with a repository joins its open turn: its own branch, task-<number>, which the turn
    branch holds by fast-forward. Work with no branch of its own changed no code and joins no release. */
-async function turnkeyIntegration(ctx: Reader, task: Task) {
+async function turnkeyIntegration(ctx: Reader, task: Task, named?: TurnkeyChecked) {
   const target = await integrationTarget(ctx, task);
   const turn = target?.turn;
   if (!target || !turn || !ctx.readCommit) return null;
@@ -51,18 +67,20 @@ async function turnkeyIntegration(ctx: Reader, task: Task) {
     throw unreadable();
   }
   const { branch } = target;
-  await requireInTurn(ctx, { ...target, turn }, own.commitSha, (head, holdsHead) => holdsHead
+  if (!named) throw unnamed(task, own, branch);
+  await requireNamed(ctx, target.repo, own, named);
+  await requireInTurn(ctx, { ...target, turn }, named.commit, (head, holdsHead) => holdsHead
     ? `fast-forward ${branch} to ${own.branch} first, so the release takes it, then report done.`
     : `${own.branch} does not hold ${head}, the head of ${branch}, so ${branch} cannot go to it by fast-forward: take ${branch} into ${own.branch} first, then fast-forward ${branch} to it and report done.`);
-  return { turn, integration: { branch: target.branch, commit: own.commitSha, from: own.branch, observedAt: new Date().toISOString() } };
+  return { turn, integration: { branch, commit: named.commit, start: named.baseCommit, from: own.branch, observedAt: new Date().toISOString() } };
 }
 
 /* Its holder closes turnkey work alone: nobody checks it after, and whoever gave it hears that it is done. */
-export async function turnkeyReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string): Promise<Moved> {
+export async function turnkeyReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, named?: TurnkeyChecked): Promise<Moved> {
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not yours to report.`);
   const text = summary.trim();
   if (!text) throw refuse(400, 'task_invalid', 'Say what was done and how it was checked.');
-  const joined = await turnkeyIntegration(ctx, task);
+  const joined = await turnkeyIntegration(ctx, task, named);
   const wakes = giver(task, 'done', agentId, text);
   const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0, ...(joined ? { turnId: joined.turn.id } : {}) }, {
     kind: 'report', actor: { agentId }, text, data: { done: true, ...(joined ? { integration: joined.integration } : {}) }, returned: true,

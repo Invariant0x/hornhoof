@@ -43,7 +43,7 @@ async function handReleased(options: { rewritten: boolean }) {
   const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
   f.repo.holds[OWN] = [TAGGED, ...f.repo.holds[TAGGED]!];
   f.repo.heads[`task-${task.number}`] = OWN;
-  const done = () => report(f.ctx, holder.id, task.id, { done: true, summary: 'Joined task-N to the turn branch after my own review, security check and tests.' });
+  const done = () => report(f.ctx, holder.id, task.id, { done: true, summary: 'Joined task-N to the turn branch after my own review, security check and tests.', turnkey: { commit: f.repo.heads[`task-${task.number}`]!, baseCommit: TAGGED } });
   const open = async () => (await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open'))))[0]!;
   return { ...f, holder, work: task, own: `task-${task.number}`, done, open };
 }

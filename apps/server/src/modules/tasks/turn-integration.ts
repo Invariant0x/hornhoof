@@ -48,12 +48,13 @@ export async function branchHolds(ctx: Partial<Pick<Ctx, 'readMerged' | 'readCom
   }
 }
 
-/* The head of a branch as the repository says it now, or why it could not say. */
+/* The head of a branch as the repository says it now, or why it could not say. A tag of its name is no branch: it stands for
+   no line, as a ref written in place of a deleted branch would otherwise. */
 export async function headOf(ctx: Reader, repo: Repo, branch: string): Promise<string | null> {
   if (!ctx.readCommit) return null;
   try {
     const at = await ctx.readCommit(repo, { branch }, 5_000);
-    return 'problem' in at || at.branch !== branch ? null : at.commitSha;
+    return 'problem' in at || at.branch !== branch || at.tag ? null : at.commitSha;
   } catch {
     return null;
   }
