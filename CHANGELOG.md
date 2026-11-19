@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - A version whose tag reaches GitHub with main still gets its images built, published and released: a version counts as out only once its images are published, and as released once its tag has a release.
+- When GitHub or the image registry answers with an error or cannot be reached, a release stops and says why, and leaves the latest images and the releases as they are.
 
 ### Changed
 

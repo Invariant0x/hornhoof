@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { imageOf, verdictOf } from '../github-tests/version-out.mjs';
+import { imageOf, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
 
 const SHA = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
@@ -56,6 +56,13 @@ test('the release job goes by the tag and the release alone, not by the images',
   assert.equal(verdictOf({ job: 'release', ...PUSH, tag: SHA, image: OTHER, release: false }).verdict, 'new');
 });
 
+test('a lookup that failed is unknown, a third answer beside out and new, and says why the job stops', () => {
+  assert.deepEqual(unknownOf(VERSION, 'GitHub could not be reached'), {
+    verdict: 'unknown',
+    why: 'Could not tell whether version 0.34.1 is out: GitHub could not be reached. This job stops and builds, moves and releases nothing; run it again once that is fixed.',
+  });
+});
+
 test('no message has an em dash or a dash between words', () => {
   const all = [
     verdictOf({ job: 'images', event: 'workflow_dispatch', sha: SHA, version: VERSION }),
@@ -64,6 +71,7 @@ test('no message has an em dash or a dash between words', () => {
     verdictOf({ job: 'images', ...PUSH, image: '' }),
     verdictOf({ job: 'publish', ...PUSH, image: SHA }),
     verdictOf({ job: 'release', ...PUSH, release: false }),
+    unknownOf(VERSION, 'the registry answered 500 for manifests/0.34.1'),
   ];
   for (const { why } of all) assert.doesNotMatch(why, /[\u2013\u2014]| - /);
 });

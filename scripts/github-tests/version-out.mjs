@@ -4,7 +4,11 @@ import { versionParts } from '../release/versions.mjs';
 
 /* Whether the version of a commit is out, for the images, publish and release jobs of .github/workflows/images.yml. A
    version is out once its app image is published, ghcr.io/invariant0x/hornhoof:<version>, and released once its tag has
-   a GitHub release: the tag alone says neither, as it may come with main before anything was built. */
+   a GitHub release: the tag alone says neither, as it may come with main before anything was built.
+
+   Each lookup has three answers: there, not there (a 404 and nothing else), and unknown, when GitHub or the registry
+   answers anything else, cannot be reached or gives no JSON. An unknown answer says nothing about the version, so it
+   stops the job as a conflict does: it never reads as not out, which would build and move :latest or make a release. */
 
 const IMAGE = 'invariant0x/hornhoof';
 const REVISION = 'org.opencontainers.image.revision';
@@ -49,17 +53,34 @@ export function verdictOf({ job, event, sha, version, tag, image, release }) {
   return { verdict: 'new', why: `Version ${version} has no published images yet${tagged}, so ${DOES[job].new}.` };
 }
 
-const signal = () => AbortSignal.timeout(READ_MS);
+/* A request that says in plain words when nothing answered in time or at all. */
+async function reach(who, url, options = {}) {
+  try {
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(READ_MS) });
+  } catch (error) {
+    throw new Error(error?.name === 'TimeoutError' ? `${who} did not answer within ${READ_MS / 1000} seconds` : `${who} could not be reached`);
+  }
+}
+
+async function bodyOf(res, who, path) {
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(`${who} answered ${path} with something that is not JSON`);
+  }
+}
+
+/* GitHub says so in its headers when a 403 or 429 comes from its rate limit. */
+const rateNote = res => (res.headers.get('x-ratelimit-remaining') === '0' ? ', as its rate limit is used up' : '');
 
 /* One object of the repository through GitHub's API, null when GitHub has none. */
 async function fromGitHub(path) {
-  const res = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`, {
+  const res = await reach('GitHub', `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`, {
     headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}) },
-    signal: signal(),
   });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${path}`);
-  return res.json();
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${path}${rateNote(res)}`);
+  return bodyOf(res, 'GitHub', path);
 }
 
 /* The commit the tag is on, through its annotated tag objects; null without the tag. */
@@ -86,9 +107,9 @@ async function pullToken(challenge) {
   if (realm.origin !== registryUrl().origin) throw new Error(`the registry sends for a token to ${realm.origin}, which is not its own`);
   for (const key of ['service', 'scope']) if (fields[key]) realm.searchParams.set(key, fields[key]);
   const basic = env.GITHUB_TOKEN ? { authorization: `Basic ${Buffer.from(`${env.GITHUB_ACTOR || 'github-actions'}:${env.GITHUB_TOKEN}`).toString('base64')}` } : {};
-  const res = await fetch(realm, { headers: basic, signal: signal() });
+  const res = await reach('the registry', realm, { headers: basic });
   if (!res.ok) throw new Error(`the registry answered ${res.status} for a token`);
-  const body = await res.json();
+  const body = await bodyOf(res, 'the registry', 'a token');
   const token = body.token ?? body.access_token;
   if (typeof token !== 'string' || !token) throw new Error('the registry gave no token');
   return token;
@@ -96,7 +117,7 @@ async function pullToken(challenge) {
 
 async function registryAnswer(url, accept) {
   const headers = { accept, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) };
-  const res = await fetch(url, { headers, redirect: 'manual', signal: signal() });
+  const res = await reach('the registry', url, { headers, redirect: 'manual' });
   if (res.status !== 401 || bearer) return res;
   await res.body?.cancel();
   bearer = await pullToken(res.headers.get('www-authenticate') ?? '');
@@ -111,11 +132,11 @@ async function fromRegistry(path, accept) {
   const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
   if (location) {
     await res.body?.cancel();
-    res = await fetch(new URL(location, url), { signal: signal() });
+    res = await reach('the registry', new URL(location, url));
   }
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`the registry answered ${res.status} for ${path}`);
-  return res.json();
+  return bodyOf(res, 'the registry', path);
 }
 
 async function required(path, accept, what) {
@@ -150,8 +171,17 @@ async function factsFor(job, event, version) {
   return { tag, image: await imageRevision(version) };
 }
 
+/* The answer when a lookup failed: the job stops, as nothing can be said of the version. */
+export const unknownOf = (version, reason) => ({ verdict: 'unknown', why: `Could not tell whether version ${version} is out: ${reason}. This job stops and builds, moves and releases nothing; run it again once that is fixed.` });
+
 export async function versionOut({ job, event, sha, version }) {
   if (!COMMIT.test(sha ?? '')) throw new Error(`${sha} is not a commit`);
   versionParts(version);
-  return verdictOf({ job, event, sha, version, ...await factsFor(job, event, version) });
+  let facts;
+  try {
+    facts = await factsFor(job, event, version);
+  } catch (error) {
+    return unknownOf(version, error.message);
+  }
+  return verdictOf({ job, event, sha, version, ...facts });
 }

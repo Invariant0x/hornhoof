@@ -545,7 +545,9 @@ describe('whether a version is out, as the images, publish and release jobs look
   const IMAGE = `ghcr.io/invariant0x/hornhoof:${VERSION}`;
 
   type Where = 'none' | 'here' | 'other';
-  type World = { tag?: Where; release?: boolean; image?: Where | 'unlabeled'; github?: number; registry?: number };
+  /* github and registry: a status each answers everything with; limited: GitHub's rate limit is used up; down: who cannot be
+     reached at all. */
+  type World = { tag?: Where; release?: boolean; image?: Where | 'unlabeled'; github?: number; registry?: number; limited?: boolean; down?: 'github' | 'registry' };
   type Ran = { code: number; said: string; outputs: Record<string, Record<string, string>>; gh: string[][]; asked: { url: string; authorization: string | undefined }[]; notes: string | null; sha: string; other: string };
 
   const project = (dir: string, version: string) => {
@@ -581,6 +583,7 @@ describe('whether a version is out, as the images, publish and release jobs look
     };
     const api = (req: IncomingMessage, res: ServerResponse, path: string) => {
       if (world.github) return reply(res, world.github, { message: 'GitHub is down' });
+      if (world.limited) return reply(res, 403, { message: 'API rate limit exceeded for installation.' }, { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' });
       if (path === `/repos/acme/shop/git/ref/tags/v${VERSION}`) {
         return world.tag && world.tag !== 'none' ? reply(res, 200, { ref: `refs/tags/v${VERSION}`, object: { type: 'tag', sha: TAG_OBJECT } }) : reply(res, 404, { message: 'Not Found' });
       }
@@ -678,10 +681,10 @@ describe('whether a version is out, as the images, publish and release jobs look
         GITHUB_REPOSITORY: 'acme/shop',
         GITHUB_EVENT_NAME: event,
         GITHUB_ACTOR: ACTOR,
-        GITHUB_API_URL: api,
+        GITHUB_API_URL: world.down === 'github' ? 'http://127.0.0.1:1/api' : api,
         GITHUB_OUTPUT: output,
         RUNNER_TEMP: temp,
-        HORNHOOF_REGISTRY_URL: registry,
+        HORNHOOF_REGISTRY_URL: world.down === 'registry' ? 'http://127.0.0.1:1' : registry,
         ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, fill(value, context)])),
       };
       const ran = await bash(step.run!, dir, env);
@@ -777,16 +780,36 @@ describe('whether a version is out, as the images, publish and release jobs look
     expect(ran.asked).toEqual([]);
   });
 
+  /* A lookup that fails says nothing about the version, so the job stops: no images are built, no tag moves, and no
+     release is made. Only a 404 says a thing is not there. */
   it.each([
-    ['images', { github: 500 }],
-    ['images', { registry: 500 }],
-    ['publish', { registry: 503 }],
-    ['release', { github: 502 }],
-  ] as const)('the %s job stops when it cannot tell, and says what answered', async (name, trouble) => {
-    const ran = await run(name, { tag: 'here', release: false, image: 'here', ...trouble });
-    expect(ran.code).not.toBe(0);
-    expect(ran.said).toContain(String(Object.values(trouble)[0]));
+    ['images', 'GitHub answers 500', { github: 500 }, 'GitHub answered 500 for git/ref/tags/v0.34.1'],
+    ['publish', 'GitHub has used up its rate limit', { limited: true }, 'GitHub answered 403 for git/ref/tags/v0.34.1, as its rate limit is used up'],
+    ['release', 'GitHub has used up its rate limit', { limited: true }, 'GitHub answered 403 for git/ref/tags/v0.34.1, as its rate limit is used up'],
+    ['images', 'GitHub cannot be reached', { down: 'github' }, 'GitHub could not be reached'],
+    ['release', 'GitHub cannot be reached', { down: 'github' }, 'GitHub could not be reached'],
+    ['release', 'GitHub answers 502', { github: 502 }, 'GitHub answered 502 for git/ref/tags/v0.34.1'],
+    ['images', 'the registry answers 500', { registry: 500 }, 'the registry answered 500 for manifests/0.34.1'],
+    ['publish', 'the registry answers 429', { registry: 429 }, 'the registry answered 429 for manifests/0.34.1'],
+    ['publish', 'the registry cannot be reached', { down: 'registry' }, 'the registry could not be reached'],
+  ] as const)('the %s job cannot tell when %s, and stops without building, moving or releasing anything', async (name, _when, trouble, reason) => {
+    const ran = await run(name, { tag: 'here', release: false, image: 'none', ...trouble });
+    expect(ran.code, ran.said).not.toBe(0);
+    expect(ran.outputs.fresh).toEqual({});
+    expect(ran.said).toContain(`Could not tell whether version ${VERSION} is out: ${reason}.`);
     expect(released(ran)).toEqual([]);
+    expect(siteStarted(ran)).toBe(false);
+  });
+
+  it.each([
+    ['images', { tag: 'here', image: 'none' }, 'has no published images yet'],
+    ['publish', { tag: 'none', image: 'none' }, 'has no published images yet'],
+    ['release', { tag: 'here', release: false }, 'has no release yet'],
+  ] as const)('the %s job reads a 404 as not out, and only a 404', async (name, world, said) => {
+    const ran = await run(name, world);
+    expect(ran.code, ran.said).toBe(0);
+    expect(ran.outputs.fresh).toEqual({ version: 'new' });
+    expect(ran.said).toContain(said);
   });
 
   it('gives the token only to GitHub and the registry, never where a blob is served from, and prints it nowhere', async () => {
