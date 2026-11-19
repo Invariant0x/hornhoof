@@ -177,6 +177,23 @@ describe('Department view', () => {
     expect(screen.getByText(description)).toBeInTheDocument();
   });
 
+  it.each([
+    ['en', ['Review', 'Security']],
+    ['ru', ['Проверка', 'Безопасность']],
+  ] as const)('names the %s call frames by their stage in the language of the screen', (language, names) => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const department = DEV_ORG.departments[0]!;
+    const stages = [['review', 'DEV-REV'], ['security', 'DEV-SEC']] as const;
+    const pipelines = [{ id: 'r1', department: { id: department.id, name: 'Development' }, name: 'Software changes', why: '', archived: false, isDefault: true, version: 1,
+      stages: stages.map(([stage, ownerRole], i) => ({ id: `s${i}`, parentId: null, name: stage, ownerRole, owner: null, position: i, echelon: stage, oneShot: { fanOut: 1, judge: false } })) }];
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, pipelines, calls: [] }}
+      deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    for (const name of names) expect(screen.getByRole('group', { name })).toHaveClass('frame-calls');
+  });
+
   it('flies into a department and shows its head and members', async () => {
     const user = userEvent.setup();
     shell();

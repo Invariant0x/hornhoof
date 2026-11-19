@@ -8,9 +8,9 @@ import type { FastifyRequest } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, assistants, certificates, computerRuns, departments, invites, machineAccess, machines, nodes, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, subscriptions } from '../src/db/schema.js';
+import { agents, assistants, certificates, computerRuns, departments, invites, machineAccess, machines, machineTickets, nodeCodes, nodes, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, subscriptions } from '../src/db/schema.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
-import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
+import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, Restores, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { CHOICE_FILE } from '../src/modules/merge/kept.js';
@@ -25,6 +25,7 @@ await prepareSharedDatabase();
 
 /* What the updater runs on the database a restore replaces, read from where its image takes it. */
 const CARRY = readFileSync(new URL('../../updater/carry.sql', import.meta.url), 'utf8');
+const emptyKeyLists = { assistantKeys: [], nodeKeys: [] };
 
 const folder = () => mkdtempSync(join(tmpdir(), 'hh-restore-'));
 type Refusal = { error: { reason: string; message: string } };
@@ -218,6 +219,7 @@ describe('a restore from a backup', () => {
     const asCarried = (person: typeof people.$inferSelect, over: Partial<Carry['people'][number]> = {}): Carry['people'][number] =>
       ({ id: person.id, status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind, isOwner: person.isOwner, isCeoDelegate: person.isCeoDelegate, access: [], ...over });
     const carry: Carry = {
+      ...emptyKeyLists,
       people: [
         asCarried((await db.select().from(people).where(eq(people.id, s.owner.id)))[0]!),
         asCarried(dana!.row, { status: 'disabled' }),
@@ -231,7 +233,7 @@ describe('a restore from a backup', () => {
         { id: kept, revoked: false, lendsTests: false, keepsBackups: false, computerClosed: true },
         { id: randomUUID(), revoked: true, lendsTests: true, keepsBackups: true },
       ],
-      serials: ['aa01', 'never-here'],
+      serials: ['aa01', 'cc03'],
       recoveryKeys: [
         { id: hereRow!.id, recipient: hereRow!.recipient, linkPrint: hereRow!.linkPrint, linkName: null, linkUrl: null, madeBy: s.owner.id, madeAt: hereRow!.madeAt.toISOString(), retiredAt: new Date().toISOString() },
         newer,
@@ -284,7 +286,7 @@ describe('a restore from a backup', () => {
     const removedAt = '2026-11-10T08:00:00.000Z';
     const older = { id: row.id, status: row.status, passwordHash: row.passwordHash, scopeKind: row.scopeKind, isOwner: false, isCeoDelegate: false, access: [] };
     const person = { ...older, status: 'disabled' as const, removedAt };
-    const carry: Carry = { people: [person], invites: [], machines: [], serials: [], recoveryKeys: [] };
+    const carry: Carry = { ...emptyKeyLists, people: [person], invites: [], machines: [], serials: [], recoveryKeys: [] };
 
     await applyCarry(app.ctx, carry);
     await applyCarry(app.ctx, carry);
@@ -302,6 +304,7 @@ describe('a restore from a backup', () => {
     const id = randomUUID();
     const removedAt = '2026-11-10T08:00:00.000Z';
     const carry: Carry = {
+      ...emptyKeyLists,
       people: [{ id, status: 'disabled', passwordHash: null, scopeKind: 'listed', isOwner: false, isCeoDelegate: false, access: [], removedAt, removedName: 'Dana' }],
       invites: [], machines: [], serials: [], recoveryKeys: [],
     };
@@ -337,13 +340,9 @@ describe('a restore from a backup', () => {
     for (const row of bundled) await db.update(assistants).set(row).where(eq(assistants.personId, row.personId));
     expect(await opens(older)).toBe(200);
 
-    /* A carry of an updater from before says nothing of the keys, and leaves them as the bundle has them. */
-    const { assistantKeys, ...fromBefore } = carry;
-    await applyCarry(app.ctx, fromBefore);
-    expect(await keys()).toEqual(bundled);
     /* An assistant made after the bundle is not in the restored database, and its key opens nothing there. */
     const madeSince = { personId: randomUUID(), keyHash: hashToken('made since'), keyCreatedAt: new Date().toISOString(), wakeSecretEnc: 'sealed' };
-    await applyCarry(app.ctx, { ...carry, assistantKeys: [...assistantKeys ?? [], madeSince] });
+    await applyCarry(app.ctx, { ...carry, assistantKeys: [...carry.assistantKeys ?? [], madeSince] });
     expect(await opens(older)).toBe(401);
     expect(await opens(before)).toBe(401);
     expect(await opens(newer)).toBe(200);
@@ -370,7 +369,6 @@ describe('a restore from a backup', () => {
     const planStatus = async () => (await db.select({ status: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.status;
     const [signedOut, gone, replaced, kept] = [await node('signed-out', plan), await node('gone'), await node('replaced'), await node('kept')];
     const bundled = await db.select().from(nodes);
-    const bundledKeys = await keys();
     /* Since the bundle, one node signed out, the row of another went as a plan's reset takes its nodes, and a third joined
        again with a new key; the old database closes with that. */
     await handleNodeMessage(app.ctx, { kind: 'node', nodeId: signedOut.id, keyHash: hashToken(signedOut.key) }, { type: 'removed' });
@@ -386,13 +384,9 @@ describe('a restore from a backup', () => {
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, plan));
     expect(await opens(signedOut.key)).toBe(true);
 
-    /* A carry of an updater from before says nothing of the nodes' keys, and leaves them as the bundle has them. */
-    const { nodeKeys, ...fromBefore } = carry;
-    await applyCarry(app.ctx, fromBefore);
-    expect(await keys()).toEqual(bundledKeys);
     /* A node made after the bundle is not in the restored database, and its key opens nothing there. */
     const madeSince = `made-since-${randomUUID()}`;
-    await applyCarry(app.ctx, { ...carry, nodeKeys: [...nodeKeys ?? [], { id: randomUUID(), keyHash: hashToken(madeSince) }] });
+    await applyCarry(app.ctx, { ...carry, nodeKeys: [...carry.nodeKeys ?? [], { id: randomUUID(), keyHash: hashToken(madeSince) }] });
     expect(await opens(signedOut.key)).toBe(false);
     expect(await opens(gone.key)).toBe(false);
     expect(await opens(replaced.key)).toBe(false);
@@ -423,6 +417,7 @@ describe('a restore from a backup', () => {
     const made = '2026-11-01T00:00:00.123456+00:00';
     const sealed = '2026-11-02T00:00:00.654321+00:00';
     const carry: Carry = {
+      ...emptyKeyLists,
       people: [], invites: [], serials: [], recoveryKeys: [],
       machines: [
         { id: copy, revoked: false, lendsTests: true, keepsBackups: true, role: 'worker', dataLeftAt: left, uploadState: 'waiting' },
@@ -456,7 +451,7 @@ describe('a restore from a backup', () => {
     expect(await db.select().from(peerSecrets)).toEqual([]);
     /* A carry of an updater from before knows none of this, and leaves it all as the bundle has it. */
     await db.insert(publicLinks).values({ companyId: s.acme.id, name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'older-key', tunnelEnc: 'older-tunnel' });
-    await applyCarry(s.app.ctx, { people: [], invites: [], serials: [], recoveryKeys: [], machines: [{ id: stays, revoked: false, lendsTests: true, keepsBackups: true }] });
+    await applyCarry(s.app.ctx, { ...emptyKeyLists, people: [], invites: [], serials: [], recoveryKeys: [], machines: [{ id: stays, revoked: false, lendsTests: true, keepsBackups: true }] });
     expect(await db.select().from(publicLinks)).toMatchObject([{ keyEnc: 'older-key' }]);
     expect(await machine(stays)).toMatchObject({ role: 'data' });
   });
@@ -467,7 +462,7 @@ describe('a restore from a backup', () => {
     const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const run = { companyId: s.acme.id, machineId: machine, agentId: orchestrator!.id, command: 'true', timeoutS: 10 };
     const made = await s.db.insert(computerRuns).values([{ ...run, state: 'waiting' }, { ...run, state: 'sent' }, { ...run, state: 'done', exit: 0, output: '' }] as (typeof computerRuns.$inferInsert)[]).returning();
-    await applyCarry(s.app.ctx, { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] });
+    await applyCarry(s.app.ctx, { ...emptyKeyLists, people: [], invites: [], machines: [], serials: [], recoveryKeys: [] });
     const states = await s.db.select({ id: computerRuns.id, state: computerRuns.state }).from(computerRuns);
     expect(made.map(row => states.find(state => state.id === row.id)!.state)).toEqual(['lost', 'lost', 'done']);
   });
@@ -487,7 +482,7 @@ describe('a restore from a backup', () => {
     ];
     for (const [n, [status, carried, applies]] of cases.entries()) {
       const serial = `aa0${n}`;
-      const carry: Carry = { people: [], invites: [], machines: [], serials: [serial], recoveryKeys: [] };
+      const carry: Carry = { ...emptyKeyLists, people: [], invites: [], machines: [], serials: [serial], recoveryKeys: [] };
       const machine = await s.worker('mac');
       await s.db.insert(certificates).values({ serial, machineId: machine, until: new Date(Date.now() + 86_400_000) });
       rmSync(join(s.control, RESTORE_STATUS), { force: true });
@@ -530,6 +525,69 @@ describe('a restore from a backup', () => {
     expect((await s.restore(s.made.id, { bringBack: 'no' })).statusCode).toBe(400);
   });
 
+  it.each(['assistantKeys', 'nodeKeys'] as const)('clears both key sets when the carry lacks %s', async missing => {
+    const s = await stand();
+    const added = await s.app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name: 'Ava', owner: s.owner.id, program: 'other' }, ...as(s.ceo) });
+    expect(added.statusCode).toBe(201);
+    const { person } = added.json() as { person: { id: string } };
+    expect((await s.app.inject({ method: 'POST', url: `/api/people/${person.id}/key`, ...as(s.ceo) })).statusCode).toBe(201);
+    const machineId = await s.worker('node-key-holder');
+    const [node] = await s.db.insert(nodes).values({ companyId: s.acme.id, machineId, keyHash: hashToken('bundled node key'), status: 'ready' }).returning();
+    const result = await s.db.execute(sql.raw(CARRY)) as { rows: Record<string, unknown>[] };
+    const carry = Object.values(result.rows[0]!)[0] as Carry;
+    expect(carry.assistantKeys).toHaveLength(1);
+    expect(carry.nodeKeys).toHaveLength(1);
+    delete carry[missing];
+    const attempt = randomUUID();
+    s.says({ attempt, state: 'done', step: 'start' });
+    writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt, carry }));
+
+    const restart = new Restores(s.app.ctx);
+    await restart.afterSwap();
+    expect((await s.db.select().from(assistants).where(eq(assistants.personId, person.id)))[0])
+      .toMatchObject({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null });
+    expect((await s.db.select().from(nodes).where(eq(nodes.id, node!.id)))[0]).toMatchObject({ keyHash: null, status: 'needs_login' });
+    expect(restart.ready()).toBe(true);
+  });
+
+  it.each([false, true])('closes open credentials on the first boot of a restore (carry: %s)', async withCarry => {
+    const s = await stand();
+    const machineId = await s.worker('credential-holder');
+    const expiresAt = new Date('2099-01-01T00:00:00.000Z');
+    const spentAt = new Date('2026-11-01T00:00:00.000Z');
+    const addCredentials = async (name: string, usedAt: Date | null = null) => {
+      const hash = hashToken(name);
+      await s.db.insert(machineTickets).values({ ticketHash: hash, machineId, expiresAt, usedAt });
+      await s.db.insert(nodeCodes).values({ codeHash: hash, companyId: s.acme.id, personId: s.owner.id, subscriptionIds: [], expiresAt, usedAt });
+      return hash;
+    };
+    const used = async (hash: string) => {
+      const [ticket] = await s.db.select().from(machineTickets).where(eq(machineTickets.ticketHash, hash));
+      const [code] = await s.db.select().from(nodeCodes).where(eq(nodeCodes.codeHash, hash));
+      return [ticket!.usedAt, code!.usedAt];
+    };
+    const bundled = await addCredentials('from the dump');
+    const spent = await addCredentials('already spent', spentAt);
+    const attempt = randomUUID();
+    s.says({ attempt, state: 'running', step: 'swap' });
+    const restore = new Restores(s.app.ctx);
+    await restore.afterSwap();
+    expect(await used(bundled)).toEqual([null, null]);
+
+    s.says({ attempt, state: 'running', step: 'start' });
+    if (withCarry) writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt,
+      carry: { ...emptyKeyLists, people: [], invites: [], machines: [], serials: [], recoveryKeys: [] },
+    }));
+    await new Restores(s.app.ctx).afterSwap();
+    expect(await used(bundled)).toEqual([expect.any(Date), expect.any(Date)]);
+    expect(await used(spent)).toEqual([spentAt, spentAt]);
+
+    const live = await addCredentials('created after the restore');
+    s.says({ attempt, state: 'done', step: 'start' });
+    await new Restores(s.app.ctx).afterSwap();
+    expect(await used(live)).toEqual([null, null]);
+  });
+
   it('marks every restore', async () => {
     /* One company for every case, as a second one in this test would open a whole database of its own: each case is a
        restore of an attempt of its own, and the marks of that attempt are its own. */
@@ -541,7 +599,7 @@ describe('a restore from a backup', () => {
     for (const carried of [true, false]) {
       const attempt = randomUUID();
       s.says({ attempt, state: 'running', step: 'start', dumpedAt });
-      if (carried) writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt, carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
+      if (carried) writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt, carry: { ...emptyKeyLists, people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
       await s.app.ctx.restores.afterSwap();
       const [mark] = await marks(attempt);
       expect([mark!.attempt, mark!.backup, new Date(mark!.dumped_at).toISOString(), mark!.kept], String(carried)).toEqual([attempt, s.made.id, dumpedAt, null]);
@@ -600,7 +658,7 @@ describe('a restore from a backup', () => {
        what was carried over waits, so the sessions the bundle brought back open nothing. */
     for (const mode of ['maintenance', 'read'] as const) {
       const control = folder();
-      writeFileSync(join(control, RESTORE_CARRY), JSON.stringify({ attempt: randomUUID(), carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
+      writeFileSync(join(control, RESTORE_CARRY), JSON.stringify({ attempt: randomUUID(), carry: { ...emptyKeyLists, people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
       writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
       const { app } = await appWith({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
       for (const url of ['/api/people', '/api/version', '/api/updates/current']) {
