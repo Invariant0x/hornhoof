@@ -4,29 +4,29 @@ import type { Employee, GoalView, Org, Pipeline, TaskLine } from '../src/types';
 import { taskRoute } from './task-route';
 
 const DEV = { id: 'd2', name: 'Development' };
-const ELLIS = { id: 'p2', name: 'Ellis' };
-const JUNO = { id: 'p3', name: 'Juno' };
+const SAM = { id: 'p2', name: 'Sam' };
+const LEO = { id: 'p3', name: 'Leo' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null };
 const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: null };
 
 const task = (over: Partial<TaskLine> & { id: string; number: number }): TaskLine => ({
   echelons: taskRoute(), title: `Task ${over.number}`, brief: '', status: 'working', department: DEV, product: null, assignee: BRUNO, turn: null, parentId: null, waitsFor: [],
-  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: ELLIS, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
+  createdAt: '2026-11-16T08:00:00.000Z', updatedAt: '2026-11-16T09:00:00.000Z', goal: null, responsible: SAM, why: '', dueAt: null, pipelineId: null, pipelineStageId: null, ...over,
 });
 const goal = (over: Partial<GoalView> & { id: string; number: number }): GoalView => ({
-  title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: ELLIS, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, ...over,
+  title: `Goal ${over.number}`, why: '', department: DEV, parentId: null, responsible: SAM, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: null, done: 0, total: 0, version: 0, ...over,
 });
 
 /* A company goal, a smaller goal of Development under it, two tasks under the smaller goal and two subtasks of the first;
    the second task waits for the first; one task serves no goal. */
-const BIG = goal({ id: 'g1', number: 1, title: '500 trial sign-ups', department: null, responsible: JUNO });
+const BIG = goal({ id: 'g1', number: 1, title: '500 trial sign-ups', department: null, responsible: LEO });
 const SMALL = goal({ id: 'g2', number: 2, title: 'Invite people to the trial', parentId: 'g1' });
 const OTHER = goal({ id: 'g3', number: 3, title: 'Accounts', status: 'dropped' });
 const GOALS = [BIG, SMALL, OTHER];
 const SERVES = { id: 'g2', number: 2, title: 'Invite people to the trial' };
 const T312 = task({ id: 't312', number: 312, title: 'Find pilot teams', goal: SERVES, pipelineId: 'pl1', pipelineStageId: 's1' });
 const S1 = task({ id: 's1t', number: 313, title: 'List from the directory', status: 'done', parentId: 't312', goal: SERVES });
-const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: JUNO });
+const S2 = task({ id: 's2t', number: 314, title: 'List from the forum', status: 'waiting', parentId: 't312', goal: SERVES, assignee: RITA, responsible: LEO });
 const T319 = task({ id: 't319', number: 319, title: 'Invite the first group', status: 'review', goal: SERVES, waitsFor: [312], pipelineId: 'pl1', pipelineStageId: 's3' });
 const LOOSE = task({ id: 't500', number: 500, title: 'Tidy the inbox', status: 'open', assignee: null, pipelineId: 'pl1' });
 const GONE = task({ id: 't501', number: 501, title: 'Old idea', status: 'cancelled' });
@@ -57,7 +57,7 @@ describe('the list', () => {
   });
 
   it('counts the subtasks of a task over all the work under it, whatever the list shows', () => {
-    /* Ellis's own open tasks leave out the subtask done and Juno's; a status filter leaves out what does not match. */
+    /* Sam's own open tasks leave out the subtask done and Leo's; a status filter leaves out what does not match. */
     const own = listGroups(mine(TASKS, GOALS, 'p2').tasks, undefined, TASKS).find(g => g.status === 'working')!.trees.find(tree => tree.task.id === 't312');
     expect([own!.task.id, own!.done, own!.total]).toEqual(['t312', 1, 2]);
     const working = listGroups(filterTasks(TASKS, { status: 'working' }, GOALS), undefined, TASKS)[0]!.trees.find(tree => tree.task.id === 't312');

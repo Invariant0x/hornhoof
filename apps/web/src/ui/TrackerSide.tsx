@@ -144,7 +144,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, onOpenAgent, pipelines,
   const working = employees.filter(e => e.status === 'working').length;
   const at = (next: TrackerPlace) => go({ department: d.id, personId: place.personId, ...next });
   const answers = d.responsible ? words.answers(d.responsible.name) : undefined;
-  /* Folded, the line under its name also counts its employees, as the mockup's "Luisa answers · 14". */
+  /* Folded, the line under its name also counts its employees, as the mockup's "Leo answers · 14". */
   const sub = !open && employees.length ? [answers, employees.length].filter(Boolean).join(' · ') : answers;
   const view = place.view ?? 'list';
   return (
