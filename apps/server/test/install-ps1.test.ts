@@ -11,6 +11,8 @@ const DIGEST = `sha256:${'e'.repeat(64)}`;
 const UPDATER = `ghcr.io/invariant0x/hornhoof-updater@${DIGEST}`;
 /* A code may start with a dash, as base64url may. */
 const CODE = '-Ab3_d-Ef'.repeat(4) + 'xyz';
+/* Where Docker Desktop keeps the volume of the installer's folders, as docker volume inspect says. */
+const KEPT = '/var/lib/docker/volumes/hornhoof-windows/_data';
 
 /* The Windows installer GET /install.ps1 answers on a server of this commit, whose registry knows this digest of the updater. */
 async function served(env: Record<string, string> = { PUBLIC_URL: SERVER }, commit = COMMIT) {
@@ -35,6 +37,25 @@ describe('GET /install.ps1', () => {
   });
 });
 
+/* What the script says, read where no pwsh runs it: the run of install.sh and the folders it keeps. */
+describe('install.ps1 as written', () => {
+  const text = readFileSync(new URL('../../../scripts/install.ps1', import.meta.url), 'utf8');
+
+  it('ends the run with install.sh and keeps its folders in a volume at the path Docker keeps it at', () => {
+    /* A restart policy would run the join again after each end and each restart of Windows, with its code used up. */
+    expect(text).toContain("$run = @('run', '--rm', '-i')");
+    expect(text).not.toMatch(/--restart/);
+    expect(text).toContain("$volume = 'hornhoof-windows'");
+    expect(text).toMatch(/Test-Docker volume create \$volume\b/);
+    expect(text).toContain("$kept = Get-DockerText volume inspect --format '{{.Mountpoint}}' $volume");
+    expect(text).toMatch(/if \(\$LASTEXITCODE -ne 0 -or \$kept -cnotmatch '\^\/\[A-Za-z0-9\._\/-\]\+\$'\) \{ throw /);
+    expect(text).toContain("'-v', \"$($volume):$kept\"");
+    expect(text).toContain("$passed['HORNHOOF_HOME'] = \"$kept/.hornhoof\"");
+    expect(text).toContain("$passed['HORNHOOF_DIR'] = \"$kept/hornhoof\"");
+    expect(text).not.toContain("$passed['HORNHOOF_HOME'] = '/hornhoof'");
+  });
+});
+
 /* Where pwsh is, if this computer has it: the script runs there with a stub in place of docker. */
 const PWSH = spawnSync('sh', ['-c', 'command -v pwsh'], { encoding: 'utf8' }).stdout.trim();
 
@@ -42,13 +63,15 @@ const PWSH = spawnSync('sh', ['-c', 'command -v pwsh'], { encoding: 'utf8' }).st
    answers info only once Docker Desktop started; STUB_OSTYPE is the kind of containers it runs; STUB_PULL "fail" downloads
    nothing and STUB_IMAGE_LOCAL "1" has the image here. run runs the shell command it gets, as the container would, with curl
    writing STUB_INSTALL_SH where it is told to, and ends as that ends. exec reads the sign-in link install.sh wrote in the
-   container, STUB_OPEN_URL, and counts each look; with STUB_RUN_UNTIL_LOOKS run lasts until that many looks were taken. */
+   container, STUB_OPEN_URL, and counts each look; with STUB_RUN_UNTIL_LOOKS run lasts until that many looks were taken.
+   volume inspect says where Docker keeps a volume, STUB_VOLUME_PATH or KEPT, and STUB_VOLUME "fail" fails both volume calls. */
 const DOCKER_STUB = `#!${process.execPath}
+const KEPT = ${JSON.stringify(KEPT)};
 const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ['HORNHOOF_SERVER', 'HORNHOOF_HOME', 'HORNHOOF_MACHINE', 'HORNHOOF_HOST_CPU', 'HORNHOOF_HOST_CPUS', 'HORNHOOF_HOST_MEMORY', 'HORNHOOF_FROM_WINDOWS']) {
+for (const name of ['HORNHOOF_SERVER', 'HORNHOOF_HOME', 'HORNHOOF_DIR', 'HORNHOOF_MACHINE', 'HORNHOOF_HOST_CPU', 'HORNHOOF_HOST_CPUS', 'HORNHOOF_HOST_MEMORY', 'HORNHOOF_FROM_WINDOWS']) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 appendFileSync(process.env.STUB_LOG, JSON.stringify({ args, env }) + '\\n');
@@ -60,6 +83,9 @@ if (args[0] === 'info') {
   if (s.STUB_PULL === 'fail') process.exit(1);
 } else if (args[0] === 'image') {
   if (s.STUB_IMAGE_LOCAL !== '1') process.exit(1);
+} else if (args[0] === 'volume') {
+  if (s.STUB_VOLUME === 'fail') { console.error('Error response from daemon: volume'); process.exit(1); }
+  if (args[1] === 'inspect') console.log(s.STUB_VOLUME_PATH || KEPT);
 } else if (args[0] === 'exec') {
   if (args.at(-1) !== '/tmp/hornhoof-open-url') process.exit(1);
   appendFileSync(s.STUB_STATE + '/looks', 'look\\n');
@@ -235,21 +261,27 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-ps1-home-'));
     const r = windows(script, { home });
     expect(r.code).toBe(0);
-    expect(r.calls.map(c => c.args[0])).toEqual(['info', 'info', 'pull', 'run']);
+    expect(r.calls.map(c => c.args[0])).toEqual(['info', 'info', 'pull', 'volume', 'volume', 'run']);
     expect(r.calls[2]!.args).toEqual(['pull', UPDATER]);
+    expect(r.calls[3]!.args).toEqual(['volume', 'create', 'hornhoof-windows']);
+    expect(r.calls[4]!.args).toEqual(['volume', 'inspect', '--format', '{{.Mountpoint}}', 'hornhoof-windows']);
     const run = r.run!.args;
+    /* The run ends when install.sh ends: a restart would only run the join again, with its code used up. */
     expect(run.slice(0, 3)).toEqual(['run', '--rm', '-i']);
+    expect(run.some(word => word.startsWith('--restart'))).toBe(false);
     /* A name of its own, by which the watcher reads the sign-in link in it. */
     expect(run[run.indexOf('--name') + 1]).toMatch(/^hornhoof-install-[0-9a-f]{12}$/);
     expect(run[run.indexOf('--hostname') + 1]).toMatch(/^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$/);
-    expect(run[run.indexOf('-v') + 1]).toBe('//var/run/docker.sock:/var/run/docker.sock');
+    /* The folders install.sh keeps, the company's core among them, are in a volume that outlasts the run, at the path Docker
+       keeps it at, so the core's updater, which mounts its folder by that path, finds the same files. */
+    expect(run.filter((_, i) => run[i - 1] === '-v')).toEqual(['//var/run/docker.sock:/var/run/docker.sock', `hornhoof-windows:${KEPT}`]);
     expect(run.slice(run.indexOf('--entrypoint'), run.indexOf('-c'))).toEqual(['--entrypoint', 'sh', UPDATER]);
     expect(run.slice(run.indexOf('-c') + 2)).toEqual(['install', '--join', CODE]);
     /* Settings go through the environment by name only, so no value is on a command line. */
     expect(run.filter((_, i) => run[i - 1] === '-e').every(word => /^HORNHOOF_[A-Z_]+$/.test(word))).toBe(true);
     const key = readFileSync(join(home, '.hornhoof', 'machine'), 'utf8');
     expect(key).toMatch(/^[0-9a-f]{32}$/);
-    expect(r.run!.env).toMatchObject({ HORNHOOF_SERVER: SERVER, HORNHOOF_HOME: '/hornhoof', HORNHOOF_MACHINE: key, HORNHOOF_FROM_WINDOWS: '1' });
+    expect(r.run!.env).toMatchObject({ HORNHOOF_SERVER: SERVER, HORNHOOF_HOME: `${KEPT}/.hornhoof`, HORNHOOF_DIR: `${KEPT}/hornhoof`, HORNHOOF_MACHINE: key, HORNHOOF_FROM_WINDOWS: '1' });
     expect(r.run!.env.HORNHOOF_HOST_CPUS).toMatch(/^[1-9][0-9]*$/);
     expect(r.out).toContain(`install.sh --join ${CODE}`);
     expect(r.out).toContain(`machine ${key}`);
@@ -260,6 +292,7 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(again.code).toBe(0);
     expect(again.run!.args.at(-1)).toBe('install');
     expect(again.run!.env.HORNHOOF_MACHINE).toBe(key);
+    expect(again.run!.args.filter((_, i, all) => all[i - 1] === '-v')).toContain(`hornhoof-windows:${KEPT}`);
     expect(again.out).toContain(`machine ${key}`);
   });
 
@@ -447,6 +480,21 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain('Ubuntu terminal of WSL');
     expect(r.calls).toEqual([]);
+  });
+
+  it('mounts the volume wherever Docker keeps it, and stops plainly when Docker cannot say where', async () => {
+    const script = (await served()).body;
+    const elsewhere = windows(script, { env: { STUB_VOLUME_PATH: '/mnt/wsl/docker-desktop-data/volumes/hornhoof-windows/_data' } });
+    expect(elsewhere.code).toBe(0);
+    expect(elsewhere.run!.args).toContain('hornhoof-windows:/mnt/wsl/docker-desktop-data/volumes/hornhoof-windows/_data');
+    expect(elsewhere.run!.env.HORNHOOF_DIR).toBe('/mnt/wsl/docker-desktop-data/volumes/hornhoof-windows/_data/hornhoof');
+    const unplaced: Record<string, string>[] = [{ STUB_VOLUME: 'fail' }, { STUB_VOLUME_PATH: 'C:\\ProgramData\\Docker' }];
+    for (const env of unplaced) {
+      const r = windows(script, { env });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('Docker Desktop could not keep the folder Hornhoof keeps the company\'s core in. Restart Docker Desktop, then run this command again.');
+      expect(r.run).toBeUndefined();
+    }
   });
 
   it('uses the updater image on this computer when it cannot be downloaded, and stops when it is not here either', async () => {
