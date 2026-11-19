@@ -1,5 +1,5 @@
 import { randomUUID, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -128,6 +128,18 @@ describe("a machine's keeper and its computer access", () => {
     await carrier.tick();
     expect(s.asked.at(-1)?.path).toContain('&updater=1&');
     s.advance(30_000);
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=0&');
+  });
+
+  it('takes no heartbeat that is a link, even to a fresh file', async () => {
+    const s = stand();
+    const carrier = s.make();
+    carrier.prepare();
+    s.alive();
+    const fresh = join(s.dir, 'fresh-heartbeat');
+    renameSync(join(s.computerControl, 'alive'), fresh);
+    symlinkSync(fresh, join(s.computerControl, 'alive'));
     await carrier.tick();
     expect(s.asked.at(-1)?.path).toContain('&updater=0&');
   });

@@ -96,12 +96,18 @@ describe('updater, the computer', () => {
     expect(readFileSync(leftover, 'utf8')).toBe('recorded leftover');
   });
 
-  it.each(['sample.out.json', 'sample.started'])('refuses a keeper request with a linked %s', async marker => {
+  /* A link to a file that is there, and one to a file that is not, which root would otherwise create. */
+  it.each([
+    { marker: 'sample.out.json', contents: 'recorded contents' },
+    { marker: 'sample.started', contents: 'recorded contents' },
+    { marker: 'sample.out.json', contents: null },
+    { marker: 'sample.started', contents: null },
+  ])('refuses a keeper request with a linked $marker whose target holds $contents', async ({ marker, contents }) => {
     const s = stand();
     access(s, later());
     command(s, 'sample', 'recorded sample');
     const target = join(s.dir, 'recorded-target');
-    writeFileSync(target, 'recorded contents');
+    if (contents !== null) writeFileSync(target, contents);
     const link = join(s.computerControl, 'computer', marker);
     symlinkSync(target, link);
     const r = await runOnce(s, null, env);
@@ -109,7 +115,41 @@ describe('updater, the computer', () => {
     expect(r.calls).toEqual([]);
     expect(r.out).toContain('Computer request refused: its answer or start marker is a link.');
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
-    expect(readFileSync(target, 'utf8')).toBe('recorded contents');
+    expect(existsSync(target) ? readFileSync(target, 'utf8') : null).toBe(contents);
+  });
+
+  /* Bash sets PWD from the path it resolved before it entered a folder, so a link the keeper swaps in between goes unseen
+     there. The system's own pwd says where the updater really is: here it says somewhere else for the folders named. */
+  function elsewhere(s: Stand, folders: string) {
+    const tools = join(s.dir, 'elsewhere');
+    mkdirSync(tools);
+    writeFileSync(join(tools, 'pwd'), `#!/bin/sh\ncase "$(/bin/pwd -P)" in ${folders}) echo /elsewhere ;; *) exec /bin/pwd "$@" ;; esac\n`, { mode: 0o755 });
+    return { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
+  }
+
+  it('works in no queue that the system places elsewhere, old or new', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c5', 'recorded sample');
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    writeFileSync(join(shared, 'old.json'), 'recorded old request');
+    const r = await runOnce(s, null, elsewhere(s, '*/computer'));
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).not.toContain('old computer queue');
+    expect(readdirSync(join(s.computerControl, 'computer'))).toEqual(['c5.json']);
+    expect(readdirSync(shared)).toEqual(['old.json']);
+  });
+
+  it('publishes no answer from a private folder that the system places elsewhere, and keeps the mark', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c6', 'recorded sample');
+    const r = await runOnce(s, null, elsewhere(s, '*/.answer.*'));
+    expect(r.calls.filter(c => c.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-c6']);
+    expect(r.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(readdirSync(join(s.computerControl, 'computer')).sort()).toEqual(['c6.json', 'c6.started']);
   });
 
   it('clears only old queue entries without following file or directory links', async () => {
@@ -146,6 +186,15 @@ describe('updater, the computer', () => {
     expect(r.code).toBe(0);
     expect(existsSync(join(s.computerControl, 'alive'))).toBe(true);
     expect(existsSync(join(s.control, 'alive'))).toBe(true);
+  });
+
+  it('leaves a linked computer heartbeat and its target alone', async () => {
+    const s = stand();
+    const target = join(s.dir, 'recorded-target');
+    symlinkSync(target, join(s.computerControl, 'alive'));
+    expect((await runOnce(s, null, env)).code).toBe(0);
+    expect(lstatSync(join(s.computerControl, 'alive')).isSymbolicLink()).toBe(true);
+    expect(existsSync(target)).toBe(false);
   });
 
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {

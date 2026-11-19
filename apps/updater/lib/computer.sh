@@ -15,11 +15,18 @@ HOST_OS="${HORNHOOF_HOST_OS:-}"
 ADDRESSES_EVERY=60
 ADDRESSES_AT=0
 
+# The directory the shell is really in, asked of the system. Bash sets PWD from the path it resolved before it entered,
+# so a link swapped in between would go unseen there, and its own pwd -P reads that same path again.
+physical_dir() {
+  env pwd -P 2> /dev/null
+}
+
 # Check the physical path after entering the queue, then use relative paths in that directory.
 enter_computer_queue() {
+  local here
   cd -P -- "$1" 2> /dev/null || return 1
-  local expected="${PWD%/}/computer"
-  [ ! -L ./computer ] && cd -P -- ./computer 2> /dev/null && [ "$PWD" = "$expected" ]
+  here=$(physical_dir) || return 1
+  [ ! -L ./computer ] && cd -P -- ./computer 2> /dev/null && [ "$(physical_dir)" = "${here%/}/computer" ]
 }
 
 # Clear the old queue at startup. Unlink queue entries without opening them or descending into directories.
@@ -37,9 +44,9 @@ computer_heartbeat() {
   local marker="$COMPUTER_CONTROL/alive"
   [ ! -L "$marker" ] || return 0
   if [ -f "$marker" ]; then
-    touch -h -- "$marker" 2> /dev/null || true
+    # -c: BusyBox touch -h would create a marker missing by now, through a link put there in the meantime.
+    touch -c -h -- "$marker" 2> /dev/null || true
   elif [ ! -e "$marker" ]; then
-    # With -h, touch can refresh an existing marker but does not create a missing one.
     (set -o noclobber; : > "$marker") 2> /dev/null || true
   fi
 }
@@ -56,12 +63,12 @@ computer_open() {
 # computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved. It fails when
 # no answer is in place, as on a full volume, so the caller keeps the command's mark.
 computer_answer() {
-  local file="$1.out.json" temporary queue="$PWD" published=''
+  local file="$1.out.json" temporary queue published=''
   [ ! -L "$file" ] && [ ! -e "$file" ] || return 0
   # Create the answer inside a private temporary directory on this volume, then publish the whole file.
-  if temporary=$(mktemp -d .answer.XXXXXXXX 2> /dev/null); then
+  if queue=$(physical_dir) && temporary=$(mktemp -d .answer.XXXXXXXX 2> /dev/null); then
     (
-      cd -P -- "./$temporary" && [ "$PWD" = "$queue/$temporary" ] && [ -O . ] || exit 1
+      cd -P -- "./$temporary" && [ "$(physical_dir)" = "${queue%/}/$temporary" ] && [ -O . ] || exit 1
       trap 'rm -f -- ./answer' EXIT
       umask 022
       set -o noclobber
