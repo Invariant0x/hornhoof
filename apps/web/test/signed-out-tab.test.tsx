@@ -102,7 +102,9 @@ describe('a tab whose session ended', () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
     await user.type(await answerField(user), 'Ivan: not sent yet');
-    expect(screen.getByRole('button', { name: /^Development/ })).toBeInTheDocument();
+    /* The draft stays with Ivan while he goes back to the map, where the tab stays once he logs in again. */
+    await user.click(screen.getByRole('button', { name: /^Map/ }));
+    expect(await screen.findByRole('button', { name: /^Development/ })).toBeInTheDocument();
 
     /* The server ends the session; the next look of the open page is refused. */
     ended = true;
