@@ -53,26 +53,31 @@ computer_open() {
   [ "$until" -gt "$(date +%s)" ]
 }
 
-# computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved.
+# computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved. It fails when
+# no answer is in place, as on a full volume, so the caller keeps the command's mark.
 computer_answer() {
-  local file="$1.out.json" temporary queue="$PWD"
+  local file="$1.out.json" temporary queue="$PWD" published=''
   [ ! -L "$file" ] && [ ! -e "$file" ] || return 0
   # Create the answer inside a private temporary directory on this volume, then publish the whole file.
-  temporary=$(mktemp -d .answer.XXXXXXXX) || return 0
-  (
-    cd -P -- "./$temporary" && [ "$PWD" = "$queue/$temporary" ] && [ -O . ] || exit 1
-    trap 'rm -f -- ./answer' EXIT
-    umask 022
-    set -o noclobber
-    tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > ./answer || exit 1
-    [ ! -L "../$file" ] && [ ! -e "../$file" ] || exit 1
-    if [[ "$OSTYPE" == darwin* ]]; then
-      mv -fh -- ./answer "../$file"
-    else
-      mv -fT -- ./answer "../$file"
-    fi
-  ) 2> /dev/null || printf '%s\n' 'Computer answer refused: it could not be published safely.' >&2
-  rmdir -- "./${temporary:?}" 2> /dev/null || true
+  if temporary=$(mktemp -d .answer.XXXXXXXX 2> /dev/null); then
+    (
+      cd -P -- "./$temporary" && [ "$PWD" = "$queue/$temporary" ] && [ -O . ] || exit 1
+      trap 'rm -f -- ./answer' EXIT
+      umask 022
+      set -o noclobber
+      tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > ./answer || exit 1
+      [ ! -L "../$file" ] && [ ! -e "../$file" ] || exit 1
+      if [[ "$OSTYPE" == darwin* ]]; then
+        mv -fh -- ./answer "../$file"
+      else
+        mv -fT -- ./answer "../$file"
+      fi
+    ) 2> /dev/null && published=1
+    rmdir -- "./${temporary:?}" 2> /dev/null || true
+  fi
+  [ -z "$published" ] || return 0
+  printf '%s\n' 'Computer answer refused: it could not be published safely.' >&2
+  return 1
 }
 
 # Each waiting command, one at a time, in a container of the updater's image: root with every privilege, in the
@@ -108,13 +113,14 @@ computer_runs() (
     if [ -f "$started" ]; then
       docker rm -f "$name" > /dev/null 2>&1 || true
       printf 'The updater restarted while this command ran, so it was stopped. Look at what it did before you run it again.\n' > "$out"
-      computer_answer "$id" 125 "$out"
-      rm -f -- "${out:?}" "${started:?}"
+      if computer_answer "$id" 125 "$out"; then rm -f -- "${started:?}"; fi
+      rm -f -- "${out:?}"
       continue
     fi
     if ! computer_open; then
       printf 'Access to the computer is closed.\n' > "$out"
-      computer_answer "$id" 126 "$out"
+      # Nothing ran, so an answer that could not be written is tried again at the next look.
+      computer_answer "$id" 126 "$out" || true
       rm -f -- "${out:?}"
       continue
     fi
@@ -167,8 +173,9 @@ computer_runs() (
       code=125
     fi
     # The app stops waiting for an answer and takes the command back after a while.
-    [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"
-    rm -f -- "${out:?}" "${out:?}.done" "${out:?}.late" "${out:?}.closed" "${started:?}"
+    # The mark goes only once the answer is in place: a command whose answer could not be written never runs again.
+    if [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"; then rm -f -- "${started:?}"; fi
+    rm -f -- "${out:?}" "${out:?}.done" "${out:?}.late" "${out:?}.closed"
   done
 )
 

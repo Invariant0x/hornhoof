@@ -2,13 +2,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { APP, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, JQ, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
+const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const NOW_SEC = 1_795_000_000;
 const CLOCK = { STUB_COMPUTER_NOW: String(NOW_SEC) };
@@ -225,6 +226,43 @@ describe('updater, the computer', () => {
     expect(r.calls).toEqual(['docker rm -f hornhoof-computer-c7']);
     expect(answer(s, 'c7')).toMatchObject({ id: 'c7', exit: 125, output: expect.stringContaining('The updater restarted while this command ran') });
     expect(existsSync(join(s.computerControl, 'computer', 'c7.started'))).toBe(false);
+  });
+
+  /* A full volume, as mktemp meets it: the answer's private folder cannot be made. Every other mktemp works. */
+  function onFullVolume(s: Stand) {
+    const full = join(s.dir, 'full-volume');
+    mkdirSync(full);
+    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\n[ "$1" != -d ] || exit 1\nexec /usr/bin/mktemp "$@"\n', { mode: 0o755 });
+    return { ...env, PATH: `${full}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
+  }
+
+  it('never runs a command a second time when its answer cannot be written', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'c3', 'recorded sample');
+    const first = await runOnce(s, null, onFullVolume(s));
+    expect(first.calls.filter(c => c.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-c3']);
+    expect(first.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(answer(s, 'c3')).toBeNull();
+    expect(existsSync(join(s.computerControl, 'computer', 'c3.started'))).toBe(true);
+    /* The next look finds the mark and answers that the command was stopped: it never starts it again. */
+    const next = await runOnce(s, null, env);
+    expect(next.calls.filter(c => c.startsWith('docker start'))).toHaveLength(1);
+    expect(answer(s, 'c3')).toMatchObject({ id: 'c3', exit: 125, output: expect.stringContaining('The updater restarted while this command ran') });
+    expect(existsSync(join(s.computerControl, 'computer', 'c3.started'))).toBe(false);
+  });
+
+  it('answers a closed machine at the next look when its answer cannot be written', async () => {
+    const s = stand();
+    access(s, NOW_SEC - 1);
+    command(s, 'c4', 'recorded sample');
+    const first = await runOnce(s, null, onFullVolume(s));
+    expect(first.code).toBe(0);
+    expect(first.out).toContain('Computer answer refused: it could not be published safely.');
+    expect(answer(s, 'c4')).toBeNull();
+    const next = await runOnce(s, null, env);
+    expect(next.calls.filter(c => c.startsWith('docker'))).toEqual([]);
+    expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 126 });
   });
 
   it('stops a command it started whose request the app took back', async () => {
