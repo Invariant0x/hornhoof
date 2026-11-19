@@ -750,6 +750,7 @@
           "apps/server/test/tasks-routes.test.ts",
           "apps/server/test/tasks-tools.test.ts",
           "apps/server/test/tasks-wake.test.ts",
+          "apps/server/test/template-laws.test.ts",
           "apps/server/test/templates-load.test.ts",
           "apps/server/test/templates-once.test.ts",
           "apps/server/test/templates-pipeline.test.ts",
