@@ -7,8 +7,9 @@ import { LONG_HINT, wholeTextOrg, type Script } from './whole-text-data';
 /* The department cards of the map, the head card, role frames and member chips of a department's screen, and the hint at
    its foot show every word: no ellipsis, no line clamp and no text cut off or standing out of its frame, in a long pseudo
    translation, Japanese and right to left as in English and Russian, on a wide screen and on a phone. Where the words fit
-   the old boxes, the boxes keep their old sizes. The run that takes the pictures names its phase and folder in
-   WHOLE_TEXT_PHASE and WHOLE_TEXT_SHOTS. */
+   the old boxes, the boxes keep their old sizes. Each check is soft, so a look goes through the map, the department and
+   far zoom, takes every picture and fails at its end with every cut it found. The run that takes the pictures names its
+   phase and folder in WHOLE_TEXT_PHASE and WHOLE_TEXT_SHOTS. */
 test.describe.configure({ timeout: 180_000 });
 
 type Look = { script: Script; lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; width: 1440 | 375 };
@@ -84,22 +85,22 @@ async function zoomTo(page: Page, k: number) {
 /* Every word of the head card, the role frames and the chips in its frame, each heading above its frame's first chip, one
    height for every chip, and the head card and chips of their old width. */
 async function checkSchema(page: Page) {
-  expect(await cutTexts(page, '.dview .shead .edge-in', '.role, .hn, .meta, .st, .hx-task, .hc > span')).toEqual([]);
-  expect(await cutTexts(page, '.dview .frame', '.fn, .fa, .fc')).toEqual([]);
-  expect(await cutTexts(page, '.dview .schip .edge-in', '.mn, .st, .r2, .r3')).toEqual([]);
+  expect.soft(await cutTexts(page, '.dview .shead .edge-in', '.role, .hn, .meta, .st, .hx-task, .hc > span')).toEqual([]);
+  expect.soft(await cutTexts(page, '.dview .frame', '.fn, .fa, .fc')).toEqual([]);
+  expect.soft(await cutTexts(page, '.dview .schip .edge-in', '.mn, .st, .r2, .r3')).toEqual([]);
   const headings = await page.locator('.dview .frame').evaluateAll(frames => frames.map(f => {
     const fh = f.querySelector('.fh')!.getBoundingClientRect(), chip = f.querySelector('.dept-chip')?.getBoundingClientRect();
     return chip ? chip.top - fh.bottom : null;
   }));
-  for (const room of headings) if (room !== null) expect(room, 'a heading ends above its first chip').toBeGreaterThanOrEqual(-1);
+  for (const room of headings) if (room !== null) expect.soft(room, 'a heading ends above its first chip').toBeGreaterThanOrEqual(-1);
   const chips = await placed(page, '.dview .frame .dept-chip');
-  expect(new Set(chips.map(c => c.h)).size, 'one height for every chip').toBe(1);
-  expect(chips.every(c => c.w === 240), 'the chips keep their width').toBe(true);
+  expect.soft(new Set(chips.map(c => c.h)).size, 'one height for every chip').toBe(1);
+  expect.soft(chips.every(c => c.w === 240), 'the chips keep their width').toBe(true);
   const head = await page.locator('.dview .shead').first().evaluate(card => {
     const s = ((card.closest('.sslot') as HTMLElement | null) ?? (card as HTMLElement)).style;
     return { w: parseFloat(s.width), h: parseFloat(s.height) };
   });
-  expect(head.w, 'the head card keeps its width').toBe(380);
+  expect.soft(head.w, 'the head card keeps its width').toBe(380);
   return { head, chips };
 }
 
@@ -137,12 +138,12 @@ for (const look of LOOKS) {
     if (browserName === 'chromium') await shoot(page, info, `map-${name}`);
 
     /* The map: every word of each card in its frame, one height for all cards, and the rows apart. */
-    expect(await cutTexts(page, '.map .dept .edge-in', '.dname, .cnt, .role, .detail, .now > span')).toEqual([]);
+    expect.soft(await cutTexts(page, '.map .dept .edge-in', '.dname, .cnt, .role, .detail, .now > span')).toEqual([]);
     const cards = await placed(page, '.map .dept');
-    expect(new Set(cards.map(c => c.h)).size, 'one height for every card of the map').toBe(1);
-    expect(cards.every(c => c.w === 280), 'the cards keep their width').toBe(true);
-    for (const gap of await columnGaps(page)) expect(gap, 'cards of a column stay apart').toBeGreaterThanOrEqual(32);
-    if (look.script === 'en' || look.script === 'ru') expect(cards[0]!.h, 'words that fit keep the old card').toBe(160);
+    expect.soft(new Set(cards.map(c => c.h)).size, 'one height for every card of the map').toBe(1);
+    expect.soft(cards.every(c => c.w === 280), 'the cards keep their width').toBe(true);
+    for (const gap of await columnGaps(page)) expect.soft(gap, 'cards of a column stay apart').toBeGreaterThanOrEqual(32);
+    if (look.script === 'en' || look.script === 'ru') expect.soft(cards[0]!.h, 'words that fit keep the old card').toBe(160);
 
     /* The department: its head card, role frames and member chips, and the hint at its foot. */
     /* A card can stand under the top bar on a phone: it is pressed as a person's tap on it would press it. */
@@ -156,27 +157,27 @@ for (const look of LOOKS) {
     if (browserName === 'chromium') await shoot(page, info, `department-${name}`);
 
     const { head, chips } = await checkSchema(page);
-    expect(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
+    expect.soft(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
     if (look.script === 'en' || look.script === 'ru') {
-      expect([head.h, chips[0]!.h], 'words that fit keep the old head card and chips').toEqual([184, 84]);
-      expect(chips.every(c => (c.y - 100) % 96 === 0), 'chips stand where they stood').toBe(true);
+      expect.soft([head.h, chips[0]!.h], 'words that fit keep the old head card and chips').toEqual([184, 84]);
+      expect.soft(chips.every(c => (c.y - 100) % 96 === 0), 'chips stand where they stood').toBe(true);
     }
 
     /* The hint stands whole on the screen, clear of the zoom and the tools. */
     const ticker = await page.locator('.dview .ticker').boundingBox();
     const view = page.viewportSize()!;
-    expect(ticker!.x >= -1 && ticker!.x + ticker!.width <= view.width + 1 && ticker!.y >= -1 && ticker!.y + ticker!.height <= view.height + 1, 'the hint stands on the screen').toBe(true);
+    expect.soft(ticker!.x >= -1 && ticker!.x + ticker!.width <= view.width + 1 && ticker!.y >= -1 && ticker!.y + ticker!.height <= view.height + 1, 'the hint stands on the screen').toBe(true);
     const rects = await page.evaluate(() => ['.dview .ticker', '.dview .zoom', '.dview .dv-acts'].map(s => document.querySelector(s)?.getBoundingClientRect().toJSON() as DOMRect | null));
-    expect(overlap(rects[0]!, rects[1]!) || overlap(rects[0]!, rects[2]!), 'the hint clear of the zoom and the tools').toBe(false);
+    expect.soft(overlap(rects[0]!, rects[1]!) || overlap(rects[0]!, rects[2]!), 'the hint clear of the zoom and the tools').toBe(false);
 
     /* Zoomed far out, where chips show colours: the layout holds, and no word is cut or runs over a chip. */
     await zoomTo(page, 0.4);
     await settle(page);
     if (browserName === 'chromium') await shoot(page, info, `department-far-${name}`);
     const far = await checkSchema(page);
-    expect(far.head, 'far zoom keeps the head card').toEqual(head);
-    expect(far.chips, 'far zoom moves no chip').toEqual(chips);
+    expect.soft(far.head, 'far zoom keeps the head card').toEqual(head);
+    expect.soft(far.chips, 'far zoom moves no chip').toEqual(chips);
 
-    expect(errors).toEqual([]);
+    expect.soft(errors).toEqual([]);
   });
 }
