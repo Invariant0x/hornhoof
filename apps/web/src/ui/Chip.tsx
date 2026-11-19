@@ -53,11 +53,12 @@ export function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): v
 }
 
 /* lead: the employee leads a stage of a task now, and its chip is marked in its role's frame. An employee with no
-   subscription yet is drawn grey, and its last line asks for one. */
+   subscription yet is drawn grey, and its last line asks for one. The chip is CW wide and at least CH tall, taller when its
+   words take more lines; what holds it lays out the height it measures. */
 export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serverNow, onOpen, onSwitch, row }: { e: Employee; x: number; y: number; on: boolean; lead?: boolean; flash: boolean; serverNow?: string; onOpen(event: MouseEvent<HTMLButtonElement>): void; onSwitch?(on: boolean): void; row?: string }) {
   const t = useT();
   return (
-    <div className={`sslot dept-chip${e.on ? '' : ' off'}${e.on && e.status === 'off' ? ' no-plan' : ''}${onSwitch ? ' has-sw' : ''}`} data-row={row} style={{ left: x, top: y, width: CW, height: CH }}>
+    <div className={`sslot dept-chip${e.on ? '' : ' off'}${e.on && e.status === 'off' ? ' no-plan' : ''}${onSwitch ? ' has-sw' : ''}`} data-row={row} style={{ left: x, top: y, width: CW, minHeight: CH }}>
       <button
         type="button"
         className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${lead ? ' lead' : ''}${flash ? ' flash' : ''}`}

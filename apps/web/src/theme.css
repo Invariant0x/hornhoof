@@ -1365,40 +1365,45 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .frame.gt > .edge { background: color-mix(in srgb, var(--cyan) 55%, var(--line2)); }
 .frame .edge-in { background: color-mix(in srgb, var(--surface) 45%, var(--bg)); }
 .fh { display: flex; flex-direction: column; gap: 3px; padding: 16px 20px 0 24px; }
-.fn { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fa { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fn { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; }
+.fa { font-size: 13px; overflow-wrap: break-word; }
 .fc { font-size: 12px; color: var(--muted); }
 .far .fn { font-size: calc(18px * var(--k, 1)); }
 .far .fc { font-size: calc(12px * var(--k, 1)); }
 .far .fa { display: none; }
-/* The head on top and an employee's chip: name and what it does, its model, its task. */
+/* The head on top and an employee's chip: name and what it does, its model, its task. Every word stays: a card is at least
+   its own size and grows with its lines, its slot a grid the card fills, and the schema lays out what each one measures. */
 .shead, .schip { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--ink); text-align: left; }
 button.shead, button.schip { cursor: pointer; }
 .shead > .edge, .schip > .edge { height: 100%; }
 .shead .edge-in { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; box-sizing: border-box; }
 .shead .hr { display: flex; align-items: center; gap: 8px; }
 .shead .hr .ic { color: var(--cyan-ink); }
-.shead .hn { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shead .meta { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shead .hx { margin-top: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; white-space: nowrap; overflow: hidden; }
-.shead .hx .st { flex: none; font-size: 12px; color: var(--muted); }
-.shead .hx-task { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.shead .hn { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1.15; overflow-wrap: break-word; }
+.shead .meta { font-size: 12.5px; color: var(--muted); overflow-wrap: break-word; }
+/* The state, the program's mark and the task share a row while they fit; the task goes under them when it does not. */
+.shead .hx { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 13px; }
+.shead .hx .st { flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.shead .hx .ast { flex: 0 1 auto; }
+.shead .hx-task { min-width: 0; overflow-wrap: break-word; }
 .shead .hc { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .shead .hc .bar { flex: 1; }
 .shead .hc b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.shead.empty { display: grid; grid-template-columns: minmax(0, 1fr); }
 .shead.empty > .edge { background: var(--line2); }
 /* A card with no head yet keeps its role line, its words and its count at one start edge, right to left too. */
 .shead.empty { text-align: start; }
 .shead.empty .hn { font-size: 18px; color: var(--muted); }
 .schip .edge-in { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 10px 14px; box-sizing: border-box; }
 .schip .cx { position: absolute; left: 14px; right: 12px; bottom: 6px; height: 3px; }
-.schip .r1 { display: flex; align-items: center; gap: 8px; }
+.schip .r1 { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .schip .r1 .ic { color: var(--muted); }
-/* The name keeps its whole width up to most of the row; the state takes what is left and ends in an ellipsis. */
-.schip .mn { flex: 1 0 auto; max-width: 62%; min-width: 0; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.schip .st { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); }
-.schip .r2 { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.schip .r3 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name takes the row beside the worker's mark (14 px and the gap) and the state stands at its end; a state that does not
+   fit beside the name goes under it, at the same end. */
+.schip .mn { flex: 1 1 auto; min-width: 0; max-width: calc(100% - 22px); font-family: var(--f-display); font-size: 13.5px; font-weight: 600; overflow-wrap: break-word; }
+.schip .st { flex: 0 1 auto; min-width: 0; margin-inline-start: auto; font-size: 11.5px; color: var(--muted); overflow-wrap: break-word; }
+.schip .r2 { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.schip .r3 { font-size: 13px; overflow-wrap: break-word; }
 .schip.s-i .r3, .schip.s-o .r3 { color: var(--muted); }
 .s-w .r1 .ic { color: var(--cyan); animation: blink 2.2s ease-in-out infinite; }
 .s-w .st { color: var(--cyan-ink); }
@@ -1414,11 +1419,14 @@ button.shead, button.schip { cursor: pointer; }
 .schip.s-h > .edge { background: var(--pink); }
 .schip:has(.ast.alarm) > .edge, .shead:has(.ast.alarm) > .edge { background: var(--red); }
 .schip .r3 .ast { margin-right: 6px; }
+/* A program's mark longer than the line wraps inside its frame. */
+.schip .r3 .ast, .shead .hx .ast { max-width: 100%; white-space: normal; }
 button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2); }
 .shead.on > .edge, .schip.on > .edge, button.shead:focus-visible > .edge, button.schip:focus-visible > .edge { background: var(--cyan); }
 .shead.flash > .edge, .schip.flash > .edge { animation: eflash 1.4s ease-out; }
 /* An agent's place on the schema: its chip, and the tick that switches it off for now. An agent that is off fades. */
-.sslot > .schip, .sslot > .shead { width: 100%; height: 100%; }
+.sslot { display: grid; grid-template-columns: minmax(0, 1fr); }
+.sslot > .schip, .sslot > .shead { width: 100%; }
 .sslot .sw { position: absolute; top: 10px; right: 14px; width: 14px; height: 14px; margin: 0; accent-color: var(--cyan-ink); cursor: pointer; }
 .sslot > .shead ~ .sw { top: 17px; right: 20px; }
 .sslot.has-sw .schip .r1 { padding-right: 22px; }
@@ -1438,17 +1446,20 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .far .schip.s-h .edge-in { background: color-mix(in srgb, var(--pink) 24%, var(--surface)); }
 .far .schip:has(.ast.alarm) .edge-in { background: color-mix(in srgb, var(--red) 24%, var(--surface)); }
 /* The people who reach the department, at the right of the head. */
+.pchip { display: grid; grid-template-columns: minmax(0, 1fr); }
+.pchip > .chip-btn { height: auto; }
 .pchip > .edge { height: 100%; }
-.pchip .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
-.pchip .ic { width: 18px; height: 18px; }
+.pchip .edge-in { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
+.pchip .ic { flex: none; width: 18px; height: 18px; }
 .pchip .pn { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
-.pchip .pn b { font-family: var(--f-display); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pchip .pn span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dv-empty { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
-/* The department's name next to the logo, its actions bottom right and the drawer they open at the left. */
-.crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: center; gap: 8px; height: 44px; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
-.crumbs h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--cyan-ink); }
-.crumb { display: flex; align-items: center; gap: 10px; height: 44px; box-sizing: border-box; min-width: 0; padding: 0 14px; color: var(--ink); }
+.pchip .pn b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
+.pchip .pn span { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.dv-empty { position: absolute; left: 50%; bottom: var(--tree-bottom, 76px); transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
+/* The department's name next to the logo, its actions bottom right and the drawer they open at the left. A name too long
+   for its room wraps its words, and the tree and the drawers start under it, as the department measures it. */
+.crumbs { position: absolute; z-index: 3; top: 12px; inset-inline-start: 68px; display: flex; align-items: flex-start; gap: 8px; height: auto; max-width: calc(50% - var(--tabs-half, 204px) - 76px); min-width: 0; }
+.crumbs h2 { min-width: 0; white-space: normal; overflow-wrap: break-word; font-size: 15px; color: var(--cyan-ink); }
+.crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; height: auto; min-height: 44px; box-sizing: border-box; min-width: 0; padding: 8px 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
 /* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
    that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */
@@ -1471,10 +1482,17 @@ body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
    every window and panel fixed there (#1384). A phone shows no version at all; About names it there. */
 @media (max-width: 760px) { .version-mark { display: none; } }
-/* The line of what changed sits between the zoom and the actions. */
+/* The line of what changed sits between the zoom and the actions and wraps its words over as many lines as it needs, growing
+   up from the bottom. A line of several rows keeps its dot and time on the first row; one row still stands in the middle of
+   44 px. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
+.dv-dock > .ticker { align-items: flex-start; padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); white-space: normal; overflow: visible; }
+.dv-dock .ticker .live { margin-block-start: calc((1lh - 7px) / 2); }
+.dv-dock .ticker .tx { overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
 .dv-drawer { position: absolute; z-index: 4; }
 .dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+/* The drawer starts under the department's name and ends above the line of what happened, as the department measures them. */
+.dv-drawer { top: var(--tree-top, 68px); bottom: var(--tree-bottom, 76px); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
 .dv-drawer-h b { font-family: var(--f-display); font-size: 16px; font-weight: 600; }
 .dv-drawer-b { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 24px; align-content: start; padding: 16px 18px 20px; }
@@ -1691,9 +1709,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (max-width: 760px) {
   /* The name of the department stands under the top bar and wraps its words; the tree and the drawers start under it, as the
      department measures it. */
-  .crumbs { top: 64px; inset-inline-start: 16px; max-width: calc(100% - 32px); height: auto; align-items: flex-start; }
-  .crumb { height: auto; min-height: 44px; flex-wrap: wrap; padding-block: 8px; }
-  .crumbs h2 { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
+  .crumbs { top: 64px; inset-inline-start: 16px; max-width: calc(100% - 32px); }
   .dv-acts { flex-wrap: wrap; }
   /* The hint of an empty map stands whole above the dock, which may grow to several rows: across the width, 16px above
      its top as the map measures it. */
@@ -1709,9 +1725,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .dv-dock .zoom, .dv-dock > .ticker, .dv-dock > .dv-acts { position: static; }
   .dv-dock .zoom { align-self: flex-end; max-inline-size: none; border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
   .dv-dock .zv { display: none; }
-  .dv-dock > .ticker { transform: none; max-width: none; align-items: flex-start; padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); white-space: normal; overflow: visible; }
-  .dv-dock .ticker .live { margin-block-start: calc((1lh - 7px) / 2); }
-  .dv-dock .ticker .tx { overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
+  .dv-dock > .ticker { transform: none; max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }
 
@@ -2548,7 +2562,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .hbtn.ib .gl { stroke: var(--cyan); }
 .hbtn.ib:hover { color: var(--cyan-ink); }
 
-.tview { position: absolute; top: 68px; left: 16px; right: 16px; bottom: 76px; background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
+.tview { position: absolute; top: var(--tree-top, 68px); left: 16px; right: 16px; bottom: var(--tree-bottom, 76px); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
 .tview .tv-empty { margin: 32px; padding: 12px 16px; width: fit-content; color: var(--muted); }
 .tview .tv-scroll { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .tview .tv-scroll:active { cursor: grabbing; }
@@ -2681,9 +2695,10 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .dv-drawer.spd .spl-r { width: 100%; padding: 9px 6px; border: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer; text-align: left; font-size: 13px; }
 .dv-drawer.spd .spl-r:hover { background: var(--surface2); }
 .dv-drawer.spd .spl-r.on { background: var(--glow); box-shadow: inset 3px 0 0 var(--cyan); }
-.dv-drawer.spd .spl-r .who { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dv-drawer.spd .spl-r .who b { font-family: var(--f-display); font-weight: 600; white-space: nowrap; }
-.dv-drawer.spd .spl-r .who small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+/* An agent's name and role wrap their words; a role that does not fit beside the name goes under it. */
+.dv-drawer.spd .spl-r .who { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
+.dv-drawer.spd .spl-r .who b { min-width: 0; font-family: var(--f-display); font-weight: 600; overflow-wrap: break-word; }
+.dv-drawer.spd .spl-r .who small { min-width: 0; overflow-wrap: break-word; color: var(--muted); font-size: 12px; }
 .dv-drawer.spd .spl-r .n { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dv-drawer.spd .spl-r .n.z { color: var(--muted); }
 .dv-drawer.spd .spl-r .n.a { color: var(--amber-ink); font-weight: 700; }
