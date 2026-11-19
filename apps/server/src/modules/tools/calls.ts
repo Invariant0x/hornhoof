@@ -176,7 +176,8 @@ function privateCall(config: ToolConfig, name: string, input: unknown, protectio
 }
 
 function lostHandler(name: string, handler: Handler): Handler {
-  return READ_TOOLS.has(name) && name !== 'database' ? handler : async () => say(PRIVATE_TURN_LOST);
+  /* These tools also take arbitrary text that can carry a secret, including an API path or query. */
+  return READ_TOOLS.has(name) && name !== 'database' && name !== 'api' ? handler : async () => say(PRIVATE_TURN_LOST);
 }
 
 function registerProtected(register: Register, call: Omit<Call, 'name'>, name: string, config: ToolConfig, handler: Handler, protection?: ToolProtection): unknown {
