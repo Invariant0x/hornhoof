@@ -90,8 +90,9 @@ export class BundleStore {
     return bavail * bsize;
   }
 
-  /* One after another for the same bundle. */
-  private alone<T>(id: string, work: () => Promise<T>): Promise<T> {
+  /* One after another for the same bundle. A take publishes in here; a caller that looks whether a bundle is held, takes
+     it and acts on what came of it as one step runs that step in here, and names the bundle to take as inside. */
+  alone<T>(id: string, work: () => Promise<T>): Promise<T> {
     const run = (this.writing.get(id) ?? Promise.resolve()).then(work, work);
     const settled = run.catch(() => undefined);
     this.writing.set(id, settled);
@@ -104,8 +105,9 @@ export class BundleStore {
   /* Takes a bundle from a stream: its head is checked first by the caller's check, which throws; then there must be
      room; then the sealed part goes into a file of this take alone while it is counted and hashed, cut the moment it
      passes the signed size or stops coming; and only what has the signed size and hash is published, once. Any failure
-     removes this take's file and nothing else. */
-  async take(input: Readable, check: (head: string) => Manifest, opts: { id?: string; free?: () => number; idleMs?: number } = {}): Promise<StoredBundle> {
+     removes this take's file and nothing else. inside: the bundle whose turn of alone the caller holds already, where
+     the take publishes without waiting for a turn of its own. */
+  async take(input: Readable, check: (head: string) => Manifest, opts: { id?: string; free?: () => number; idleMs?: number; inside?: string } = {}): Promise<StoredBundle> {
     let part: string | null = null;
     try {
       const { head, rest } = await readHead(input);
@@ -123,13 +125,14 @@ export class BundleStore {
       if (sha256.size !== manifest.size) throw new BundleRefused('size', 'The bundle is not as long as its head says.');
       if (sha256.hash !== manifest.sha256) throw new BundleRefused('hash', 'The sealed part is not the one its head names.');
       const taken = part;
-      return await this.alone(manifest.id, async () => {
+      const publish = async () => {
         const there = this.read(manifest.id);
         if (there) return there;
         writeFileSync(this.head(manifest.id), head, { mode: 0o600 });
         renameSync(taken, this.ageFile(manifest.id));
         return this.read(manifest.id)!;
-      });
+      };
+      return await (opts.inside === manifest.id ? publish() : this.alone(manifest.id, publish));
     } catch (err) {
       input.destroy();
       throw err;
