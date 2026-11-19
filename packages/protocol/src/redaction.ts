@@ -130,3 +130,14 @@ export function hideCredentialsIn(value: unknown): unknown {
 /* A diagnostic with no credential and no private path in it, for a reader who may not read where it comes from. Clean it
    before cutting it, so that no part of either is left at the edge. */
 export const cleanDiagnostic = (text: string): string => hiddenBy(hiddenBy(text, CREDENTIALS), PRIVATE_PATHS);
+
+/* A whole answer cleaned as a diagnostic: every word in it, down through its lists and records. */
+export function cleanDiagnosticIn<T>(value: T): T;
+export function cleanDiagnosticIn(value: unknown): unknown {
+  if (typeof value === 'string') return cleanDiagnostic(value);
+  if (Array.isArray(value)) return value.map(item => cleanDiagnosticIn(item));
+  if (value && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cleanDiagnosticIn(item)]));
+  }
+  return value;
+}

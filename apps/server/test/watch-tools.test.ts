@@ -47,6 +47,17 @@ async function company(skills: string[]) {
 
 type Result = { content: { text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
+/* Every word of a tool's answer, as its reader gets it. */
+const wordsOf = (value: unknown): string[] =>
+  typeof value === 'string' ? [value] : value !== null && typeof value === 'object' ? Object.values(value).flatMap(wordsOf) : [];
+/* A watchdog opens another department's task to inspect it, with no credential and no private path in what it reads. */
+async function inspected(client: Client, number: number, secrets: string[]): Promise<string> {
+  const seen = await call(client, 'task', { task: number });
+  expect(seen.isError, seen.content[0]!.text).toBeFalsy();
+  const words = wordsOf(JSON.parse(seen.content[0]!.text)).join('\n');
+  for (const secret of secrets) expect.soft(words, secret).not.toContain(secret);
+  return words;
+}
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 
 type WatchedTask = { number: number; title: string; status: string; updatedAt: string; waitsFor: number[];
@@ -345,7 +356,7 @@ describe('tools a skill grants', () => {
     expect(reason.slice(-500).startsWith(second.slice(-12))).toBe(true);
     await blocked(app.ctx, bruno.id, task.id, reason);
     const client = await mcp(app, TOKEN);
-    expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
+    expect(await inspected(client, task.number, [GITHUB_TOKEN, second.slice(-12), HOME, 'fixture805', 'C:\\Users\\fixture', '/Users/fixture'])).toContain('Status: BLOCKED. Could not read [hidden] with [hidden].');
     const [held] = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).blocked as { why: string; whyTail: string }[];
     for (const words of [held!.why, held!.whyTail]) {
       for (const secret of [GITHUB_TOKEN, second.slice(-12), HOME, 'fixture805', 'C:\\Users\\fixture', '/Users/fixture']) expect(words).not.toContain(secret);
@@ -368,7 +379,7 @@ describe('tools a skill grants', () => {
       { ...turn, taskId: null, tail: `git push failed: key=${GITHUB_TOKEN} for /home/fixture805/app`, finishedAt: ago(5) },
     ]);
     const client = await mcp(app, TOKEN);
-    expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
+    await inspected(client, task.number, [GITHUB_TOKEN, HOME, 'fixture805', '/Users/fixture', '/root/.npmrc']);
     const failed = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).failed as { tail: string; reason: string | null }[];
     expect(failed).toHaveLength(4);
     for (const { tail, reason } of failed) {
@@ -497,7 +508,7 @@ describe('tools a skill grants', () => {
     const { second, output } = await stumbledOnTask(c);
     expect(output.slice(-400).startsWith(second.slice(-9))).toBe(true);
     const client = await mcp(c.app, TOKEN);
-    expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
+    expect(await inspected(client, c.task.number, [GITHUB_TOKEN, second.slice(-9), HOME, 'fixture805', '/Users/fixture', 'bruno:ppp'])).toContain('Checkout API for [hidden]');
     const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as Stumbles;
     const words: [string, string][] = [
       ['failed.interruption.diagnosis.log', out.failed[0]!.interruption.diagnosis.log], ['blocked.title', out.blocked[0]!.title],
@@ -566,7 +577,9 @@ describe('tools a skill grants', () => {
     const [orchestrator] = await c.db.select().from(agents).where(and(eq(agents.companyId, c.acme.id), eq(agents.kind, 'orchestrator')));
     const opsTask = (await createTask(c.app.ctx, { agentId: orchestrator!.id }, { title: `Rotate ${GITHUB_TOKEN}`, brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: c.bruno.id, executor: true })).task;
     const client = await mcp(c.app, TOKEN);
-    expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
+    const other = await inspected(client, c.task.number, [GITHUB_TOKEN, HOME, 'fixture805']);
+    expect(other).toContain('Checkout API for [hidden]');
+    expect(other).toContain('Waits for the bank to read [hidden]');
     const own = await call(client, 'task', { task: opsTask.number });
     expect(own.isError, own.content[0]!.text).toBeFalsy();
     expect(JSON.parse(own.content[0]!.text).title).toBe('Rotate [hidden]');

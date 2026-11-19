@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS, redactExact, secretForms } from '../src/redaction.js';
+import { CREDENTIALS, cleanDiagnostic, cleanDiagnosticIn, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS, redactExact, secretForms } from '../src/redaction.js';
 import mixed from './fixtures/redaction-mixed.json' with { type: 'json' };
 
 describe('stored prose, masked as it is written', () => {
@@ -159,6 +159,28 @@ describe('a diagnostic cleaned for a reader who may not read where it comes from
       'the /homework folder and /rooted paths',
       'commit 5989973ddde9b758474401009c791623fd4a5bca passed',
     ]) expect(cleanDiagnostic(kept), kept).toBe(kept);
+  });
+
+  it('cleans every word of a whole answer, down through its lists and records, and leaves the rest as it is', () => {
+    const at = new Date('2026-11-19T00:00:00.000Z');
+    const answer = {
+      title: 'Checkout API for ghp_abcDEF0123456789abcdef0123',
+      number: 12,
+      done: false,
+      closed: null,
+      at,
+      log: [{ text: 'Could not read /home/alex/project/.env', data: { reason: 'Waits on C:\\Users\\alex\\key with token=abc' } }, 'plain words'],
+    };
+    expect(cleanDiagnosticIn(answer)).toEqual({
+      title: `Checkout API for ${HIDDEN}`,
+      number: 12,
+      done: false,
+      closed: null,
+      at,
+      log: [{ text: `Could not read ${HIDDEN}`, data: { reason: `Waits on ${HIDDEN} with token=${HIDDEN}` } }, 'plain words'],
+    });
+    expect(cleanDiagnosticIn(answer).at).toBe(at);
+    expect(answer.title).toBe('Checkout API for ghp_abcDEF0123456789abcdef0123');
   });
 
   it('keeps each list to its own kind, so the node log hides credentials and leaves its paths', () => {

@@ -5,6 +5,7 @@ import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
+import { cleanDiagnosticIn } from '@hornhoof/protocol/redaction';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
@@ -380,7 +381,11 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref, true).then(
-          async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
+          async ({ agent, task }) => {
+            const detail = { ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) };
+            /* A watchdog that inspects another department's task reads it with no credential and no private path. */
+            return say(fitted(sees(agent, task) ? detail : cleanDiagnosticIn(detail)));
+          },
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );
