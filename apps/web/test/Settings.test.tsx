@@ -96,7 +96,7 @@ describe('the public link under Company & access', () => {
     expect(remove).toHaveClass('btn', 'ghost', 'danger');
     expect(remove.parentElement!.lastElementChild).toBe(remove);
     expect(screen.getByRole('button', { name: 'Change name' })).not.toHaveClass('danger');
-    /* The pink of a danger button is the shared rule of Oracle and Trinity: pink words, a pink frame on hover. */
+    /* The pink of a danger button is a shared rule: pink words, a pink frame on hover. */
     expect(decl(':is(.btn.ghost, .act).danger', 'color')).toBe('var(--pink-ink)');
     expect(decl('.btn.ghost.danger:hover', 'box-shadow')).toBe('inset 0 0 0 1px var(--pink)');
   });

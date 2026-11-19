@@ -7,7 +7,7 @@ export const WaitOnInput = z.discriminatedUnion('kind', [
 type WaitOn = z.infer<typeof WaitOnInput>;
 export type RecordedWaitOn = WaitOn & { name?: string };
 /* operation: what the wait's accountable record keeps it by, the same across a restart. run: the one run whose end ends it. */
-export type ExternalWait = { reason: string; since: string; until: string; on?: RecordedWaitOn; operation?: string; run?: string };
+export type ExternalWait = { reason: string; since: string; until: string; on?: RecordedWaitOn; operation?: string; run?: string; work?: true };
 
 const moment = z.iso.datetime({ offset: true });
 const reference = z.string().trim().min(1).max(200);
@@ -26,12 +26,14 @@ export type TaskWaitFact = {
   kind: WaitSourceKind | 'work';
   reason: string | null;
   until?: string;
+  nextCheck?: string;
   event?: 'time' | 'ceo';
   failure?: WaitFailure;
   runError?: WaitRunError;
 };
 
 export function externalWaitFact(wait: ExternalWait, now: number, observed?: TaskWaitFact): TaskWaitFact {
+  if (wait.work) return { kind: 'work', who: observed?.who ?? null, since: wait.since, until: wait.until, nextCheck: wait.until, reason: wait.reason };
   const on = wait.on;
   const event = on?.kind === 'external' ? on.event : undefined;
   const who = observed?.who ?? (on?.kind === 'employee' ? { kind: 'agent', id: on.employee, name: on.name ?? '' } : null);

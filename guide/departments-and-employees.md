@@ -176,7 +176,7 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | --- | --- | --- | --- |
 | Business development | - | Business analyst, Research reviewer | Head of business development, Partnerships manager, Product manager |
 | Design | - | Design system designer, Product UI designer | Design QA, Head of design, Product manager |
-| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Product manager, Technical writer |
+| Development | Architect, Backend engineer, Code reviewer, Developer, Interface developer, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Product manager, Technical writer |
 | Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller, Product manager |
 | Home devices | - | Home network helper | Head of home devices, Product manager, Smart home helper |
 | Household | - | - | Bills helper, Calendar helper, Head of household, Product manager, Supplies helper |
@@ -184,12 +184,13 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Operations | - | Integrations engineer, Reliability engineer, Weak point collector | Accounts administrator, Head of operations, Product manager, Program operator, Task watchdog |
 | Sales | - | Account executive, Sales reviewer | Head of sales, Product manager, Sales development representative, Sales operations analyst |
 | Support | - | Second-line support, Support quality reviewer | First-line support, Head of support, Knowledge base editor, Product manager |
+| Video production | - | Colorist, Director and head of video production, Script supervisor and continuity keeper, Shot operator, Sound designer, Story and script writer, Storyboard artist and set builder, Video editor, Video quality reviewer | Product manager, Shot reference artist |
 
 Each role asks for a strength of model, and an employee hired without a model named runs the one of that strength its plan has, by name. When the plan has none of that strength it takes the nearest stronger one, else the nearest weaker.
 
 Top roles, the strongest model there is, for work nobody checks after: Architect, Security engineer.
 
-Deep roles, a strong model, for whoever checks the work of others or leads risky work: Code reviewer, Controller, Design QA, Editor, Finance auditor, Head of business development, Head of development, Red team, Research reviewer, Sales reviewer, Support quality reviewer.
+Deep roles, a strong model, for whoever checks the work of others or leads risky work: Code reviewer, Controller, Design QA, Director and head of video production, Editor, Finance auditor, Head of business development, Head of development, Red team, Research reviewer, Sales reviewer, Script supervisor and continuity keeper, Support quality reviewer, Video quality reviewer.
 
 Fast roles, the lightest model, for simple work that comes in a stream: Calendar helper, First-line support, Product manager, Sales development representative, Social media manager, Supplies helper, Task watchdog.
 

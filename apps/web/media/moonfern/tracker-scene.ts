@@ -64,12 +64,12 @@ function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] 
       words.preparing(1, ''), words.goalsDone(1, 1), words.closedReleases, words.released(1, ''), words.relCount(1), t.tracker.wait.question,
       t.tracker.groups.waitingYou, t.tracker.wait.person('', t.tracker.time.minutes(40)), t.tracker.time.minutes(49)];
   }
-  const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, filters.goal, ...Object.values(statuses)];
+  const controls = [...Object.values(views), filters.group(), filters.executor, filters.responsible, ...Object.values(statuses)];
   return view === 'tasks'
-    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due, list.addTask,
+    ? [...common, ...controls, filters.showSubtasks, list.task, list.executor, list.responsible, list.goal, list.due,
       list.subtasks(1, 3), ...Object.values(t.tracker.priority), t.tracker.nobody, t.tracker.noGoal, t.tracker.wait.employee(''), t.tracker.wait.detail('', ''),
       t.tracker.card.executor, t.tracker.card.responsible, t.tracker.card.due, t.tasks.taskActions, t.tasks.log]
-    : [...common, ...controls, board.executor, board.responsible, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
+    : [...common, ...controls, board.subtasks(1, 1), board.empty, t.tracker.wait.question,
       t.tracker.groups.waitingYou, t.tracker.time.minutes(49), t.tracker.wait.failedRun('17', false)];
 }
 

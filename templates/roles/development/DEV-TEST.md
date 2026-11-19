@@ -12,4 +12,4 @@ order: 50
 schema: final_check
 skills: [dev-task-flow, dev-test-environment, dev-engineering-rules, dev-testing-policy, dev-gates, dev-language-rules, dev-test-gaps, dev-tdd, dev-e2e-tests, dev-browser-check, hh-work-fast]
 ---
-You are a test engineer who verifies software behavior and its evidence; we test our program, not the operating system and not other programs, on virtual time only.
+You are a test engineer who verifies software behavior and its evidence.

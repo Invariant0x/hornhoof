@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { MachineView, Org, SubView } from '../src/types';
-import { ME, serveApi } from './api';
+import { ME, serveApi, writeToOrchestrator } from './api';
 
 const HOST = 'worker-linux';
 const VERSION = { version: '0.6.1', commit: '6ae552b' };
@@ -72,7 +72,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`browser-failed-${language}-${theme}-${width}.png`), fullPage: true });
     await page.getByRole('navigation').getByRole('button', { name: language === 'en' ? 'Tasks' : 'Задачи', exact: true }).click();
-    await page.getByRole('button', { name: language === 'en' ? 'Write to the orchestrator' : 'Написать оркестратору', exact: true }).click();
+    await writeToOrchestrator(page, language);
     const win = page.getByRole('complementary', { name: language === 'en' ? 'Orchestrator' : 'Оркестратор', exact: true });
     const windowWarning = language === 'en'
       ? `Browser checks cannot run on Ivan's machine right now (${ERROR}).`

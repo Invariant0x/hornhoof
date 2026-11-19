@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { EventView } from '../src/types';
-import { openTaskAction, detail, ME, openTaskCard, serveApi, TASKS } from './api';
+import { detail, ME, openTaskCard, serveApi, TASKS } from './api';
 import { taskStream } from './hub-turn-api';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
@@ -123,8 +123,7 @@ test('a person sees and downloads an attached .xlsx in 1 click from both the tas
     await page.goto('/tasks');
     await openTaskCard(page, 1);
     const taskPanel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-    await openTaskAction(taskPanel, t, t.tracker.card.materials);
-    const taskLink = taskPanel.getByRole('link', { name: 'контакты-партнеров.xlsx', exact: true });
+    const taskLink = taskPanel.getByRole('region', { name: t.tracker.card.materials }).getByRole('link', { name: t.tracker.card.openIt('контакты-партнеров.xlsx'), exact: true });
     await expect(taskLink).toBeVisible();
     await expect(taskLink).toHaveAttribute('href', '/api/attachments/file-task-xlsx');
     await expect(taskLink).toHaveAttribute('download', 'контакты-партнеров.xlsx');

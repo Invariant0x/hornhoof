@@ -32,7 +32,7 @@ describe('product environment ownership', () => {
     expect(skill).toMatch(/fetches tools once for each product and declared runtime fingerprint/);
     expect(skill).toMatch(/Several programs/);
     expect(skill).toMatch(/changed version or preparation input invalidates/);
-    expect(skill).toMatch(/another product's runtime[\s\S]*proves this environment ready/);
+    expect(skill).toMatch(/another product's runtime is no evidence that this product is ready/i);
   });
 
   it('keeps final checks and existing role skills while adding the environment procedure', () => {

@@ -710,6 +710,7 @@
           "apps/server/test/tasks-routes.test.ts",
           "apps/server/test/tasks-tools.test.ts",
           "apps/server/test/tasks-wake.test.ts",
+          "apps/server/test/template-laws.test.ts",
           "apps/server/test/templates-load.test.ts",
           "apps/server/test/templates-once.test.ts",
           "apps/server/test/templates-pipeline.test.ts",
@@ -726,6 +727,7 @@
           "apps/server/test/turn-effort-dispatch.test.ts",
           "apps/server/test/turn-effort.test.ts",
           "apps/server/test/turn-endings.test.ts",
+          "apps/server/test/video-template.test.ts",
           "apps/server/test/wait-producers.test.ts",
           "apps/server/test/work-tree-route.test.ts"
         ]

@@ -5,13 +5,13 @@ description: { en: "Where finance checks item by item, in a batch, by sample and
 kind: procedure
 sources: []
 ---
-When assigned to plan or assess finance checks, use the queue's source records, outputs, maker, checker, tolerances and approval policy. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The department owner is the person named for this department, or the CEO when there is none. The current assignment and task gates select the work route; this plan grants no tool or approval authority.
+When assigned to plan or assess finance checks, use the queue's source records, outputs, maker, checker, tolerances and approval policy. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The current assignment and task gates select the work route; this plan grants no tool or approval authority.
 
 ## Item by item
 
-- Every spend is checked for its amount, budget, business need, vendor, terms and approval limit before a human approves and a different human pays. The requester does not approve their own spend.
+- Check spend against the budget, business need, vendor, terms and applicable department limit. Record who owns any exception and who makes the payment.
 - Everything that leaves the company, such as statements, invoices, payment lists and figures for banks or tax, has every key number independently rebuilt from source records and matching before it goes. Its checker must not be its maker and reports findings without fixing the checked work.
-- Humans post, pay and file. No agent does.
+- Assign posting and filing to the people responsible under the department's rules. A person pays or signs.
 
 ## In a batch
 
@@ -24,17 +24,16 @@ When assigned to plan or assess finance checks, use the queue's source records, 
 
 ## By code
 
-- The independent recompute is code, not a model's reading: SQL or a script rebuilds the key numbers from source records before the checker reads the maker's workings, then the checker compares the results.
+- Identify the material figures, source records and tolerance for the assigned independent check.
 - Totals, balances that must balance, differences left on a reconciliation and items counted twice go through the same kind of script.
 - Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
 
 ## By a model
 
-- No number passes on a model's reading. Reading commentary and assumptions against the numbers is a model check that has no example set yet.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. An action that cannot be undone keeps its approval item by item, whatever a set shows.
+- Use executable checks for numbers. Give the assigned checker the exact figures, sources and assumptions used for commentary.
 
 ## Descriptions and measures
 
-- For each queue in scope, record its source records, maker, separate checker, tolerance, approvals and sample in the department notebook. Give drafts to the people who approve, pay, post or file; agents perform none of those protected financial actions.
+- For each queue in scope, record its source records, maker, separate checker, tolerance, approvals and sample in the department notebook. Give drafts to the assigned decision or execution owner.
 - Name the department's own measures, such as reconciliation accuracy, in the department description: the head sets it with "change_department" (about) under the department's rules. The pipeline report of a turn says when a department has no description.
 - Return the proposed check plan, uncovered controls and missing evidence to the person who assigned this work.

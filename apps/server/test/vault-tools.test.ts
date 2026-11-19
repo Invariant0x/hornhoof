@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { decryptSecret } from '../src/crypto/secrets.js';
 import { agentEvents, agents, attachments, computerRuns, jobs, taskEvents, toolCalls, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { INVOCATION } from '../src/modules/tools/calls.js';
 import { appendTurnEvent } from '../src/modules/events/store.js';
@@ -43,6 +42,13 @@ async function replay(c: Awaited<ReturnType<typeof setUp>>, token: string, name:
 }
 
 describe('the vault for agents', () => {
+  it('keeps secret creation on the protected vault screen', async () => {
+    const c = await setUp();
+    const { token } = await c.startTurn(c.nora.id);
+    const catalog = await (await mcp(c.app, token)).listTools();
+    expect(catalog.tools.map(tool => tool.name)).not.toContain('vault_save');
+    expect(catalog.tools.find(tool => tool.name === 'vault_entry')?.description).toContain('protected sign-in field');
+  });
   it('keeps no secret answer in replay storage or the journal', async () => {
     const c = await setUp();
     const { token } = await c.startTurn(c.nora.id);
@@ -107,16 +113,15 @@ describe('the vault for agents', () => {
     expect(JSON.stringify([done, events])).not.toContain('081804');
   });
 
-  it('keeps vault_save arguments out of replay storage and error responses', async () => {
+  it('refuses an old vault_save call without recording or echoing its values', async () => {
     const c = await setUp();
     const { token } = await c.startTurn(c.nora.id);
-    const saved = await replay(c, token, 'vault_save', { name: 'Private save', site: 'https://example.com', login: 'team', password: PASSWORD, code: CODE }, randomUUID());
-    expect(saved.isError).toBeUndefined();
+    const refused = await replay(c, token, 'vault_save', { name: 'New sign-in', site: 'https://example.com', login: 'team', password: PASSWORD, code: CODE }, randomUUID());
+    expect(refused.isError).toBe(true);
     expect(await c.db.select().from(toolCalls)).toEqual([]);
-    expect(JSON.stringify(saved)).not.toContain(PASSWORD);
-    const invalid = await replay(c, token, 'vault_save', { name: 'Invalid', site: 'https://example.com', login: 'team', password: PASSWORD, code: PASSWORD }, randomUUID());
-    expect(invalid.isError).toBe(true);
-    expect(JSON.stringify(invalid)).not.toContain(PASSWORD);
+    expect(JSON.stringify(refused)).not.toContain(PASSWORD);
+    expect(JSON.stringify(refused)).not.toContain(CODE);
+    expect(await c.db.select().from(vaultEntries).where(eq(vaultEntries.name, 'New sign-in'))).toEqual([]);
   });
 
   it('delivers reports with exact secrets hidden while keeping ordinary words and safe reports', async () => {
@@ -271,25 +276,4 @@ describe('the vault for agents', () => {
     expect(await c.db.select().from(vaultLog).where(eq(vaultLog.kind, 'taken'))).toEqual([]);
   });
 
-  it('saves the sign-in a person gave the orchestrator in chat, and changes it by its name the next time', async () => {
-    const c = await setUp();
-    const { token } = await c.startTurn(c.orchestrator.id);
-    const saved = await call(c, token, 'vault_save', { name: 'LinkedIn', site: 'https://www.linkedin.com/login', login: 'ivan@acme.test', password: 'pw-linked-5521', code: 'jbsw y3dp ehpk 3pxp' });
-    expect(saved.isError).toBeUndefined();
-    expect(answer(saved)).toMatchObject({ name: 'LinkedIn', site: 'https://www.linkedin.com/login', login: 'ivan@acme.test', hasCode: true, createdBy: { id: c.orchestrator.id, name: c.orchestrator.name } });
-    expect(JSON.stringify(saved)).not.toContain('pw-linked-5521');
-    const [row] = await c.db.select().from(vaultEntries).where(eq(vaultEntries.name, 'LinkedIn'));
-    expect(decryptSecret(row!.passwordEnc, Buffer.from(c.config.secret))).toBe('pw-linked-5521');
-
-    const changed = await call(c, token, 'vault_save', { name: 'linkedin', site: 'https://www.linkedin.com/login', login: 'ivan@acme.test', password: 'pw-linked-new-77' });
-    expect(answer(changed)).toMatchObject({ name: 'LinkedIn', hasCode: true });
-    const rows = await c.db.select().from(vaultEntries).where(eq(vaultEntries.name, 'LinkedIn'));
-    expect(rows).toHaveLength(1);
-    expect(decryptSecret(rows[0]!.passwordEnc, Buffer.from(c.config.secret))).toBe('pw-linked-new-77');
-    const log = await c.db.select().from(vaultLog).where(eq(vaultLog.entryName, 'LinkedIn')).orderBy(vaultLog.at);
-    expect(log.map(l => [l.kind, l.agentId, l.personId])).toEqual([['created', c.orchestrator.id, null], ['changed', c.orchestrator.id, null]]);
-
-    const { token: nora } = await c.startTurn(c.nora.id);
-    expect(answer(await call(c, nora, 'vault_entry', { entry: 'LinkedIn' }))).toMatchObject({ login: 'ivan@acme.test', password: 'pw-linked-new-77' });
-  });
 });

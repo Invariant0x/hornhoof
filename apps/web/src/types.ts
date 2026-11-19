@@ -655,7 +655,7 @@ export type WaitingRequest = MaterialStampView & {
 };
 
 /* Who takes a decision: the CEO and the CEO delegate, and also the people of its department or its owner. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner'; department: { id: string; name: string } | null };
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner' | 'named_person'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = MaterialStampView & {

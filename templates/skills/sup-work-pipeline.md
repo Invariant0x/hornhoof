@@ -5,12 +5,12 @@ description: { en: "Where support checks item by item, in a batch, by sample and
 kind: procedure
 sources: []
 ---
-When assigned to plan or assess support checks, use the queues, the case records in the department's git, the help articles, response targets, approval policy and sampling decisions. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The department owner is the person named for this department, or the CEO / CEO delegate when there is none. The employee assignment and task gates select the work route; this ability grants no extra authority.
+When assigned to plan or assess support checks, use the queues, the case records in the department's git, the help articles, response targets, approval policy and sampling decisions. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The employee assignment and task gates select the work route; this ability grants no extra authority.
 
 ## Item by item
 
 - A person with that authority decides every refund or credit, every legal question and every request about personal data, such as its export or deletion. Agents prepare the facts, never change customer accounts or payments.
-- Sort each ticket by type and urgency before drafting its reply. A case that is not support's to decide, or one you are unsure of, goes to the department owner, or the CEO when no owner is set.
+- Sort each ticket by type and impact. Refer unresolved cases to the head or the person responsible for the subject.
 - Every ticket of the highest urgency, and every security or privacy case, goes up at once; route cross-department work through the orchestrator with reproducible evidence and minimal customer data.
 - On a new queue, a colleague in the department reads every reply before it goes out, until the department moves that queue to a sample.
 
@@ -33,9 +33,8 @@ When assigned to plan or assess support checks, use the queues, the case records
 
 ## By a model
 
-- Sorting tickets and reading replies against the policy are model checks that have no example set yet: a colleague keeps reading what they would pass.
 - The examples of a set are private to the company and go into no template.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. An action that cannot be undone keeps its approval item by item, whatever a set shows.
+- For ticket sorting and reply review, identify the current evidence and assigned fallback when the check has no validated result.
 
 ## Descriptions and measures
 

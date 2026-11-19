@@ -14,6 +14,7 @@ export const TEMPLATE_TEXT: Record<TemplateKey, { name: string; description: str
   support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
   finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
   home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning.' },
+  video_production: { name: 'Video production', description: 'Plans, makes, checks and delivers videos.' },
   household: { name: 'Household', description: 'Runs the household: shopping lists and supplies, bills and subscriptions, chores, the family calendar and reminders. Buying or paying waits for a person.' },
 };
 

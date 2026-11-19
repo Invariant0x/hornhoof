@@ -40,6 +40,7 @@ export function waitLabel(t: Messages, task: WaitTask, wait: TaskWaitFact, now =
     return wait.runError ? words.detail(label, words.runErrors[wait.runError]) : label;
   }
   if (wait.failure) return described(words[wait.failure]);
+  if (wait.nextCheck) return words.nextCheck(wait.reason, momentText(language, wait.nextCheck));
   if (wait.event === 'time') {
     if (!wait.until) return words.scheduled;
     const date = new Date(wait.until);

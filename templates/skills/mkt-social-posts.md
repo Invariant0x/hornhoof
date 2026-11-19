@@ -16,3 +16,7 @@ Use this ability to draft posts for an assigned network and audience. Inputs are
 7. Check facts and permitted links; identify the source for every claim. Include media requirements and useful alt text.
 
 Return each draft with network, account, language, proposed time and sources. A draft does not authorize posting or replying. A public item goes from the company's own account, is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
+
+Give original video production to the department equipped to make it. Publish the accepted version for the assigned audience.
+
+Read and act on social networks only in their installed phone apps. Use the assigned account, take one action at a time and inspect the result before continuing at a human pace.

@@ -10,6 +10,6 @@ Read the target person, company and department scope before changing anything. T
 
 Use invite_person, change_person or invite_again. Never use database SQL to create people, change their permissions or bypass these checks. Show the exact intended person and scope before an irreversible action; do not invent invitations, sign up for services or send mail beyond the authorized action.
 
-To delete a person or an assistant for good, ask the CEO first, naming the exact person: it cannot be undone. After the CEO's yes, call api: DELETE /api/people/<id>. Their sign-in, keys, machines and personal plans end, a key they added for the company stays, and their own assistants go with them; old tasks and answers keep their name. The CEO is never deleted, nor a person whose machine runs the company server until the server moves.
+To delete a person or an assistant for good, ask the CEO first and name the exact target and loss. Verify the CEO's recorded deletion decision for that target before executing DELETE /api/people/<id> through the owner API. Inspect what was removed and report the actual outcome.
 
 Read the tool result and resulting record before claiming success. Report an unknown or partial result honestly rather than retrying a non-idempotent invitation blindly. Keep invitation secrets and private personal details out of reports.

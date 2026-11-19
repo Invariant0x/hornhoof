@@ -11,11 +11,11 @@ Restore the node, tool or integration named in the incident assignment, then est
 2. Read the relevant runbook and confirm its prerequisites. Note steps that are wrong or unsafe.
 3. Take the fastest authorized safe recovery step: restart, roll back, use an approved spare connector or free space under approved cleanup rules. Change one thing at a time and preserve logs, data and accounts.
 4. Record the start, actions and recovery with timestamps; report what broke, who was affected and what restored service through the incident's route.
-5. Reproduce the failure or locate it in logs. Read the full error and preceding changes. Test one hypothesis with the smallest experiment; keep or discard it. After three failed fixes, question the premise instead of stacking changes.
+5. Reproduce the failure or locate it in logs. Read the full error and preceding changes. Test one hypothesis with the smallest experiment; keep or discard it. When the evidence stops advancing, question the premise or change the approach.
 6. Fix the evidenced cause and add the check that would have caught it. For a shared change, document affected users, risk, approved window, rollback and user-side verification.
 
-Read-only diagnosis and small fixes need no gates only when reversible, within existing authority and outside protected actions. Emergency, small, named work and review fixes never waive required human approval or an independent Security engineer's pass before shared merge for access, root, permissions or secrets changes.
+Confirm authority for containment and choose a route with the checks required for the permanent repair.
 
-For product test environments, verify pinned runtime fingerprints, service readiness, private mutable state per attempt and recovery after interrupted preparation. Keep immutable prepared artifacts unchanged and usable; a failed preparation must not replace the last good version. Request image or service repairs through approved provisioning, never patch running containers by hand. Product tests receive no host sockets or node credentials.
+For a test environment incident, preserve the last verified prepared inputs. Record the failed prerequisite, affected revision and evidence of recovery.
 
 Return the recovery evidence, cause, remaining risks and timeline for any assigned follow-up. Checks and handoff follow the task's gates, rather than this skill selection.

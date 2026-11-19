@@ -7,7 +7,7 @@ sources: [anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.m
 ---
 Prepare the design package named in the assignment so a builder can implement it without inventing decisions.
 
-1. **Mockups**: static HTML pages using approved system tokens and components, with realistic text in every supported language. Show empty, loading, error and full states at phone and desktop widths, in each theme.
+1. **Design reference**. Choose a format the builder and checker can open on the supported surfaces. Preserve inspectable behavior, content, layout and all relevant states, themes and languages.
 2. **Specification**, per screen:
    - User task and position in the flow.
    - System component names and variants.

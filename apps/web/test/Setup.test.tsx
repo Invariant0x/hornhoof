@@ -65,8 +65,8 @@ describe('Setup', () => {
     /* A template brings its people, who wait only for a subscription; the card counts the turnkey teams among them. */
     expect(screen.getByText(/departments and their employees right away/)).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('21 employees'));
-    /* The eight ready-made companies, named by the template, not by the scheme picture. */
-    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
+    /* The ready-made companies, named by the template. */
+    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home|Video studio/ })).toHaveLength(10);
     /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.getByRole('radio', { name: /Full company/ })).toHaveAccessibleName(expect.stringContaining('Departments: Operations, Development'));
@@ -89,6 +89,20 @@ describe('Setup', () => {
     await user.type(screen.getByLabelText('Key'), 'sk-ant-xyz12345');
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(posted(calls)[0]!.body).toMatchObject({ companyName: 'Acme', template: 'studio' });
+  });
+
+  it('offers Video production in the Video studio and sets it up for later model assignment', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    const studio = screen.getByRole('radio', { name: /Video studio/ });
+    expect(studio).toHaveAccessibleName(expect.stringContaining('Departments: Operations, Video production'));
+    expect(studio).toHaveAccessibleName(expect.stringContaining('Add a video generation API key to the vault'));
+    await user.click(studio);
+    await fillFirstTwoSteps(user);
+    await user.click(screen.getByRole('radio', { name: 'Later' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(posted(calls)[0]!.body).toMatchObject({ template: 'video_studio', orchestrator: { mode: 'later' } });
   });
 
   it('sends the API key choice and finishes', async () => {

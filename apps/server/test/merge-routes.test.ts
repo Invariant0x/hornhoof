@@ -30,7 +30,7 @@ async function stand() {
 }
 
 describe("the CEO's conflicts of a merge", () => {
-  it("shows all conflicts to the orchestrator and the CEO's cards on the owner's screen", async () => {
+  it('shows reversible conflicts to the orchestrator and masks protected values', async () => {
     const s = await stand();
     const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const inside = { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) };
@@ -41,9 +41,9 @@ describe("the CEO's conflicts of a merge", () => {
       expect([read.statusCode, write.statusCode]).toEqual([status, status]);
     }
     expect((await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.merge_conflicts WHERE picked IS NOT NULL`))[0]!.n).toBe(0);
-    const listed = (await s.conflictsOf(as(s.ceo))).json() as { conflicts: ConflictView[] };
-    /* His own, and not the orchestrator's: those are in the orchestrator's task. */
-    expect(listed.conflicts.map(conflict => [conflict.table, conflict.whose]).sort()).toEqual([['machines', 'ceo'], ['people', 'ceo']]);
+    const listed = (await s.conflictsOf(inside)).json() as { conflicts: ConflictView[] };
+    expect(listed.conflicts.map(conflict => [conflict.table, conflict.whose]).sort()).toEqual([['machines', 'orchestrator'], ['people', 'orchestrator'], ['tasks', 'orchestrator']]);
+    expect((await s.conflictsOf(as(s.ceo))).json().conflicts).toEqual([]);
     const person = listed.conflicts.find(conflict => conflict.table === 'people')!;
     expect(person).toMatchObject({ what: 'Maria Here (maria@acme.test)', kind: 'differs', here: { name: '"Maria Here"', password_hash: '(hidden)' }, there: { name: '"Maria There"', password_hash: '(hidden)' } });
     expect(JSON.stringify(listed)).not.toContain('hash-');
@@ -51,7 +51,7 @@ describe("the CEO's conflicts of a merge", () => {
     expect([took.statusCode, took.json()]).toEqual([200, { settled: 1, here: 0, there: 1, refused: [], tasks: [] }]);
     expect((await s.db.select().from(people).where(eq(people.id, s.maria.id)))[0]).toMatchObject({ name: 'Maria There', passwordHash: 'hash-there' });
     expect(await rowsOf(s.db, sql`SELECT picked, picked_by FROM net.merge_conflicts WHERE id = ${person.id}`)).toEqual([{ picked: 'there', picked_by: `person:${s.owner.id}` }]);
-    expect(((await s.conflictsOf(as(s.ceo), '?settled=1')).json() as { conflicts: ConflictView[] }).conflicts.map(conflict => conflict.id)).toEqual([person.id]);
+    expect(((await s.conflictsOf(inside, '?settled=1')).json() as { conflicts: ConflictView[] }).conflicts.map(conflict => conflict.id)).toEqual([person.id]);
     /* Computer access is its owner's to open, on the machine's card: no pick opens it, the CEO's neither. */
     const access = listed.conflicts.find(conflict => conflict.table === 'machines')!;
     const refused = await s.pick({ ids: [access.id], take: 'there' });
@@ -63,12 +63,15 @@ describe("the CEO's conflicts of a merge", () => {
     expect((await s.pick({ merge: s.id, take: 'both' })).statusCode).toBe(400);
   });
 
-  it("gives a merge's conflicts to the CEO", async () => {
+  it('puts only proposed permanent deletions on the CEO’s request list', async () => {
     const s = await stand();
     const decisions = async (who: object) => (await s.app.inject({ url: '/api/requests', ...who })).json() as Decisions;
+    expect((await decisions(as(s.ceo))).merges).toEqual([]);
+    const [deletion] = await rowsOf<{ id: string }>(s.db, sql`INSERT INTO net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, why)
+      VALUES (${s.id}, gen_random_uuid(), 'tasks', '{}'::jsonb, 'delete', 'refused', 'work', 'Permanent deletion') RETURNING id`);
     const mine = await decisions(as(s.ceo));
     /* One card for the merge, however many conflicts it holds, with the time of the backup the restore went back to. */
-    expect(mine.merges).toEqual([{ id: s.id, label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 2, ownerPersonId: s.owner.id }]);
+    expect(mine.merges).toEqual([{ id: s.id, label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 1, ownerPersonId: s.owner.id }]);
     /* Listed for one person, it shows only for its owner. */
     expect((await decisions({ ...as(s.ceo), query: { person: s.maria.id } } as object)).merges).toEqual([]);
     expect([mine.counts.total, mine.counts.byPerson[s.owner.id], mine.counts.byAgent[s.orchestrator.id]]).toEqual([1, 1, 1]);
@@ -85,7 +88,7 @@ describe("the CEO's conflicts of a merge", () => {
     /* Settled, it is gone. */
     await s.pick({ merge: s.id, table: 'people', take: 'here' });
     expect((await decisions(as(s.ceo))).merges).toMatchObject([{ open: 1 }]);
-    await s.pick({ merge: s.id, table: 'machines', take: 'here' });
+    await s.pick({ ids: [deletion!.id], take: 'here' });
     const after = await decisions(as(s.ceo));
     expect([after.merges, after.counts.total]).toEqual([[], 0]);
   });

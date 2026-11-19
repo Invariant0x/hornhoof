@@ -1,7 +1,7 @@
 ---
 id: hh-check-work
 title: { en: "Checking a result", ru: "Проверка результата" }
-description: { en: "Checks a result against its task before it goes on, another's or your own: reads what was handed in, takes each claim to its source, corrects what is wrong and gives a verdict.", ru: "Проверяет результат по его задаче, прежде чем он пойдет дальше, чужой или свой: читает сданное, сверяет каждое утверждение с источником, исправляет неверное и выносит вердикт." }
+description: { en: "Checks a result against its task before it goes on, another's or your own: reads what was handed in, takes each claim to its source, records findings and gives a verdict.", ru: "Проверяет результат по его задаче, прежде чем он пойдет дальше, чужой или свой: читает сданное, сверяет каждое утверждение с источником, записывает замечания и сообщает результат." }
 kind: procedure
 sources: []
 ---
@@ -21,4 +21,4 @@ At a one-shot review stage, follow the ability "One-shot calls". In the brief, g
 
 **Each finding** has a place (the file and its line or section), what is wrong and the harm to a person. Check it against the source before you record it: a wrong finding costs its reader a round.
 
-**What comes next.** Correct what you found yourself in the same result and hand the corrected result in with "submit", saying what you changed; the author is not asked to redo it. When the result meets its task, give "verdict" with pass true, naming the exact candidate you checked. When the result answers the wrong goal, escalate to the head instead of rewriting it. At a stage of a route you never check your own work. On a task that is yours from start to end, go through the same list, correct what you find and name in your report what is left; your own check replaces no stage and no approval.
+**What comes next.** Read the route for the repair owner. When the check requires an independent verdict, preserve the candidate and send findings to the repair owner. When the stage assigns repairs to you, record your changes and get any independent check required on the repaired version. Give the verdict for the exact version you actually checked. Escalate a wrong goal to the head. On an end-to-end assignment correct your own work and record the result.

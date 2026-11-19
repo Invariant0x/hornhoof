@@ -106,7 +106,7 @@ describe('shareable workspace', () => {
     expect(location.pathname).toBe('/tasks/t12');
     expect(department).toBeVisible();
     const reopened = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-    await user.click(within(reopened).getByRole('link', { name: '#10 Payments' }));
+    await user.click(within(within(reopened).getByRole('navigation', { name: 'Where it belongs' })).getByRole('button', { name: '#10 Payments' }));
     const parent = await screen.findByRole('complementary', { name: '#10 Payments' });
     expect(department).toBeVisible();
     await user.click(within(parent).getByRole('button', { name: 'Close' }));

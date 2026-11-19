@@ -11,12 +11,13 @@ describe('a file over 50 MB', () => {
   it('says by its name, on the task and in the chat, that it lives 30 days on one machine and is lost if that machine goes', () => {
     render(
       <LanguageProvider>
-        <TaskFiles files={[{ id: 'f1', name: 'dump.tar', size: 60 * 1024 * 1024, by: null, at: AT, big: true }, { id: 'f2', name: 'notes.txt', size: 10, by: null, at: AT }]} />
+        <ul><TaskFiles files={[{ id: 'f1', name: 'dump.tar', size: 60 * 1024 * 1024, by: null, at: AT, big: true }, { id: 'f2', name: 'notes.txt', size: 10, by: null, at: AT }]} /></ul>
         <SentPictures data={{ pictures: [{ id: 'c1', name: 'archive.zip', file: true, big: true }, { id: 'c2', name: 'plan.pdf', file: true }] }} />
       </LanguageProvider>,
     );
-    expect(screen.getByRole('link', { name: `dump.tar · ${SAID}` })).toHaveAttribute('href', '/api/attachments/f1');
-    expect(screen.getByRole('link', { name: 'notes.txt' })).toHaveAttribute('href', '/api/attachments/f2');
+    expect(screen.getByText(`dump.tar · ${SAID}`)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open dump.tar' })).toHaveAttribute('href', '/api/attachments/f1');
+    expect(screen.getByRole('link', { name: 'Open notes.txt' })).toHaveAttribute('href', '/api/attachments/f2');
     expect(screen.getByRole('link', { name: `Download archive.zip · ${SAID}` })).toHaveTextContent(`archive.zip · ${SAID}`);
     expect(screen.getByRole('link', { name: 'Download plan.pdf' })).toHaveTextContent(/^plan\.pdf$/);
   });

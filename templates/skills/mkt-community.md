@@ -15,3 +15,5 @@ Use this ability to summarize an assigned community's discussion and prepare res
 6. Group the findings for the assigned period, with counts, sources and proposed product or communication changes.
 
 Return the summary and clearly marked response drafts. Never promise unannounced dates, fixes, compensation or terms. A public reply is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it; observing a community does not authorize posting there.
+
+Read and act on social networks only in their installed phone apps. Use the assigned account, take one action at a time and inspect the result before continuing at a human pace.

@@ -158,7 +158,7 @@ describe("an assistant's own agent", () => {
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'read_events', 'send_message', 'tell_owner', 'vault_entries', 'vault_entry', 'vault_save', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'read_events', 'send_message', 'tell_owner', 'vault_entries', 'vault_entry', 'who_am_i']);
   });
 });
 

@@ -27,8 +27,8 @@ When assigned to plan or assess checks for a family's home devices or household 
 
 ## By a model
 
-- A suggestion a model makes decides nothing here and has no example set yet: it reaches a person as a suggestion.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. Irreversible deletion needs the CEO's yes, whatever a set shows.
+- Treat a suggestion as advice unless its check has valid evidence and the assignment authorizes the result.
+- For household model checks, record the evidence available for the assigned decision and use the owner's fallback when needed.
 
 ## Descriptions and measures
 

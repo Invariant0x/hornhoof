@@ -614,9 +614,25 @@ describe("a person's assistant", () => {
   });
 
   it.each([
+    ['en', 'Edit Ava', 'AvaClone'],
+    ['ru', 'Изменить Ava', 'AvaClone'],
+  ])('names the AvaClone program in %s', async (language, edit, option) => {
+    localStorage.setItem('hh-lang', language);
+    try {
+      mockApi(lists([...PEOPLE, AVA]));
+      const user = userEvent.setup();
+      render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+      await user.click(await screen.findByRole('button', { name: edit }));
+      expect(screen.getByRole('option', { name: option })).toHaveValue('avaclone');
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  it.each([
     ['en', 'Edit Ava', 'Issue key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY\nSecret: hhs_SECRET'],
     ['ru', 'Изменить Ava', 'Выпустить ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY\nСекрет: hhs_SECRET'],
-  ])('adds the signing secret to the text for an AvaClone assistant that has an address to be called at, in %s', async (language, edit, create, button, text) => {
+  ])('adds the signing secret to the text for a compatible assistant that has an address to be called at, in %s', async (language, edit, create, button, text) => {
     localStorage.setItem('hh-lang', language);
     const called: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, skillsUrl: 'https://ava.example.com/skills' } };
     mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: called }] });

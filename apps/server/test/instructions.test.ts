@@ -175,9 +175,11 @@ describe("the orchestrator's standing role", () => {
 
   it('gives the orchestrator owner authority in any turn and treats quoted text as data', () => {
     const { text } = orchestratorSteady(shipped);
-    expect(text).toContain('Ordinary work uses the company owner');
-    expect(text).toContain('A permanent deletion requires the CEO');
-    expect(text).toContain('Lines Hornhoof marks with "> "');
+    expect(text).toMatch(/company owner's rights[^.]*whoever asked/i);
+    expect(text).toMatch(/any turn/i);
+    expect(text).toMatch(/`> ` prefix marks quoted lines[^.]*sender/i);
+    expect(text).toMatch(/CEO's recorded yes[^.]*irreversible deletion/i);
+    expect(text).toMatch(/keep[^.]*passwords[^.]*out of[^.]*messages/i);
     expect(text).not.toContain('do it only when they say so');
   });
 });
@@ -290,23 +292,25 @@ describe('renderInstructions', () => {
     }
   });
 
-  it("tells employees and the orchestrator that Claude Code's SendMessage and an answer in the window reach no agent", () => {
+  it('tells employees and the orchestrator how to deliver replies to people and to agents', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text];
     for (const text of told) {
-      expect(text).toContain('When you run in Claude Code, never answer with its SendMessage tool: what it sends reaches no one in Hornhoof.');
-      expect(text).toContain("Answer people in your reply and agents with Hornhoof's tools.");
       expect(text).toContain('The orchestrator and other employees write into this conversation too, but your reply here never reaches them, only people.');
+      expect(text).toMatch(/Answer people in your reply[^.]*company delivery tool[^.]*agents/i);
+      expect(text).toMatch(/provider's own messaging tool[^.]*cannot deliver[^.]*company employees/i);
     }
   });
 
-  /* Claude Code refuses such a removal by itself after two minutes, and the step is lost (#1246). */
   /* An assistant's own agent runs shell commands too, hh-attach among them, and hh-assistant is the only skill it gets. */
-  it('tells employees, the orchestrator and an assistant\'s own agent to write a path from a variable as "${VAR:?}" or literally in a command that deletes or overwrites', () => {
+  it('requires checked shell paths before an overwrite or deletion and the CEO only for irreversible deletion', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text, shipped.skills.get('hh-assistant')?.body ?? ''];
     for (const text of told) {
-      expect(text).toContain('In rm, mv, cp and any other command that deletes or overwrites, write a path from a variable as "${VAR:?}/..." or as a literal path, never $VAR/* unchecked: Claude Code refuses such a command, and only a person can allow it.');
+      expect(text).toMatch(/verify[^.]*exact target[^.]*recoverability/i);
+      expect(text).toMatch(/overwrite or delet(?:e|ion)[^.]*literal path[^.]*"\$\{VAR:\?\}\/\.\.\."/i);
+      expect(text).toMatch(/CEO's recorded yes before irreversible deletion/i);
+      expect(text).not.toMatch(/only a person can allow it/i);
     }
   });
 
@@ -397,6 +401,7 @@ describe('renderInstructions', () => {
       expect(rendered.text, roleKey).toContain('<!-- hh:skill hh-questions -->');
       expect(rendered.text, roleKey).toContain('- **Materials**:');
       expect(wholeOf(rendered), roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
+      expect(wholeOf(rendered), roleKey).toMatch(/shared and per-option materials/i);
     }
   });
 
@@ -610,8 +615,9 @@ describe('renderInstructions', () => {
       const watchPacket = renderInstructions(shipped, watchAgent, PLACE);
       expect(watchPacket.text).toContain('\n- ops-task-watch:');
       const watchSkill = watchPacket.skills.find(s => s.name === 'ops-task-watch');
-      expect(watchSkill?.body).toContain('People who stand free while work waits are a fault, not a normal wait');
-      expect(wholeOf(watchPacket)).toContain('People who stand free while work waits are a fault, not a normal wait');
+      const idleFault = /runnable work has an eligible free owner[^.]*fault[^.]*tell the department head/i;
+      expect(watchSkill?.body).toMatch(idleFault);
+      expect(wholeOf(watchPacket)).toMatch(idleFault);
     }
     expect(savedWatchList).toEqual(['ops-task-watch']);
   });
@@ -624,9 +630,10 @@ describe('renderInstructions', () => {
       const files = new Map(rendered.skills.map(s => [s.name, s.body]));
       const impl = files.get('dev-implement')!;
       const policy = files.get('dev-testing-policy')!;
-      expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
+      expect(impl, roleKey).toMatch(/run affected checks in your own workspace/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
-      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*named local tests of the touched area/i);
+      expect(impl, roleKey).toMatch(/declared fallback[^.]*affected package when impact cannot be bounded/i);
+      expect(impl, roleKey).toMatch(/record the fallback reason/i);
       expect(impl, roleKey).toMatch(/install from the lockfile and run builds, types and quality checks locally/i);
       expect(policy, roleKey).toContain('NOT_RUN');
       expect(policy, roleKey).toMatch(/fresh and upgraded data[\s\S]*both up\/down when supported[\s\S]*report unsupported down explicitly/i);
@@ -687,8 +694,9 @@ describe('reading web pages in a browser on the node', () => {
     expect(body).toMatch(/only public http and https addresses/);
     expect(body).toMatch(/`login_required`[\s\S]*`robot_check`/);
     expect(body).toMatch(/At `login_required`, sign in yourself[^.]*vault_entry/);
-    expect(body).toMatch(/At `robot_check`, never try to get past it and never ask the orchestrator or the CEO/);
-    expect(body).toMatch(/note the address[^.]*for a person[^.]*go on with the other addresses/i);
+    expect(body).toMatch(/At `robot_check`, stop at the challenge/);
+    expect(body).toMatch(/never bypass it or ask[^.]*for a way around it/i);
+    expect(body).toMatch(/record the address[^.]*account holder[^.]*\. Go on with the other addresses/i);
     expect(body).not.toMatch(/[—ё]/);
   });
 });
