@@ -10,7 +10,8 @@ import { repoAt } from '../departments/repository.js';
 import { refuse, type Task } from './state.js';
 import type { Route } from './route-records.js';
 import type { CheckerIdentity } from './echelons-policy.js';
-import { exactComparison, type Review } from './review-context.js';
+import { heldLineage } from '../testruns/compare.js';
+import type { Review } from './review-context.js';
 
 export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review): EchelonCandidate {
   if (!review.commit || !review.branch || !review.source) throw refuse(409, 'task_invalid', 'A handoff needs the exact candidate commit, branch and base comparison.');
@@ -58,7 +59,7 @@ export async function requireRepairHistory(ctx: Pick<Ctx, 'db'> & Partial<Pick<C
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   let verified = false;
   if (found) {
-    try { verified = exactComparison(await ctx.readCompare(found.repo, { base: parent.commit, head: candidate.commit }, 10_000), parent.commit, candidate.commit); }
+    try { verified = !!heldLineage(await ctx.readCompare(found.repo, { base: parent.commit, head: candidate.commit }, 10_000), parent.commit, candidate.commit); }
     catch { /* An unavailable comparison never proves that the assigned candidate was preserved. */ }
   }
   if (!verified) throw refuse(409, 'task_changed', 'The repair must include the assigned candidate commit.');

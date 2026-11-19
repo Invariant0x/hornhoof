@@ -41,6 +41,7 @@ async function releaseFixture(options: { product?: boolean } = {}) {
   let branchCommit = CANDIDATE;
   let fastForward = true;
   let compareProblem: string | null = null;
+  let capped = false;
   const branchHeads = new Map<string, string>();
   const nonMainBases = new Map<string, Set<string>>();
 
@@ -56,6 +57,8 @@ async function releaseFixture(options: { product?: boolean } = {}) {
       return { complete: false, reason: 'not-an-ancestor' };
     }
     if (want.base === mainCommit && !fastForward) return { complete: false, reason: 'Branch diverged from main.' };
+    /* GitHub listed 300 files of the comparison: it proves the line, never the files. */
+    if (capped) return { complete: false, reason: 'too-many-files', lineage: { baseSha: want.base, headSha: want.head, commits: [] } };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' };
   };
 
@@ -301,6 +304,9 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     },
     setCompareProblem: (problem: string | null) => {
       compareProblem = problem;
+    },
+    setCapped: (on: boolean) => {
+      capped = on;
     },
     markNonMainBase: (baseSha: string, descendants: string[] = []) => {
       nonMainBases.set(baseSha, new Set(descendants));
@@ -601,6 +607,24 @@ describe('autonomous release for exact commits to main', () => {
     const blind = await headCall('ask_person', { task: blindTask.number, question: 'Ship blind?', commit: CANDIDATE });
     expect(blind.text).toContain('waits for a person');
     expect((await f.journal()).json().entries).toEqual([]);
+  });
+
+  it('auto-approves where main moved by more files than GitHub lists, as the comparisons still prove the base and the fast-forward', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE });
+    const { call: headCall } = await f.openTools(f.head);
+    f.setCapped(true);
+    const releaseTask = (await f.coordinating('Release after a large main', f.task));
+    const asked = await headCall('ask_person', { task: releaseTask.number, question: 'Release to main.', commit: CANDIDATE });
+    expect(asked.text).not.toContain('waits for a person');
+    expect((await f.journal()).json().entries).toHaveLength(1);
+
+    /* A capped comparison of a branch that is no fast-forward still proves nothing. */
+    f.setFastForward(false);
+    const diverged = (await f.coordinating('Diverged after a large main', f.task));
+    expect((await headCall('ask_person', { task: diverged.number, question: 'Ship diverged?', commit: CANDIDATE })).text).toContain('waits for a person');
   });
 
   it('lets a signed-in person who runs a department turn its own autonomous release on and off, and no other department\'s', async () => {

@@ -17,6 +17,8 @@ export type Repository = {
   holds: Record<string, string[]>;
   between: Record<string, { sha: string; parents: string[] }[]>;
   cut: Set<string>;
+  /* Comparisons whose files GitHub capped at 300: they prove the line and its commits, never the files. */
+  capped?: Set<string>;
   made?: { branch: string; commit: string }[];
   refusing?: string;
   hold?: () => Promise<void>;
@@ -44,6 +46,7 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
     if (!contains(repo, want.head, want.base)) return { complete: true, baseSha: want.base, headSha: 'f'.repeat(40), paths: [], diff: '', commits: [] };
     /* A comparison cut short reads as GitHub's: too many commits to page through. */
     if (repo.cut.has(key)) return { complete: false, reason: 'incomplete-comparison' };
+    if (repo.capped?.has(key)) return { complete: false, reason: 'too-many-files', lineage: { baseSha: want.base, headSha: want.head, commits } };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
   };
   ctx.readMerged = async (at, want) => contains(repoAt(at.url), want.base, want.head);
