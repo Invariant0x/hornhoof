@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS, SIGNIN_STEPS, type SigninStep } from '@hornhoof/protocol/signin';
 import { hideKeyLike } from './redact.js';
+import type { ProviderAdapter } from './runner.js';
 
 /* Where a sign-in in the install window leaves its steps for the running node, one JSON line each. */
 export const LOGIN_STEPS_FILE = 'login-steps';
@@ -95,6 +96,21 @@ export class SignInProgress {
     this.last = null;
     this.took = [];
   }
+}
+
+type PlanReads = { setup(): Promise<unknown>; account(): Promise<void>; limits(): Promise<void> };
+
+/* What the node reads of its plan once its program signed in or out. After a sign-in it says each step to Hornhoof, and
+   reads the plan's limits at once rather than at its next look; a program with a first setup looks whether it needs it. */
+export async function readSignedIn(program: Pick<ProviderAdapter, 'setupNeeded'> | null, step: ((s: SigninStep) => void) | undefined, reads: PlanReads): Promise<void> {
+  if (step && program?.setupNeeded) step('setup');
+  await reads.setup();
+  step?.('account');
+  await reads.account();
+  if (!step) return;
+  step('limits');
+  await reads.limits();
+  step('models');
 }
 
 /* A last line from a program, as it may go to Hornhoof: no key in it, and no longer than login.step takes. */

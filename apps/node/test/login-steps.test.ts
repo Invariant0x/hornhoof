@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LOGIN_STEPS_FILE, SignInProgress, StepWatch, stepsFile } from '../src/login-steps.js';
+import { LOGIN_STEPS_FILE, readSignedIn, SignInProgress, StepWatch, stepsFile } from '../src/login-steps.js';
 
 /* After the sign-in code, the node tells Hornhoof each step until the plan is ready, and its log keeps when the code came,
    when the plan was ready and how long each step took. A sign-in in the install window runs apart from the node: it
@@ -101,6 +101,30 @@ describe('the steps of a sign-in after its code', () => {
     p.shown.failed(SIGNIN_ERRORS.stopped, null);
     expect(p.sent).toEqual([]);
     expect(p.logged).toEqual([]);
+  });
+});
+
+describe('what the node reads of its plan once its program signed in or out', () => {
+  const reads = (done: string[]) => ({
+    setup: async () => { done.push('setup'); },
+    account: async () => { done.push('account'); },
+    limits: async () => { done.push('limits'); },
+  });
+
+  it('after a sign-in says each step, and reads the limits at once; a program with a first setup looks whether it needs it', async () => {
+    const done: string[] = [];
+    const steps: string[] = [];
+    await readSignedIn({ setupNeeded: async () => false }, s => { steps.push(s); done.push(`said ${s}`); }, reads(done));
+    expect(done).toEqual(['said setup', 'setup', 'said account', 'account', 'said limits', 'limits', 'said models']);
+    const plain: string[] = [];
+    await readSignedIn({}, s => plain.push(s), reads([]));
+    expect(plain).toEqual(['account', 'limits', 'models']);
+  });
+
+  it('after a sign-out says nothing and leaves the limits to their next look', async () => {
+    const done: string[] = [];
+    await readSignedIn(null, undefined, reads(done));
+    expect(done).toEqual(['setup', 'account']);
   });
 });
 

@@ -31,7 +31,7 @@ import { PhoneExecutor } from './phones/executor.js';
 import { keyboardApk } from './phones/keyboard.js';
 import { CheckedInstalls } from './program-check.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
-import { SignInProgress, StepWatch, stepsFile } from './login-steps.js';
+import { readSignedIn, SignInProgress, StepWatch, stepsFile } from './login-steps.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
@@ -957,21 +957,6 @@ type LoginParts = Omit<ConstructorParameters<typeof LoginTerminal>[0], 'setup'>;
 /* The sign-in terminal of Hornhoof's window, on a node that installs its own program. */
 function loginTerminal(setup: LoginSetup | undefined, builtin: unknown, parts: LoginParts): LoginTerminal | null {
   return setup && !builtin ? new LoginTerminal({ setup, ...parts }) : null;
-}
-
-type PlanReads = { setup(): Promise<unknown>; account(): Promise<void>; limits(): Promise<void> };
-
-/* What the node reads of its plan once its program signed in or out. After a sign-in it says each step to Hornhoof, and
-   reads the plan's limits at once rather than at its next look; a program with a first setup looks whether it needs it. */
-async function readSignedIn(program: ProviderAdapter | null, step: ((s: SigninStep) => void) | undefined, reads: PlanReads) {
-  if (step && program?.setupNeeded) step('setup');
-  await reads.setup();
-  step?.('account');
-  await reads.account();
-  if (!step) return;
-  step('limits');
-  await reads.limits();
-  step('models');
 }
 
 /* The first setup its owner passes on the machine after the sign-in, such as accepting agy's terms; an exit code when it

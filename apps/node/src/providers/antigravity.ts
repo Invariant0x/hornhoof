@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import type { AgentEvent, Limits, ModelOption } from '@hornhoof/protocol';
 import { asAgent, type JobUser } from '../isolation.js';
 import { toldPlace } from '../program-folder.js';
-import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { sayStep, type LoginIo, type ProviderAdapter, type RunInput, type RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { READY } from '../terminal/program-state.js';
 import { Tmux } from '../terminal/tmux.js';
@@ -339,7 +339,7 @@ async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir
     if (!code) throw new Error('No code was pasted.');
     await tmux.keys(name, '-l', code);
     await tmux.keys(name, 'Enter');
-    io.step?.('checking');
+    sayStep(io, 'checking');
     await until(async () => {
       const refused = REFUSED.exec(await screen());
       if (refused) throw new Error(`Google did not take the code: ${refused[1]!.trim()}`);
