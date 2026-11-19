@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
+import { SIGNIN_ERRORS, type SigninStep } from '@hornhoof/protocol/signin';
 import { ownFs, type AgentFs } from './agent-fs.js';
 import { applyCredential, takeLease } from './credentials.js';
 import { asAgent, type JobUser } from './isolation.js';
@@ -90,8 +90,10 @@ type Options = {
   send(m: NodeMessage): void;
   /* Values that never reach a screen people watch. */
   secrets(): string[];
-  /* After a sign-in was kept: what the screens hide and whether the program is signed in, said at once. */
-  signedIn(): Promise<void>;
+  /* After a sign-in was kept: what the screens hide and whether the program is signed in, said at once, with each step. */
+  signedIn(step: (s: SigninStep) => void): Promise<void>;
+  /* Where the sign-in is after its code, for Hornhoof; without it, said as it is. */
+  step?(s: SigninStep): void;
   /* Installs the program when it is missing, before its sign-in starts. */
   install?: () => Promise<void>;
   /* The machine's own output, for how a sign-in's program ended when it ended with an error. */
@@ -235,6 +237,7 @@ export class LoginTerminal {
         this.opts.log?.(endedEarly(code, text, this.opts.secrets()));
         early = { code, line: plainOutput(text).includes(TOKEN_START) ? null : lastWords(text, this.opts.secrets()) };
       }
+      if (code === 0) this.step('checking');
       error = code !== 0 ? UNFINISHED : await this.keep(run, snapshot?.programOutput?.text ?? '', screen);
     } catch {
       error = BROKE;
@@ -256,6 +259,7 @@ export class LoginTerminal {
       if (!token) return UNFINISHED;
       if (!(await exitsCleanly(bin, ['auth', 'status'], { ...programEnv, CLAUDE_CONFIG_DIR: this.scratch, CLAUDE_CODE_OAUTH_TOKEN: token }, this.user))) return NOT_TAKEN;
       if (run !== this.run) return STOPPED;
+      this.step('saving');
       applyCredential(dir, home, 'claude_token', new TextEncoder().encode(token), this.user);
       return null;
     }
@@ -264,6 +268,7 @@ export class LoginTerminal {
     const auth = await this.fs.read(join(this.scratch, 'auth.json'));
     if (auth === null) return NOT_TAKEN;
     if (run !== this.run) return STOPPED;
+    this.step('saving');
     /* The machine that signed in holds the plan's Codex sign-in, which Codex renews. */
     takeLease(dir);
     applyCredential(dir, home, 'codex_auth', new TextEncoder().encode(auth), this.user);
@@ -275,8 +280,13 @@ export class LoginTerminal {
     await this.end();
     if (run !== this.run) return;
     this.active = false;
-    if (error === null) await this.opts.signedIn().catch(() => {});
+    if (error === null) await this.opts.signedIn(step => this.step(step)).catch(() => {});
     this.opts.send({ type: 'login.done', ok: error === null, error, ...(early ?? {}) });
+  }
+
+  private step(step: SigninStep): void {
+    if (this.opts.step) this.opts.step(step);
+    else this.opts.send({ type: 'login.step', step });
   }
 
   /* The session, its views and its folder go. */

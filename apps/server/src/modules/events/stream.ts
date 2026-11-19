@@ -14,7 +14,7 @@ function isFor(m: StreamMessage, me: Person, access: Access): boolean {
   /* It carries nothing, so every person's screens load the access that is theirs to see; a head acting for anyone sees
      none of it. */
   if (m.type === 'computer' && me.viaHead) return false;
-  return m.type !== 'subscription.signin' || m.owner === me.id;
+  return (m.type !== 'subscription.signin' && m.type !== 'subscription.connecting') || m.owner === me.id;
 }
 
 /* One Server-Sent Events stream per open page. What is said of an agent or its work goes only to people who see them. */

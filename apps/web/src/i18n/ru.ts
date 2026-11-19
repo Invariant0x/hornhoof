@@ -110,6 +110,7 @@ export const ru: Messages = {
   },
   common: {
     loading: 'Загрузка…',
+    tooLong: 'Дольше обычного',
     somethingWrong: 'Что-то пошло не так.',
     next: 'Далее',
     back: 'Назад',
@@ -800,13 +801,12 @@ export const ru: Messages = {
       },
       seconds: s => `${s} с`,
       minutes: (m, s) => `${m} мин ${s} с`,
-      passed: time => `${time} с момента ввода кода`,
+      passed: time => `${time} после ввода кода`,
       next: {
         signInAgain: 'Войдите еще раз. В подписке ничего не изменилось.',
         installWindow: host => `Запустите команду установки на ${host} еще раз и войдите там.`,
       },
-      tooLong: minutes => `Подключение идет дольше ${minutes} мин. Оно еще может завершиться.`,
-      tooLongNext: 'Попробуйте еще раз или остановите и вернитесь к нему позже.',
+      tooLongNext: minutes => `Подключение идет больше ${minutes} мин. Оно еще может завершиться. Попробуйте еще раз или остановите и вернитесь к нему позже.`,
       retry: 'Еще раз',
       retryLabel: name => `Подключить ${name} еще раз`,
       cancel: 'Остановить',

@@ -257,7 +257,7 @@ describe('status', () => {
 });
 
 /* The steps a sign-in in the install window left for the running node. */
-const stepsLeft = () => readFileSync(join(data, 'login-steps'), 'utf8').trim().split('\n').map(l => { const { run: _run, ...entry } = JSON.parse(l) as { run?: string }; return entry; });
+const stepsLeft = () => readFileSync(join(data, 'login-steps'), 'utf8').trim().split('\n').map(l => { const entry = JSON.parse(l) as Record<string, unknown>; delete entry.run; return entry; });
 
 describe('login', () => {
   beforeEach(async () => {

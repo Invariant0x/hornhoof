@@ -1,6 +1,8 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
+import { useStream } from '../live';
+import { PlanConnection } from '../ui/PlanConnection';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, PlanFallback, ShownCommand, SubView } from '../types';
@@ -255,6 +257,9 @@ type PlanControls = {
   remove: (sub: SubView) => unknown;
   endSignIn: (signing: Signing, error: string | null) => void;
   stopSignIn: (signing: Signing) => unknown;
+  /* A plan's connection after its sign-in code that failed or takes too long: try it again, or stop it. */
+  retryConnection: (sub: SubView) => unknown;
+  cancelConnection: (sub: SubView) => unknown;
   done: () => void;
 };
 
@@ -388,10 +393,13 @@ function PlanFoot(props: PlanProps) {
   );
 }
 
-function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
+/* Its sign-in window when open, which shows the plan's connection after the code; else the connection on the card. */
+function PlanExtra({ sub: s, controls: c, now }: Omit<PlanProps, 'me'> & { now: number }) {
   const on = c.signing;
+  const connection = s.connecting ? <PlanConnection sub={s} connecting={s.connecting} now={now} onRetry={() => c.retryConnection(s)} onCancel={() => c.cancelConnection(s)} /> : null;
   return <>
-    {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} />}
+    {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} connection={connection} />}
+    {!on && connection}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}
     {c.editing && s.kind === 'api_key' && <ApiForm sub={s} places={c.places} onSaved={c.saved} onCancel={() => c.setEditFor(null)} />}
   </>;
@@ -455,7 +463,7 @@ function PlanFix(props: PlanProps) {
   return (
     <section className="blk blk-fix">
       {!c.note?.command && <p>{fixWords(t, s)}</p>}
-      {!c.note?.command && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
+      {!c.note?.command && !s.connecting && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
       <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
@@ -491,7 +499,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   return (
     <CardFrame label={`${subName(t, s)}, ${s.owner.name}`} accent={s.isOrchestrator}
       head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={shortName(t, s)} sign={<KindSign kind={s.kind} />} under={s.isOrchestrator && t.subs.orchestrator} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
-      extra={<PlanExtra sub={s} controls={controls} />}>
+      extra={<PlanExtra sub={s} controls={controls} now={now} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
   );
@@ -603,6 +611,28 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     void load();
   };
 
+  /* Where a plan's connection is after its sign-in code comes as its node says it; once it ended, the plan is read again,
+     and shows ready or what to do. */
+  const setConnection = (id: string, connecting: SubView['connecting']) => setSubs(list => list?.map(s => (s.id === id ? { ...s, connecting } : s)) ?? null);
+  useStream(m => {
+    if (m.type !== 'subscription.connecting') return;
+    setConnection(m.subscriptionId, m.connecting);
+    if (m.connecting === null) void load();
+  });
+  /* A plan that signs in from Hornhoof tries again with a new sign-in; one that signs in on its machine has its node check
+     the sign-in there again. */
+  const retryConnection = (sub: SubView) =>
+    run(async () => {
+      if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
+      else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
+      setConnection(sub.id, null);
+    });
+  const cancelConnection = (sub: SubView) =>
+    run(async () => {
+      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
+      setConnection(sub.id, null);
+    });
+
   const remove = (sub: SubView) =>
     run(async () => {
       setConfirm(null);
@@ -658,7 +688,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, setFallbacks, plans: subs, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
+            setBudget, setFallbacks, plans: subs, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />

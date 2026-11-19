@@ -917,6 +917,14 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .signin-line.warn { color: var(--amber-ink); }
 /* A plan's sign-in terminal under its row: the program's own screen, which needs room for its links and code. */
 .signin { display: grid; gap: 8px; }
+/* Something under way, or why it stalled with the ways on (ui/Waiting.tsx): a plan's connection after its sign-in code
+   among them. Every word wraps inside its card, however narrow. */
+.plan-connection, .stalled { display: grid; gap: 8px; min-width: 0; }
+.stalled p { margin: 0; }
+.waiting > b, .waiting > .uprog-text, .stalled p { min-width: 0; overflow-wrap: anywhere; }
+/* The words stay beside the mark and wrap there; how long it has taken goes under them. */
+.waiting > b { flex: 1 1 0; }
+.waiting > .uprog-text { flex-basis: 100%; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }

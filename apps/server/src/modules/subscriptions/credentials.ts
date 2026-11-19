@@ -7,6 +7,7 @@ import { idOnly } from '../../db/selections.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { liveNode, settlePlans } from '../nodes/nodes.js';
 import { keyedNodes } from './lease.js';
+import { connectionEnded } from './connecting.js';
 
 /* What a plan's sign-in is on its nodes. Antigravity has none Hornhoof can carry yet. */
 export const CRED_KIND: Partial<Record<ProviderId, CredKind>> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
@@ -129,4 +130,5 @@ export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: str
   await settlePlans(db, [node.plan]);
   ctx.bus.publish(node.companyId, { type: 'subscription.signin', subscriptionId: node.plan, nodeId, ok, error, code: early.code, line: early.line, owner: node.owner });
   ctx.bus.publish(node.companyId, { type: 'org' });
+  await connectionEnded(ctx, nodeId, ok, error, early);
 }

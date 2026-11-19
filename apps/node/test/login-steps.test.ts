@@ -67,7 +67,7 @@ describe('the steps of a sign-in after its code', () => {
 
 describe('the steps of a sign-in in the install window', () => {
   /* The steps as the file keeps them, without the mark of the sign-in they are of. */
-  const lines = (dir: string) => readFileSync(join(dir, LOGIN_STEPS_FILE), 'utf8').trim().split('\n').map(l => { const { run: _run, ...entry } = JSON.parse(l) as { run?: string }; return entry; });
+  const lines = (dir: string) => readFileSync(join(dir, LOGIN_STEPS_FILE), 'utf8').trim().split('\n').map(l => { const entry = JSON.parse(l) as Record<string, unknown>; delete entry.run; return entry; });
 
   it('are left in a file of their own, which a new sign-in starts empty', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-steps-'));

@@ -43,7 +43,9 @@ const words = (look: { lang: 'en' | 'ru' }) => (look.lang === 'en' ? en : ru);
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
 
-type Opened = { posted: string[]; plans: { now: SubView[] }; terminal: () => boolean };
+type Connection = ReturnType<typeof connection> | null;
+/* connect: the machine's word of where the plan's connection is, as the stream says it and as the list then gives it. */
+type Opened = { posted: string[]; plans: { now: SubView[] }; terminal: () => boolean; connect(provider: Provider, c: Connection): Promise<void> };
 
 /* The page opens on the plans, with a stand-in for the stream that the test speaks into, as the machine's words would come,
    and one for the sign-in terminal. The page's clock is paused a minute after it started: the time since the code moves
@@ -67,9 +69,12 @@ async function openPlans(page: Page, look: Look, list: SubView[]): Promise<Opene
   await serveApi(page);
   const plans = { now: list };
   const posted: string[] = [];
-  await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: plans.now } }));
+  const connections = new Map<string, Connection>();
+  await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: plans.now.map(p => ({ ...p, connecting: connections.get(p.id) ?? null })) } }));
   await page.route(url => /^\/api\/subscriptions\/[^/]+\/(signin|connecting\/(cancel|retry))$/.test(pathOf(url)), route => {
     posted.push(pathOf(route.request().url()));
+    /* A new sign-in, Try again and Stop each end what the plan's connection said, as the server does. */
+    connections.delete(pathOf(route.request().url()).split('/')[3]!);
     return pathOf(route.request().url()).endsWith('/signin') ? route.fulfill({ json: { nodeId: NODE, hostname: HOST } }) : route.fulfill({ status: 204 });
   });
   let terminal = false;
@@ -79,12 +84,14 @@ async function openPlans(page: Page, look: Look, list: SubView[]): Promise<Opene
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByRole('navigation').getByRole('button', { name: words(look).shell.tabs.subscriptions, exact: true }).click();
-  return { posted, plans, terminal: () => terminal };
+  const connect = async (provider: Provider, c: Connection) => {
+    connections.set(`s-${provider}`, c);
+    await say(page, { type: 'subscription.connecting', subscriptionId: `s-${provider}`, connecting: c, owner: 'p1' });
+  };
+  return { posted, plans, terminal: () => terminal, connect };
 }
 
 const say = (page: Page, m: object) => page.evaluate(data => (window as unknown as { hhSay(data: string): void }).hhSay(data), JSON.stringify(m));
-const connecting = (page: Page, provider: Provider, c: ReturnType<typeof connection> | null) =>
-  say(page, { type: 'subscription.connecting', subscriptionId: `s-${provider}`, connecting: c, owner: 'p1' });
 
 /* The connection's part of the plan's card, by its name. */
 const part = (page: Page, look: Look, provider: Provider) => page.getByRole('group', { name: words(look).subs.connection.label(NAMES[provider]), exact: true });
@@ -115,23 +122,23 @@ test.describe('a plan connecting after its sign-in code', () => {
     await expect(window.getByRole('heading', { name: t.subs.signingIn(HOST), exact: true })).toBeVisible();
     await expect.poll(opened.terminal).toBe(true);
     await expect(part(page, EN, 'codex')).toHaveCount(0);
-    await connecting(page, 'codex', connection('checking'));
+    await opened.connect('codex', connection('checking'));
     const shown = window.getByRole('group', { name: t.subs.connection.label('Codex'), exact: true });
-    await expect(shown.locator('.spinner')).toBeVisible();
+    await expect(shown.locator('.waiting-mark')).toBeVisible();
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.seconds(0)));
-    await page.clock.runFor(65_000);
+    await page.clock.fastForward(65_000);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.minutes(1, 5)));
-    await connecting(page, 'codex', connection('saving'));
+    await opened.connect('codex', connection('saving'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.saving);
     /* The sign-in window closes once the sign-in is kept; the card goes on showing the connection. */
     await say(page, { type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: true, error: null, code: null, line: null, owner: 'p1' });
     await expect(window).toHaveCount(0);
-    await connecting(page, 'codex', connection('models'));
+    await opened.connect('codex', connection('models'));
     await expect(part(page, EN, 'codex').getByRole('status')).toContainText(t.subs.connection.steps.models);
-    await expect(part(page, EN, 'codex').locator('.spinner')).toBeVisible();
+    await expect(part(page, EN, 'codex').locator('.waiting-mark')).toBeVisible();
     opened.plans.now = [plan('codex', 'ready')];
-    await connecting(page, 'codex', null);
+    await opened.connect('codex', null);
     await expect(part(page, EN, 'codex')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: t.cards.aboutPlan, exact: true })).toBeVisible();
   });
@@ -141,18 +148,18 @@ test.describe('a plan connecting after its sign-in code', () => {
     const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
     await openCard(page, EN, 'antigravity');
     await expect(part(page, EN, 'antigravity')).toHaveCount(0);
-    await connecting(page, 'antigravity', connection('checking'));
+    await opened.connect('antigravity', connection('checking'));
     const shown = part(page, EN, 'antigravity');
-    await expect(shown.locator('.spinner')).toBeVisible();
+    await expect(shown.locator('.waiting-mark')).toBeVisible();
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
-    await page.clock.runFor(2 * MINUTE + 10_000);
-    await connecting(page, 'antigravity', connection('signed_in'));
+    await page.clock.fastForward(2 * MINUTE + 10_000);
+    await opened.connect('antigravity', connection('signed_in'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.signed_in);
-    await connecting(page, 'antigravity', connection('limits'));
+    await opened.connect('antigravity', connection('limits'));
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.limits);
     await expect(shown.getByRole('status')).toContainText(t.subs.connection.passed(t.subs.connection.minutes(2, 10)));
     opened.plans.now = [plan('antigravity', 'ready')];
-    await connecting(page, 'antigravity', null);
+    await opened.connect('antigravity', null);
     await expect(shown).toHaveCount(0);
     await expect(page.getByRole('heading', { name: t.cards.aboutPlan, exact: true })).toBeVisible();
   });
@@ -161,11 +168,11 @@ test.describe('a plan connecting after its sign-in code', () => {
     const t = words(EN);
     const opened = await openPlans(page, EN, [plan('codex', 'needs_login')]);
     await openCard(page, EN, 'codex');
-    await connecting(page, 'codex', connection('checking', 'failed', { error: 'The program did not take the new sign-in, so nothing changed.' }));
+    await opened.connect('codex', connection('checking', 'failed', { error: 'The program did not take the new sign-in, so nothing changed.' }));
     const shown = part(page, EN, 'codex');
     await expect(shown.getByRole('alert')).toHaveText(t.subs.signInErrors.notTaken);
     await expect(shown).toContainText(t.subs.connection.next.signInAgain);
-    await expect(shown.locator('.spinner')).toHaveCount(0);
+    await expect(shown.locator('.waiting-mark')).toHaveCount(0);
     await shown.getByRole('button', { name: t.subs.connection.retryLabel('Codex'), exact: true }).click();
     await expect.poll(() => opened.posted).toContain('/api/subscriptions/s-codex/signin');
     await expect(page.locator('.signin').getByRole('heading', { name: t.subs.signingIn(HOST), exact: true })).toBeVisible();
@@ -174,14 +181,14 @@ test.describe('a plan connecting after its sign-in code', () => {
 
   test('Antigravity: a failed connection gives the last line its program said, and what to do on the machine', async ({ page }) => {
     const t = words(EN);
-    await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
+    const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
     await openCard(page, EN, 'antigravity');
     const line = 'Google did not take the code: invalid_grant';
-    await connecting(page, 'antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line }));
+    await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line }));
     const shown = part(page, EN, 'antigravity');
     await expect(shown.getByRole('alert')).toContainText(line);
     await expect(shown).toContainText(t.subs.connection.next.installWindow(HOST));
-    await expect(shown.locator('.spinner')).toHaveCount(0);
+    await expect(shown.locator('.waiting-mark')).toHaveCount(0);
   });
 
   for (const provider of ['codex', 'antigravity'] as const) {
@@ -189,14 +196,15 @@ test.describe('a plan connecting after its sign-in code', () => {
       const t = words(EN);
       const opened = await openPlans(page, EN, [plan(provider, 'needs_login')]);
       await openCard(page, EN, provider);
-      await connecting(page, provider, connection('models'));
+      await opened.connect(provider, connection('models'));
       const shown = part(page, EN, provider);
-      await expect(shown.locator('.spinner')).toBeVisible();
-      await page.clock.runFor(LIMIT);
-      await connecting(page, provider, connection('models', 'too_long'));
-      await expect(shown.getByRole('alert')).toHaveText(t.subs.connection.tooLong(10));
+      await expect(shown.locator('.waiting-mark')).toBeVisible();
+      await page.clock.fastForward(LIMIT);
+      await opened.connect(provider, connection('models', 'too_long'));
+      await expect(shown.getByRole('alert')).toHaveText(t.common.tooLong);
+        await expect(shown).toContainText(t.subs.connection.tooLongNext(10));
       await expect(shown).toContainText(t.subs.connection.steps.models);
-      await expect(shown.locator('.spinner')).toHaveCount(0);
+      await expect(shown.locator('.waiting-mark')).toHaveCount(0);
       const retry = shown.getByRole('button', { name: t.subs.connection.retryLabel(NAMES[provider]), exact: true });
       const cancel = shown.getByRole('button', { name: t.subs.connection.cancelLabel(NAMES[provider]), exact: true });
       await expect(cancel).toBeVisible();
@@ -206,12 +214,15 @@ test.describe('a plan connecting after its sign-in code', () => {
       const ring = await retry.evaluate(el => { const s = getComputedStyle(el); return { visible: el.matches(':focus-visible'), style: s.outlineStyle, width: s.outlineWidth }; });
       expect(ring).toEqual({ visible: true, style: 'solid', width: '2px' });
       if (provider === 'antigravity') {
+        /* Try again has its node check the sign-in again: the plan connects anew, with no way to stop it until it stalls. */
         await retry.press('Enter');
         await expect.poll(() => opened.posted).toContain('/api/subscriptions/s-antigravity/connecting/retry');
-        await connecting(page, provider, connection('checking'));
+        await opened.connect(provider, connection('checking'));
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.checking);
+        await expect(shown.getByRole('button')).toHaveCount(0);
+        return;
       }
-      await shown.getByRole('button', { name: t.subs.connection.cancelLabel(NAMES[provider]), exact: true }).click();
+      await cancel.click();
       await expect.poll(() => opened.posted).toContain(`/api/subscriptions/s-${provider}/connecting/cancel`);
       await expect(shown).toHaveCount(0);
     });
@@ -219,10 +230,10 @@ test.describe('a plan connecting after its sign-in code', () => {
 
   test('the ring turns only for a person who did not ask for less motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
+    const opened = await openPlans(page, EN, [plan('antigravity', 'needs_login')]);
     await openCard(page, EN, 'antigravity');
-    await connecting(page, 'antigravity', connection('checking'));
-    const ring = part(page, EN, 'antigravity').locator('.spinner');
+    await opened.connect('antigravity', connection('checking'));
+    const ring = part(page, EN, 'antigravity').locator('.waiting-mark');
     await expect(ring).toBeVisible();
     expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -247,7 +258,7 @@ for (const look of LOOKS) {
     for (const state of STATES) {
       if (state === 'ready') {
         opened.plans.now = [plan('antigravity', 'ready')];
-        await connecting(page, 'antigravity', null);
+        await opened.connect('antigravity', null);
         await expect(shown).toHaveCount(0);
         const card = page.getByRole('heading', { name: t.cards.aboutPlan, exact: true });
         await expect(card).toBeVisible();
@@ -259,17 +270,18 @@ for (const look of LOOKS) {
         continue;
       }
       if (state === 'connecting') {
-        await connecting(page, 'antigravity', connection('account'));
-        await page.clock.runFor(MINUTE + 5_000);
+        await opened.connect('antigravity', connection('account'));
+        await page.clock.fastForward(MINUTE + 5_000);
         await expect(shown.getByRole('status')).toContainText(t.subs.connection.steps.account);
       }
       if (state === 'failed') {
-        await connecting(page, 'antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
+        await opened.connect('antigravity', connection('checking', 'failed', { error: 'The sign-in ended before it finished, so nothing changed.', line: 'Antigravity CLI did not finish signing in.' }));
         await expect(shown.getByRole('alert')).toBeVisible();
       }
       if (state === 'too_long') {
-        await connecting(page, 'antigravity', connection('models', 'too_long'));
-        await expect(shown.getByRole('alert')).toHaveText(t.subs.connection.tooLong(10));
+        await opened.connect('antigravity', connection('models', 'too_long'));
+        await expect(shown.getByRole('alert')).toHaveText(t.common.tooLong);
+        await expect(shown).toContainText(t.subs.connection.tooLongNext(10));
         await shown.getByRole('button', { name: t.subs.connection.cancelLabel('Antigravity'), exact: true }).focus();
         await page.keyboard.press('Shift+Tab');
       }

@@ -13,6 +13,7 @@ import { nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { cols, followFrames, keepLooking, rows } from '../terminals/look.js';
 import { CLOSE } from '../terminals/relay.js';
+import { CONNECT_ROUND_MS, connectionCleared, connectionRound } from './connecting.js';
 import { LOGIN_KEY } from './credentials.js';
 
 /* Plans that sign in in a terminal on one machine and are then sealed for the others. Kimi and GLM take a pasted key,
@@ -71,8 +72,36 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     const old = online.filter(n => !able.includes(n)).map(n => n.hostname);
     if (!node) throw old.length ? unsupported(old, updateCommand(await publicUrl(db, ctx.config))) : noNode();
     if (!hub.send(nodeIdentity(node.nodeId), { type: 'login.start', fresh })) throw noNode();
+    /* A new sign-in starts a new connection: what the last one said goes. */
+    connectionCleared(ctx, sub.id);
     return { nodeId: node.nodeId, hostname: node.hostname };
   });
+
+  /* The owner stops a plan's connection: a sign-in still running on its machine stops, and the plan shows its state. */
+  app.post('/api/subscriptions/:id/connecting/cancel', async (req, reply) => {
+    const { sub } = await ownPlan(req);
+    const gone = connectionCleared(ctx, sub.id);
+    if (gone) hub.send(nodeIdentity(gone.nodeId), { type: 'login.stop' });
+    return reply.code(204).send();
+  });
+
+  /* The owner tries a plan that signs in on its machine again: its node checks the sign-in there again and says each step,
+     and the limit starts over with them. A plan that signs in from Hornhoof tries again with a new sign-in. */
+  app.post('/api/subscriptions/:id/connecting/retry', async (req, reply) => {
+    const { sub } = await ownPlan(req);
+    if (sub.kind !== 'personal') throw new ApiError(400, 'validation', 'Only a plan connects on its machines.', 'wrong_kind');
+    const gone = connectionCleared(ctx, sub.id);
+    const { online } = await onlineNodes(sub.id);
+    const asked = gone && online.some(n => n.nodeId === gone.nodeId) ? [gone.nodeId] : online.map(n => n.nodeId);
+    if (!asked.length) throw noNode();
+    for (const nodeId of asked) hub.send(nodeIdentity(nodeId), { type: 'login.check' });
+    return reply.code(204).send();
+  });
+
+  /* A connection past its limit says so: the server looks once a second. */
+  const round = setInterval(() => connectionRound(ctx), CONNECT_ROUND_MS);
+  round.unref();
+  app.addHook('onClose', async () => clearInterval(round));
 
   app.post('/api/subscriptions/:id/signin/stop', async (req, reply) => {
     const { sub } = await ownPlan(req);

@@ -24,6 +24,7 @@ export * from './phones.js';
 import { PhoneProbe, PhoneList, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
+import { SIGNIN_STEPS } from './signin.js';
 export { CHECK_LEASE_MS, checkCapacity, fitsCheck, freeCores, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 export { TEST_WORKER_BYTES, vitestMemoryWorkers } from './test-workers.js';
 
@@ -485,6 +486,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* code and line: a sign-in whose program ended early, with its exit code and the last line it said, through the node's
      masks, for its owner to read. */
   z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), code: z.number().int().nullable().optional(), line: z.string().min(1).max(400).nullable().optional(), n: MessageNumber }),
+  /* Where a plan's connection is after its sign-in code, until the plan is ready; failed with why, and the last line its
+     program said through the node's masks. */
+  z.object({ type: z.literal('login.step'), step: z.enum([...SIGNIN_STEPS, 'failed']), error: z.string().max(300).nullable().optional(), line: z.string().min(1).max(400).nullable().optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
@@ -686,6 +690,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Open the plan's sign-in in the login terminal; fresh signs the program out first, for another account. */
   z.object({ type: z.literal('login.start'), fresh: z.boolean() }),
   z.object({ type: z.literal('login.stop') }),
+  /* Check the plan's sign-in on this machine again, saying each step, as after a sign-in in the install window. */
+  z.object({ type: z.literal('login.check') }),
   /* Codex runs on one machine at a time: hold says whether this node is it. */
   z.object({ type: z.literal('cred.lease'), hold: z.boolean() }),
   /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */

@@ -48,7 +48,14 @@ async function plans(env: NodeJS.ProcessEnv = {}) {
   const agy = await online('antigravity');
   const stream = await openStream(app, owner);
   onTestFinished(() => stream.close());
-  return { app, db, owner, codex, agy, stream };
+  /* The server's clock moves on, its nodes still there as they would be, and the round after it runs. */
+  const later = async (ms: number) => {
+    vi.setSystemTime(Date.now() + ms);
+    for (const n of [codex, agy]) n.node.send({ type: 'status', loggedIn: false, limits: null });
+    await until(() => [codex, agy].every(n => app.ctx.hub.lastSeenAt({ kind: 'node', nodeId: n.nodeId }) === Date.now()));
+    await vi.advanceTimersByTimeAsync(ROUND);
+  };
+  return { app, db, owner, codex, agy, stream, later };
 }
 
 /* The plan as its owner's list shows it. */
@@ -69,8 +76,6 @@ async function saysNext(stream: StreamReader, plan: string, before: number, chec
 /* The node says it is signed in, as a node does once its program took the sign-in. */
 const signedIn = (node: FakeNode) => node.send({ type: 'status', loggedIn: true, limits: null });
 
-/* The server's clock moves on, and its rounds with it. */
-const later = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); };
 
 describe('connecting a plan after its sign-in code', () => {
   it('has one limit for the whole connection, ten minutes unless set otherwise', () => {
@@ -80,7 +85,7 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('shows a Codex plan connecting from the first step its node reports, at the step it is at and since when, until it is ready', async () => {
-    const { app, owner, codex, stream } = await plans();
+    const { app, owner, codex, stream, later } = await plans();
     codex.node.send({ type: 'login.step', step: 'checking' });
     const first = await saysNext(stream, codex.plan, 0);
     const shown = { nodeId: codex.nodeId, hostname: 'dev-laptop', state: 'connecting', step: 'checking', since: at(0), until: at(LIMIT), error: null, code: null, line: null };
@@ -99,7 +104,7 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('shows an Antigravity plan connecting from the steps of its sign-in in the install window, until it is ready', async () => {
-    const { app, owner, agy, stream } = await plans();
+    const { app, owner, agy, stream, later } = await plans();
     agy.node.send({ type: 'login.step', step: 'checking' });
     expect(await saysNext(stream, agy.plan, 0)).toMatchObject({ state: 'connecting', step: 'checking', since: at(0) });
     await later(40_000);
@@ -131,7 +136,7 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('says why a Codex connection failed, as its node said it, and keeps saying it', async () => {
-    const { app, owner, codex, stream } = await plans();
+    const { app, owner, codex, stream, later } = await plans();
     codex.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, codex.plan, 0);
     codex.node.send({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.notTaken });
@@ -158,16 +163,16 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('says a connection takes too long past the one limit for the whole of it, whatever its steps, and still turns ready if it ends', async () => {
-    const { app, owner, agy, stream } = await plans();
+    const { app, owner, agy, stream, later } = await plans();
     agy.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, agy.plan, 0);
     await later(4 * MINUTE);
     agy.node.send({ type: 'login.step', step: 'models' });
     await saysNext(stream, agy.plan, 1);
     /* A new step does not move the limit: it is of the whole connection. */
-    await later(6 * MINUTE - 2 * ROUND);
+    await later(6 * MINUTE - 3 * ROUND);
     expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'connecting', step: 'models', until: at(LIMIT) });
-    await later(3 * ROUND);
+    await later(2 * ROUND);
     expect(await saysNext(stream, agy.plan, 2)).toMatchObject({ state: 'too_long', step: 'models', since: at(0), until: at(LIMIT), error: null });
     expect((await planOf(app, owner, agy.plan)).connecting).toMatchObject({ state: 'too_long' });
     signedIn(agy.node);
@@ -176,10 +181,10 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('takes the limit it is set to', async () => {
-    const { codex, stream } = await plans({ SIGNIN_CONNECT_MS: String(2 * MINUTE) });
+    const { codex, stream, later } = await plans({ SIGNIN_CONNECT_MS: String(2 * MINUTE) });
     codex.node.send({ type: 'login.step', step: 'checking' });
     expect(await saysNext(stream, codex.plan, 0)).toMatchObject({ until: at(2 * MINUTE) });
-    await later(2 * MINUTE + ROUND);
+    await later(2 * MINUTE);
     expect(await saysNext(stream, codex.plan, 1)).toMatchObject({ state: 'too_long' });
   });
 
@@ -195,10 +200,10 @@ describe('connecting a plan after its sign-in code', () => {
   });
 
   it('tries an Antigravity connection again on Retry: its node checks the sign-in again, and the limit starts over', async () => {
-    const { app, owner, agy, stream } = await plans();
+    const { app, owner, agy, stream, later } = await plans();
     agy.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, agy.plan, 0);
-    await later(LIMIT + ROUND);
+    await later(LIMIT);
     await saysNext(stream, agy.plan, 1, c => c?.state === 'too_long');
     const retry = await app.inject({ method: 'POST', url: `/api/subscriptions/${agy.plan}/connecting/retry`, ...as(owner) });
     expect(retry.statusCode).toBe(204);
@@ -228,6 +233,9 @@ describe('connecting a plan after its sign-in code', () => {
     onTestFinished(() => theirs.close());
     codex.node.send({ type: 'login.step', step: 'checking' });
     await saysNext(stream, codex.plan, 0);
+    /* A sign-in that ends tells everyone the plan changed, after what came before it. */
+    codex.node.send({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.notTaken });
+    await saysNext(stream, codex.plan, 1);
     await until(() => theirs.messages.some(m => m.type === 'org'));
     expect(theirs.messages.some(m => m.type === 'subscription.connecting')).toBe(false);
     expect((await planOf(app, other, codex.plan)).connecting).toBeNull();

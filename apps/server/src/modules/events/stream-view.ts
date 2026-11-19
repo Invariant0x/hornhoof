@@ -53,6 +53,7 @@ const FILTERS: Filters = {
   backlog: passes,
   computer: passes,
   'subscription.signin': passes,
+  'subscription.connecting': passes,
 };
 
 export async function heardBy(db: Db, companyId: string, viewer: AgentViewer, m: StreamMessage): Promise<StreamMessage | null> {

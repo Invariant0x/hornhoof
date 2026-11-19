@@ -339,6 +339,7 @@ async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir
     if (!code) throw new Error('No code was pasted.');
     await tmux.keys(name, '-l', code);
     await tmux.keys(name, 'Enter');
+    io.step?.('checking');
     await until(async () => {
       const refused = REFUSED.exec(await screen());
       if (refused) throw new Error(`Google did not take the code: ${refused[1]!.trim()}`);

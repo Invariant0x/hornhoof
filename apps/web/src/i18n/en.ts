@@ -75,6 +75,8 @@ export const en = {
   },
   common: {
     loading: 'Loading…',
+    /* Something under way that took longer than its one limit: it may still finish. */
+    tooLong: 'Taking longer than usual',
     somethingWrong: 'Something went wrong.',
     next: 'Next',
     back: 'Back',
@@ -788,8 +790,7 @@ export const en = {
         signInAgain: 'Sign in again. Nothing changed on the plan.',
         installWindow: (host: string) => `Run the install command on ${host} again and sign in there.`,
       },
-      tooLong: (minutes: number) => `Connecting takes longer than ${minutes} min. It may still finish.`,
-      tooLongNext: 'Try again, or stop and come back to it later.',
+      tooLongNext: (minutes: number) => `Connecting has taken more than ${minutes} min. It may still finish. Try again, or stop and come back to it later.`,
       retry: 'Try again',
       retryLabel: (name: string) => `Try connecting ${name} again`,
       cancel: 'Stop',

@@ -30,6 +30,7 @@ import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { alertSilentPart } from '../testruns/part-silence.js';
 import { ownMachine, sameNode, type NodeIdentity, type NodeTransport } from './hub.js';
+import { connectionSettled, connectionStep } from '../subscriptions/connecting.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
@@ -380,6 +381,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'status':
       await handleNodeStatus(ctx, id, msg, now);
+      if (id.kind === 'node') await connectionSettled(ctx, id.nodeId);
+      return;
+    case 'login.step':
+      if (id.kind === 'node') await connectionStep(ctx, id.nodeId, msg);
       return;
     /* A node of a plan sealed the sign-in it holds for the plan's other nodes. */
     case 'cred.sealed': {
