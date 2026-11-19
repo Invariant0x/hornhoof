@@ -1,5 +1,4 @@
 import { modelGroup, type LimitGroup } from '@hornhoof/protocol';
-import { Fragment } from 'react';
 import { Phrase, useLanguage, useT } from '../i18n';
 import type { Limits, SubView } from '../types';
 import { Bar, percent, Share } from './Bar';
@@ -47,7 +46,13 @@ export function LimitMeters({ sub, now, model }: { sub: SubView; now: number; mo
   const groups = groupsOf(limits);
   if (!groups.length) return <Gauges sub={sub} limits={limits} now={now} />;
   const own = modelGroup(groups, model);
-  return <>{(own ? [own] : groups).map(group => <Fragment key={group.name}><p className="part-note" dir="auto">{t.subs.groupLimits(group.name)}</p><Gauges sub={sub} limits={groupLimits(group)} now={now} /></Fragment>)}</>;
+  return <GroupParts sub={sub} groups={own ? [own] : groups} now={now} />;
+}
+
+/* Each group's limits in a part of its own, under the group's name. */
+function GroupParts({ sub, groups, now }: { sub: SubView; groups: LimitGroup[]; now: number }) {
+  const t = useT();
+  return <>{groups.map(group => <Part key={group.name} title={t.subs.groupLimits(group.name)}><Gauges sub={sub} limits={groupLimits(group)} now={now} /></Part>)}</>;
 }
 
 /* The plan card's limits: one part for each group of models the plan keeps its limits by, under the group's own name,
@@ -56,7 +61,7 @@ export function PlanLimitParts({ sub, now }: { sub: SubView; now: number }) {
   const t = useT();
   const groups = sub.kind === 'api_key' ? [] : groupsOf(currentPlanLimits(sub, now));
   if (!groups.length) return <Part title={t.subs.limits}><LimitMeters sub={sub} now={now} /></Part>;
-  return <>{groups.map(group => <Part key={group.name} title={t.subs.groupLimits(group.name)}><Gauges sub={sub} limits={groupLimits(group)} now={now} /></Part>)}</>;
+  return <GroupParts sub={sub} groups={groups} now={now} />;
 }
 
 /* One window of a part of the plan's limits in the list: its used share, then when it resets. */

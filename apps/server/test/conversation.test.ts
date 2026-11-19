@@ -591,7 +591,7 @@ describe('the orchestrator\'s conversation', () => {
     await onModel('gemini-4-argon');
     const weekEnds = new Date(Date.now() + 3 * 86_400_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: groupedLimits(0.5, 0.2, weekEnds) });
-    await until(async () => (await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'antigravity')))[0]?.limits?.groups !== undefined);
+    await until(async () => Boolean((await app.ctx.db.select(only(subscriptions, 'limits')).from(subscriptions).where(eq(subscriptions.provider, 'antigravity')))[0]?.limits));
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
     const now = stillClock();
