@@ -546,8 +546,12 @@ describe('whether a version is out, as the images, publish and release jobs look
 
   type Where = 'none' | 'here' | 'other';
   /* github and registry: a status each answers everything with; limited: GitHub's rate limit is used up; down: who cannot be
-     reached at all. */
-  type World = { tag?: Where; release?: boolean; image?: Where | 'unlabeled'; github?: number; registry?: number; limited?: boolean; down?: 'github' | 'registry' };
+     reached at all. lightweight: the tag names its commit with no tag object; lost: GitHub has no tag object for it.
+     single: the version names one image, not an index of platforms; refused: the registry gives no token. */
+  type World = {
+    tag?: Where; release?: boolean; image?: Where | 'unlabeled'; github?: number; registry?: number; limited?: boolean; down?: 'github' | 'registry';
+    lightweight?: boolean; lost?: boolean; single?: boolean; refused?: boolean;
+  };
   type Ran = { code: number; said: string; outputs: Record<string, Record<string, string>>; gh: string[][]; asked: { url: string; authorization: string | undefined }[]; notes: string | null; sha: string; other: string };
 
   const project = (dir: string, version: string) => {
@@ -585,9 +589,10 @@ describe('whether a version is out, as the images, publish and release jobs look
       if (world.github) return reply(res, world.github, { message: 'GitHub is down' });
       if (world.limited) return reply(res, 403, { message: 'API rate limit exceeded for installation.' }, { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' });
       if (path === `/repos/acme/shop/git/ref/tags/v${VERSION}`) {
-        return world.tag && world.tag !== 'none' ? reply(res, 200, { ref: `refs/tags/v${VERSION}`, object: { type: 'tag', sha: TAG_OBJECT } }) : reply(res, 404, { message: 'Not Found' });
+        if (!world.tag || world.tag === 'none') return reply(res, 404, { message: 'Not Found' });
+        return reply(res, 200, { ref: `refs/tags/v${VERSION}`, object: world.lightweight ? { type: 'commit', sha: world.tag === 'here' ? sha : other } : { type: 'tag', sha: TAG_OBJECT } });
       }
-      if (path === `/repos/acme/shop/git/tags/${TAG_OBJECT}`) return reply(res, 200, { tag: `v${VERSION}`, object: { type: 'commit', sha: world.tag === 'here' ? sha : other } });
+      if (path === `/repos/acme/shop/git/tags/${TAG_OBJECT}` && !world.lost) return reply(res, 200, { tag: `v${VERSION}`, object: { type: 'commit', sha: world.tag === 'here' ? sha : other } });
       if (path === `/repos/acme/shop/releases/tags/v${VERSION}`) return world.release ? reply(res, 200, { tag_name: `v${VERSION}` }) : reply(res, 404, { message: 'Not Found' });
       return reply(res, 404, { message: 'Not Found' });
     };
@@ -595,6 +600,7 @@ describe('whether a version is out, as the images, publish and release jobs look
       if (world.registry) return reply(res, world.registry, { errors: [{ code: 'UNAVAILABLE' }] });
       if (url.startsWith('/token?')) {
         const basic = `Basic ${Buffer.from(`${ACTOR}:${TOKEN}`).toString('base64')}`;
+        if (world.refused) return reply(res, 403, { errors: [{ code: 'DENIED' }] });
         return req.headers.authorization === basic ? reply(res, 200, { token: 'pull-token' }) : reply(res, 401, { errors: [{ code: 'UNAUTHORIZED' }] });
       }
       if (url === '/cdn/config') return reply(res, 200, { architecture: 'amd64', os: 'linux', config: { Labels: revision ? { 'org.opencontainers.image.revision': revision } : {} } });
@@ -603,6 +609,7 @@ describe('whether a version is out, as the images, publish and release jobs look
       }
       if (url === `/v2/invariant0x/hornhoof/manifests/${VERSION}`) {
         if (!world.image || world.image === 'none') return reply(res, 404, { errors: [{ code: 'MANIFEST_UNKNOWN' }] });
+        if (world.single) return reply(res, 200, { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] }, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
         return reply(res, 200, {
           schemaVersion: 2,
           mediaType: 'application/vnd.oci.image.index.v1+json',
@@ -792,6 +799,8 @@ describe('whether a version is out, as the images, publish and release jobs look
     ['images', 'the registry answers 500', { registry: 500 }, 'the registry answered 500 for manifests/0.34.1'],
     ['publish', 'the registry answers 429', { registry: 429 }, 'the registry answered 429 for manifests/0.34.1'],
     ['publish', 'the registry cannot be reached', { down: 'registry' }, 'the registry could not be reached'],
+    ['images', 'the registry gives no token', { refused: true }, 'the registry answered 403 for a token'],
+    ['release', 'GitHub has no tag object for the tag', { lost: true }, 'GitHub has no tag object for v0.34.1'],
   ] as const)('the %s job cannot tell when %s, and stops without building, moving or releasing anything', async (name, _when, trouble, reason) => {
     const ran = await run(name, { tag: 'here', release: false, image: 'none', ...trouble });
     expect(ran.code, ran.said).not.toBe(0);
@@ -799,6 +808,18 @@ describe('whether a version is out, as the images, publish and release jobs look
     expect(ran.said).toContain(`Could not tell whether version ${VERSION} is out: ${reason}.`);
     expect(released(ran)).toEqual([]);
     expect(siteStarted(ran)).toBe(false);
+  });
+
+  it('reads a tag with no tag object, and an image for one platform alone, as git and the registry give them', async () => {
+    const images = await run('images', { tag: 'here', lightweight: true, image: 'none' });
+    expect(images.outputs.fresh, images.said).toEqual({ version: 'new' });
+    expect(images.said).toContain(`though its tag v${VERSION} is on this commit`);
+    expect(images.asked.map(a => a.url)).not.toContain(`/api/repos/acme/shop/git/tags/${TAG_OBJECT}`);
+    const elsewhere = await run('release', { tag: 'other', lightweight: true });
+    expect(elsewhere.said).toContain(`The tag v${VERSION} is on commit ${elsewhere.other}, not on this commit ${elsewhere.sha}.`);
+    const publish = await run('publish', { tag: 'here', image: 'here', single: true });
+    expect(publish.outputs.fresh, publish.said).toEqual({ version: 'out' });
+    expect(publish.asked.map(a => a.url)).not.toContain(`/v2/invariant0x/hornhoof/manifests/${AMD64}`);
   });
 
   it.each([

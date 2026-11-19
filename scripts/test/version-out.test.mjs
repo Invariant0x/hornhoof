@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { imageOf, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
+import { digestOf, imageOf, namedBy, platformOf, revisionIn, signIn, tokenIn, tokenRealm, unknownOf, verdictOf } from '../github-tests/version-out.mjs';
 
 const SHA = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
@@ -61,6 +61,59 @@ test('a lookup that failed is unknown, a third answer beside out and new, and sa
     verdict: 'unknown',
     why: 'Could not tell whether version 0.34.1 is out: GitHub could not be reached. This job stops and builds, moves and releases nothing; run it again once that is fixed.',
   });
+});
+
+test('a tag names a commit or a tag object, by a full sha, and nothing else', () => {
+  const commit = { type: 'commit', sha: SHA };
+  assert.equal(namedBy('v0.34.1', commit), commit);
+  assert.deepEqual(namedBy('v0.34.1', { type: 'tag', sha: OTHER }), { type: 'tag', sha: OTHER });
+  for (const object of [{ type: 'tree', sha: SHA }, { type: 'commit', sha: 'main' }, { type: 'tag', sha: '../x' }, {}, null, undefined]) {
+    assert.throws(() => namedBy('v0.34.1', object), { message: 'the tag v0.34.1 is not on a commit' }, JSON.stringify(object));
+  }
+});
+
+const REGISTRY = new URL('https://ghcr.io');
+
+test('the registry is asked for a token only at a realm of its own, with the service and scope it names', () => {
+  const realm = tokenRealm('Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:invariant0x/hornhoof:pull"', REGISTRY);
+  assert.equal(realm.href, 'https://ghcr.io/token?service=ghcr.io&scope=repository%3Ainvariant0x%2Fhornhoof%3Apull');
+  assert.equal(tokenRealm('bearer realm="https://ghcr.io/token"', REGISTRY).href, 'https://ghcr.io/token');
+  assert.throws(() => tokenRealm('Bearer realm="https://evil.example/token",service="ghcr.io"', REGISTRY), { message: 'the registry sends for a token to https://evil.example, which is not its own' });
+  for (const challenge of ['Basic realm="https://ghcr.io/token"', 'Bearer service="ghcr.io"', '']) {
+    assert.throws(() => tokenRealm(challenge, REGISTRY), { message: 'the registry asks for a kind of sign-in this job cannot give' }, challenge);
+  }
+});
+
+test("the token is asked for with the workflow's token as a basic sign-in, and with no sign-in without one", () => {
+  assert.deepEqual(signIn('octocat', 'ghs_1'), { authorization: `Basic ${Buffer.from('octocat:ghs_1').toString('base64')}` });
+  assert.deepEqual(signIn(undefined, 'ghs_1'), { authorization: `Basic ${Buffer.from('github-actions:ghs_1').toString('base64')}` });
+  assert.deepEqual(signIn('octocat', undefined), {});
+  assert.deepEqual(signIn('octocat', ''), {});
+});
+
+test('the registry gives its token as token or access_token, and nothing else counts as one', () => {
+  assert.equal(tokenIn({ token: 'pull' }), 'pull');
+  assert.equal(tokenIn({ access_token: 'pull' }), 'pull');
+  for (const body of [{}, { token: '' }, { token: 7 }, null]) assert.throws(() => tokenIn(body), { message: 'the registry gave no token' }, JSON.stringify(body));
+});
+
+test('a digest the registry names is a sha256 one, or the lookup ends', () => {
+  const digest = `sha256:${'1'.repeat(64)}`;
+  assert.equal(digestOf({ digest }, 'image'), digest);
+  for (const reference of [{ digest: 'sha256:abc' }, { digest: `sha512:${'1'.repeat(128)}` }, { digest: `../${digest}` }, {}, undefined]) {
+    assert.throws(() => digestOf(reference, 'image of a platform'), { message: 'the registry names no image of a platform' }, JSON.stringify(reference));
+  }
+});
+
+test('an index gives the image of its first real platform, not an attestation', () => {
+  const amd64 = { digest: 'a', platform: { os: 'linux', architecture: 'amd64' } };
+  assert.equal(platformOf({ manifests: [{ digest: 'x', platform: { os: 'unknown', architecture: 'unknown' } }, { digest: 'y' }, amd64] }), amd64);
+  assert.equal(platformOf({ manifests: [{ digest: 'x', platform: { os: 'unknown' } }] }), undefined);
+});
+
+test('an image configuration gives its revision label, or nothing when it carries none', () => {
+  assert.equal(revisionIn({ config: { Labels: { 'org.opencontainers.image.revision': SHA } } }), SHA);
+  for (const config of [{ config: { Labels: {} } }, { config: {} }, {}, null]) assert.equal(revisionIn(config), '', JSON.stringify(config));
 });
 
 test('no message has an em dash or a dash between words', () => {

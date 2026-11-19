@@ -45,7 +45,10 @@ function releaseVerdict({ version, tag, release }) {
 export function verdictOf({ job, event, sha, version, tag, image, release }) {
   if (job === 'images' && event !== 'push') return { verdict: 'new', why: 'A run by hand builds the images of its commit under that commit alone.' };
   if (tag && tag !== sha) return stop(`The tag v${version} is on commit ${tag}, not on this commit ${sha}. Version ${version} belongs to that commit, so this one builds, moves and releases nothing. Give this commit a new version, or move the tag if it is wrong.`);
-  if (job === 'release') return releaseVerdict({ version, tag, release });
+  return job === 'release' ? releaseVerdict({ version, tag, release }) : imageVerdict({ job, sha, version, tag, image });
+}
+
+function imageVerdict({ job, sha, version, tag, image }) {
   if (image === '') return stop(`${imageOf(version)} has no revision label, so it cannot tell which commit its images were built from. Nothing is built or moved until it says.`);
   if (image && image !== sha) return stop(`${imageOf(version)} holds the images of commit ${image}, not of this commit ${sha}. Version ${version} is out already for that commit, so this one builds and moves nothing. Give this commit a new version.`);
   if (image) return { verdict: 'out', why: `Version ${version} is out already: ${imageOf(version)} holds the images of this commit, so ${DOES[job].out}.` };
@@ -83,36 +86,54 @@ async function fromGitHub(path) {
   return bodyOf(res, 'GitHub', path);
 }
 
-/* The commit the tag is on, through its annotated tag objects; null without the tag. */
+/* What a git object of GitHub's API names, when it is a commit or a tag object; anything else ends the lookup. */
+export function namedBy(tag, object) {
+  if (!['commit', 'tag'].includes(object?.type) || !COMMIT.test(object?.sha ?? '')) throw new Error(`the tag ${tag} is not on a commit`);
+  return object;
+}
+
+async function tagObject(tag, sha) {
+  const found = await fromGitHub(`git/tags/${sha}`);
+  if (!found) throw new Error(`GitHub has no tag object for ${tag}`);
+  return namedBy(tag, found.object);
+}
+
+/* The commit the tag is on, through at most four annotated tag objects; null without the tag. */
 async function tagCommit(tag) {
-  let object = (await fromGitHub(`git/ref/tags/${tag}`))?.object;
-  if (!object) return null;
-  for (let depth = 0; object.type === 'tag' && depth < 4; depth += 1) {
-    if (!COMMIT.test(object.sha)) throw new Error(`the tag ${tag} names no tag object`);
-    object = (await fromGitHub(`git/tags/${object.sha}`))?.object;
-    if (!object) throw new Error(`GitHub has no tag object for ${tag}`);
-  }
-  if (object.type !== 'commit' || !COMMIT.test(object.sha)) throw new Error(`the tag ${tag} is not on a commit`);
-  return object.sha;
+  const ref = await fromGitHub(`git/ref/tags/${tag}`);
+  if (!ref) return null;
+  let object = namedBy(tag, ref.object);
+  for (let depth = 0; object.type === 'tag' && depth < 4; depth += 1) object = await tagObject(tag, object.sha);
+  return namedBy(tag, object.type === 'commit' ? object : null).sha;
 }
 
 const registryUrl = () => new URL(env.HORNHOOF_REGISTRY_URL || 'https://ghcr.io');
 let bearer = null;
 
-/* A token to pull with, from the realm the registry names. The workflow's token goes only to a realm of the registry itself. */
-async function pullToken(challenge) {
+/* Where the registry sends for a token to pull with, from its WWW-Authenticate answer: only a realm of the registry itself,
+   as the workflow's token goes there. */
+export function tokenRealm(challenge, registry) {
   const fields = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
   if (!/^Bearer /i.test(challenge) || !fields.realm) throw new Error('the registry asks for a kind of sign-in this job cannot give');
   const realm = new URL(fields.realm);
-  if (realm.origin !== registryUrl().origin) throw new Error(`the registry sends for a token to ${realm.origin}, which is not its own`);
+  if (realm.origin !== registry.origin) throw new Error(`the registry sends for a token to ${realm.origin}, which is not its own`);
   for (const key of ['service', 'scope']) if (fields[key]) realm.searchParams.set(key, fields[key]);
-  const basic = env.GITHUB_TOKEN ? { authorization: `Basic ${Buffer.from(`${env.GITHUB_ACTOR || 'github-actions'}:${env.GITHUB_TOKEN}`).toString('base64')}` } : {};
-  const res = await reach('the registry', realm, { headers: basic });
-  if (!res.ok) throw new Error(`the registry answered ${res.status} for a token`);
-  const body = await bodyOf(res, 'the registry', 'a token');
-  const token = body.token ?? body.access_token;
+  return realm;
+}
+
+/* The sign-in the token is asked for with: the workflow's token, none without one. */
+export const signIn = (actor, token) => (token ? { authorization: `Basic ${Buffer.from(`${actor || 'github-actions'}:${token}`).toString('base64')}` } : {});
+
+export function tokenIn(body) {
+  const token = body?.token ?? body?.access_token;
   if (typeof token !== 'string' || !token) throw new Error('the registry gave no token');
   return token;
+}
+
+async function pullToken(challenge) {
+  const res = await reach('the registry', tokenRealm(challenge, registryUrl()), { headers: signIn(env.GITHUB_ACTOR, env.GITHUB_TOKEN) });
+  if (!res.ok) throw new Error(`the registry answered ${res.status} for a token`);
+  return tokenIn(await bodyOf(res, 'the registry', 'a token'));
 }
 
 async function registryAnswer(url, accept) {
@@ -145,21 +166,26 @@ async function required(path, accept, what) {
   return found;
 }
 
-function digestOf(reference, what) {
+export function digestOf(reference, what) {
   if (!DIGEST.test(reference?.digest ?? '')) throw new Error(`the registry names no ${what}`);
   return reference.digest;
 }
 
 /* The image of one platform in an index, as each platform's image carries the same labels; attestations name no platform. */
-const platformOf = index => index.manifests?.find(entry => entry.platform && entry.platform.os !== 'unknown');
+export const platformOf = index => index.manifests.find(entry => entry.platform && entry.platform.os !== 'unknown');
+
+/* The revision label of an image configuration, '' when it carries none. */
+export const revisionIn = config => config?.config?.Labels?.[REVISION] ?? '';
+
+/* The manifest of one image: the version's own, or that of a platform when the version names an index of them. */
+const imageManifest = top => (Array.isArray(top.manifests) ? required(`manifests/${digestOf(platformOf(top), 'image of a platform')}`, MANIFESTS, 'image') : top);
 
 /* The revision label of the published app image of the version: null when it is not published, '' when it carries none. */
 async function imageRevision(version) {
   const top = await fromRegistry(`manifests/${version}`, MANIFESTS);
   if (!top) return null;
-  const manifest = Array.isArray(top.manifests) ? await required(`manifests/${digestOf(platformOf(top), 'image of a platform')}`, MANIFESTS, 'image') : top;
-  const config = await required(`blobs/${digestOf(manifest.config, 'image configuration')}`, '*/*', 'configuration');
-  return config.config?.Labels?.[REVISION] ?? '';
+  const manifest = await imageManifest(top);
+  return revisionIn(await required(`blobs/${digestOf(manifest.config, 'image configuration')}`, '*/*', 'configuration'));
 }
 
 /* What each job must know: the images job of a run by hand nothing, release the tag and its release, the rest the tag and
