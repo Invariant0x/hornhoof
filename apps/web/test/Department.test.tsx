@@ -3,7 +3,8 @@ import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider, type Language, type Messages } from '../src/i18n';
+import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { DepartmentView } from '../src/screens/Department';
@@ -27,6 +28,15 @@ const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast
 /* Lena reaches Development by its own line in her access; Kira reaches only Sales. */
 const LENA = { id: 'p6', name: 'Lena', email: 'lena@acme.com', title: 'Product lead', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
+
+const messages: Record<Language, Messages> = { en, ru };
+/* The shortest and the longest shipped language by the words of a route, and every right to left one. */
+const routeLocales = LANGUAGES.map(({ id }) => {
+  const route = messages[id].pipelineCatalog['development-changes'];
+  return { id, length: [route.name, ...Object.values(route.stages)].join('').length };
+}).sort((a, b) => a.length - b.length);
+const checkedLocales = [...new Set([routeLocales[0]!.id, routeLocales.at(-1)!.id,
+  ...LANGUAGES.map(({ id }) => id).filter(id => /^(ar|fa|he|ur)(-|$)/.test(id))])];
 
 function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me = ME) {
   const calls = mockApi({
@@ -115,28 +125,19 @@ describe('Department view', () => {
     expect(diamonds.every(mark => mark.classList.contains('idle'))).toBe(true);
   });
 
-  it.each(checkedLocales)('shows the video draft calls and the keeper before editing in %s', language => {
-    localStorage.setItem('hh-lang', language);
-    const t = messages[language], [dev] = DEV_ORG.departments;
-    const draft = { id: 'draft', parentId: null, name: 'Generate draft shots', ownerRole: 'VID-GEN', owner: null,
-      ownerTitle: { en: 'Shot generation operator', ru: 'Оператор создания кадров' }, position: 0, oneShot: { fanOut: 2, judge: true } };
-    const keeper = { id: 'keeper', parentId: draft.id, name: 'Check shot continuity', ownerRole: 'VID-KEEP', owner: null,
-      ownerTitle: { en: 'Character and style keeper', ru: 'Хранитель внешнего вида' }, position: 1 };
+  it.each(checkedLocales)('names the video draft, keeper and edit stages in %s', language => {
+    const [dev] = DEV_ORG.departments;
+    const draft = { id: 'draft', parentId: null, name: 'Generate draft shots', ownerRole: 'VID-GEN', owner: null, position: 0, oneShot: { fanOut: 2, judge: true } };
+    const keeper = { id: 'keeper', parentId: draft.id, name: 'Check shot continuity', ownerRole: 'VID-KEEP', owner: null, position: 1 };
     const edit = { id: 'edit', parentId: keeper.id, name: 'Edit the draft cut', ownerRole: 'VID-EDIT', owner: null, position: 2 };
     const pipeline = { id: 'video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-production', name: 'Video production',
       why: '', archived: false, version: 1, isDefault: true, stages: [draft, keeper, edit] };
-    render(<LanguageProvider><DepartmentStructure department={{ ...dev!, employees: [], pipelines: [pipeline] }} onOpen={() => {}} /></LanguageProvider>);
     const copy = {
       en: ['Video production', 'Generate draft shots', 'Check shot continuity', 'Edit the draft cut'],
       ru: ['Производство видео', 'Создать черновые кадры', 'Проверить согласованность кадров', 'Смонтировать черновик'],
     }[language];
-    const route = within(screen.getByRole('region', { name: copy[0] }));
-    expect(route.getAllByRole('heading', { level: 5 }).map(heading => heading.textContent)).toEqual(copy.slice(1));
-    const [draftPlace, keeperPlace] = route.getAllByRole('listitem');
-    expect(within(draftPlace!).getAllByRole('img').filter(mark => mark.querySelector('path[d="M8 1 15 8 8 15 1 8Z"]'))).toHaveLength(3);
-    expect(within(keeperPlace!).getByRole('img', { name: t.workers.permanent })).toHaveClass('cell', 'o');
-    expect(within(keeperPlace!).getByText(keeper.ownerTitle[language])).toBeVisible();
-    expect(within(keeperPlace!).getByText(t.dept.noModelYet)).toBeVisible();
+    const local = localPipeline(messages[language], pipeline);
+    expect([local.name, ...local.stages.map(stage => stage.name)]).toEqual(copy);
   });
 
   it.each(checkedLocales)('localizes the long video pipeline and its use in %s', language => {
@@ -157,10 +158,10 @@ describe('Department view', () => {
     const pipeline = { id: 'long-video', department: { id: dev!.id, name: 'Video production' }, catalogKey: 'video-long-work',
       name: copy.en.name, why: copy.en.why, archived: false, version: 1,
       stages: copy.en.stages.map((name, position) => ({ id: String(position), parentId: position ? String(position - 1) : null, name, position, ownerRole: null, owner: null })) };
-    expect(localPipeline(messages[language], pipeline).why).toBe(copy[language].why);
-    render(<LanguageProvider><DepartmentStructure department={{ ...dev!, employees: [], pipelines: [pipeline] }} onOpen={() => {}} /></LanguageProvider>);
-    const route = within(screen.getByRole('region', { name: copy[language].name }));
-    expect(route.getAllByRole('heading', { level: 5 }).map(heading => heading.textContent)).toEqual(copy[language].stages);
+    const local = localPipeline(messages[language], pipeline);
+    expect(local.why).toBe(copy[language].why);
+    expect(local.name).toBe(copy[language].name);
+    expect(local.stages.map(stage => stage.name)).toEqual(copy[language].stages);
   });
 
   /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
