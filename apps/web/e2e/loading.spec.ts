@@ -5,6 +5,9 @@ import { ru } from '../src/i18n/ru';
 import type { SubView } from '../src/types';
 import { serveApi } from './api';
 
+/* The one department serveApi answers with, whose tasks the tracker lists. */
+const DEPARTMENT_ID = 'd2';
+
 /* 19.11: on screens whose data comes in parts, one part showed first and the rest came in with a jump, and nobody could
    tell whether everything had come. While a screen's data is coming, the shared indicator stands where it will be and says
    more is coming; once it came, the indicator goes and nothing already shown moves. A load that fails says why, one past
@@ -44,9 +47,10 @@ const SCREENS: Screen[] = [
   {
     name: 'tracker',
     held: '/api/tasks',
-    open: async page => { await page.goto('/tasks', { waitUntil: 'domcontentloaded' }); },
+    /* A department's list, whose rows are the work the held answer brings. */
+    open: async page => { await page.goto(`/tasks?department=${DEPARTMENT_ID}`, { waitUntil: 'domcontentloaded' }); },
     answer: route => route.fallback(),
-    shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.getByRole('button', { name: words(lang).tracker.views.list, exact: true })],
+    shown: (page, lang) => [page.getByRole('navigation').first(), page.locator('h1.tr-where'), page.getByRole('radio', { name: words(lang).tracker.views.list, exact: true })],
     place: page => page.locator('.tr-main'),
     arrived: page => page.locator('.tr-row').first(),
   },
