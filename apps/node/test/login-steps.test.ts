@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LOGIN_STEPS_FILE, SignInProgress, StepWatch, stepsFile } from '../src/login-steps.js';
+import { LOGIN_STEPS_FILE, readSignedIn, SignInProgress, StepWatch, stepsFile } from '../src/login-steps.js';
 
 /* After the sign-in code, the node tells Hornhoof each step until the plan is ready, and its log keeps when the code came,
    when the plan was ready and how long each step took. A sign-in in the install window runs apart from the node: it
@@ -56,12 +56,75 @@ describe('the steps of a sign-in after its code', () => {
     expect(p.logged.at(-1)).toBe('Sign-in: checking, 0 s after the code (2026-11-19T22:01:12.000Z).');
   });
 
+  it("notes how a sign-in in Hornhoof's window ended as the node sends it", () => {
+    const p = progress();
+    const sent: NodeMessage[] = [];
+    const send = p.shown.passing(m => sent.push(m));
+    p.shown.step('checking');
+    vi.advanceTimersByTime(3_000);
+    send({ type: 'login.done', ok: true, error: null });
+    expect(sent).toEqual([{ type: 'login.done', ok: true, error: null }]);
+    expect(p.logged.at(-1)).toMatch(/^Sign-in: ready 3 s after the code/);
+    send({ type: 'login.step', step: 'saving' });
+    expect(sent).toHaveLength(2);
+    expect(p.logged.filter(l => l.startsWith('Sign-in: ready'))).toHaveLength(1);
+  });
+
+  it('says the plan could not be read after a sign-in, and why in the log', async () => {
+    const p = progress();
+    p.shown.step('signed_in');
+    await p.shown.readPlan(async step => { step('account'); throw new Error('agy models timed out'); });
+    expect(p.steps().map(m => m.step)).toEqual(['signed_in', 'account', 'failed']);
+    expect(p.steps().at(-1)?.error).toBe(SIGNIN_ERRORS.broke);
+    expect(p.logged).toContain('Could not read the plan after its sign-in: agy models timed out');
+  });
+
+  it('checks again when Hornhoof asks: the sign-in, then the plan, or that the program is not signed in', async () => {
+    const read = vi.fn(async (step: (s: 'models') => void) => step('models'));
+    const signedIn = vi.fn(async () => true);
+    const elsewhere = progress();
+    await elsewhere.shown.checkAgain({ holds: false, signedIn, read });
+    expect(elsewhere.sent).toEqual([]);
+    expect(signedIn).not.toHaveBeenCalled();
+    const p = progress();
+    await p.shown.checkAgain({ holds: true, signedIn, read });
+    expect(p.steps().map(m => m.step)).toEqual(['checking', 'signed_in', 'models']);
+    expect(p.logged.at(-1)).toMatch(/^Sign-in: ready 0 s after the code/);
+    const out = progress();
+    await out.shown.checkAgain({ holds: true, signedIn: async () => { throw new Error('agy is gone'); }, read });
+    expect(out.steps().map(m => [m.step, m.error ?? null])).toEqual([['checking', null], ['failed', SIGNIN_ERRORS.signedOut]]);
+  });
+
   it('tells nothing of a sign-in that ended before any step', () => {
     const p = progress();
     p.shown.ended(false);
     p.shown.failed(SIGNIN_ERRORS.stopped, null);
     expect(p.sent).toEqual([]);
     expect(p.logged).toEqual([]);
+  });
+});
+
+describe('what the node reads of its plan once its program signed in or out', () => {
+  const reads = (done: string[]) => ({
+    setup: async () => { done.push('setup'); },
+    account: async () => { done.push('account'); },
+    limits: async () => { done.push('limits'); },
+  });
+
+  it('after a sign-in says each step, and reads the limits at once; a program with a first setup looks whether it needs it', async () => {
+    const done: string[] = [];
+    const steps: string[] = [];
+    await readSignedIn({ setupNeeded: async () => false }, s => { steps.push(s); done.push(`said ${s}`); }, reads(done));
+    expect(done).toEqual(['said setup', 'setup', 'said account', 'account', 'said limits', 'limits', 'said models']);
+    const plain: string[] = [];
+    await readSignedIn({}, s => plain.push(s), reads([]));
+    expect(plain).toEqual(['account', 'limits', 'models']);
+  });
+
+  it('after a sign-out says nothing and leaves the limits to their next look', async () => {
+    const done: string[] = [];
+    await readSignedIn(null, undefined, reads(done));
+    expect(done).toEqual(['setup', 'account']);
   });
 });
 
@@ -80,6 +143,17 @@ describe('the steps of a sign-in in the install window', () => {
     const runs = readFileSync(join(dir, LOGIN_STEPS_FILE), 'utf8').trim().split('\n').map(l => (JSON.parse(l) as { run: string }).run);
     expect(new Set(runs).size).toBe(1);
     expect(runs[0]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('say a step that only follows the code, such as the first setup, only once a step was', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-steps-'));
+    const file = stepsFile(dir);
+    file.after('setup');
+    expect(readFileSync(join(dir, LOGIN_STEPS_FILE), 'utf8')).toBe('');
+    file.step('checking');
+    file.after('setup');
+    file.after('signed_in');
+    expect(lines(dir)).toEqual([{ step: 'checking' }, { step: 'setup' }, { step: 'signed_in' }]);
   });
 
   it('say why the sign-in failed only once it began, with the last line through the masks', () => {
@@ -101,7 +175,7 @@ describe('the steps of a sign-in in the install window', () => {
     writeFileSync(join(dir, LOGIN_STEPS_FILE), '{"step":"models"}\n');
     const p = progress();
     const signedIn = vi.fn(async (step: (s: 'models' | 'limits') => void) => { step('limits'); step('models'); });
-    const watch = new StepWatch({ dir, progress: p.shown, signedIn, everyMs: 1000 });
+    const watch = new StepWatch({ dir, progress: p.shown, holds: true, signedIn, everyMs: 1000 });
     watch.start();
     await vi.advanceTimersByTimeAsync(1000);
     expect(p.steps()).toEqual([]);
@@ -121,7 +195,7 @@ describe('the steps of a sign-in in the install window', () => {
   it('pass on a failure with its reason', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-steps-'));
     const p = progress();
-    const watch = new StepWatch({ dir, progress: p.shown, signedIn: vi.fn(async () => {}), everyMs: 1000 });
+    const watch = new StepWatch({ dir, progress: p.shown, holds: true, signedIn: vi.fn(async () => {}), everyMs: 1000 });
     watch.start();
     const file = stepsFile(dir);
     file.step('checking');
@@ -131,10 +205,21 @@ describe('the steps of a sign-in in the install window', () => {
     watch.stop();
   });
 
+  it('are not watched on a node that holds no sign-in of its own', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-steps-'));
+    const p = progress();
+    const watch = new StepWatch({ dir, progress: p.shown, holds: false, signedIn: vi.fn(async () => {}), everyMs: 1000 });
+    watch.start();
+    stepsFile(dir).step('checking');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(p.steps()).toEqual([]);
+    watch.stop();
+  });
+
   it('take a line torn in the middle of its writing on the next look', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-steps-'));
     const p = progress();
-    const watch = new StepWatch({ dir, progress: p.shown, signedIn: vi.fn(async () => {}), everyMs: 1000 });
+    const watch = new StepWatch({ dir, progress: p.shown, holds: true, signedIn: vi.fn(async () => {}), everyMs: 1000 });
     watch.start();
     stepsFile(dir);
     appendFileSync(join(dir, LOGIN_STEPS_FILE), '{"step":"che');

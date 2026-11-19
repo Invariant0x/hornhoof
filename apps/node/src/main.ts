@@ -31,7 +31,7 @@ import { PhoneExecutor } from './phones/executor.js';
 import { keyboardApk } from './phones/keyboard.js';
 import { CheckedInstalls } from './program-check.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
-import { SignInProgress, StepWatch, stepsFile } from './login-steps.js';
+import { readSignedIn, SignInProgress, StepWatch, stepsFile } from './login-steps.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
@@ -340,26 +340,19 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     : null;
   /* A plan's connection after its sign-in code, step by step, until it is ready: Hornhoof shows it, the log keeps its times. */
   const progress = new SignInProgress({ send: emit, log });
-  const login =
-    loginSetup && !builtin
-      ? new LoginTerminal({
-          setup: loginSetup,
-          dir,
-          home: credHome,
-          send: m => {
-            if (m.type === 'login.done') progress.ended(m.ok);
-            sendOrKeep(m);
-          },
-          secrets: () => [...known],
-          signedIn: step => signedInNow(step),
-          step: step => progress.step(step),
-          install,
-          log: onMachine,
-        })
-      : null;
+  const login = loginTerminal(loginSetup, builtin, {
+    dir,
+    home: credHome,
+    send: progress.passing(sendOrKeep),
+    secrets: () => [...known],
+    signedIn: step => signedInNow(step),
+    step: step => progress.step(step),
+    install,
+    log: onMachine,
+  });
   /* A sign-in in the install window runs apart from the node and leaves its steps in a file, which the node passes on. */
-  const installSteps = holdsSignIn ? new StepWatch({ dir, progress, signedIn: step => signedInNow(step) }) : null;
-  installSteps?.start();
+  const installSteps = new StepWatch({ dir, progress, holds: holdsSignIn, signedIn: step => signedInNow(step) });
+  installSteps.start();
   /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
   await login?.clear();
   /* A plan's sign-in can reach a new node from Hornhoof with no sign-in on the machine, which used to install it. */
@@ -565,7 +558,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       case 'login.stop':
         return login?.stop();
       case 'login.check':
-        return holdsSignIn ? inOrder(() => checkAgain()) : undefined;
+        return inOrder(() => progress.checkAgain({ holds: holdsSignIn, signedIn: signedInHere, read: step => signedInNow(step) }));
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
@@ -630,31 +623,12 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   async function signedInNow(step?: (s: SigninStep) => void) {
     await learn();
     loggedIn = await signedInHere();
-    if (step && single?.setupNeeded) step('setup');
-    await setup.check(loggedIn);
-    step?.('account');
-    account = await readAccount();
-    if (step) {
-      step('limits');
-      planLimits.looked(await readLimits(), online);
-      step('models');
-    }
+    await readSignedIn(single, step, {
+      setup: () => setup.check(loggedIn),
+      account: async () => { account = await readAccount(); },
+      limits: async () => planLimits.looked(await readLimits(), online),
+    });
     await status();
-  }
-
-  /* Hornhoof asks again after a connection that failed or took too long: the node checks its program's sign-in, then reads
-     the plan, saying each step. */
-  async function checkAgain() {
-    progress.step('checking');
-    if (!(await signedInHere().catch(() => false))) return progress.failed(SIGNIN_ERRORS.signedOut, null);
-    progress.step('signed_in');
-    try {
-      await signedInNow(step => progress.step(step));
-      progress.ended(true);
-    } catch (err) {
-      progress.failed(SIGNIN_ERRORS.broke, null);
-      log(`Could not read the plan after its sign-in: ${message(err)}`);
-    }
   }
 
   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
@@ -816,7 +790,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     clearInterval(reporting);
     clearInterval(renewing);
     clearInterval(checkingBrowser);
-    installSteps?.stop();
+    installSteps.stop();
     void host?.stop();
     void login?.shutdown();
     outbox.close();
@@ -978,20 +952,27 @@ async function planWord(dir: string, provider: ProviderId): Promise<string> {
   return (await adapter.setupNeeded?.().catch(() => false)) ? 'needs_setup' : 'ready';
 }
 
+type LoginParts = Omit<ConstructorParameters<typeof LoginTerminal>[0], 'setup'>;
+
+/* The sign-in terminal of Hornhoof's window, on a node that installs its own program. */
+function loginTerminal(setup: LoginSetup | undefined, builtin: unknown, parts: LoginParts): LoginTerminal | null {
+  return setup && !builtin ? new LoginTerminal({ setup, ...parts }) : null;
+}
+
 /* The first setup its owner passes on the machine after the sign-in, such as accepting agy's terms; an exit code when it
    did not finish. */
 type Steps = ReturnType<typeof stepsFile>;
 
-async function firstSetup(adapter: ProviderAdapter, name: string, io: Io, urlFile: string, steps?: Steps): Promise<number | null> {
+async function firstSetup(adapter: ProviderAdapter, name: string, io: Io, urlFile: string, steps: Steps): Promise<number | null> {
   if (!adapter.setup) return null;
   try {
     if (!(await adapter.setupNeeded?.())) return null;
-    if (steps?.begun) steps.step('setup');
+    steps.after('setup');
     await adapter.setup({ input: io.stdin, output: io.stdout, urlFile });
     return null;
   } catch (err) {
     io.stderr.write(`The first setup of ${name} did not finish: ${message(err)}\n`);
-    steps?.failed(SIGNIN_ERRORS.unfinished, message(err));
+    steps.failed(SIGNIN_ERRORS.unfinished, message(err));
     return 1;
   }
 }
@@ -1037,7 +1018,7 @@ async function login(dir: string, io: Io): Promise<number> {
   }
   const unfinished = await firstSetup(adapter, name, io, join(dir, 'login-url'), steps);
   if (unfinished !== null) return unfinished;
-  if (steps.begun) steps.step('signed_in');
+  steps.after('signed_in');
   io.stdout.write('Logged in.\n');
   return 0;
 }

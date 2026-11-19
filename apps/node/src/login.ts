@@ -237,7 +237,6 @@ export class LoginTerminal {
         this.opts.log?.(endedEarly(code, text, this.opts.secrets()));
         early = { code, line: plainOutput(text).includes(TOKEN_START) ? null : lastWords(text, this.opts.secrets()) };
       }
-      if (code === 0) this.step('checking');
       error = code !== 0 ? UNFINISHED : await this.keep(run, snapshot?.programOutput?.text ?? '', screen);
     } catch {
       error = BROKE;
@@ -248,9 +247,10 @@ export class LoginTerminal {
     await this.finish(run, error, early);
   }
 
-  /* Takes the new sign-in into the plan's home; the words of what went wrong, or null. One stopped while its program
-     checks it keeps nothing. */
+  /* Takes the new sign-in into the plan's home, saying first that it checks it; the words of what went wrong, or null. One
+     stopped while its program checks it keeps nothing. */
   private async keep(run: number, output: string, screen: string): Promise<string | null> {
+    this.step('checking');
     const { provider, bin, env } = this.opts.setup;
     const { dir, home } = this.opts;
     const programEnv = { ...env, HOME: this.scratch };

@@ -506,6 +506,38 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
+type PlanReads = ReturnType<typeof usePlanCommands>;
+type ConnectionParts = {
+  setSubs: PlanReads['setSubs'];
+  load: PlanReads['load'];
+  run: (action: () => Promise<void>) => Promise<void>;
+  signIn: (sub: SubView, fresh: boolean) => unknown;
+};
+
+/* Where a plan's connection is after its sign-in code comes as its node says it; once it ended, the plans are read again
+   and show ready or what to do. From one that stalled: a plan that signs in from Hornhoof tries again with a new sign-in,
+   one that signs in on its machine has its node check the sign-in there again; or it stops. */
+function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
+  const setConnection = (id: string, connecting: SubView['connecting']) => setSubs(list => list?.map(s => (s.id === id ? { ...s, connecting } : s)) ?? null);
+  useStream(m => {
+    if (m.type !== 'subscription.connecting') return;
+    setConnection(m.subscriptionId, m.connecting);
+    if (m.connecting === null) void load();
+  });
+  const retryConnection = (sub: SubView) =>
+    run(async () => {
+      if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
+      else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
+      setConnection(sub.id, null);
+    });
+  const cancelConnection = (sub: SubView) =>
+    run(async () => {
+      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
+      setConnection(sub.id, null);
+    });
+  return { retryConnection, cancelConnection };
+}
+
 /* What could not load, said on top of the page: the plans' own failure stands where they would until they came. */
 const failureOnTop = (subs: SubView[] | null, plans: unknown, commands: unknown) => (subs ? plans ?? commands : commands);
 
@@ -617,27 +649,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     void load();
   };
 
-  /* Where a plan's connection is after its sign-in code comes as its node says it; once it ended, the plan is read again,
-     and shows ready or what to do. */
-  const setConnection = (id: string, connecting: SubView['connecting']) => setSubs(list => list?.map(s => (s.id === id ? { ...s, connecting } : s)) ?? null);
-  useStream(m => {
-    if (m.type !== 'subscription.connecting') return;
-    setConnection(m.subscriptionId, m.connecting);
-    if (m.connecting === null) void load();
-  });
-  /* A plan that signs in from Hornhoof tries again with a new sign-in; one that signs in on its machine has its node check
-     the sign-in there again. */
-  const retryConnection = (sub: SubView) =>
-    run(async () => {
-      if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
-      else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
-      setConnection(sub.id, null);
-    });
-  const cancelConnection = (sub: SubView) =>
-    run(async () => {
-      await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
-      setConnection(sub.id, null);
-    });
+  const { retryConnection, cancelConnection } = usePlanConnections({ setSubs, load, run, signIn });
 
   const remove = (sub: SubView) =>
     run(async () => {
