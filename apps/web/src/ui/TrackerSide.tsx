@@ -32,6 +32,9 @@ type Props = {
 type Tone = 'attention' | 'quiet' | 'plain' | 'working';
 const TONE_CLASS: Record<Tone, string> = { attention: 'tr-count tr-badge attention', quiet: 'tr-count tr-badge', plain: 'tr-count', working: 'tr-count working' };
 
+/* How far in a row stands under the row above it. */
+const LEVEL_CLASS = { 1: ' tr-l1', 2: ' tr-l2' } as const;
+
 type ItemProps = {
   on?: boolean; onClick: () => void; count?: number; tone?: Tone; icon: ReactNode; level?: 1 | 2; more?: boolean;
   /* A second line under the name, and words at the end of the row, both told to screen readers after the name. */
@@ -44,7 +47,7 @@ function Item({ on = false, onClick, count, tone = 'quiet', icon, level, more, s
   const id = useId();
   const described = [sub !== undefined && `${id}-s`, end !== undefined && `${id}-e`].filter(Boolean).join(' ');
   return (
-    <button className={`tr-item${level ? ` tr-l${level}` : ''}${more ? ' more' : ''}${on ? ' on' : ''}`} type="button" aria-current={on ? 'page' : undefined}
+    <button className={`tr-item${level ? LEVEL_CLASS[level] : ''}${more ? ' more' : ''}${on ? ' on' : ''}`} type="button" aria-current={on ? 'page' : undefined}
       aria-expanded={expanded} aria-labelledby={count === undefined ? `${id}-n` : `${id}-n ${id}-c`} aria-describedby={described || undefined} onClick={onClick}>
       <span className="tr-item-name">
         {icon}
