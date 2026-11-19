@@ -1,6 +1,8 @@
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -10,6 +12,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parse } from 'yaml';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { selfSigned } from '../src/modules/tls/x509.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
@@ -540,9 +543,7 @@ describe('whether a version is out, as the images, publish and release jobs look
   const ACTOR = 'octocat';
   const TAG_OBJECT = 'f'.repeat(40);
   const INDEX = `sha256:${'1'.repeat(64)}`;
-  const AMD64 = `sha256:${'2'.repeat(64)}`;
   const ATTESTATION = `sha256:${'3'.repeat(64)}`;
-  const CONFIG = `sha256:${'4'.repeat(64)}`;
   const IMAGE = `ghcr.io/invariant0x/hornhoof:${VERSION}`;
 
   type Where = 'none' | 'here' | 'other';
@@ -577,11 +578,19 @@ describe('whether a version is out, as the images, publish and release jobs look
     return { dir, sha, other };
   }
 
-  /* GitHub's API under /api, and a registry that asks for a token first, as ghcr.io does, and serves blobs from elsewhere. */
+  /* GitHub's API under /api, and a registry that asks for a token first, as ghcr.io does, and serves blobs from elsewhere over
+     https, with a certificate the job trusts through ca. */
   async function outside(world: World, sha: string, other: string) {
     const asked: Ran['asked'] = [];
     let base = '';
+    let storage = '';
     const revision = { here: sha, other, unlabeled: null }[world.image as 'here' | 'other' | 'unlabeled'];
+    /* What is read by its digest hashes to that digest, as the registry's content does. */
+    const digestOf = (body: unknown) => `sha256:${createHash('sha256').update(JSON.stringify(body)).digest('hex')}`;
+    const imageConfig = { architecture: 'amd64', os: 'linux', rootfs: { type: 'layers', diff_ids: [] }, config: { Labels: revision ? { 'org.opencontainers.image.revision': revision } : {} } };
+    const CONFIG = digestOf(imageConfig);
+    const platform = { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] };
+    const AMD64 = digestOf(platform);
     const reply = (res: ServerResponse, code: number, body?: unknown, headers: Record<string, string> = {}) => {
       res.writeHead(code, { 'content-type': 'application/json', ...headers });
       res.end(body === undefined ? '' : JSON.stringify(body));
@@ -593,8 +602,8 @@ describe('whether a version is out, as the images, publish and release jobs look
         if (!world.tag || world.tag === 'none') return reply(res, 404, { message: 'Not Found' });
         return reply(res, 200, { ref: `refs/tags/v${VERSION}`, object: world.lightweight ? { type: 'commit', sha: world.tag === 'here' ? sha : other } : { type: 'tag', sha: TAG_OBJECT } });
       }
-      if (path === `/repos/acme/shop/git/tags/${TAG_OBJECT}` && !world.lost) return reply(res, 200, { tag: `v${VERSION}`, object: { type: 'commit', sha: world.tag === 'here' ? sha : other } });
-      if (path === `/repos/acme/shop/releases/tags/v${VERSION}`) return world.release ? reply(res, 200, { tag_name: `v${VERSION}` }) : reply(res, 404, { message: 'Not Found' });
+      if (path === `/repos/acme/shop/git/tags/${TAG_OBJECT}` && !world.lost) return reply(res, 200, { sha: TAG_OBJECT, tag: `v${VERSION}`, object: { type: 'commit', sha: world.tag === 'here' ? sha : other } });
+      if (path === `/repos/acme/shop/releases/tags/v${VERSION}`) return world.release ? reply(res, 200, { id: 41, tag_name: `v${VERSION}` }) : reply(res, 404, { message: 'Not Found' });
       return reply(res, 404, { message: 'Not Found' });
     };
     const registry = (req: IncomingMessage, res: ServerResponse, url: string) => {
@@ -604,13 +613,12 @@ describe('whether a version is out, as the images, publish and release jobs look
         if (world.refused) return reply(res, 403, { errors: [{ code: 'DENIED' }] });
         return req.headers.authorization === basic ? reply(res, 200, { token: 'pull-token' }) : reply(res, 401, { errors: [{ code: 'UNAUTHORIZED' }] });
       }
-      if (url === '/cdn/config') return reply(res, 200, { architecture: 'amd64', os: 'linux', config: { Labels: revision ? { 'org.opencontainers.image.revision': revision } : {} } });
       if (req.headers.authorization !== 'Bearer pull-token') {
         return reply(res, 401, { errors: [{ code: 'UNAUTHORIZED' }] }, { 'www-authenticate': `Bearer realm="${base}/token",service="ghcr.io",scope="repository:invariant0x/hornhoof:pull"` });
       }
       if (url === `/v2/invariant0x/hornhoof/manifests/${VERSION}`) {
         if (!world.image || world.image === 'none') return reply(res, 404, { errors: [{ code: 'MANIFEST_UNKNOWN' }] });
-        if (world.single) return reply(res, 200, { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] }, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
+        if (world.single) return reply(res, 200, platform, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
         return reply(res, 200, {
           schemaVersion: 2,
           mediaType: 'application/vnd.oci.image.index.v1+json',
@@ -621,9 +629,9 @@ describe('whether a version is out, as the images, publish and release jobs look
         }, { 'content-type': 'application/vnd.oci.image.index.v1+json', 'docker-content-digest': INDEX });
       }
       if (url === `/v2/invariant0x/hornhoof/manifests/${AMD64}`) {
-        return reply(res, 200, { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] }, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
+        return reply(res, 200, platform, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
       }
-      if (url === `/v2/invariant0x/hornhoof/blobs/${CONFIG}`) return reply(res, 307, undefined, { location: `${base}/cdn/config` });
+      if (url === `/v2/invariant0x/hornhoof/blobs/${CONFIG}`) return reply(res, 307, undefined, { location: `${storage}/cdn/config` });
       return reply(res, 404, { errors: [{ code: 'NAME_UNKNOWN' }] });
     };
     const server = createServer((req, res) => {
@@ -632,13 +640,24 @@ describe('whether a version is out, as the images, publish and release jobs look
       if (url.startsWith('/api/')) return api(req, res, url.slice('/api'.length));
       return registry(req, res, url);
     });
-    await listenIn(server);
-    onTestFinished(() => new Promise<void>(done => {
-      server.closeAllConnections();
-      server.close(() => done());
-    }));
+    const { certPem, keyPem } = await selfSigned('localhost');
+    const cdn = createHttpsServer({ cert: certPem, key: keyPem }, (req, res) => {
+      const url = req.url ?? '';
+      asked.push({ url, authorization: req.headers.authorization });
+      return url === '/cdn/config' ? reply(res, 200, imageConfig) : reply(res, 404, { errors: [{ code: 'BLOB_UNKNOWN' }] });
+    });
+    for (const made of [server, cdn]) {
+      await listenIn(made);
+      onTestFinished(() => new Promise<void>(done => {
+        made.closeAllConnections();
+        made.close(() => done());
+      }));
+    }
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    return { asked, api: `${base}/api`, registry: base };
+    storage = `https://localhost:${(cdn.address() as AddressInfo).port}`;
+    const ca = join(folder(), 'storage.pem');
+    writeFileSync(ca, certPem);
+    return { asked, api: `${base}/api`, registry: base, ca };
   }
 
   /* A gh that asks the fake GitHub for `gh api` and only writes down what else it was told. */
@@ -668,7 +687,7 @@ describe('whether a version is out, as the images, publish and release jobs look
      looks, for the images and publish jobs, whose later steps build and move images. */
   async function run(name: 'images' | 'publish' | 'release', world: World, event = 'push'): Promise<Ran> {
     const { dir, sha, other } = checkout(world);
-    const { asked, api, registry } = await outside(world, sha, other);
+    const { asked, api, registry, ca } = await outside(world, sha, other);
     const stub = gh();
     const temp = folder();
     const own = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GITHUB_|GH_|RUNNER_|HORNHOOF_)/.test(key)));
@@ -693,6 +712,7 @@ describe('whether a version is out, as the images, publish and release jobs look
         GITHUB_OUTPUT: output,
         RUNNER_TEMP: temp,
         HORNHOOF_REGISTRY_URL: world.down === 'registry' ? 'http://127.0.0.1:1' : registry,
+        NODE_EXTRA_CA_CERTS: ca,
         ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, fill(value, context)])),
       };
       const ran = await bash(step.run!, dir, env);
@@ -820,7 +840,7 @@ describe('whether a version is out, as the images, publish and release jobs look
     expect(elsewhere.said).toContain(`The tag v${VERSION} is on commit ${elsewhere.other}, not on this commit ${elsewhere.sha}.`);
     const publish = await run('publish', { tag: 'here', image: 'here', single: true });
     expect(publish.outputs.fresh, publish.said).toEqual({ version: 'out' });
-    expect(publish.asked.map(a => a.url)).not.toContain(`/v2/invariant0x/hornhoof/manifests/${AMD64}`);
+    expect(publish.asked.map(a => a.url).filter(url => url.startsWith('/v2/invariant0x/hornhoof/manifests/sha256:'))).toEqual([]);
   });
 
   it.each([

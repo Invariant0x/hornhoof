@@ -88,7 +88,7 @@ describe('/mcp', () => {
     await job('running');
     await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
-    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: '2222' }).returning();
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: 'Wq9z' }).returning();
     const [sub] = await db.select().from(subscriptions);
     const [bruno, hana] = await db
       .insert(agents)
@@ -101,7 +101,8 @@ describe('/mcp', () => {
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
-    expect(raw).not.toMatch(/sealed|2222/);
+    /* The token's last four are no hex digits, so no id of the answer holds them by chance. */
+    expect(raw).not.toMatch(/sealed|Wq9z/);
     const view = JSON.parse(raw);
     expect(view).toMatchObject({
       name: 'Acme',
