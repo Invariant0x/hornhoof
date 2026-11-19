@@ -103,6 +103,14 @@ async function openHeld(page: Page, screen: Screen, look: { lang: Lang; theme: s
 
 const boxesOf = (blocks: Locator[]) => Promise.all(blocks.map(async b => (await b.boundingBox())!));
 
+/* The turning mark stands before the words, on their first line, not above them. */
+async function expectBeside(mark: Locator, words: Locator) {
+  const [m, w] = await boxesOf([mark, words]);
+  expect(m.x + m.width).toBeLessThanOrEqual(w.x);
+  expect(m.y + m.height / 2).toBeGreaterThan(w.y);
+  expect(m.y + m.height / 2).toBeLessThan(w.y + w.height);
+}
+
 const EN = { lang: 'en' as const, theme: 'cyberpunk', width: 1440 };
 
 for (const screen of SCREENS) {
@@ -113,6 +121,7 @@ for (const screen of SCREENS) {
       const waiting = screen.place(page).getByRole('status').filter({ hasText: t.common.loading });
       await expect(waiting).toBeVisible();
       await expect(waiting.locator('.waiting-mark')).toBeVisible();
+      await expectBeside(waiting.locator('.waiting-mark'), waiting.getByText(t.common.loading, { exact: true }));
       await expect(screen.arrived(page, 'en')).toHaveCount(0);
       for (const block of screen.shown(page, 'en')) await expect(block).toBeVisible();
       const before = await boxesOf(screen.shown(page, 'en'));
