@@ -24,8 +24,7 @@ test('home.gif: Oak Lane home map, Home devices at work, Tasks with two requests
 
   /* 2. Fly into the Home devices department at work. */
   await devices.click();
-  await page.getByRole('button', { name: 'Staff map', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Department schema' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Department schema', exact: true })).toBeVisible();
   await page.waitForTimeout(750);
   await pushStream(page, {
     type: 'pulse',

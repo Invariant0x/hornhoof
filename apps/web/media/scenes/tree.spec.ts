@@ -15,7 +15,7 @@ test('tree.gif: readable Development work tree filling width, idle pickup, merge
 
   await page.goto('/');
   await mapDepartment(page, 'Development').click();
-  await expect(page.getByRole('region', { name: 'Department structure' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Department schema', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tree', exact: true }).click();
   const scroll = page.getByRole('region', { name: 'Work tree', exact: true });
   await expect(scroll).toBeVisible();
