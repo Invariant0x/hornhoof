@@ -1645,9 +1645,6 @@ body:has(.dview) .version-mark { display: none; }
   background-image: none; font-size: 14px; line-height: 1.45;
 }
 :is(.plan-settings, .plan-fallbacks) .select-wrap > select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--line2); box-shadow: none; }
-/* A name keeps its own direction, and stands on the start side of the page's: an English model on a page written right to
-   left starts at the right, as a phrase isolated in its own direction does elsewhere. */
-:is(.plan-settings, .plan-fallbacks) bdi { text-align: -webkit-match-parent; text-align: match-parent; }
 .model-select { grid-template-areas: "value"; }
 .model-select > select, .model-select > .model-value { grid-area: value; }
 .plan-fallbacks .model-select > select { z-index: 1; block-size: 100%; background-color: transparent; color: transparent; }
