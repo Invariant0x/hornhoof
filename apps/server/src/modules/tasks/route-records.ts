@@ -47,14 +47,21 @@ export async function changeRoute(tx: Tx, before: Route, state: Route['state'], 
   const [changed] = await tx.update(taskRoutes).set({ state, paths, revision: before.revision + 1 })
     .where(and(eq(taskRoutes.taskId, before.taskId), eq(taskRoutes.companyId, before.companyId), eq(taskRoutes.revision, before.revision))).returning({ id: taskRoutes.taskId });
   if (!changed) throw new ApiError(409, 'conflict', 'The route changed meanwhile. Read the task again.', 'task_changed');
-  const previous = before.state.stages.find(step => step.stage === 'review' && step.status === 'active');
-  if (!previous?.ownerAgentId) return;
-  const next = state.stages.find(step => step.stage === 'review');
-  if (next?.ownerAgentId === previous.ownerAgentId && next.inputCandidateId === previous.inputCandidateId
-    && (next.status === 'active' || next.status === 'complete')) return;
+  const pastReviewOwner = displacedReviewOwner(before.state, state);
   /* A displaced owner may have left no verdict or repair. Keep the assignment with the route change. */
-  await ownNote(tx, { id: before.taskId, companyId: before.companyId }, {
-    kind: 'comment', text: 'The previous Review assignment was recorded.',
-    data: { pastReviewOwner: { agentId: previous.ownerAgentId, candidateId: previous.inputCandidateId } },
+  if (pastReviewOwner) await ownNote(tx, { id: before.taskId, companyId: before.companyId }, {
+    kind: 'comment', text: 'The previous Review assignment was recorded.', data: { pastReviewOwner },
   });
+}
+
+type Step = Route['state']['stages'][number];
+
+const keepsReview = (previous: Step, next: Step | undefined): boolean => next?.ownerAgentId === previous.ownerAgentId
+  && next.inputCandidateId === previous.inputCandidateId && (next.status === 'active' || next.status === 'complete');
+
+/* The owner of an active Review that a route change takes away, with the candidate it was given. */
+function displacedReviewOwner(before: Route['state'], after: Route['state']): { agentId: string; candidateId: string | null } | null {
+  const previous = before.stages.find(step => step.stage === 'review' && step.status === 'active');
+  if (!previous?.ownerAgentId || keepsReview(previous, after.stages.find(step => step.stage === 'review'))) return null;
+  return { agentId: previous.ownerAgentId, candidateId: previous.inputCandidateId };
 }

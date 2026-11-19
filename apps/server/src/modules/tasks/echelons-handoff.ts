@@ -83,6 +83,12 @@ export async function reopenAuthorReview(ctx: Pick<Ctx, 'db' | 'bus'>, task: Tas
   return { task: row, wakes: next.wakes };
 }
 
+/* A stage with no eligible checker may be skipped where the department allows it, never a Review a legacy route must reopen. */
+async function skipsUnstaffed(db: Ctx['db'], task: Task, stage: EchelonStage, ability: string, security: Route['state']['security'], requireReview: boolean): Promise<boolean> {
+  if (requireReview && stage === 'review') return false;
+  return uncheckable(db, task, stage, ability, security);
+}
+
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate, requireReview = false): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
@@ -97,8 +103,7 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     const excluded = await keptFromReview(ctx.db, task, next.stage, candidate);
     const named = next.ownerAgentId && !excluded.has(next.ownerAgentId) ? next.ownerAgentId : null;
     const owner = await checkerFor(ctx, task, received.producedBy, ability, named, undefined, excluded);
-    const requiredReview = requireReview && next.stage === 'review';
-    if (!owner && !requiredReview && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
+    if (!owner && await skipsUnstaffed(ctx.db, task, next.stage, ability, route.state.security, requireReview)) {
       stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
       skipped.push(next.stage);
       continue;
