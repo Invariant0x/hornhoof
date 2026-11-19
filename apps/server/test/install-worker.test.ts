@@ -289,6 +289,18 @@ describe('install.sh on a machine that has the core', () => {
     expect(stuck.calls.some(call => call.startsWith('docker run -d'))).toBe(true);
   });
 
+  it.each([[[]], [['--urgent']]])('leaves a node whose host names Docker does not say running as it was, %j', args => {
+    /* Not even pointed at the machine's own front: its volume stays as its container does. */
+    const { shared } = withCore({ STUB_EXTRA_HOSTS: `${NODE}=host.docker.internal:host-gateway`, STUB_EXTRA_HOSTS_UNREAD: NODE });
+    const r = install({ args, env: shared });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`Could not read the host names ${NODE} was started with, so ${NODE} stays as it is and goes on running.`);
+    const changed = r.calls.filter(
+      call => call.includes(NODE) && (call.includes('prepare-stop') || / (set-server|wait-update)$/.test(call) || /^docker (stop|rename|update|rm|run -d) /.test(call)),
+    );
+    expect(changed).toEqual([]);
+  });
+
   it('leaves the nodes of a machine with no core where they are', () => {
     const r = install({ args: [], env: { STUB_CONTAINERS: `${NODE}=${SERVER}`, STUB_NODE_SERVERS: `${NODE}=${SERVER}` } });
     expect(r.code).toBe(0);
