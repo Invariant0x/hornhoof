@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.34.5] - 2026-11-19
+
+### Fixed
+
+- Department cards, the head card, role frames and the hint show every word and grow taller instead of cutting text.
+
 ## [0.34.4] - 2026-11-19
 
 ### Fixed
