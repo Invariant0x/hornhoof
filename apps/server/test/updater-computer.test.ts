@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,17 @@ describe('updater, the computer', () => {
   };
   const later = () => NOW_SEC + 3600;
 
+  function legacyQueueOwner(s: Stand, uid: string) {
+    const tools = join(s.dir, 'queue-owner');
+    mkdirSync(tools);
+    writeFileSync(
+      join(tools, 'stat'),
+      '#!/bin/sh\ncase "$*:$PWD" in\n  "-c %u .:$LEGACY_QUEUE"|"-f %u .:$LEGACY_QUEUE") printf "%s\\n" "$LEGACY_UID" ;;\n  *) exec /usr/bin/stat "$@" ;;\nesac\n',
+      { mode: 0o755 },
+    );
+    return { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin`, LEGACY_QUEUE: join(realpathSync(s.control), 'computer'), LEGACY_UID: uid };
+  }
+
   it('removes old computer files, logging only the count, while a keeper request runs', async () => {
     const s = stand();
     const shared = join(s.control, 'computer');
@@ -54,7 +65,7 @@ describe('updater, the computer', () => {
     writeFileSync(join(shared, 'old.started'), '');
     access(s, later());
     command(s, 'keeper', 'recorded sample');
-    const r = await runOnce(s, null, env);
+    const r = await runOnce(s, null, legacyQueueOwner(s, '1000'));
     expect(r.code).toBe(0);
     expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-keeper']);
     expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-shared'));
@@ -74,7 +85,7 @@ describe('updater, the computer', () => {
     writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec: later(), until: null, asked: null }));
     writeFileSync(join(shared, 'dropped.json'), JSON.stringify({ id: 'dropped', command: 'private sample', timeout: 30 }));
     writeFileSync(join(shared, 'k1.started'), '');
-    const r = await runOnce(s, null, env);
+    const r = await runOnce(s, null, legacyQueueOwner(s, '1000'));
     expect(r.code).toBe(0);
     expect(r.calls.filter(call => call.startsWith('docker'))).toEqual([]);
     expect(r.out.match(/Removed 2 files from the old computer queue\./g) ?? []).toHaveLength(1);
@@ -137,7 +148,7 @@ describe('updater, the computer', () => {
     const r = await runOnce(s, null, elsewhere(s, '*/computer'));
     expect(r.code).toBe(0);
     expect(r.calls).toEqual([]);
-    expect(r.out).not.toContain('old computer queue');
+    expect(r.out).toContain('Skipped the old computer queue');
     expect(readdirSync(join(s.computerControl, 'computer'))).toEqual(['c5.json']);
     expect(readdirSync(shared)).toEqual(['old.json']);
   });
@@ -152,6 +163,46 @@ describe('updater, the computer', () => {
     expect(readdirSync(join(s.computerControl, 'computer')).sort()).toEqual(['c6.json', 'c6.started']);
   });
 
+  it('runs no command when the system places its private start-marker folder elsewhere', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const r = await runOnce(s, null, elsewhere(s, '*/.started.*'));
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Computer request refused: its start marker could not be created.');
+    expect(readdirSync(join(s.computerControl, 'computer'))).toEqual(['sample.json']);
+  });
+
+  it('keeps processing requests while named pipes occupy a heartbeat, start marker and answer', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'marked', 'recorded sample');
+    command(s, 'answered', 'recorded sample');
+    command(s, 'next', 'recorded sample');
+    const queue = join(s.computerControl, 'computer');
+    const pipes = [join(s.computerControl, 'alive'), join(queue, 'marked.started'), join(queue, 'answered.out.json')];
+    expect(spawnSync('mkfifo', pipes).status).toBe(0);
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-next']);
+    expect(answer(s, 'next')).toMatchObject({ exit: 0 });
+    expect(lstatSync(join(s.control, 'alive')).isFile()).toBe(true);
+    expect(pipes.every(path => lstatSync(path).isFIFO())).toBe(true);
+  }, 10_000);
+
+  it('leaves the old queue alone when its owner is not UID 1000', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    mkdirSync(shared);
+    const files = ['old.json', 'old.json.new', 'old.started'];
+    for (const file of files) writeFileSync(join(shared, file), 'recorded contents');
+    const r = await runOnce(s, null, legacyQueueOwner(s, '0'));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Skipped the old computer queue');
+    expect(readdirSync(shared).sort()).toEqual(files);
+  });
+
   it('clears only old queue entries without following file or directory links', async () => {
     const s = stand();
     const shared = join(s.control, 'computer');
@@ -160,9 +211,10 @@ describe('updater, the computer', () => {
     const sample = join(elsewhere, 'sample.json');
     writeFileSync(sample, 'recorded contents');
     symlinkSync(elsewhere, shared);
-    const linked = await runOnce(s, null, env);
+    const owned = legacyQueueOwner(s, '1000');
+    const linked = await runOnce(s, null, owned);
     expect(linked.code).toBe(0);
-    expect(linked.out).not.toContain('old computer queue');
+    expect(linked.out).toContain('Skipped the old computer queue');
     expect(readFileSync(sample, 'utf8')).toBe('recorded contents');
 
     rmSync(shared);
@@ -172,7 +224,7 @@ describe('updater, the computer', () => {
     writeFileSync(join(shared, 'old.out.json.new'), '{}');
     mkdirSync(join(shared, 'directory.json'));
     writeFileSync(join(shared, 'notes'), 'recorded notes');
-    const cleaned = await runOnce(s, null, env);
+    const cleaned = await runOnce(s, null, owned);
     expect(cleaned.code).toBe(0);
     expect(cleaned.out).toContain('Removed 3 files from the old computer queue.');
     expect(cleaned.out).not.toContain('old.json');
@@ -211,12 +263,12 @@ describe('updater, the computer', () => {
     writeFileSync(
       join(tools, 'mv'),
       `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
-        `case "$last" in ../alive) ln -s '${target}' ../alive ;; esac\nexec /bin/mv "$@"\n`,
+        `case "$last" in */alive) ln -s '${target}' "$last" ;; esac\nexec /bin/mv "$@"\n`,
       { mode: 0o755 },
     );
     const r = await runOnce(s, null, { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` });
     expect(r.code).toBe(0);
-    expect(readFileSync(moves, 'utf8')).toContain('./alive ../alive');
+    expect(readFileSync(moves, 'utf8')).toMatch(/\.\/alive \S+\/alive/);
     expect(lstatSync(join(s.computerControl, 'alive')).isFile()).toBe(true);
     expect(existsSync(target)).toBe(false);
     expect(readdirSync(s.computerControl).filter(name => name.startsWith('.alive.'))).toEqual([]);
@@ -332,7 +384,7 @@ describe('updater, the computer', () => {
   function onFullVolume(s: Stand) {
     const full = join(s.dir, 'full-volume');
     mkdirSync(full);
-    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\n[ "$1" != -d ] || exit 1\nexec /usr/bin/mktemp "$@"\n', { mode: 0o755 });
+    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\ncase "$*" in "-d .answer."*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n', { mode: 0o755 });
     return { ...env, PATH: `${full}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
   }
 

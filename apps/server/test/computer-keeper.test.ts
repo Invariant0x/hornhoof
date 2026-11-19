@@ -144,6 +144,19 @@ describe("a machine's keeper and its computer access", () => {
     expect(s.asked.at(-1)?.path).toContain('&updater=0&');
   });
 
+  it('keeps a heartbeat alive after a backward clock step of up to five seconds', async () => {
+    const s = stand();
+    const carrier = s.make();
+    carrier.prepare();
+    s.alive();
+    s.advance(-5_000);
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=1&');
+    s.advance(-1);
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=0&');
+  });
+
   it('closes on a refusal, and when it hears nothing for a minute', async () => {
     for (const silence of [new Error('socket hang up'), { status: 503, body: null }, 'never'] as Answer[]) {
       const s = stand();
