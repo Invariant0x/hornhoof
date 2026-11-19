@@ -179,6 +179,47 @@ describe('startup tool readiness', () => {
 });
 
 describe('playwrightVersionIn', () => {
+  it('limits regex input to one line while reading a pnpm workspace lockfile', () => {
+    const lock = readFileSync(new URL('./fixtures/browser/pnpm-lock.yaml', import.meta.url), 'utf8');
+    const repo = makeTemp();
+    writeFileSync(join(repo, 'pnpm-lock.yaml'), lock);
+    const longestLine = Math.max(...lock.split('\n').map(line => line.length));
+    const exec = RegExp.prototype.exec;
+    let longestRegexInput = 0;
+    const regex = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, input: string) {
+      longestRegexInput = Math.max(longestRegexInput, input.length);
+      return exec.call(this, input);
+    });
+    let version: string | null;
+    try {
+      version = playwrightVersionIn(repo);
+    } finally {
+      regex.mockRestore();
+    }
+
+    expect(version).toBe('1.65.1');
+    expect(longestRegexInput).toBeLessThanOrEqual(longestLine);
+  });
+
+  it('skips a pnpm workspace link and reads the next Playwright entry with CRLF line endings', () => {
+    const repo = makeTemp();
+    writeFileSync(join(repo, 'pnpm-lock.yaml'), [
+      'dependencies:',
+      '  playwright:',
+      '    specifier: workspace:*',
+      '    version: link:../playwright',
+      '  typescript:',
+      '    specifier: 5.8.3',
+      '    version: 5.8.3',
+      'devDependencies:',
+      '  "@playwright/test":',
+      '    specifier: 1.65.2-beta.1',
+      '    version: "1.65.2-beta.1"',
+    ].join('\r\n'));
+
+    expect(playwrightVersionIn(repo)).toBe('1.65.2-beta.1');
+  });
+
   it('reads @playwright/test version from root or workspace entries in package-lock.json', () => {
     const repo = makeTemp();
     writeFileSync(
