@@ -10,13 +10,34 @@ check_setting() {
   [ "$(settings --user current get "$1" "$2" 2>/dev/null)" = "$3" ] || echo "$4"
 }
 
+brightness_integer() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -le 2147483647 ] 2>/dev/null
+}
+
+screen_brightness() { settings --user current get system screen_brightness 2>/dev/null; }
+
+check_brightness() {
+  # The legacy power dump gives a setting integer. Newer Android can dump a normalized float.
+  maximum=$(printf '%s\n' "$power" | sed -n 's/^[[:space:]]*mScreenBrightnessSettingMaximum=\([0-9][0-9]*\)[[:space:]]*$/\1/p')
+  if ! brightness_integer "$maximum" || [ "$maximum" -eq 0 ]; then
+    maximum=$(cmd overlay lookup android android:integer/config_screenBrightnessSettingMaximum 2>/dev/null) || return 1
+    brightness_integer "$maximum" && [ "$maximum" -gt 0 ] || return 1
+  fi
+  target=$(awk -v "maximum=$maximum" 'BEGIN { printf "%d\n", int(maximum * 0.4 + 0.5) }') || return 1
+  check_setting system screen_brightness_mode 0 brightness
+  check_setting secure reduce_bright_colors_activated 0 brightness
+  current=$(screen_brightness) && brightness_integer "$current" || return 1
+  if [ "$current" -lt "$target" ]; then
+    settings --user current put system screen_brightness "$target" >/dev/null 2>&1
+    current=$(screen_brightness) && brightness_integer "$current" && [ "$current" -ge "$target" ] || return 1
+  fi
+}
+
 check_setting global stay_on_while_plugged_in 7 awake
 check_setting system screen_off_timeout 2147483647 awake
 check_setting secure sleep_timeout -1 awake
 check_setting secure attentive_timeout -1 awake
-check_setting system screen_brightness_mode 0 brightness
-check_setting system screen_brightness 0 brightness
-check_setting secure reduce_bright_colors_activated 0 brightness
 check_setting global low_power_sticky 0 batterySaver
 check_setting global automatic_power_save_mode 0 batterySaver
 check_setting global low_power_trigger_level 0 batterySaver
@@ -43,6 +64,7 @@ awake() { printf '%s\n' "$power" | grep -Eq 'mWakefulness=Awake|mWakefulnessRaw=
 adaptive_off() { printf '%s\n' "$power" | grep -Eq 'adaptive=false|mAdaptiveEnabled=false'; }
 
 power=$(dumpsys power 2>/dev/null)
+check_brightness || echo brightness
 if ! awake; then
   input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
   reread_power=1

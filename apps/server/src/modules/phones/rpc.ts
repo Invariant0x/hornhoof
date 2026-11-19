@@ -47,7 +47,8 @@ export function phoneNodeMessage(ctx: Ctx, node: NodeIdentity, message: NodeMess
     else phones.capable.delete(key);
     if (message.phones && message.phoneList) phones.lists.add(key);
     else phones.lists.delete(key);
-    if (message.phones && message.phoneBaseline) phones.baseline.add(key);
+    // Older baseline checks can lower the screen brightness set by a person.
+    if (message.phones && message.phoneBaseline && message.phoneBrightnessFloor) phones.baseline.add(key);
     else phones.baseline.delete(key);
     return false;
   }
