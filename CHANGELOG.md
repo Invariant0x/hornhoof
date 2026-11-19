@@ -7,6 +7,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+## [0.39.3] - 2026-11-19
+
+### Fixed
+
+- On a phone, a department's head card no longer opens under the department's name: it starts 8 px below it, with or without a banner over the map.
+
 ## [0.39.2] - 2026-11-19
 
 ### Fixed
