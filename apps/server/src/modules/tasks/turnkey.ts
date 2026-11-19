@@ -52,20 +52,25 @@ async function requireNamed(ctx: Reader, repo: IntegrationTarget['repo'], own: O
   if (!(await branchHolds(ctx, repo, named.commit, named.baseCommit))) throw refuse(409, 'task_invalid', `${named.commit} does not hold ${named.baseCommit}. Name as turnkey.baseCommit the commit of main or the turn branch your branch started from.`);
 }
 
+/* The work's own branch, task-<number>, as the repository says it is now: none where the repository has no such branch. */
+async function ownBranchOf(readCommit: NonNullable<Ctx['readCommit']>, repo: IntegrationTarget['repo'], task: Task): Promise<Own | null> {
+  const unreadable = () => refuse(409, 'task_changed', `The branch of #${task.number} could not be read. Try again.`);
+  let own: Awaited<ReturnType<Ctx['readCommit']>>;
+  try { own = await readCommit(repo, { task: task.number }, 5_000); }
+  catch { throw unreadable(); }
+  if (!('problem' in own)) return own;
+  if (own.missing) return null;
+  throw unreadable();
+}
+
 /* Where turnkey work of a department with a repository joins its open turn: its own branch, task-<number>, which the turn
    branch holds by fast-forward. Work with no branch of its own changed no code and joins no release. */
 async function turnkeyIntegration(ctx: Reader, task: Task, named?: TurnkeyChecked) {
   const target = await integrationTarget(ctx, task);
   const turn = target?.turn;
   if (!target || !turn || !ctx.readCommit) return null;
-  const unreadable = () => refuse(409, 'task_changed', `The branch of #${task.number} could not be read. Try again.`);
-  let own: Awaited<ReturnType<Ctx['readCommit']>>;
-  try { own = await ctx.readCommit(target.repo, { task: task.number }, 5_000); }
-  catch { throw unreadable(); }
-  if ('problem' in own) {
-    if (own.missing) return null;
-    throw unreadable();
-  }
+  const own = await ownBranchOf(ctx.readCommit, target.repo, task);
+  if (!own) return null;
   const { branch } = target;
   if (!named) throw unnamed(task, own, branch);
   await requireNamed(ctx, target.repo, own, named);
