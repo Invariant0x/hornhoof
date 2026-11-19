@@ -244,11 +244,13 @@ An additive `echelonFindings` read projection may carry per-stage reported and
 confirmed counts plus source finding/event IDs; compute it from events rather
 than persisting counters in `tasks.echelons`.
 
-The web maps stage keys to literal English Architecture, Development, Review,
-Security and Tests in every locale. It shows actual skipped/added entries and
-current owner from the route; it does not derive them from role gate numbers.
-With no active task it shows no invented owner. Preserve legacy rendering for
-null. Ordinary status/reason/help text remains localized.
+The web names stage keys in the language of the screen, from each locale's own
+stage names (in English Architecture, Development, Review, Cleanup, Security
+and Tests); the stages of a document read Plan, Work, Check and Risk check in
+English and their own words in other locales. It shows actual skipped/added
+entries and current owner from the route; it does not derive them from role
+gate numbers. With no active task it shows no invented owner. Preserve legacy
+rendering for null. Ordinary status/reason/help text remains localized.
 
 Derive reported counts from unique server-bound finding IDs grouped by task and
 Review/Security source stage. Derive confirmed counts from independent valid
