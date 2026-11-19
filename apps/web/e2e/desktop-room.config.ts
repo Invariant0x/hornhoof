@@ -17,8 +17,9 @@ export default defineConfig({
   retries: 0,
   timeout: 180_000,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',
-  /* Expectations, actions and navigation have no limit of their own (0); the limit for a test above is the only one. */
-  expect: { timeout: 0 },
+  /* An expectation that does not come true fails in 15 seconds, not at the test's limit; actions and navigation have no
+     limit of their own (0), so the limit for a test above bounds them. */
+  expect: { timeout: 15_000 },
   use: {
     baseURL: origin,
     actionTimeout: 0,
