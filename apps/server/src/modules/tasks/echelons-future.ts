@@ -21,6 +21,8 @@ async function futureProducer(ctx: Reader, task: Task, route: Route): Promise<Ch
   return authorId ? agentIdentity(ctx.db, task.companyId, authorId) : null;
 }
 
+const handedSoFar = async (ctx: Reader, task: Task, route: Route) => route.state.candidateId ? currentHanded(ctx.db, task, route) : null;
+
 /* Naming an owner narrows the same selection used by an automatic replacement. */
 export async function futureOwner(ctx: Reader, task: Task, route: Route, stage: EchelonStage, named: string | null, roleKey?: string | null): Promise<string | null> {
   const ability = route.state.abilities[stage];
@@ -30,7 +32,7 @@ export async function futureOwner(ctx: Reader, task: Task, route: Route, stage: 
     if (named) throw refuse(409, 'task_invalid', 'The planned producer needs a known model capability before a future checker can be assigned.');
     return null;
   }
-  const excluded = await keptFromReview(ctx.db, task, stage, route.state.candidateId ? await currentHanded(ctx.db, task, route) : null);
+  const excluded = await keptFromReview(ctx.db, task, stage, await handedSoFar(ctx, task, route));
   if (named) await requireIndependentChecker(ctx, task, producer, named, excluded);
   return (await checkerFor(ctx, task, producer, ability, named, roleKey, excluded))?.agentId ?? null;
 }

@@ -61,6 +61,12 @@ function verdictData(route: Route, candidate: Checked, identity: CheckerIdentity
   };
 }
 
+/* A route that still carries the old author-check skip goes to Review at this handoff, not at a later one. */
+async function passingHandoff(ctx: Reader, task: Task, route: Route, candidate: EchelonCandidate | DocumentCandidate) {
+  if (REVIEW_SKIP_ENABLED || !skippedAuthorReview(route.state)) return { next: await forwardHandoff(ctx, task, route, candidate), required: {} };
+  return { next: await reviewReplacement(ctx, task, route, candidate), required: { reviewRequired: { candidateId: candidate.id, routeRevision: route.revision } } };
+}
+
 export async function echelonVerdict(ctx: Reader, agentId: string, taskId: string, verdict: Verdict): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
@@ -86,10 +92,8 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     const row = await move(ctx, task, { status: 'working' }, n, async tx => { await held(tx); await changeRoute(tx, route, state); });
     return { task: row, wakes: [] };
   }
-  /* A route that still carries the old author-check skip goes to Review at this handoff, not at a later one. */
-  const reopen = !REVIEW_SKIP_ENABLED && Boolean(skippedAuthorReview(state));
-  const next = reopen ? await reviewReplacement(ctx, task, { ...route, state }, candidate) : await forwardHandoff(ctx, task, { ...route, state }, candidate);
-  const data = { ...n.data, ...skippedData(next.skipped), ...(reopen ? { reviewRequired: { candidateId: candidate.id, routeRevision: route.revision } } : {}) };
+  const { next, required } = await passingHandoff(ctx, task, { ...route, state }, candidate);
+  const data = { ...n.data, ...skippedData(next.skipped), ...required };
   const row = await move(ctx, task, next.set, { ...n, data, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
   return { task: row, wakes: next.wakes };
 }
