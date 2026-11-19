@@ -144,7 +144,7 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
   for (const task of rows) {
     const [report] = await db.select({ id: taskEvents.id, agentId: taskEvents.agentId, data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`(${taskEvents.data} ? 'acceptedCandidate' OR ${taskEvents.data} ? 'integration')`)).orderBy(desc(taskEvents.id)).limit(1);
     const accepted = report?.data.acceptedCandidate as { candidateId?: string; commit?: string } | undefined;
-    const integration = report?.data.integration as { commit?: string; start?: string } | undefined;
+    const integration = report?.data.integration as { commit?: string } | undefined;
     const [route] = await db.select().from(taskRoutes).where(eq(taskRoutes.taskId, task.id));
     const stages = (route?.state.stages ?? []).filter(step => (step.stage === 'review' || step.stage === 'security') && step.status === 'complete');
     const candidate = accepted?.candidateId ? await candidateOf(db, task, accepted.candidateId) : null;
@@ -153,12 +153,21 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
     const owners = stages.map(step => step.ownerAgentId).filter((id): id is string => !!id);
     const live = owners.length ? await db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, owners), isNull(agents.removedAt), isNull(agents.switchedOffAt))) : [];
     const checkersLive = !!candidate && stages.length > 0 && live.length === new Set(owners).size && owners.every(id => id !== candidate.producedBy.agentId);
-    const holder = route?.state.resultKind === 'turnkey' && report?.data.done === true && integration?.commit ? report.agentId : null;
-    const atWork = holder ? await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, holder), isNull(agents.removedAt), isNull(agents.switchedOffAt))) : [];
-    const turnkey = holder ? { report: String(report!.id), live: atWork.length > 0, start: integration?.start ?? null } : null;
+    const turnkey = route?.state.resultKind === 'turnkey' && report ? await turnkeyOf(db, report) : null;
     out.push({ task, commit, candidate, verdicts, checkersLive, turnkey });
   }
   return out;
+}
+
+type Closing = Pick<typeof taskEvents.$inferSelect, 'id' | 'agentId' | 'data'>;
+
+/* Turnkey work as the last report of its holder closed it, joining it to the turn branch: whether that holder is at work, and
+   the commit it named as where its branch started. None where that report closed nothing. */
+async function turnkeyOf(db: Ctx['db'], report: Closing): Promise<Turnkey | null> {
+  const integration = report.data.integration as { commit?: string; start?: string } | undefined;
+  if (report.data.done !== true || !integration?.commit || !report.agentId) return null;
+  const atWork = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, report.agentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  return { report: String(report.id), live: atWork.length > 0, start: integration.start ?? null };
 }
 
 async function candidateOf(db: Ctx['db'], task: Task, candidateId: string): Promise<EchelonCandidate | null> {
@@ -201,14 +210,16 @@ async function coverage(ctx: Reader, repo: Repo, base: string, commit: string, r
     if (!own) { uncovered.push({ kind: 'task_unread', task: result.task.number }); continue; }
     for (const c of own) checked.add(c.sha);
   }
-  const lines = results.flatMap(r => (r.turnkey?.start ? [{ tip: r.commit, start: r.turnkey.start }] : []));
-  for (const sha of turnkeyCommits(brought, lines, checked)) checked.add(sha);
+  for (const sha of turnkeyCommits(brought, turnkeyLines(results), checked)) checked.add(sha);
   for (const c of brought) {
     if (checked.has(c.sha)) continue;
     uncovered.push({ kind: c.parents.length > 1 ? 'merge' : 'commit', commit: c.sha });
   }
   return uncovered;
 }
+
+/* The line each turnkey work's holder checked: from the commit it named down to where its branch started. */
+const turnkeyLines = (results: Accepted[]) => results.flatMap(r => (r.turnkey?.start ? [{ tip: r.commit, start: r.turnkey.start }] : []));
 
 /* What turnkey work leaves to a person by itself: a holder off since, or a report that named nothing it checked. */
 function turnkeyGaps(task: Task, turnkey: Turnkey): UncheckedItem[] {

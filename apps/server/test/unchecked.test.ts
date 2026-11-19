@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { namesExactly, sortedUnchecked, uncheckedLine, uncheckedLines, type UncheckedItem } from '../src/modules/tasks/unchecked.js';
+import { keptLines, namesExactly, sortedUnchecked, uncheckedLine, uncheckedLines, type UncheckedItem } from '../src/modules/tasks/unchecked.js';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), C = 'c'.repeat(40);
 
@@ -31,5 +31,11 @@ describe('what a release brings that no check covers', () => {
     expect(namesExactly([...items, { kind: 'commit', commit: C }], lines)).toBe(false);
     expect(namesExactly(null, lines)).toBe(false);
     expect(namesExactly([], [])).toBe(false);
+  });
+
+  it('gives the lines of what a card keeps, and none for a card that keeps no list', () => {
+    const items: UncheckedItem[] = [{ kind: 'merge', commit: C }, { kind: 'commit', commit: B }];
+    expect(keptLines(items)).toEqual(uncheckedLines(items));
+    expect(keptLines(null)).toBeNull();
   });
 });

@@ -41,6 +41,9 @@ export function sortedUnchecked(items: UncheckedItem[]): UncheckedItem[] {
 /* The lines of the items, the same each time for the same list. */
 export const uncheckedLines = (items: UncheckedItem[]): string[] => sortedUnchecked(items).map(uncheckedLine);
 
+/* The lines of what a card keeps, none where it keeps no list. */
+export const keptLines = (kept: UncheckedItem[] | null): string[] | null => (kept ? uncheckedLines(kept) : null);
+
 /* A card names exactly what a release brings unchecked, by its lines: the same items, whatever order either was kept in. */
 export const namesExactly = (kept: UncheckedItem[] | null, lines: string[]): boolean =>
   !!kept?.length && uncheckedLines(kept).join('\n') === [...lines].sort().join('\n');

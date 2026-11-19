@@ -4,7 +4,7 @@ import { personColumns, type Person } from '../../auth/session.js';
 import { agents, assistantRequests, assistants, departments, people, requests } from '../../db/schema.js';
 import { departmentParty } from '../events/parties.js';
 import { visibleDecisions } from '../tasks/decisions.js';
-import { uncheckedLines } from '../tasks/unchecked.js';
+import { keptLines } from '../tasks/unchecked.js';
 import { storeEvent } from './events.js';
 import type { Told } from './replies.js';
 
@@ -26,7 +26,7 @@ function viewOf(r: Seen, names: Map<string, string>, depts: Map<string, typeof d
     options: request.options.map(o => o.label),
     commit: request.commit,
     /* What the release of that commit brings that no check covers, as Hornhoof wrote it on the card. */
-    unchecked: request.unchecked ? uncheckedLines(request.unchecked) : null,
+    unchecked: keptLines(request.unchecked),
     approval: request.approvalChannel ? { channel: request.approvalChannel, kind: request.approvalKind, amount: request.approvalAmount } : null,
     link: request.link,
     task: { id: task.id, number: task.number, title: task.title },
