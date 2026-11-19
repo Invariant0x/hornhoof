@@ -64,6 +64,11 @@ function shell(path = '/tasks', routes: Record<string, unknown> = {}, me: Me = M
 const main = () => screen.findByRole('region', { name: /^(List|Board|Graph)$/ });
 const rowOf = (list: HTMLElement, name: string) => within(list).getByRole('listitem', { name });
 const card = (name: string) => screen.findByRole('complementary', { name });
+/* The one way to make something, as in the mockup: the + beside the panel's title opens what the person may make here. */
+async function makeMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(within(await screen.findByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: 'Create' }));
+  return within(screen.getByRole('group', { name: 'Create' }));
+}
 
 it('shows a ready pipeline and its stages in the chosen language', async () => {
   localStorage.setItem('hh-lang', 'ru');
@@ -248,8 +253,6 @@ describe('the views and the card', () => {
     const toggle = within(filters).getByRole('button', { name: 'Subtasks: show' });
     await user.click(toggle);
     expect(toggle).toHaveTextContent('Subtasks: hide');
-    await user.selectOptions(within(filters).getByLabelText('Goal'), 'g2');
-    expect(filters).toHaveTextContent('Goal: Card payments');
   });
 
   it('orders list tasks by priority and shows it on the card, the row keeping the mockup columns', async () => {
@@ -484,7 +487,9 @@ describe('making work in a department', () => {
     const made = detail(line({ id: 't25', number: 25, title: 'Refund API', status: 'open' }));
     const calls = shell('/tasks?department=d2', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
     await main();
-    await user.click(screen.getByRole('button', { name: 'New task' }));
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New task' }));
+    /* The menu closes on a choice. */
+    expect(screen.queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
     expect(screen.getByText('Dana, the head, gets it and splits it among the department.')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Title'), 'Refund API');
     await user.type(screen.getByLabelText('In one line'), 'Give the money back.');
@@ -498,8 +503,7 @@ describe('making work in a department', () => {
     const made = detail(line({ id: 't25', number: 25, title: 'New payment option', pipelineId: 'pl1', priority: 'high' }));
     const calls = shell('/tasks?department=d2&pipeline=pl1', { 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t25': [200, { task: made }] });
     await main();
-    /* The + beside the panel's title, as in the mockup. */
-    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: 'Add task' }));
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New task' }));
     await user.type(screen.getByLabelText('Title'), 'New payment option');
     await user.selectOptions(screen.getByLabelText('Priority'), 'high');
     await user.click(screen.getByRole('button', { name: 'Create task' }));
@@ -512,38 +516,42 @@ describe('making work in a department', () => {
     const [dev] = ORG.departments;
     shell('/tasks?department=d2', { 'GET /api/org': [200, { ...ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.kind === 'head' ? { ...e, name: e.title!.en } : e)) }] }] });
     await main();
-    await user.click(screen.getByRole('button', { name: 'New task' }));
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New task' }));
     expect(screen.getByText('The head gets it and splits it among the department.')).toBeInTheDocument();
   });
 
   it('asks for a head before the department takes tasks', async () => {
+    const user = userEvent.setup();
     const [dev] = ORG.departments;
     shell('/tasks?department=d2', { 'GET /api/org': [200, { ...ORG, departments: [{ ...dev!, employees: [] }] }] });
-    expect(await screen.findByText('Tasks go to the department through its head. Hire one first.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
+    await main();
+    const menu = await makeMenu(user);
+    expect(menu.getByText('Tasks go to the department through its head. Hire one first.')).toBeInTheDocument();
+    expect(menu.queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
   });
 
   it('lets a person give the department tasks, goals and pipelines where the server says they plan, and nowhere else', async () => {
+    const user = userEvent.setup();
     shell('/tasks?department=d2', places(true), listed('p6', 'Lena'));
-    expect(await screen.findByRole('button', { name: 'New task' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New goal' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New pipeline' })).toBeInTheDocument();
+    await main();
+    const lena = await makeMenu(user);
+    await waitFor(() => expect(lena.getAllByRole('button').map(b => b.textContent)).toEqual(['New task', 'New goal', 'New pipeline']));
     cleanup();
-    /* Kira has only a product of the department: she reads its work and gives it none. */
+    /* Kira has only a product of the department: she reads its work and gives it none, and the + is not there. */
     shell('/tasks?department=d2', places(false), listed('p7', 'Kira'));
     await main();
-    expect(screen.queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'New goal' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'New pipeline' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Task lists' })).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
   });
 
   it("offers a company goal only to a person the server lets set the company's goals", async () => {
+    const user = userEvent.setup();
     shell('/tasks', { 'GET /api/task-departments': [200, { whole: true, mayPlanCompany: false, departments: [] }] });
     await main();
-    expect(screen.queryByRole('button', { name: 'New goal' })).not.toBeInTheDocument();
+    expect((await makeMenu(user)).queryByRole('button', { name: 'New goal' })).not.toBeInTheDocument();
     cleanup();
     shell('/tasks');
-    expect(await screen.findByRole('button', { name: 'New goal' })).toBeInTheDocument();
+    await main();
+    await waitFor(async () => expect((await makeMenu(user)).getByRole('button', { name: 'New goal' })).toBeInTheDocument());
   });
 
   it('offers to change a goal or a pipeline only when the server says the person may', async () => {
@@ -557,16 +565,19 @@ describe('making work in a department', () => {
     const own = await card('Mascot shop');
     for (const name of ['Edit', 'Mark as reached', 'Drop the goal']) expect(within(own).getByRole('button', { name })).toBeInTheDocument();
     cleanup();
+    const user = userEvent.setup();
     shell('/tasks?department=d2&pipeline=pl1', { 'GET /api/pipelines': [200, { pipelines: [{ ...PIPELINE, mayEdit: false }] }] });
-    expect(await screen.findByRole('button', { name: 'New pipeline' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Change the pipeline' })).not.toBeInTheDocument();
+    await main();
+    const menu = await makeMenu(user);
+    expect(menu.getByRole('button', { name: 'New pipeline' })).toBeInTheDocument();
+    expect(menu.queryByRole('button', { name: 'Change the pipeline' })).not.toBeInTheDocument();
   });
 
   it('drafts a pipeline of the department with its stages and the roles that do them', async () => {
     const user = userEvent.setup();
     const calls = shell('/tasks?department=d2', { 'POST /api/pipelines': [201, { pipeline: PIPELINE }] });
     await main();
-    await user.click(screen.getByRole('button', { name: 'New pipeline' }));
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New pipeline' }));
     const form = screen.getByRole('form', { name: 'New pipeline' });
     await user.type(within(form).getByLabelText('Name'), 'Refunds');
     await user.click(within(form).getByRole('button', { name: 'Add a stage' }));
@@ -700,6 +711,23 @@ it('shows the people of a board card as the mockup avatars, named in full', asyn
   expect(record.getByRole('img', { name: 'Sam Rivera' })).toHaveClass('tr-avatar');
   expect(record.getByRole('img', { name: 'Lee Chen' })).toHaveClass('tr-executor');
   expect(record.getByRole('img', { name: 'Lee Chen' }).parentElement).toHaveClass('tr-avatars');
+  /* Two letters in the employee's square, from the first two words of its name or the first two letters of one word, as
+     the mockup's LR for Lead Researcher; one letter in the person's circle. */
+  expect(record.getByRole('img', { name: 'Lee Chen' })).toHaveTextContent(/^LC$/);
+  expect(record.getByRole('img', { name: 'Sam Rivera' })).toHaveTextContent(/^S$/);
+  cleanup();
+  shell('/tasks?department=d2&view=board', { 'GET /api/tasks?status=all': [200, { tasks: [{ ...PAY, responsible, executor: BRUNO }] }] });
+  const bruno = within(await screen.findByRole('article', { name: '#21 Take card payments' }));
+  expect(bruno.getByRole('img', { name: 'Bruno' })).toHaveTextContent(/^BR$/);
+});
+
+it("offers the mockup's chips over the list: group, subtasks, executor and responsible", async () => {
+  shell('/tasks?department=d2');
+  await main();
+  const chips = within(screen.getByRole('group', { name: 'Filters' }));
+  expect(chips.getAllByRole('combobox').map(c => c.getAttribute('aria-label'))).toEqual(['Status', 'Executor', 'Responsible']);
+  expect(chips.getByRole('button', { name: 'Subtasks: show' })).toBeInTheDocument();
+  expect(chips.queryByRole('combobox', { name: 'Goal' })).not.toBeInTheDocument();
 });
 
 it.each([
@@ -737,12 +765,43 @@ describe('the left panel and the goals page', () => {
     expect(side.getByRole('button', { name: /^Working now/ }).querySelector('.tr-count')).toHaveClass('working');
   });
 
+  it('makes everything from the + beside Tasks, and no button floats over the views or the goals page', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?department=d2&pipeline=pl1');
+    const list = await main();
+    const nav = within(screen.getByRole('navigation', { name: 'Task lists' }));
+    for (const name of ['New task', 'New goal', 'New pipeline', 'Change the pipeline', 'Write to the orchestrator']) expect.soft(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    const plus = nav.getByRole('button', { name: 'Create' });
+    expect(plus).toHaveAttribute('aria-expanded', 'false');
+    const menu = await makeMenu(user);
+    expect(plus).toHaveAttribute('aria-expanded', 'true');
+    expect(menu.getAllByRole('button').map(b => b.textContent)).toEqual(['New task', 'New goal', 'New pipeline', 'Change the pipeline', 'Write to the orchestrator']);
+    /* Escape closes it and gives the focus back to the +. */
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
+    expect(plus).toHaveFocus();
+    /* A press outside closes it too. */
+    await makeMenu(user);
+    await user.click(list);
+    expect(screen.queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
+    /* A goal from the menu: its form opens in the work, over the views. */
+    await user.click((await makeMenu(user)).getByRole('button', { name: 'New goal' }));
+    expect(screen.getByRole('form', { name: 'New goal' })).toBeInTheDocument();
+    cleanup();
+    shell('/tasks?show=goals');
+    await screen.findByRole('region', { name: 'Goals' });
+    for (const name of ['New goal', 'Write to the orchestrator']) expect.soft(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  });
+
   it('draws the panel at the mockup sizes', () => {
     expect.soft(decl('.tracker', 'grid-template-columns')).toBe('clamp(270px, 18.75vw, 360px) minmax(0, 1fr)');
     expect.soft(decl('.tr-side', 'padding')).toBe('12px 8px 20px');
     expect.soft(decl('.tr-side-title', 'font')).toBe('600 18px var(--f-display)');
     expect.soft(decl('.tr-side-title', 'margin')).toBe('2px 8px 10px');
     expect.soft(decl('.tr-new', 'inline-size')).toBe('30px');
+    /* The + menu in the look of the card's menu: a raised box in a line under the +, rows of the menu list. */
+    expect.soft(decl('.tr-new-menu', 'position')).toBe('absolute');
+    expect.soft(decl('.tr-new-menu', 'border')).toBe('1px solid var(--line2)');
     expect.soft(decl('.tr-item', 'min-block-size')).toBe('32px');
     expect.soft(decl('.tr-item', 'min-block-size', '(max-width: 760px), (pointer: coarse)')).toBe('44px');
     expect.soft(decl('.tr-item', 'padding')).toBe('4px 8px');

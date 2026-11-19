@@ -218,11 +218,12 @@ function treeOf(id: string, tasks: TaskLine[]): TaskLine[] {
   return found;
 }
 
-type Chips = Pick<WorkFilter, 'status' | 'executor' | 'responsible' | 'goal'>;
+type Chips = Pick<WorkFilter, 'status' | 'executor' | 'responsible'>;
 
-/* Status, executor, responsible and goal, each a choice of what the work shown holds, or any. */
-function FilterChips({ chips, onChange, tasks, goals, subtasks, onSubtasks }: {
-  chips: Chips; onChange: (chips: Chips) => void; tasks: TaskLine[]; goals: GoalView[];
+/* The mockup's chips: the group by status, the subtasks, the executor and the responsible, each a choice of what the work
+   shown holds, or any. */
+function FilterChips({ chips, onChange, tasks, subtasks, onSubtasks }: {
+  chips: Chips; onChange: (chips: Chips) => void; tasks: TaskLine[];
   subtasks?: boolean; onSubtasks: () => void;
 }) {
   const t = useT();
@@ -247,7 +248,6 @@ function FilterChips({ chips, onChange, tasks, goals, subtasks, onSubtasks }: {
       {subtasks !== undefined && <button className={`tr-chip${subtasks ? ' on' : ''}`} type="button" aria-pressed={subtasks} onClick={onSubtasks}>{subtasks ? words.showSubtasks : words.hideSubtasks}</button>}
       {chip('executor', words.executor, unique(tasks.map(doerOf)))}
       {chip('responsible', words.responsible, unique(tasks.map(task => task.responsible)))}
-      {chip('goal', words.goal, goals.filter(g => g.status !== 'dropped').map(g => ({ id: g.id, name: g.title })))}
     </div>
   );
 }
@@ -274,30 +274,32 @@ function ViewTabs({ value, onChange }: { value: (typeof TRACKER_VIEWS)[number]; 
 
 type Making = 'task' | 'goal' | 'pipeline' | 'editPipeline' | null;
 
-/* What a person may make where they are: a task for the department, a goal of the department or of the company, and the
-   department's pipelines, where the server says they plan. */
-function MakeHere({ places, org, department, pipeline, loose, making, setMaking, onOpenTask }: {
-  places: TaskDepartments | undefined; org: Org | null; department: string | null; pipeline: Pipeline | null; loose: boolean; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
-}) {
-  const t = useT();
-  const words = t.tracker.actions;
+/* What a person may make where they are: a task for the department through its head, a goal of the department or of the
+   company, and the department's pipelines, where the server says they plan. A department without a head says so. */
+function mayMake(places: TaskDepartments | undefined, org: Org | null, department: string | null, pipeline: Pipeline | null): { kinds: NonNullable<Making>[]; needsHead: boolean } {
   const known = department ? org?.departments.find(d => d.id === department) : undefined;
   const plans = department === null ? !!places?.mayPlanCompany : !!places?.departments.find(d => d.id === department)?.mayPlan;
-  if (department === 'none' || !plans || (department && !known)) return null;
+  if (department === 'none' || !plans || (department && !known)) return { kinds: [], needsHead: false };
+  const head = !!known?.employees.some(e => e.kind === 'head');
+  const kinds: NonNullable<Making>[] = [];
+  if (known && head) kinds.push('task');
+  kinds.push('goal');
+  if (known) kinds.push('pipeline');
+  if (known && pipeline?.mayEdit) kinds.push('editPipeline');
+  return { kinds, needsHead: !!known && !head };
+}
+
+/* The form of what the person chose to make from the + beside Tasks. */
+function MakeHere({ org, department, pipeline, loose, making, setMaking, onOpenTask }: {
+  org: Org | null; department: string | null; pipeline: Pipeline | null; loose: boolean; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
+}) {
+  const t = useT();
+  const known = department ? org?.departments.find(d => d.id === department) : undefined;
+  if (!making) return null;
   const close = () => setMaking(null);
   const named = known ? { id: known.id, name: deptLabel(t, known) } : null;
-  const head = known?.employees.some(e => e.kind === 'head');
   return (
     <>
-      {known && !head && <p className="muted" dir="auto">{t.dept.needsHead}</p>}
-      {!making && (
-        <div className="entry-actions tr-make">
-          {known && head && <button className="btn small ghost" type="button" onClick={() => setMaking('task')}>{words.newTask}</button>}
-          <button className="btn small ghost" type="button" onClick={() => setMaking('goal')}>{words.newGoal}</button>
-          {known && <button className="btn small ghost" type="button" onClick={() => setMaking('pipeline')}>{words.newPipeline}</button>}
-          {known && pipeline?.mayEdit && <button className="btn small ghost" type="button" onClick={() => setMaking('editPipeline')}>{words.editPipeline}</button>}
-        </div>
-      )}
       {making === 'task' && known && <TrackerNewTask department={known} pipelineId={loose ? null : pipeline?.id} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
       {making === 'goal' && <GoalForm department={named} onCancel={close} onDone={close} />}
       {making === 'pipeline' && known && <PipelineForm department={known} onCancel={close} onDone={close} />}
@@ -394,8 +396,6 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const work = filterTasks(base.tasks, view === 'list' ? { ...base.filter, ...chips } : base.filter, goals, asksYou);
   const chipTasks = filterTasks(base.tasks, base.filter, goals, asksYou);
   const stages = stageMode ?? Boolean(pipeline);
-  const addInGroup = department?.mayPlan && org?.departments.find(d => d.id === department.id)?.employees.some(e => e.kind === 'head')
-    ? () => setMaking('task') : undefined;
   const found = query.trim() ? searchTasks(all, query) : null;
 
   const graph = (): { forest: GraphNode[]; crumbs: Crumb[] } => {
@@ -458,9 +458,19 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     />
   );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
-  const makeHere = (section.kind === 'mine' || section.kind === 'department' || section.kind === 'company' || section.kind === 'goals') && (
-    <MakeHere places={places} org={org} department={departmentId ?? (other ? 'none' : null)} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
-  );
+  const makesHere = section.kind === 'mine' || section.kind === 'department' || section.kind === 'company' || section.kind === 'goals';
+  const makeDepartment = departmentId ?? (other ? 'none' : null);
+  const makeHere = makesHere && <MakeHere org={org} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
+  /* The mockup's one way to make something: the + beside Tasks, with what the person may make here and the orchestrator. */
+  const can = makesHere ? mayMake(places, org, makeDepartment, pipeline) : { kinds: [], needsHead: false };
+  const makeWords = { task: t.tracker.actions.newTask, goal: t.tracker.actions.newGoal, pipeline: t.tracker.actions.newPipeline, editPipeline: t.tracker.actions.editPipeline };
+  const create = {
+    note: can.needsHead ? t.dept.needsHead : undefined,
+    items: [
+      ...can.kinds.map(kind => ({ key: kind, label: makeWords[kind], onChoose: () => setMaking(kind) })),
+      ...(onOpenOrchestrator ? [{ key: 'orchestrator', label: t.tasks.writeOrchestrator, onChoose: onOpenOrchestrator }] : []),
+    ],
+  };
   const shownGoals = goals.filter(g => g.status !== 'dropped' && (!departmentId || g.department?.id === departmentId));
   const { forest, crumbs } = view === 'graph' ? graph() : { forest: [], crumbs: [] };
 
@@ -478,7 +488,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         tasks={all}
         onOpenAgent={onOpenAgent}
         counts={{ waits: countOf(shownOf(decisions, recipient), waitsOnWho), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
-        onAddTask={addInGroup}
+        create={create}
         open={drawer}
         onClose={() => setDrawer(false)}
       />
@@ -537,22 +547,20 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
             <>
               <div className="tr-bar">
                 <ViewTabs value={view} onChange={next => onPlace({ ...place, view: next })} />
-                {view === 'list' && <FilterChips chips={{ ...chips, goal: chips.goal === undefined ? base.filter.goal : chips.goal }} onChange={setChips} tasks={chipTasks} goals={goals}
+                {view === 'list' && <FilterChips chips={chips} onChange={setChips} tasks={chipTasks}
                   subtasks={showSubtasks} onSubtasks={() => setShowSubtasks(!showSubtasks)} />}
               </div>
               {section.kind === 'failures' && <MachineAway machines={machinesAway} />}
-              {making && makeHere}
+              {makeHere}
               {!tasks && broken === null && <p className="muted" role="status">{t.common.loading}</p>}
               {tasks && (
                 view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={false} rows={rows} />
                 : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStageMode } : undefined} />
               )}
-              {!making && makeHere}
               {section.kind === 'mine' && waiting}
             </>
           )}
-        {onOpenOrchestrator && <button className="btn ghost tr-write" type="button" onClick={onOpenOrchestrator}>{t.tasks.writeOrchestrator}</button>}
       </div>
     </div>
   );

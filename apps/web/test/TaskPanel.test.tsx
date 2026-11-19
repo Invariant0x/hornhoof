@@ -87,6 +87,8 @@ describe('the simple task card', () => {
     const drawer = '.body.tracker-page ~ .acard.at-end';
     expect.soft(decl(drawer, 'inline-size', '(min-width: 761px)')).toBe('460px');
     expect.soft(decl(drawer, 'inset-inline-end', '(min-width: 761px)')).toBe('0');
+    /* Minimized windows keep their strips at the right edge in reach beside it. */
+    expect.soft(decl('.shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr)', 'inset-inline-end', '(min-width: 761px)')).toBe('32px');
     expect.soft(decl(drawer, 'border-inline-start', '(min-width: 761px)')).toBe('1px solid var(--line2)');
     expect.soft(decl(drawer, 'inset', '(max-width: 760px)')).toBe('68px 0 0');
     expect.soft(decl('.body.with-task .tracker', 'padding-inline-end', '(min-width: 1100px)')).toBeUndefined();

@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS } from './api';
+import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS, writeToOrchestrator } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its place, the panel runs to the bottom of the window,
    scrolls by itself and leaves the page scrolled where it was. On the tracker a task's card stands at the end side, and from
@@ -26,7 +26,7 @@ test('a tab closes the task, history restores it, and the task and the agent win
   await expect(panelOf(page, 1)).toBeVisible();
   await panelOf(page, 1).getByRole('button', { name: 'Close' }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
-  await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
+  await writeToOrchestrator(page);
   const window = await box(page.getByRole('complementary', { name: 'Orchestrator' }));
   expect(window.x + window.width).toBe(1424);
 });
@@ -103,7 +103,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
     go: openTasks,
     content: page => placeOf(row(page, 1)),
     open: async page => {
-      await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
+      await writeToOrchestrator(page);
       const panel = page.getByRole('complementary', { name: 'Orchestrator' });
       await expect(panel).toBeVisible();
       return panel;

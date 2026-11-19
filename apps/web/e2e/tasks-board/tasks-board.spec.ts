@@ -660,6 +660,47 @@ for (const lang of LANGUAGES.map(l => l.id)) {
   });
 }
 
+/* The mockup's one way to make something: the + beside Tasks opens what the person may make, in rows of the card's menu
+   inside the left panel, in every language, at a desk and in the phone's drawer, also mirrored right to left. The department
+   has no head yet, so the menu says so and offers no task. A choice closes the menu and the drawer and opens its form. */
+for (const lang of LANGUAGES.map(l => l.id)) for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`makes everything from the + beside Tasks: ${lang} ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES[lang];
+    await serveTasksBoard(page);
+    await open(page, lang, width, `/tasks?department=${DEV.id}`);
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    const side = page.getByRole('navigation', { name: t.tracker.side.label });
+    const plus = side.getByRole('button', { name: t.tracker.side.create, exact: true });
+    expect(Math.round((await plus.boundingBox())!.height)).toBe(width === 375 ? 44 : 30);
+    await plus.click();
+    const menu = side.getByRole('group', { name: t.tracker.side.create, exact: true });
+    const items = menu.getByRole('button');
+    await expect(items).toHaveText([t.tracker.actions.newGoal, t.tracker.actions.newPipeline, t.tasks.writeOrchestrator]);
+    await expect(items.first()).toBeFocused();
+    const note = menu.getByText(t.dept.needsHead, { exact: true });
+    await expect(note).toBeVisible();
+    const panel = (await side.boundingBox())!;
+    for (const item of [...await items.all(), note]) {
+      const box = (await item.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(panel.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+      if (item !== note) expect(box.height).toBeGreaterThanOrEqual(43.5);
+      expect(await item.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
+    }
+    expect(await sideways(page)).toBeLessThanOrEqual(0);
+    await capture(page, info, `make-${lang}-${dir}-${width}`);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(plus).toBeFocused();
+    await plus.click();
+    await menu.getByRole('button', { name: t.tracker.actions.newGoal, exact: true }).click();
+    await expect(menu).toBeHidden();
+    if (width === 375) await expect(side).toBeHidden();
+    await expect(page.getByRole('form', { name: t.tracker.actions.newGoal, exact: true })).toBeVisible();
+  });
+}
+
 /* What waits for the person: the question on the urgent task, and the cards Hornhoof kept, inside the page in every
    language, at a desk and on a phone, and mirrored right to left. */
 test('shows what waits for the person and the cards kept for them inside the page', async ({ page }, info) => {

@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { deptLabel, useT } from '../i18n';
 import type { TrackerPlace } from '../routes';
 import { mapPeople } from '../org';
@@ -9,6 +9,10 @@ import { DepartmentMark, PersonMark } from './TrackerMarks';
 
 /* How many employees of a department stay in sight before the rest fold under "N more", as in the mockup. */
 const EMPLOYEES_SHOWN = 6;
+
+/* What the + beside Tasks offers: what the person may make here and writing to the orchestrator, with a note when something
+   cannot be made yet. */
+export type Create = { note?: string; items: { key: string; label: string; onChoose: () => void }[] };
 
 type Props = {
   id: string;
@@ -22,7 +26,7 @@ type Props = {
   goals: GoalView[];
   tasks: TaskLine[];
   counts: { waits: number; failures: number; mine: number; working: number };
-  onAddTask?: () => void;
+  create?: Create;
   open: boolean;
   onClose: () => void;
 };
@@ -64,6 +68,57 @@ function Item({ on = false, onClick, count, tone = 'quiet', icon, level, more, s
 const dotOf = (status: Employee['status']) => (status === 'working' ? 'tr-live' : status === 'waiting' ? 'tr-waitd' : 'tr-idle');
 
 type Dept = TaskDepartments['departments'][number];
+
+/* The 30px + beside Tasks, the mockup's one way to make something, opens a short menu in the look of the card's menu.
+   Escape or a press elsewhere closes it; a choice closes it and the phone's drawer. */
+function CreateMenu({ create, onClose }: { create: Create; onClose: () => void }) {
+  const t = useT();
+  const label = t.tracker.side.create;
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    menu.current?.querySelector('button')?.focus();
+    /* On the window, before the card's own Escape on the document, so one Escape closes only the menu. */
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.preventDefault();
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!menu.current?.contains(target) && !trigger.current?.contains(target)) setOpen(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onDown, true);
+    };
+  }, [open]);
+  return (
+    <>
+      <button className="tr-new" type="button" ref={trigger} aria-label={label} title={label} aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(!open)}>
+        <TrackerIcon name="add" />
+      </button>
+      {open && (
+        <div className="tr-new-menu" id={menuId} ref={menu} role="group" aria-label={label}>
+          {create.note && <p className="muted" dir="auto">{create.note}</p>}
+          {create.items.length > 0 && (
+            <div className="tp-menu-list">
+              {create.items.map(item => (
+                <button key={item.key} className="linkish" type="button" onClick={() => { setOpen(false); item.onChoose(); onClose(); }}>{item.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
 
 /* A department as the mockup draws it: its caret, mark and name, who answers for it and how many of its employees work now.
    Open, it shows its goals, its pipelines with work outside them, its employees, then its products. */
@@ -150,7 +205,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, onOpenAgent, pipelines,
 /* The left panel of mockup 10: what waits for the person, their tasks and the work going on now; the people who answer
    for the work; the departments. What the product needs besides, the goals, due dates, failures, the orchestrator's own
    work and the turns, follows in the same rows. A phone opens it as a drawer. */
-export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, places, pipelines, goals, tasks, counts, open, onClose, onAddTask }: Props) {
+export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, places, pipelines, goals, tasks, counts, open, onClose, create }: Props) {
   const t = useT();
   const words = t.tracker.side;
   const go = (next: TrackerPlace) => {
@@ -172,7 +227,7 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
     <nav id={id} className={`tr-side${open ? ' open' : ''}`} aria-label={words.label}>
       <div className="tr-side-title">
         <h2>{words.title}</h2>
-        {onAddTask && <button className="tr-new" type="button" aria-label={t.tracker.list.addTask} title={t.tracker.list.addTask} onClick={() => { onAddTask(); onClose(); }}><TrackerIcon name="add" /></button>}
+        {create && (create.items.length > 0 || create.note) && <CreateMenu create={create} onClose={onClose} />}
         <button className="zbtn tr-side-close" type="button" aria-label={words.close} title={words.close} onClick={onClose}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>

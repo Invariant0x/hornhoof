@@ -1783,11 +1783,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .body.tracker-page::before { content: none; }
 /* The mockup's .side: the panel's surface, 12px by 8px inside, its rows of 32px for a mouse (44px for a finger, below). */
 .tr-side { position: sticky; inset-block-start: 0; display: block; min-inline-size: 0; block-size: 100cqb; overflow: auto; overflow-wrap: break-word; scrollbar-gutter: stable; padding: 12px 8px 20px; box-sizing: border-box; background: var(--surface); border-inline-end: 1px solid var(--line); border-block-start: 1px solid var(--line); }
-.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-block-size: 30px; margin: 2px 8px 10px; font: 600 18px var(--f-display); }
+.tr-side-title { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-block-size: 30px; margin: 2px 8px 10px; font: 600 18px var(--f-display); }
 .tr-side-title > h2 { flex: 1 1 auto; min-inline-size: 0; margin: 0; font: inherit; }
 .tr-new { --cut: calc(5px * var(--cut-k)); display: grid; place-items: center; flex: none; inline-size: 30px; block-size: 30px; margin: 0; padding: 0; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; cursor: pointer; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
 .tr-new:hover { border-color: var(--cyan); color: var(--cyan-ink); }
 .tr-new:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* What the + offers, as the card's menu rows in a raised box under the title, as wide as the panel so any language wraps. */
+.tr-new-menu { position: absolute; z-index: 20; inset-block-start: calc(100% + 4px); inset-inline: 0; display: grid; grid-template-columns: minmax(0, 1fr); padding: 4px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); font: 400 14px/1.45 var(--f-body); }
+.tr-new-menu > p { margin: 0; padding: 8px 12px; overflow-wrap: anywhere; }
 .tr-side-heading { margin: 14px 8px 4px; font: 600 12px var(--f-body); color: var(--muted); overflow-wrap: break-word; }
 .tr-side .tr-side-close { display: none; }
 .tr-items { display: grid; margin: 0; padding: 0; list-style: none; min-inline-size: 0; }
@@ -1835,7 +1838,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-main { container: tr-main / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-inline-size: 0; padding-block-end: 30px; border-block-start: 1px solid var(--line); }
 .tr-main > :not(.tr-top, .tr-bar) { inline-size: auto; margin: 6px 20px 0; }
 .tr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-inline-size: 0; padding: 10px 20px; border-block-end: 1px solid var(--line); }
-.tr-write { justify-self: end; max-inline-size: 100%; }
 .tr-menu { display: none; }
 .tr-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-inline-size: 0; margin: 0; font: 600 16px var(--f-display); overflow-wrap: anywhere; }
 @container tr-main (min-width: 760px) {
@@ -2139,6 +2141,8 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-block: 68px 0; inset-inline-start: auto; inset-inline-end: 0; inline-size: 460px; max-inline-size: 100vw; border: 0; border-inline-start: 1px solid var(--line2); box-shadow: -12px 0 30px var(--shadow); }
   .body.tracker-page ~ .acard.at-end:dir(rtl) { box-shadow: 12px 0 30px var(--shadow); }
+  /* The strips of minimized windows stand at the right edge; the drawer leaves them in reach beside it. */
+  .shell:has(.agent-strips:not(:empty)) .body.tracker-page ~ .acard.at-end:dir(ltr) { inset-inline-end: 32px; }
 }
 @media (max-width: 760px) {
   .body.tracker-page ~ .acard.at-end { inset: 68px 0 0; inline-size: auto; max-inline-size: none; border: 0; box-shadow: none; }
