@@ -5,8 +5,8 @@ import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, MergeDecision, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
+import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
+import type { Decisions, Department, Me, Org, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard } from '../types';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
@@ -88,6 +88,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   place: (p: TaskLine['department']) => string;
   /* Whose: the person looked at, or the viewer with none. filtered: the person is picked by a filter the viewer may take off. */
   personId: string | null;
+  viewerId: string;
   onClearPerson?: () => void;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
@@ -97,20 +98,10 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   onCardsSeen: () => void;
 };
 
-type Shown = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
+/* What waits lists the decisions of the person picked, or with none the viewer's own. */
+const decisionsOfWho = (personId: string | null, viewerId: string): DecisionsOf => (personId ? { person: personId } : { viewer: viewerId });
 
-function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: string | null): T[] {
-  return personId ? items.filter(i => i.ownerPersonId === personId) : items;
-}
-
-/* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
-function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
-  if (!decisions) return { requests: [], proposals: [], merges: [] };
-  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: theirs(decisions.merges ?? []) };
-}
-
-const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.merges.length;
+const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
 /* The person whose decisions show, with a cross that shows everyone's again. */
 function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
@@ -133,32 +124,37 @@ const nothing = () => {};
 const lockOf = (card: ProposalDecision) => (card.canAnswer ? undefined : (card.decidedBy ?? CEO_DECIDES));
 
 /* An orchestrator's card as his window shows it: a structure to build, or people to hire into a department. Correcting it
-   in words opens his window. */
-function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void }) {
+   in words opens his window. waitsFor: whom it waits for, where the list says so. */
+function ProposalCard({ card, org, onCorrect = nothing, onDone, waitsFor }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void; waitsFor?: string }) {
   const t = useT();
   const locked = lockOf(card);
-  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
+  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} locked={locked} waitsFor={waitsFor} />;
   if (!card.department) return null;
   const known = org?.departments.find(d => d.id === card.department!.id);
   const department = { id: card.department.id, name: known ? deptLabel(t, known) : card.department.name };
-  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
+  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} onCorrect={onCorrect} onDone={onDone} locked={locked} waitsFor={waitsFor} />;
 }
 
-type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & { shown: Shown; onFailure: (err: unknown) => void };
+type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+  shown: ShownDecisions;
+  onFailure: (err: unknown) => void;
+  /* Whom a decision waits for, by the person it is for, on lists of more people than one. */
+  waitsFor?: (personId: string) => string;
+};
 
 /* Each decision with the buttons it has elsewhere. */
-function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
+function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure, waitsFor }: Listed) {
   const t = useT();
   const { requests, proposals, merges } = shown;
   return (
     <>
-      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
+      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} waitsFor={waitsFor} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
-        <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} />
+        <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} waitsFor={waitsFor?.(c.ownerPersonId)} />
       ))}
       {merges.map(merge => (
-        <MergeCard key={merge.id} merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />
+        <MergeCard key={merge.id} merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} waitsFor={waitsFor?.(merge.ownerPersonId)} />
       ))}
     </>
   );
@@ -177,10 +173,10 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
 /* What waits for the person: what agents ask, the orchestrator's cards, the cards Hornhoof
    kept for them, and the tasks that wait for them. For another person, only theirs, with the filter in sight when it may be
    taken off. */
-function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
+function WaitingForYou({ decisions, decisionsFailure, personId, viewerId, onClearPerson, tasks, recipient, kept, onCardsSeen, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
-  const shown = shownOf(decisions, personId);
+  const shown = shownDecisions(decisions, decisionsOfWho(personId, viewerId));
   const cards = keptShown(kept, personId);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
 
@@ -190,7 +186,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
       {personId && onClearPerson && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
       <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={onCardsSeen} />
-      {tasks.length > 0 && <WaitingTasks tasks={tasks} recipient={recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
+      {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={() => recipient} heading={personId ? t.tracker.waitTasksOf(name) : t.tracker.waitTasks} onOpenTask={rest.onOpenTask} />}
       {decisions && shownNone(shown) && !cards.length && !tasks.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
@@ -198,8 +194,37 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, t
   );
 }
 
-/* Tasks that wait for a person, each with how long already. */
-function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLine[]; recipient: string; heading: string; onOpenTask: (id: string) => void }) {
+type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+  /* The tasks that wait for any person. */
+  tasks: TaskLine[];
+};
+
+/* What waits for people in the company, for those who see the whole of it: every decision the viewer sees, each saying whom
+   it waits for, and the tasks that wait for a person. */
+function WaitingForPeople({ decisions, decisionsFailure, tasks, ...rest }: PeopleWaiting) {
+  const t = useT();
+  const words = t.tracker.peopleWaits;
+  const [failure, setFailure] = useState<unknown>(null);
+  const shown = shownDecisions(decisions, 'everyone');
+  const people = mapPeople(rest.org);
+  const waitsFor = (personId: string) => {
+    const name = people.find(p => p.id === personId)?.name;
+    return name ? words.waitingFor(name) : words.waitingForSomeone;
+  };
+  return (
+    <section className="waiting" aria-label={words.title}>
+      <h2>{words.title}</h2>
+      <DecisionList shown={shown} onFailure={setFailure} waitsFor={waitsFor} {...rest} />
+      {tasks.length > 0 && <WaitingTasks tasks={tasks} personOf={personWaited} heading={words.tasks} onOpenTask={rest.onOpenTask} />}
+      {decisions && shownNone(shown) && !tasks.length && <p className="muted">{words.nothing}</p>}
+      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </section>
+  );
+}
+
+/* Tasks that wait for a person, each with how long already; personOf: the person whose wait a task's line tells. */
+function WaitingTasks({ tasks, personOf, heading, onOpenTask }: { tasks: TaskLine[]; personOf: (task: TaskLine) => string | undefined; heading: string; onOpenTask: (id: string) => void }) {
   const t = useT();
   return (
     <div className="tr-waits">
@@ -208,7 +233,7 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
         {tasks.map(task => (
           <li key={task.id}>
             <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>#{task.number} {task.title}</button>
-            <small dir="auto">{waitText(t, task, undefined, recipient)}</small>
+            <small dir="auto">{waitText(t, task, undefined, personOf(task))}</small>
           </li>
         ))}
       </ul>
@@ -219,16 +244,10 @@ function WaitingTasks({ tasks, recipient, heading, onOpenTask }: { tasks: TaskLi
 /* The kept cards are the viewer's own, so they show only while no other person is picked. */
 const keptShown = (kept: WaitCard[] | undefined, personId: string | null) => (personId ? [] : (kept ?? []));
 
-/* What Waits for me shows, counted: a task with a question once, alongside decisions that have no task and the kept cards. */
-function countOf(s: Shown, tasks: TaskLine[], cards: WaitCard[]): number {
-  const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
-  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
-}
-
 /* Which part of the tracker a place is: what waits for a person, the turns, the goals, the due dates, or work to look at as a
    list, a board or a graph. */
 type Section =
-  | { kind: 'waits' | 'failures' | 'turns' | 'mine' | 'working' | 'company' | 'goals' | 'due' }
+  | { kind: 'waits' | 'people' | 'failures' | 'turns' | 'mine' | 'working' | 'company' | 'goals' | 'due' }
   | { kind: 'department' | 'responsible' | 'goal' | 'root'; id: string };
 
 function sectionOf(place: TrackerPlace): Section {
@@ -367,8 +386,12 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 }
 
 /* The tracker keeps the same task and goal cards across its views. */
-export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
+export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
+  /* What waits for people in the company is for those who see the whole company; anyone else asking for it by its address
+     gets what waits for them. */
+  const company = me.person.scopeKind === 'company';
+  const place: TrackerPlace = company || asked.show !== 'people' ? asked : { ...asked, show: 'waits' };
   const { language } = useLanguage();
   const sideId = useId();
   const { org } = useOrg();
@@ -432,6 +455,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const own = mine(all, goals, who);
   const working = workingNow(all, org);
   const waitsOnWho = waitingOn(all, recipient);
+  const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
@@ -478,6 +502,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     switch (section.kind) {
       case 'mine': return { title: other ? t.tracker.where.theirs(whoName) : t.tracker.where.mine };
       case 'waits': return { title: recipient === me.person.id ? t.tracker.where.waits : t.tracker.where.waitsFor(people.find(p => p.id === recipient)?.name ?? t.tasks.someone) };
+      case 'people': return { title: t.tracker.peopleWaits.title };
       case 'failures': return { title: t.tracker.side.failures };
       case 'working': return { title: t.tracker.where.working };
       case 'turns': return { title: t.tracker.where.turns };
@@ -509,6 +534,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
+      viewerId={me.person.id}
       onClearPerson={clearPerson}
       tasks={waitsOnWho}
       recipient={recipient}
@@ -521,11 +547,24 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       place={place_}
     />
   );
+  const peopleWaiting = (
+    <WaitingForPeople
+      decisions={decisions}
+      decisionsFailure={decisionsFailure}
+      onDecisionsChanged={onDecisionsChanged}
+      tasks={waitsOnPeople}
+      onOpenTask={onOpenTask}
+      onOpenAgent={onOpenAgent}
+      onOpenOrchestrator={onOpenOrchestrator}
+      org={org}
+      place={place_}
+    />
+  );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
   const makeDepartment = departmentId ?? (other ? 'none' : null);
   const makeHere = <MakeHere org={org} places={places} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
   /* Pages that are not a list of work hold what is being made above what they show. */
-  const makeOnTop = found || section.kind === 'waits' || section.kind === 'due' || section.kind === 'turns';
+  const makeOnTop = found || section.kind === 'waits' || section.kind === 'people' || section.kind === 'due' || section.kind === 'turns';
   /* The mockup's one way to make something: the + beside Tasks, on every page, with what the person may make there and the
      orchestrator. */
   const can = mayMake(places, org, makeDepartment, pipeline);
@@ -553,7 +592,13 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         goals={goals}
         tasks={all}
         onOpenAgent={onOpenAgent}
-        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho, keptShown(kept, decisionsOf)), failures: failures.length + machinesAway.filter(machine => !machine.back).length, mine: own.tasks.length, working: working.length }}
+        counts={{
+          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
+          people: company ? waitsCount(shownDecisions(decisions, 'everyone'), waitsOnPeople, []) : undefined,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length,
+          mine: own.tasks.length,
+          working: working.length,
+        }}
         create={create}
         open={drawer}
         onClose={() => setDrawer(false)}
@@ -594,8 +639,10 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
             </section>
             {/* A search leaves what waits for the person where it was. */}
             {(section.kind === 'waits' || section.kind === 'mine') && waiting}
+            {section.kind === 'people' && peopleWaiting}
           </>
         ) : section.kind === 'waits' ? waiting
+          : section.kind === 'people' ? peopleWaiting
           : section.kind === 'goals' ? (
             <>
               {/* Until the goals come, the page says it is loading rather than that there are none. */}

@@ -2391,6 +2391,13 @@ export const ru: Messages = {
     nothingWorking: 'Сейчас никто не работает над задачами.',
     waitTasks: 'Задачи, которые ждут вас',
     waitTasksOf: (name: string) => `Задачи, которые ждут ответа (${name})`,
+    peopleWaits: {
+      title: 'Ждут людей',
+      waitingFor: (name: string) => `Ждет: ${name}`,
+      waitingForSomeone: 'Ждет человека',
+      tasks: 'Задачи, которые ждут людей',
+      nothing: 'Людей сейчас ничего не ждет.',
+    },
     priority: { label: 'Приоритет', urgent: 'Срочно', high: 'Высокий', normal: 'Обычный', low: 'Низкий' },
     list: { task: 'Название', executor: 'Исполнитель', responsible: 'Ответственный', due: 'Срок', progress: 'Прогресс', parts: 'Части этой цели', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}`,
       group: (status: string, count: number) => `${status}: ${count}`,

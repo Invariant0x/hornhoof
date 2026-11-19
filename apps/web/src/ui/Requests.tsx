@@ -35,7 +35,8 @@ function storeRequestDraft(requestId: string, value: string): void {
 const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
-type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean };
+/* waitsFor: whom a request waits for, by the person it is for, on lists of more people than one. */
+type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string };
 
 /* An approval names a commit, or under a department's policy the work its words say. */
 const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
@@ -110,7 +111,7 @@ function ReadOnly({
   );
 }
 
-function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defaultPlaceName }: Shared & { who: string; request: WaitingRequest }) {
+function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defaultPlaceName, waitsFor }: Shared & { who: string; request: WaitingRequest }) {
   const t = useT();
   const { task, agent } = request;
   return (
@@ -120,6 +121,7 @@ function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defa
         #{task.number} {task.title}
       </button>
       {task.department && <small>{placeName(task.department)}</small>}
+      {waitsFor && <small>{waitsFor(request.ownerPersonId)}</small>}
       <button className="btn small ghost req-term" type="button" onClick={() => onOpenAgent(agent.id)}>
         {t.tasks.openTerminal(agent.name)}
       </button>

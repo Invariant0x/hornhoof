@@ -17,6 +17,8 @@ type Props = {
   onHide?(): void;
   /* Someone who may not take the card reads it, with who takes it, and changes nothing. */
   locked?: DecidedBy;
+  /* Whom the card waits for, on a list of what waits for more people than one. */
+  waitsFor?: string;
 };
 
 const isNew = (item: StructureItem): item is NewItem => 'template' in item;
@@ -154,7 +156,7 @@ function patchTickAt(ticks: boolean[], index: number, nextChecked: boolean): boo
 }
 
 /* The orchestrator's proposal, or the hand-made one: ticks, and one click that creates them. */
-export function StructureCard({ proposal, manual, departments, onCorrect, onDone, onHide, locked }: Props) {
+export function StructureCard({ proposal, manual, departments, onCorrect, onDone, onHide, locked, waitsFor }: Props) {
   const t = useT();
   const [items] = useState<StructureItem[]>(() => initialStructureItems(proposal, manual));
   const [ticks, setTicks] = useState(() => items.map(i => i.checked || fixed(i)));
@@ -172,6 +174,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   return (
     <div className={sent ? 't-card done' : 't-card'}>
       <h4>{t.card.title}</h4>
+      {waitsFor && <p className="muted">{waitsFor}</p>}
       <ProposalMaterialsSection state={proposalMaterials} />
       {items.map((item, i) => (
         <StructureRow key={i} item={item} checked={ticks[i]!} disabled={rowDisabled} departments={departments} t={t} onToggle={next => toggleRow(i, next)} />

@@ -2390,6 +2390,13 @@ export const en = {
     nothingWorking: 'Nobody works on a task at this moment.',
     waitTasks: 'Tasks that wait for you',
     waitTasksOf: (name: string) => `Tasks that wait for ${name}`,
+    peopleWaits: {
+      title: 'Waiting for people',
+      waitingFor: (name: string) => `Waiting for: ${name}`,
+      waitingForSomeone: 'Waiting for a person',
+      tasks: 'Tasks that wait for people',
+      nothing: 'Nothing waits for people.',
+    },
     priority: { label: 'Priority', urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' },
     list: { task: 'Name', executor: 'Executor', responsible: 'Responsible', due: 'Due', progress: 'Progress', parts: 'Parts of this goal', subtasks: (done: number, total: number) => `Subtasks: ${done} of ${total} done`,
       group: (status: string, count: number) => `${status}: ${count}`,
