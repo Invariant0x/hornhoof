@@ -1,4 +1,5 @@
-import { appendFileSync, chmodSync, existsSync, lchownSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, chmodSync, closeSync, constants, existsSync, fstatSync, fsyncSync, lchownSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OUTBOX_FILE } from './outbox.js';
 
@@ -6,6 +7,7 @@ import { OUTBOX_FILE } from './outbox.js';
 
 export type JobUser = { uid: number; gid: number };
 export const FIRST_UID = 20000;
+const LAST_UID = 0x7fffffff; // Node takes signed 32-bit IDs when spawning a process.
 
 export const isRootUser = () => process.getuid?.() === 0;
 
@@ -13,21 +15,81 @@ export const isRootUser = () => process.getuid?.() === 0;
 export function userFor(dir: string, subscriptionId: string, isRoot = isRootUser()): JobUser | null {
   if (!isRoot) return null;
   const file = join(dir, 'users.json');
-  let users: Record<string, number> = {};
-  try {
-    const saved: unknown = JSON.parse(readFileSync(file, 'utf8'));
-    if (saved && typeof saved === 'object') users = saved as Record<string, number>;
-  } catch {
-    /* No users yet. */
+  const users = readUsers(file);
+  if (Object.hasOwn(users, subscriptionId)) {
+    const uid = users[subscriptionId]!;
+    return { uid, gid: uid };
   }
-  let uid = Object.hasOwn(users, subscriptionId) ? users[subscriptionId] : undefined;
-  if (typeof uid !== 'number') {
-    uid = Math.max(FIRST_UID - 1, ...Object.values(users).filter(n => typeof n === 'number')) + 1;
-    users[subscriptionId] = uid;
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify(users), { mode: 0o600 });
-  }
+  const uid = Object.values(users).reduce((highest, used) => Math.max(highest, used), FIRST_UID - 1) + 1;
+  if (uid > LAST_UID) throw new Error('users.json has no UIDs left to assign.');
+  writeUsers(dir, file, { ...users, [subscriptionId]: uid });
   return { uid, gid: uid };
+}
+
+function readUsers(file: string): Record<string, number> {
+  let text: string | null;
+  try {
+    text = readUserFile(file);
+  } catch (error) {
+    throw new Error(`Cannot read users.json: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  if (text === null) return {};
+  let saved: unknown;
+  try {
+    saved = JSON.parse(text);
+  } catch {
+    throw new Error('Invalid users.json: expected valid JSON.');
+  }
+  if (!validUsers(saved)) throw new Error('Invalid users.json: expected a map of distinct node UIDs.');
+  return saved;
+}
+
+function validUsers(saved: unknown): saved is Record<string, number> {
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return false;
+  const uids: unknown[] = Object.values(saved);
+  return uids.every(uid => typeof uid === 'number' && Number.isInteger(uid) && uid >= FIRST_UID && uid <= LAST_UID)
+    && new Set(uids).size === uids.length;
+}
+
+/* Open the registry itself so a broken link cannot look like a missing file. */
+function readUserFile(file: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('expected a regular file.');
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function writeUsers(dir: string, file: string, users: Record<string, number>): void {
+  mkdirSync(dir, { recursive: true });
+  const temporary = join(dir, `.users-${randomUUID()}.tmp`);
+  const fd = openSync(temporary, 'wx', 0o600);
+  try {
+    try {
+      writeFileSync(fd, JSON.stringify(users));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temporary, file);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch { /* Preserve the original write error. */ }
+    throw error;
+  }
+  const parent = openSync(dir, 'r');
+  try {
+    fsyncSync(parent);
+  } finally {
+    closeSync(parent);
+  }
 }
 
 export type FolderOps = {
