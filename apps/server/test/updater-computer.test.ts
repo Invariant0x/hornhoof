@@ -191,6 +191,52 @@ describe('updater, the computer', () => {
     expect(pipes.every(path => lstatSync(path).isFIFO())).toBe(true);
   }, 10_000);
 
+  /* The keeper can plant a named pipe after the updater looked and found nothing there. One that appears while the
+     private folder is made is refused before the start marker is written; one that appears at the last moment before
+     the rename is replaced by it. Either way nothing opens the pipe, so nothing waits on it. */
+  function racing(s: Stand, tool: 'mktemp' | 'mv', plant: string) {
+    const tools = join(s.dir, 'racing');
+    mkdirSync(tools);
+    const moves = join(s.dir, 'moves');
+    const script =
+      tool === 'mktemp'
+        ? `#!/bin/sh\ncase "$*" in *"-d .started."*) mkfifo ./sample.started ;; esac\nPATH=/usr/bin:/bin exec mktemp "$@"\n`
+        : `#!/bin/sh\nlast=\nfor a in "$@"; do last=$a; done\nprintf '%s\\n' "$*" >> '${moves}'\n` +
+          `case "$last" in ${plant}) mkfifo "$last" ;; esac\nexec /bin/mv "$@"\n`;
+    writeFileSync(join(tools, tool), script, { mode: 0o755 });
+    return { env: { ...env, PATH: `${tools}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` }, moves };
+  }
+
+  it('refuses a start marker when a named pipe appears at it after the check, and runs nothing', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const r = await runOnce(s, null, racing(s, 'mktemp', '').env);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Computer request refused: its start marker could not be created.');
+    const queue = join(s.computerControl, 'computer');
+    expect(lstatSync(join(queue, 'sample.started')).isFIFO()).toBe(true);
+    expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.started']);
+  }, 10_000);
+
+  it('renames the start marker and the answer over named pipes put there at the last moment, and runs once', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const { env: raced, moves } = racing(s, 'mv', '*/sample.started|*/sample.out.json');
+    const r = await runOnce(s, null, raced);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-sample']);
+    const renamed = readFileSync(moves, 'utf8');
+    expect(renamed).toMatch(/\.\/started \S+\/sample\.started/);
+    expect(renamed).toMatch(/\.\/answer \S+\/sample\.out\.json/);
+    const queue = join(s.computerControl, 'computer');
+    expect(lstatSync(join(queue, 'sample.out.json')).isFile()).toBe(true);
+    expect(answer(s, 'sample')).toEqual({ id: 'sample', exit: 0, output: 'ran: recorded sample\n' });
+    expect(readdirSync(queue).sort()).toEqual(['sample.json', 'sample.out.json']);
+  }, 10_000);
+
   it('leaves the old queue alone when its owner is not UID 1000', async () => {
     const s = stand();
     const shared = join(s.control, 'computer');
