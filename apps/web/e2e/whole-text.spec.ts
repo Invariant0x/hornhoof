@@ -181,6 +181,35 @@ async function bareBreaks(page: Page, frames: string, texts: string): Promise<st
   ), { frames, texts });
 }
 
+/* Texts that wrap and leave one character alone on their last line, as a role broken 責任/者 (#1580). Each character's
+   place is read where it is drawn, and a line begins where a character stands lower than the one before it. */
+async function loneLastCharacters(page: Page, frames: string, texts: string): Promise<string[]> {
+  return page.evaluate(({ frames, texts }) => [...document.querySelectorAll<HTMLElement>(frames)].flatMap(frame =>
+    [...frame.querySelectorAll<HTMLElement>(texts)].flatMap(el => {
+      const lines: string[] = [];
+      let top = -Infinity;
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+        const text = node.textContent ?? '';
+        for (let at = 0; at < text.length;) {
+          const end = at + (text.codePointAt(at)! > 0xffff ? 2 : 1);
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, end);
+          const r = range.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && text.slice(at, end).trim()) {
+            if (r.top > top + r.height / 2) lines.push('');
+            top = Math.max(top, r.top);
+            lines[lines.length - 1] += text.slice(at, end);
+          }
+          at = end;
+        }
+      }
+      return lines.length > 1 && [...lines[lines.length - 1]!].length === 1 ? [`${el.className}: ${lines.join(' / ')}`] : [];
+    }),
+  ), { frames, texts });
+}
+
 /* Role names that are letter-spaced on a right to left page, or in Arabic, Persian or Hebrew, where spacing tears joined
    letters apart: the page's language is set to each for a moment and given back. Only the style is read; how the fonts of
    a machine join letters is not judged. */
@@ -627,6 +656,9 @@ for (const look of LOOKS) {
     const chips = '.map .chips .chip, .map .dept-chips .chip';
     expect.soft(await cutTexts(page, chips, 'b, small')).toEqual([]);
     expect.soft(await bareBreaks(page, chips, 'b, small'), 'words of the people chips break with a hyphen').toEqual([]);
+    /* Japanese breaks at its phrases (#1580). Only Chromium finds them, with word-break: auto-phrase; Firefox and WebKit
+       break between any two characters, and there the chips keep the checks above. */
+    if (look.script === 'cjk' && browserName === 'chromium') expect.soft(await loneLastCharacters(page, chips, 'b, small'), 'no Japanese chip leaves one character alone on its last line').toEqual([]);
     for (const row of PEOPLE_ROWS) {
       for (const heights of await rowHeights(page, row.chips)) expect.soft(new Set(heights).size, `one height for the chips of a row: ${row.what}`).toBe(1);
       const boxes = await placed(page, row.chips);

@@ -432,7 +432,7 @@ async function verifiedFastForward(ctx: Reader, repo: Repo, commit: string): Pro
   if (repo.branch !== 'main' || !ctx.readCommit) return null;
   try {
     const mainHead = await ctx.readCommit(repo, { branch: 'main' }, 5_000);
-    if ('problem' in mainHead) return null;
+    if ('problem' in mainHead || mainHead.tag) return null;
     return (await verifiedAncestorSha(ctx, repo, mainHead.commitSha, commit)) ? mainHead.commitSha : null;
   } catch {
     return null;

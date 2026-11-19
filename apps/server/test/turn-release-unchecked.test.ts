@@ -16,6 +16,10 @@ prepareTemplates();
    checked went only into a refusal to the agent recording it or onto the record. */
 const MAIN = '7'.repeat(40);
 const UNCHECKED = `${BASE} came in with no accepted candidate.`;
+/* The same as Hornhoof keeps it on the card, apart from the words of whoever asked. */
+const UNCHECKED_ITEM = { kind: 'commit', commit: BASE };
+/* The block #1544 put into the words of the card, which the explanation people read first could leave out. */
+const wordsBlock = (lines: string[]) => `What this release brings that no check covers (${lines.length}):\n${lines.map(line => `- ${line}`).join('\n')}\nApprove it only if you accept each of these.`;
 
 type Releasing = Awaited<ReturnType<typeof releasing>>;
 
@@ -62,8 +66,8 @@ describe('a release that brings what no check covers', () => {
     const f = await releasing();
     bringsUnchecked(f);
     const shown = await askedAndApproved(f, tool);
-    expect(shown).toMatchObject({ kind: 'approval', commit: f.R });
-    expect(shown.text).toContain(`- ${UNCHECKED}`);
+    expect(shown).toMatchObject({ kind: 'approval', commit: f.R, unchecked: [UNCHECKED_ITEM] });
+    expect(shown.text).not.toContain('no check covers');
   });
 
   it('is recorded once a person approved the card that named it, with what it brings unchecked on its record', async () => {
@@ -83,7 +87,7 @@ describe('a release that brings what no check covers', () => {
     bringsUnchecked(f);
     const run = await f.fullRun();
     const shown = await askedAndApproved(f);
-    expect(shown.text).toContain(`- ${UNCHECKED}`);
+    expect(shown.unchecked).toEqual([UNCHECKED_ITEM]);
     const result = await f.recordRelease({ runId: run.id });
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: shown.id, autonomousReleaseId: null, covered: false });
   });
@@ -100,6 +104,38 @@ describe('a release that brings what no check covers', () => {
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining(UNCHECKED) as unknown });
   });
 
+  /* H4 of #1569: the holder writes the words of its card, and could write a block that reads as Hornhoof's. */
+  it('takes no approval of a card whose holder wrote, in its own words, exactly the block Hornhoof would', async () => {
+    const f = await releasing();
+    bringsUnchecked(f);
+    const run = await f.fullRun();
+    const { request } = await ask(f.ctx, f.head.id, f.release.id, { kind: 'approval', text: `Release turn ${f.turn.number}: main to ${f.R}.\n\n${wordsBlock([UNCHECKED])}`, commit: f.R });
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, request.id, { approve: true });
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(UNCHECKED) as unknown });
+  });
+
+  /* B2 of #1569: people read the orchestrator's explanation in place of the words of a card, and it may leave the list out. */
+  it('is not recorded from a card whose list was only in its words, under an explanation that left it out', async () => {
+    const f = await releasing();
+    bringsUnchecked(f);
+    const run = await f.fullRun();
+    const { request } = await ask(f.ctx, f.head.id, f.release.id, { kind: 'approval', text: `Release turn ${f.turn.number}: main to ${f.R}.\n\n${wordsBlock([UNCHECKED])}`, commit: f.R });
+    await f.db.update(requests).set({ explained: 'The release of the turn is ready. Approve it to let it go to main.' }).where(eq(requests.id, request.id));
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, request.id, { approve: true });
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining(UNCHECKED) as unknown });
+  });
+
+  it('is recorded from the card Hornhoof put the list on, which shows next to Approve whatever the explanation says', async () => {
+    const f = await releasing();
+    bringsUnchecked(f);
+    const run = await f.fullRun();
+    await f.call('ask_person', { task: f.release.number, question: `Release turn ${f.turn.number}: main to ${f.R}.`, commit: f.R });
+    const shown = (await card(f))!;
+    await f.db.update(requests).set({ explained: 'The release of the turn is ready. Approve it to let it go to main.' }).where(eq(requests.id, shown.id));
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, shown.id, { approve: true });
+    expect(recorded((await f.recordRelease({ runId: run.id })).text)).toMatchObject({ approvalRequestId: shown.id, covered: false, uncovered: [UNCHECKED] });
+  });
+
   it('asks again where what it brings unchecked changed since the card the person approved', async () => {
     const f = await releasing();
     bringsUnchecked(f);
@@ -109,7 +145,7 @@ describe('a release that brings what no check covers', () => {
     const result = await f.recordRelease({ runId: run.id });
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining(`#${f.task.number}`) as unknown });
     const again = await askedAndApproved(f);
-    expect(again.text).toContain(`#${f.task.number}`);
+    expect(again.unchecked).toContainEqual({ kind: 'checker', task: f.task.number, commit: f.R });
     expect((await f.recordRelease({ runId: run.id })).isError).toBe(false);
   });
 
@@ -120,7 +156,7 @@ describe('a release that brings what no check covers', () => {
     const refused = await f.recordRelease({ runId: run.id });
     expect(refused).toMatchObject({ isError: true, text: expect.stringContaining('could not all be read') as unknown });
     const shown = await askedAndApproved(f);
-    expect(shown.text).toContain('could not all be read');
+    expect(shown.unchecked).toEqual([{ kind: 'unread', base: BASE, commit: f.R }]);
     expect(recorded((await f.recordRelease({ runId: run.id })).text)).toMatchObject({ approvalRequestId: shown.id, covered: false });
   });
 
