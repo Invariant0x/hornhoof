@@ -169,9 +169,13 @@ function Invoke-RestMethod { param($Uri)
 function systemTools(dir: string, from = ['/usr/bin', '/bin']) {
   const tools = join(dir, 'system');
   mkdirSync(tools, { recursive: true });
+  /* The first folder that has a name gives it, as PATH would; a link to nothing still counts as there. */
+  const taken = new Set<string>();
   for (const folder of from) {
     for (const name of existsSync(folder) ? readdirSync(folder) : []) {
-      if (!/^docker/.test(name) && !existsSync(join(tools, name))) symlinkSync(join(folder, name), join(tools, name));
+      if (/^docker/.test(name) || taken.has(name)) continue;
+      taken.add(name);
+      symlinkSync(join(folder, name), join(tools, name));
     }
   }
   return tools;
@@ -248,8 +252,10 @@ describe('the commands the fake Windows may use', () => {
   it("are this machine's own, with no Docker among them", () => {
     const machine = mkdtempSync(join(tmpdir(), 'hh-ps1-machine-'));
     for (const name of ['sh', 'cp', 'docker', 'docker-compose']) writeFileSync(join(machine, name), '#!/bin/sh\n', { mode: 0o755 });
-    const tools = systemTools(mkdtempSync(join(tmpdir(), 'hh-ps1-tools-')), [machine]);
-    expect(readdirSync(tools).sort()).toEqual(['cp', 'sh']);
+    /* A link to nothing, and a second folder with the same names, as /bin and /usr/bin are on Ubuntu. */
+    symlinkSync(join(machine, 'gone'), join(machine, 'broken'));
+    const tools = systemTools(mkdtempSync(join(tmpdir(), 'hh-ps1-tools-')), [machine, machine]);
+    expect(readdirSync(tools).sort()).toEqual(['broken', 'cp', 'sh']);
   });
 });
 
