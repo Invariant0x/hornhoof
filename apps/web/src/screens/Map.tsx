@@ -1078,7 +1078,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             )),
           )}
         </div>
-        {!inside && <MapVersion bars={MAP_BARS} shown={barsShown} />}
+        <MapVersion bars={MAP_BARS} shown={barsShown} off={inside} />
       </div>
 
       <ZoomBar

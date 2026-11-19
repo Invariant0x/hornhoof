@@ -78,8 +78,13 @@ function useCornerLift(mark: RefObject<HTMLElement | null>, bars: string, shown:
 /* The running build over the map, in the bottom end corner of the room its bars leave free, read left to right on any page.
    Where a bar of the map stands in that corner, as the zoom does on a wide screen right to left, it stands on that bar. It is
    on the map from the moment the map opens, even before the build answers, so the footer row never comes and goes under the
-   map (#1590). bars: the map's bars along its bottom; shown: what says which of them stand now. */
-export function MapVersion({ bars = '', shown = '' }: { bars?: string; shown?: string }) {
+   map (#1590). bars: the map's bars along its bottom; shown: what says which of them stand now; off: a department's view is
+   open over the map, which names no version then. */
+export function MapVersion({ off = false, ...where }: { off?: boolean; bars?: string; shown?: string }) {
+  return off ? null : <MapVersionText {...where} />;
+}
+
+function MapVersionText({ bars = '', shown = '' }: { bars?: string; shown?: string }) {
   const version = useVersion();
   const mark = useRef<HTMLParagraphElement>(null);
   const lift = useCornerLift(mark, bars, shown);
