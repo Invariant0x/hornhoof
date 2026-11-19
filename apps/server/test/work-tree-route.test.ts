@@ -96,7 +96,7 @@ describe('GET /api/departments/:id/tree', () => {
     const task = await c.member(c.bruno.id, 'Publish images');
     const client = await c.tools(c.bruno);
     const until = new Date(Date.now() + 3_600_000).toISOString();
-    const result = await client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Images on the registry', until } });
+    const result = await client.callTool({ name: 'track_work', arguments: { task: task.number, work: 'Images on the registry', nextCheck: until } });
     expect(result.isError).toBeFalsy();
     const [row] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
     const facts = await treeFacts(c.db, c.companyId, c.dev.id, () => true);
