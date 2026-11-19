@@ -26,10 +26,11 @@ export const FLOAT_GAP = 8, SIDE_GAP = 16;
 /* The room of a canvas that its floating bars leave free, in its own pixels: from the bars along its top to those along its
    bottom, FLOAT_GAP clear of each, and SIDE_GAP in from the sides of its space. A bar belongs to the half of the canvas its
    middle stands in. least: the room kept at the top, the bottom and each side whatever the bars are, as for the screen's own
-   bar, which floats over the top of the canvas from outside it. */
-export function freeRoom(canvas: HTMLElement, bars: Iterable<Element>, space: { left: number; width: number }, least: { top?: number; bottom?: number; side?: number } = {}): Box {
-  const at = canvas.getBoundingClientRect(), h = canvas.clientHeight, side = least.side ?? SIDE_GAP;
-  let y0 = Math.max(FLOAT_GAP, least.top ?? 0), y1 = h - Math.max(FLOAT_GAP, least.bottom ?? 0);
+   bar, which floats over the top of the canvas from outside it, and the room kept from the canvas's own top and bottom edges,
+   FLOAT_GAP unless the canvas is already cut that far clear of its bars. */
+export function freeRoom(canvas: HTMLElement, bars: Iterable<Element>, space: { left: number; width: number }, least: { top?: number; bottom?: number; side?: number; edge?: number } = {}): Box {
+  const at = canvas.getBoundingClientRect(), h = canvas.clientHeight, side = least.side ?? SIDE_GAP, edge = least.edge ?? FLOAT_GAP;
+  let y0 = Math.max(edge, least.top ?? 0), y1 = h - Math.max(edge, least.bottom ?? 0);
   for (const bar of bars) {
     const r = bar.getBoundingClientRect();
     if (!r.width || !r.height) continue;

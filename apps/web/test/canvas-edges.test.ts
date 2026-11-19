@@ -56,6 +56,13 @@ describe('freeRoom', () => {
     expect(freeRoom(canvas(116, 503), [bar(64, 108), bar(627, 796)], { left: 0, width: 375 })).toEqual({ x0: 16, x1: 359, y0: FLOAT_GAP, y1: 503 - FLOAT_GAP });
     expect(freeRoom(canvas(0, 900), [], { left: 432, width: 1008 }, { top: 76, bottom: 72, side: 32 })).toEqual({ x0: 464, x1: 1408, y0: 76, y1: 828 });
   });
+
+  /* A phone's department canvas is cut FLOAT_GAP clear of the name above it and the dock below, so its content may use the
+     whole cut: FLOAT_GAP from the bars once, not again from the canvas's own edges. */
+  it('gives a canvas cut clear of its bars the whole cut', () => {
+    expect(freeRoom(canvas(116, 503), [bar(64, 108), bar(627, 796)], { left: 0, width: 375 }, { edge: 0 })).toEqual({ x0: 16, x1: 359, y0: 0, y1: 503 });
+    expect(freeRoom(canvas(116, 503), [], { left: 0, width: 375 }, { edge: 0, top: -40 })).toEqual({ x0: 16, x1: 359, y0: 0, y1: 503 });
+  });
 });
 
 describe('mapView', () => {

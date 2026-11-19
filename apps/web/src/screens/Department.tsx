@@ -442,14 +442,16 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   }, [s]);
 
   /* The room of the canvas that the department's name, the zoom, the line of what happened and the tools leave free, side px
-     in from the sides of what an open panel leaves. */
+     in from the sides of what an open panel leaves. On a phone the canvas itself is cut FLOAT_GAP clear of the name and the
+     dock, so its content may reach the cut. */
   const roomOf = useCallback(
     (side?: number) => {
       const el = box.current, root = chrome.root.current;
       if (!el || !el.clientWidth || !root) return null;
       const space = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const bars = root.querySelectorAll(':scope > .crumbs, :scope > .dv-dock :is(.zoom, .ticker, .dv-acts)');
-      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM - el.offsetTop, side }) };
+      const cut = el.clientWidth <= NARROW ? { edge: 0 } : {};
+      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM - el.offsetTop, side, ...cut }) };
     },
     [covered, panel, chrome.root],
   );
