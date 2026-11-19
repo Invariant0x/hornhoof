@@ -674,6 +674,21 @@ describe('Department view', () => {
       expect(name * schemaView({ left: 0, width: 1440, height: 900, bottom: 76 }, { right: 3000, h: 900 }, false).k).toBeGreaterThanOrEqual(11);
     });
 
+    /* The Head of Design's word for #1554: on a phone a department opens on its head card, in the middle across, its top at
+       the top of the room under the department's name, whatever room the bars leave at the top. */
+    it('opens a schema too wide for a phone on its head card, centred, at the top of the room', () => {
+      for (const top of [8, 116]) {
+        const view = schemaView({ ...phone, top }, { right: 1200, h: 700, hx: 600 }, false, true);
+        expect(view.k).toBe(READABLE_K);
+        expect(view.x + 600 * view.k).toBe(375 / 2);
+        expect(view.y).toBe(top);
+      }
+      /* A schema that fits, and Show everything, stand whole as before. */
+      const fits = { right: 200, h: 200, hx: 100 };
+      expect(schemaView(phone, fits, false, true)).toEqual(schemaView(phone, fits, false));
+      expect(schemaView(phone, { right: 1200, h: 700, hx: 600 }, true, true)).toEqual(schemaView(phone, { right: 1200, h: 700 }, true));
+    });
+
     it('opens a schema that fits whole, as Show everything shows it', () => {
       const room = { left: 0, width: 1440, height: 900, bottom: 76 };
       expect(schemaView(room, { right: 1220, h: 662 }, false)).toEqual(schemaView(room, { right: 1220, h: 662 }, true));

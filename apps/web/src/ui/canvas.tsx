@@ -14,10 +14,62 @@ export function canvasSpace(width: number, left: number, right: number): { left:
 /* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
 export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
 
+/* A box from its top left to its bottom right corner. */
+export type Box = { x0: number; y0: number; x1: number; y1: number };
+/* What a canvas scrolls: its content, in the world's pixels, and the room of the canvas that what floats over it leaves free,
+   in the canvas's own. */
+export type Edges = { content: Box; room: Box };
+
+/* How far floating bars and the sides of the screen keep a canvas's content from them. */
+export const FLOAT_GAP = 8, SIDE_GAP = 16;
+
+/* The room of a canvas that its floating bars leave free, in its own pixels: from the bars along its top to those along its
+   bottom, FLOAT_GAP clear of each, and SIDE_GAP in from the sides of its space. A bar belongs to the half of the canvas its
+   middle stands in. least: the room kept at the top, the bottom and each side whatever the bars are, as for the screen's own
+   bar, which floats over the top of the canvas from outside it. */
+export function freeRoom(canvas: HTMLElement, bars: Iterable<Element>, space: { left: number; width: number }, least: { top?: number; bottom?: number; side?: number } = {}): Box {
+  const at = canvas.getBoundingClientRect(), h = canvas.clientHeight, side = least.side ?? SIDE_GAP;
+  let y0 = Math.max(FLOAT_GAP, least.top ?? 0), y1 = h - Math.max(FLOAT_GAP, least.bottom ?? 0);
+  for (const bar of bars) {
+    const r = bar.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    if ((r.top + r.bottom) / 2 - at.top < h / 2) y0 = Math.max(y0, r.bottom - at.top + FLOAT_GAP);
+    else y1 = Math.min(y1, r.top - at.top - FLOAT_GAP);
+  }
+  return { x0: space.left + side, x1: space.left + space.width - side, y0, y1: Math.max(y0, y1) };
+}
+
+/* Where a view may stand along one side: content from c0 to c1 drawn at scale k in a room from r0 to r1. Content larger than
+   the room scrolls until each of its edges meets the room's, no further; smaller content moves only inside the room. */
+export function scrollRange(c0: number, c1: number, k: number, r0: number, r1: number): [number, number] {
+  const start = r0 - c0 * k, end = r1 - c1 * k;
+  return start <= end ? [start, end] : [end, start];
+}
+
+/* The view a drag or a zoom asks for, kept to the edges of its content: next as asked, as far as it stays in range. A view
+   that already stood beyond an edge, as one put there by Fit or kept from an older visit may, may stay as far beyond it, never
+   further, so the hand never makes it jump. */
+export function keptToEdges(was: View, next: View, { content: c, room: r }: Edges): View {
+  const side = (v: number, w: number, c0: number, c1: number, r0: number, r1: number) => {
+    const [lo, hi] = scrollRange(c0, c1, next.k, r0, r1), [wasLo, wasHi] = scrollRange(c0, c1, was.k, r0, r1);
+    return Math.min(Math.max(v, lo - Math.max(0, wasLo - w)), hi + Math.max(0, w - wasHi));
+  };
+  return { ...next, x: side(next.x, was.x, c.x0, c.x1, r.x0, r.x1), y: side(next.y, was.y, c.y0, c.y1, r.y0, r.y1) };
+}
+
 /* Dragging and zooming a world inside box. ready changes once box is on the page, so the wheel finds it. start: the view it
-   opens at. touched tells whether the person has dragged or zoomed it since. */
-export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown, limits: { min: number; max: number }, start?: View) {
+   opens at. touched tells whether the person has dragged or zoomed it since. edges: what the world scrolls, when it has edges
+   the hand stops at; Fit and the code's own views are not stopped. */
+export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown, limits: { min: number; max: number }, start?: View, edges?: () => Edges | null) {
   const [view, setView] = useState<View>(start ?? { x: 0, y: 0, k: 1, smooth: false });
+  const edgesOf = useRef(edges);
+  useEffect(() => {
+    edgesOf.current = edges;
+  });
+  const handTo = useCallback((was: View, next: View) => {
+    const e = edgesOf.current?.();
+    return e ? keptToEdges(was, next, e) : next;
+  }, []);
   const drag = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
   const byHand = useRef(false);
   /* How far the last press moved, so the click that ends a drag opens nothing. */
@@ -32,10 +84,10 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
         const k = Math.min(max, Math.max(min, v.k * factor));
         const cx = px ?? (el ? el.clientWidth / 2 : 0);
         const cy = py ?? (el ? el.clientHeight / 2 : 0);
-        return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k, smooth: false };
+        return handTo(v, { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k, smooth: false });
       });
     },
-    [box, min, max],
+    [box, min, max, handTo],
   );
 
   useEffect(() => {
@@ -64,7 +116,7 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
       if (d.moved <= DRAG_PX && moved > DRAG_PX) e.currentTarget.setPointerCapture?.(e.pointerId);
       drag.current = { ...d, x: e.clientX, y: e.clientY, moved };
       if (dx || dy) byHand.current = true;
-      setView(v => ({ ...v, x: v.x + dx, y: v.y + dy, smooth: false }));
+      setView(v => handTo(v, { ...v, x: v.x + dx, y: v.y + dy, smooth: false }));
     },
     onPointerUp() {
       lastMoved.current = drag.current?.moved ?? 0;
