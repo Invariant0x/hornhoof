@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, pruneGoals, shownEmployees, waitingOn, workingNow, type GraphNode } from '../src/tracker';
-import type { Employee, GoalView, Org, Pipeline, TaskLine } from '../src/types';
+import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, personWaited, pipelineTree, pruneGoals, shownDecisions, shownEmployees, waitingOn, waitingOnPeople, waitsCount, workingNow, type GraphNode } from '../src/tracker';
+import type { Decisions, Employee, GoalView, Org, Pipeline, ProposalDecision, TaskLine, WaitingRequest } from '../src/types';
 import { taskRoute } from './task-route';
 
 const DEV = { id: 'd2', name: 'Development' };
@@ -202,5 +202,74 @@ describe('the graph', () => {
     expect(titles([root!])).toEqual([['pl1', [['s1', [['s2'], ['s3']]]]]]);
     const count = (node: GraphNode): Record<string, number> => ({ ...(node.kind === 'stage' || node.kind === 'pipeline' ? { [node.id]: node.count } : {}), ...Object.assign({}, ...node.children.map(count)) });
     expect(count(root!)).toEqual({ pl1: 3, s1: 1, s2: 0, s3: 1 });
+  });
+});
+
+/* Sam, the CEO, looks. Max is asked by name on task 312 and only he answers; Sam is asked by name on task 319; the question on
+   task 314 is for anyone, Leo's as his department's, and Sam may take it too. The orchestrator's card and the merge are
+   Sam's. */
+describe('what waits for people', () => {
+  const MAX = 'p9';
+  const BY_NAME = { kind: 'named_person' as const, department: null };
+  const asked = (id: string, on: TaskLine, over: Partial<WaitingRequest>): WaitingRequest => ({
+    id, kind: 'question', text: 'Which way?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false,
+    at: '2026-11-16T08:00:00.000Z', agent: { id: BRUNO.id, name: BRUNO.name }, task: { id: on.id, number: on.number, title: on.title, department: DEV },
+    ownerPersonId: SAM.id, canAnswer: true, ...over,
+  });
+  const FOR_MAX = asked('r1', T312, { ownerPersonId: MAX, canAnswer: false, decidedBy: BY_NAME });
+  const FOR_SAM = asked('r2', T319, { decidedBy: BY_NAME });
+  const FOR_ANYONE = asked('r3', S2, { ownerPersonId: LEO.id, decidedBy: { kind: 'department_and_ceo', department: DEV } });
+  const CARD = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: '', items: [], at: '2026-11-16T08:00:00.000Z', ownerPersonId: SAM.id, canAnswer: true } as ProposalDecision;
+  const MERGE = { id: 'm1', label: 'the database', after: null, open: 1, ownerPersonId: SAM.id };
+  const DECISIONS: Decisions = { requests: [FOR_MAX, FOR_SAM, FOR_ANYONE], proposals: [CARD], merges: [MERGE], counts: { byPerson: {}, byAgent: {}, total: 5 } };
+  const requested = (d: { requests: WaitingRequest[] }) => d.requests.map(r => r.id);
+
+  it("leaves a question asked of another person by name out of the viewer's own decisions, and keeps the rest as they were", () => {
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(requested(own)).toEqual(['r2', 'r3']);
+    expect(own.proposals).toEqual([CARD]);
+    expect(own.merges).toEqual([MERGE]);
+  });
+
+  it("keeps a question asked of a person by name in that person's decisions, and only theirs", () => {
+    expect(requested(shownDecisions(DECISIONS, { person: MAX }))).toEqual(['r1']);
+    expect(shownDecisions(DECISIONS, { person: MAX }).proposals).toEqual([]);
+    expect(requested(shownDecisions(DECISIONS, { person: LEO.id }))).toEqual(['r3']);
+  });
+
+  it("keeps a question asked of the viewer by name in their own decisions, also when another person looks at the company's", () => {
+    expect(requested(shownDecisions(DECISIONS, { viewer: MAX }))).toEqual(['r1', 'r3']);
+  });
+
+  it('gives everything the viewer sees for the company', () => {
+    const all = shownDecisions(DECISIONS, 'everyone');
+    expect(requested(all)).toEqual(['r1', 'r2', 'r3']);
+    expect(all.proposals).toEqual([CARD]);
+    expect(all.merges).toEqual([MERGE]);
+  });
+
+  it('gives nothing before the first answer, and takes a server without merges', () => {
+    expect(shownDecisions(undefined, 'everyone')).toEqual({ requests: [], proposals: [], merges: [] });
+    const older: Decisions = { requests: DECISIONS.requests, proposals: DECISIONS.proposals, counts: DECISIONS.counts };
+    expect(shownDecisions(older, 'everyone').merges).toEqual([]);
+  });
+
+  it('counts a task with a question once, with the tasks that wait, the cards and the merges', () => {
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(waitsCount(own, [], [])).toBe(4);
+    expect(waitsCount(own, [T319, LOOSE], [{ id: 'c1' }])).toBe(6);
+    expect(waitsCount(shownDecisions(DECISIONS, 'everyone'), [], [])).toBe(5);
+  });
+
+  it('finds the open tasks that wait for any person, and the first person each waits for', () => {
+    const since = '2026-11-16T08:00:00.000Z';
+    const waits = (over: Partial<TaskLine> & { id: string; number: number }, ...who: ({ kind: 'person' | 'agent'; id: string } | null)[]) =>
+      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: who.map(w => ({ kind: w?.kind === 'person' ? 'person' as const : 'review' as const, who: w && { ...w, name: '' }, reason: null, since })) } });
+    const external = task({ id: 'e', number: 5, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'external', who: null, reason: 'Deployment', since }, { kind: 'person', who: { kind: 'person', id: LEO.id, name: LEO.name }, reason: null, since }] } });
+    const tasks = [waits({ id: 'a', number: 1, status: 'waiting' }, { kind: 'person', id: 'p3' }), waits({ id: 'b', number: 2 }, { kind: 'agent', id: 'p3' }), waits({ id: 'c', number: 3, status: 'done' }, { kind: 'person', id: 'p3' }),
+      waits({ id: 'd', number: 4 }, null), waits({ id: 'p', number: 6, paused: { at: since, reason: 'Holiday', root: 'p' } }, { kind: 'person', id: 'p3' }), external, ...TASKS];
+    expect(ids(waitingOnPeople(tasks))).toEqual(['a', 'e']);
+    expect(personWaited(external)).toBe(LEO.id);
+    expect(personWaited(T312)).toBeUndefined();
   });
 });

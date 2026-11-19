@@ -14,6 +14,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - On a phone the map opens with names readable and a department opens on its head card; both scroll to an edge and stop clear of the floating buttons, and nothing scrolls under them.
 - Japanese names and titles on the map's people chips break between phrases, so no single character is left alone on a line.
 - A node that waits for its work to end before an update holds new turns for at most 45 minutes (`NODE_UPDATE_WAIT_MS`): then it updates, and each turn it cut runs once more after the restart. The orchestrator hears once when a wait passes half an hour.
+- A tab whose session ended goes to the sign-in screen at once, and a tab nobody is signed in on reloads by itself once Hornhoof runs another version.
+
+## [0.39.2] - 2026-11-19
+
+### Fixed
+
+- A department opened while a banner shows over the map now fills the screen instead of splitting it with the map.
 
 ## [0.39.1] - 2026-11-19
 

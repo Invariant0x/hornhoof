@@ -1,7 +1,7 @@
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { isPersonWait } from '@hornhoof/protocol/waits';
 import { humanStatus, isClosed, taskTrees, taskWaits, type Asks, type HumanStatus, type TaskTree } from './task-tree';
-import type { Employee, GoalView, Org, Pipeline, PipelineStage, TaskLine } from './types';
+import type { Decisions, DecidedBy, Employee, GoalView, MergeDecision, Org, Pipeline, PipelineStage, TaskLine } from './types';
 
 /* Ways to look at the same work. */
 export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
@@ -130,6 +130,37 @@ export const isWaitForPerson = (wait: NonNullable<TaskLine['time']>['waitsOn'][n
 
 export function waitingOn(tasks: TaskLine[], personId: string): TaskLine[] {
   return tasks.filter(t => !t.paused && taskWaits(t).some(w => isWaitForPerson(w, personId)));
+}
+
+/* The first person an open task waits for, if any. */
+export const personWaited = (task: TaskLine): string | undefined =>
+  taskWaits(task).find(w => isPersonWait(w) && w.who?.kind === 'person')?.who?.id;
+
+/* The open tasks that wait for any person. */
+export const waitingOnPeople = (tasks: TaskLine[]): TaskLine[] => tasks.filter(t => !t.paused && personWaited(t) !== undefined);
+
+/* Whose decisions a list shows: one person's; the viewer's own, without a question asked of another person by name, which
+   only that person answers; or everything the viewer sees in the company. */
+export type DecisionsOf = { person: string } | { viewer: string } | 'everyone';
+export type ShownDecisions = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
+
+type Owned = { ownerPersonId: string; decidedBy?: DecidedBy };
+const askedOfAnother = (d: Owned, viewer: string) => d.decidedBy?.kind === 'named_person' && d.ownerPersonId !== viewer;
+const isOf = (d: Owned, whose: DecisionsOf) =>
+  whose === 'everyone' || ('person' in whose ? d.ownerPersonId === whose.person : !askedOfAnother(d, whose.viewer));
+
+/* What of the decisions a list shows; nothing before the first answer. */
+export function shownDecisions(decisions: Decisions | undefined, whose: DecisionsOf): ShownDecisions {
+  if (!decisions) return { requests: [], proposals: [], merges: [] };
+  const theirs = <T extends Owned>(items: T[]) => items.filter(d => isOf(d, whose));
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), merges: theirs(decisions.merges ?? []) };
+}
+
+/* What a list of what waits shows, counted: a task with a question once, alongside decisions that have no task and the cards
+   Hornhoof kept. */
+export function waitsCount(s: ShownDecisions, tasks: TaskLine[], cards: readonly { id: string }[]): number {
+  const taskIds = new Set([...s.requests.map(r => r.task.id), ...tasks.map(task => task.id)]);
+  return taskIds.size + s.proposals.length + s.merges.length + cards.length;
 }
 
 /* A department's employees for the left panel: those at work first, then the rest, at least so many in sight. */
