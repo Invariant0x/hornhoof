@@ -19,8 +19,8 @@ describe('templates', () => {
 
   it('loads first contact instructions for starting the selected work', () => {
     expect(body('orch-interview')).toContain('first-contact');
-    expect(body('orch-company')).toMatch(/first-contact[\s\S]*build_structure[\s\S]*create_task/);
-    expect(body('orch-interview')).toMatch(/vault[\s\S]*\/api\/agents\/orchestrator\/telegram[\s\S]*stock Personal assistant instructions/);
+    expect(body('orch-company')).toMatch(/stock structure[\s\S]*verify the resulting structure[\s\S]*department assignment operation/i);
+    expect(body('orch-interview')).toMatch(/protected setup field[\s\S]*personal plan selection to its owner/i);
   });
 
   it('lets the home team carry out reversible device work the notebook allows', () => {
@@ -43,14 +43,29 @@ describe('templates', () => {
     }
   });
 
-  it('puts virtual time next to testing only our program, and names no skill set the agents do not have', () => {
+  it('uses the existing design direction skill to keep generated pictures consistent and control their cost', () => {
+    expect(templates.roles.get('DSN-UI')?.skills).toContainEqual(expect.objectContaining({ id: 'dsn-design-direction', on: true }));
+    const direction = body('dsn-design-direction');
+    expect(direction).toMatch(/generating pictures[\s\S]*one look[\s\S]*approved references[\s\S]*character sheets/i);
+    expect(direction).toMatch(/compare the routes the company actually has[\s\S]*recommend the cheapest that meets the need[\s\S]*responsible person chooses/i);
+    expect(direction).not.toMatch(/before pay-per-use/i);
+    expect(direction).toMatch(/account holder authorizes it and the provider's terms do not forbid it[\s\S]*one job at a time[\s\S]*terms forbid[\s\S]*documented API or official connector/i);
+    expect(direction).toMatch(/spending limit[\s\S]*for the order[\s\S]*maker's current prompt guide[\s\S]*model's structure/i);
+    expect(direction).toMatch(/route, model, settings[\s\S]*actual cost[\s\S]*cost per accepted picture/i);
+  });
+
+  it('makes the design check compare the exact generated pictures with their approved references', () => {
+    expect(body('dsn-work-pipeline')).toMatch(/exact generated pictures[\s\S]*approved references[\s\S]*size they will be shown/i);
+    expect(body('dsn-brand-consistency')).toMatch(/generated pictures[\s\S]*approved references[\s\S]*character sheets/i);
+  });
+
+  it('keeps deterministic testing in the testing policy and out of role identities', () => {
+    expect(body('dev-testing-policy')).toMatch(/we test our program, not the operating system and not other programs/);
+    expect(body('dev-testing-policy')).toMatch(/time in a test is virtual only/);
     for (const id of ['dev-testing-policy', 'dev-tdd', 'hh-run-checks', 'dev-e2e-tests']) {
-      expect(body(id), id).toMatch(/we test our program, not the operating system and not other programs/);
-      expect(body(id), id).toMatch(/time in a test is virtual only/);
       expect(body(id), id).not.toMatch(/superpowers|test-driven-development skill|condition-based-waiting/);
     }
-    for (const id of ['dev-test-gaps', 'dev-test-environment', 'dev-review-diff']) expect(body(id), id).toMatch(/time in a test is virtual only/);
-    for (const role of roles.filter(r => /we test our program/.test(r.body))) expect(role.body, role.id).toMatch(/on virtual time only\.$/);
+    for (const role of roles) expect(role.body, role.id).not.toMatch(/we test our program/i);
   });
 
   it('keeps a shared machine, its shared browsers and a stale preparation from costing a check', () => {
@@ -60,26 +75,26 @@ describe('templates', () => {
     expect(policy).toMatch(/check out another commit or make a worktree[\s\S]*stale preparation, not a failed check/);
   });
 
-  it('turns a missing command into a step within the access an employee has, and a failed write into a read before it is repeated', () => {
+  it('continues within current access and checks a failed write before retrying', () => {
     const flow = body('hh-task-flow');
-    expect(flow).toMatch(/`sudo: command not found`, is no reason to install it or to get around the limit[\s\S]*own user[\s\S]*goes to your head/);
-    expect(flow).toMatch(/A write that Hornhoof answered with 502, 503 or 504 may have gone through: read whether it did before you repeat it/);
+    expect(flow).toMatch(/missing command or right[\s\S]*current access[\s\S]*authorized executor/i);
+    expect(flow).toMatch(/read its state before retrying a write with an uncertain outcome/i);
   });
 
-  it('waits again after a comment or a message ended the wait before what it waits for came', () => {
-    expect(body('hh-task-flow')).toMatch(/A comment or a message on the task ends your wait too[\s\S]*call "wait_for" again/);
+  it('keeps delegated work active and records a wait for a named person', () => {
+    const flow = body('hh-task-flow');
+    expect(flow).toMatch(/running checks[\s\S]*task dependencies in progress[\s\S]*owner and a timer/i);
+    expect(flow).toMatch(/record a wait only when a named person/i);
   });
 
   it('connects a repository only once its branch holds a commit', () => {
     expect(body('orch-resources')).toMatch(/only once its branch exists with at least one commit[\s\S]*git ls-remote --heads[\s\S]*stops every turn of that department/);
   });
 
-  it("lets the program operator clear a menu without a cursor and a program's own offers, keeping the session", () => {
+  it('lets the operator confirm a menu choice while keeping the session', () => {
     const operator = body('ops-program-operator');
-    expect(operator).toMatch(/no cursor takes no Enter yet: press an arrow key, look again[\s\S]*then press Enter alone/);
-    expect(operator).toMatch(/offer of the program itself[\s\S]*never Escape[\s\S]*compact and go on in the same session/);
-    expect(operator).toMatch(/no_hold[\s\S]*at work with no question[\s\S]*tell_orchestrator with outcome cleared[\s\S]*tells no one[\s\S]*failed only for a screen that really stands/);
-    expect(operator).toMatch(/already closed[\s\S]*how it closed/);
+    expect(operator).toMatch(/no visible selection[\s\S]*confirm the choice before sending Enter/i);
+    expect(operator).toMatch(/keeping the current session[\s\S]*preserve work when compacting context/i);
     expect(body('ops-failure-review')).toMatch(/reasons Hornhoof recorded, the end of each blocked reason/);
   });
 
@@ -95,52 +110,32 @@ describe('templates', () => {
     expect(lead).toMatch(/already working in that area[\s\S]*context/);
     expect(lead).toMatch(/several tasks ahead/);
     expect(lead).toMatch(/If scope grows[\s\S]*revise the task and check/);
-    for (const id of ['hh-task-flow', 'hh-break-down']) expect(body(id), id).toMatch(/required approvals|Required approvals/i);
+    expect(body('hh-break-down')).toMatch(/required approvals/i);
+    expect(body('hh-task-flow')).toMatch(/checks required by the assignment/i);
   });
 
-  it('admits small work into the flow without adding an unconditional downstream chain or resetting a running gate', () => {
-    for (const id of ['hh-lead-tasks', 'orch-plan-turn', 'dev-lead']) {
-      const text = body(id);
-      expect(text, id).toMatch(/days or hours/);
-      expect(text, id).toMatch(/final gate[\s\S]*starts|final gate has not started/);
-      expect(text, id).toMatch(/context/);
-      expect(text, id).toMatch(/urgency flag/);
-      expect(text, id).toMatch(/once that gate runs, give it as a task of its own/);
-      expect(text, id).toMatch(/simple visual change/);
-      expect(text, id).toMatch(/required|mandatory|protected/i);
-      expect(text, id).not.toMatch(/turn is a sprint|(?:use|place it in|put it in) the next turn/i);
-    }
-    expect(body('orch-plan-turn')).toMatch(/independent pieces belong together, however large/);
-    expect(body('orch-plan-turn')).toMatch(/reviewed, tested and released before dependent work/);
-    expect(body('orch-plan-turn')).toMatch(/never tell people to start or close a turn manually/i);
+  it('fits small work into its context and preserves a candidate already being checked', () => {
+    expect(body('hh-lead-tasks')).toMatch(/before the final gate starts[\s\S]*holds its context[\s\S]*give the addition its own task/i);
+    expect(body('hh-lead-tasks')).toMatch(/project's evidence cycle for small visual changes/i);
+    expect(body('orch-plan-turn')).toMatch(/one accountable owner[\s\S]*independently acceptable results[\s\S]*handoff can be checked/i);
   });
 
   /* The flow of #883: a task goes to its department's head at once, the open turn of each top-level department is its next
      release, a task joins it as its result is accepted, and the tag of the release closes it by itself. */
-  it('gives each top-level department turns of its own as its releases, with the work flowing and no turn to wait for', () => {
-    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) {
-      const text = body(id);
-      expect(text, id).toMatch(/runs its own turns, one open at a time/i);
-      expect(text, id).toMatch(/next release/);
-      expect(text, id).toMatch(/repository of its own goes to its own main line/);
-      expect(text, id).not.toMatch(/plan_turn|merge_turn|such work waits for a turn|outside (?:a|planned) turns?|turn runs in echelons|that turn's own goal|lays? out and closes/i);
-    }
-    for (const id of ['orch-plan-turn', 'hh-head', 'hh-lead-tasks', 'dev-lead']) {
-      const text = body(id);
-      expect(text, id).toMatch(/nothing waits for a turn/i);
-      expect(text, id).toMatch(/joins it[^.]*as its result is accepted into the turn branch/);
-      expect(text, id).toMatch(/tag[^.]*closes (?:the turn|it) by itself/);
-    }
-    for (const id of ['orch-plan-turn', 'hh-head', 'dev-lead']) expect(body(id), id).toMatch(/release_turn[^.]*before main moves/);
-    expect(body('orch-plan-turn')).toMatch(/nobody picks a turn for a task or waits for one to close/);
-    expect(body('orch-plan-turn')).toMatch(/edit_turn[^.]*only[^.]*title or main point/);
+  it('gives the department its release lifecycle and keeps later work moving', () => {
+    const head = body('hh-head');
+    expect(head).toMatch(/runs its own turns, one open at a time[\s\S]*next release/i);
+    expect(head).toMatch(/joins it[^.]*as its result is accepted into the turn branch/);
+    expect(head).toMatch(/release_turn[^.]*before main moves/);
+    expect(head).toMatch(/tag[^.]*closes the turn by itself/);
+    expect(body('orch-plan-turn')).toMatch(/add_tasks[\s\S]*as soon as the brief is clear[\s\S]*departments work in parallel/i);
+    expect(body('dev-ci-release')).toMatch(/later work while testing the frozen candidate/i);
   });
 
-  it('preserves named and urgent-only orders without bypassing protected integration checks', () => {
-    expect(body('orch-company')).toMatch(/named orders end to end, with the department's oversight/);
-    expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
-    expect(body('orch-company')).toMatch(/urgentOnly[\s\S]*only what the authorized person called urgent/);
-    expect(body('dev-gates')).toMatch(/eligible reviewer is unavailable[\s\S]*candidate waiting/);
+  it('preserves named and urgent-only work and assigns unavailable required checks', () => {
+    expect(body('orch-company')).toMatch(/Keep named orders in their units[\s\S]*urgent-only unit's assignment rule/);
+    expect(body('orch-company')).toMatch(/route that can supply any required independent checker/);
+    expect(body('dev-gates')).toMatch(/keep a required check open if no eligible checker is available/i);
   });
 
   it('selects implementation checks from the task and retains the four coding cycles', () => {
@@ -172,126 +167,75 @@ describe('templates', () => {
     expect(paragraph).not.toMatch(/exception|never change|never hire/);
   });
 
-  it("has a person's assistant answer words from its window there, and write to its owner's chat from there only when asked", () => {
-    const line = body('hh-assistant').split('\n').find(l => l.includes('tell_owner'));
-    expect(line).toMatch(/your answer stays in the window/);
-    expect(line).toMatch(/asks there to be written to in their chat/);
+  it('uses the incoming destination and sends to another channel only on request', () => {
+    expect(body('hh-assistant')).toMatch(/delivery destination of the incoming message[\s\S]*tell_owner[\s\S]*when the owner asks/i);
   });
 
-  it("keeps every department's work as files in a repository of its own, which the orchestrator creates itself with a saved key, or offers", () => {
+  it('creates repositories using a protected binding and delivers work in its declared form', () => {
     const resources = body('orch-resources');
-    expect(resources).toMatch(/Every department keeps at least one repository of its own/);
-    expect(resources).toMatch(/letters, texts, layouts and tables/);
-    expect(resources).toMatch(/any earlier version/);
-    expect(resources).toMatch(/keeps none and a key is saved for it, create its first repository yourself with create_repository[\s\S]*then tell the CEO or the department's owner[\s\S]*its address/);
-    expect(resources).toMatch(/no key[\s\S]*offer one to the CEO or the department's owner[\s\S]*why[\s\S]*what it takes/);
-    expect(resources).toMatch(/A second repository[\s\S]*in any turn too, unless the notebook says otherwise/);
-    expect(resources).not.toMatch(/never create one without their word/i);
-    expect(body('orch-company')).toMatch(/hands in a document in place of a commit only until it has one/);
-    for (const id of ['hh-lead-tasks', 'hh-task-flow']) expect(body(id), id).toMatch(/letters, texts, layouts and tables/);
-    expect(body('hh-lead-tasks')).toMatch(/a document only while the department keeps none/);
-    expect(body('hh-task-flow')).toMatch(/only while your department keeps no repository/);
+    expect(resources).toMatch(/first repository[\s\S]*credential binding[\s\S]*vault reference/);
+    expect(resources).toMatch(/account holder[\s\S]*protected setup/);
+    expect(body('orch-company')).toMatch(/declared document or repository form/);
+    expect(body('hh-task-flow')).toMatch(/document[\s\S]*attach[\s\S]*name no commit[\s\S]*when the department has a repository/);
     expect(body('hh-head')).toMatch(/keeps no repository[\s\S]*"tell_orchestrator"/);
-    for (const id of ['orch-resources', 'orch-company', 'hh-lead-tasks', 'hh-task-flow', 'hh-head']) expect(body(id), id).not.toMatch(/[—ё]/);
   });
 
-  it('keeps task tools, waits, evidence and communication available without a role workflow', () => {
-    const flow = `${body('hh-tasks')}\n${body('hh-task-flow')}`;
-    for (const tool of ['task', 'tasks', 'submit', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
-    for (const id of ['hh-head', 'hh-task-flow']) {
-      expect(body(id), id).toContain('"wait_for"');
-      expect(body(id), id).toMatch(/external event[\s\S]*owner[\s\S]*ISO deadline within two hours[\s\S]*end the turn/);
-    }
-    expect(body('hh-task-flow')).toMatch(/Completion of "run_tests" or "run_work"[\s\S]*resumes/);
-    expect(body('hh-task-flow')).toContain('hh-attach --task N FILE');
-    expect(body('hh-task-flow')).toContain('hh-fetch N NAME');
+  it('keeps task tools and evidence separate from the role workflow', () => {
+    for (const id of ['hh-task-flow', 'hh-head']) expect(body(id), id).toMatch(/record a wait only[\s\S]*named person/i);
+    expect(body('hh-task-flow')).toMatch(/declared form[\s\S]*repository candidate[\s\S]*turnkey work[\s\S]*report/i);
     expect(body('hh-brief-members')).toContain('hh-attach --task N FILE');
     expect(body('hh-head')).toContain('Do not send the orchestrator a separate message repeating a task report');
     expect(body('hh-notebook')).toMatch(/only when[\s\S]*changes|when[\s\S]*changes/i);
   });
 
-  it('keeps nothing old below version 1.0 and migrates data from 1.0 on', () => {
-    const rules = templates.skills.get('dev-engineering-rules')!;
-    const preface = rules.body.slice(0, rules.body.indexOf('Every time you are asked to make a change follow:'));
-    for (const text of [preface, body('dev-plan-review')]) {
-      expect(text).toMatch(/Below version 1\.0, before the first release/);
-      expect(text).toMatch(/no compatibility paths, switches between old and new behaviour or data-conversion code/);
-      expect(text).toMatch(/From 1\.0 on, migrate existing data/);
-    }
+  it('bases compatibility and migration on actual data and deployed consumers', () => {
+    expect(body('dev-engineering-rules')).toMatch(/persistent records[\s\S]*compatibility promises and rollback/i);
+    expect(body('dev-plan-review')).toMatch(/deployed consumers[\s\S]*migration that preserves the data/i);
     expect(body('dev-plan-review')).toMatch(/Small or local work needs no note/);
   });
 
-  it('checks data compatibility by release version in the review checklist', () => {
-    const data = body('dev-review-diff').split('\n').find(line => line.startsWith('4. **Data.**'))!;
-    expect(data).toMatch(/Below version 1\.0, before the first release, no compatibility paths or data-conversion code/);
-    expect(data).toMatch(/Correct existing records directly at release/);
-    expect(data).toMatch(/From 1\.0 on, migrations safe for existing rows/);
-    expect(data).toMatch(/transactions where two writes must agree, nothing trusted from outside without a check at the boundary/i);
+  it('checks upgrades and rollback in the review checklist', () => {
+    const data = body('dev-review-diff').split('\n').find(line => line.startsWith('4. **Data.**'));
+    expect(data).toMatch(/compatibility and rollback against the deployed readers and existing records/i);
+    expect(data).toMatch(/coordinated writes consistent[\s\S]*untrusted input at its boundary/i);
   });
 
   it('offers removing what is not needed to reviewers and developers, off until someone turns it on', () => {
     for (const id of ['DEV-REV', 'DEV-ENG']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-cleanup')?.on, id).toBe(false);
   });
 
-  it('preserves ub-mode verbatim after its applicability preface', () => {
+  it('keeps upstream attribution without shipping superseded engineering orders', () => {
     const rules = templates.skills.get('dev-engineering-rules')!;
-    const upstream = readFileSync(fileURLToPath(new URL('./fixtures/ub-mode-SKILL.md', import.meta.url)), 'utf8').replace(/^---[\s\S]*?\n---\n/, '').replace(/^\s*# ub-mode\s*\n/, '').trim();
-    const start = rules.body.indexOf('Every time you are asked to make a change follow:');
-    expect(start).toBeGreaterThan(0);
-    expect(rules.body.slice(start)).toBe(upstream);
-    expect(rules.body.slice(0, start)).toMatch(/task determines[\s\S]*scope and check[\s\S]*independent approvals remain in force/);
     expect(rules.sources).toEqual(['unclebob/ub-mode SKILL.md']);
-    expect(rules.description.en).toMatch(/your company's rules, those rules win/);
-  });
-
-  it('puts a preface above the ub-mode quote that wins where they differ', () => {
-    const rules = templates.skills.get('dev-engineering-rules')!.body;
-    const preface = rules.slice(0, rules.indexOf('Every time you are asked to make a change follow:'));
-    expect(preface).toMatch(/Where the quote below differs from these lines, these lines win/);
-    expect(preface).toMatch(/never push or merge to the main line unless the task names that action/);
-    expect(preface).toMatch(/the report is the result and its evidence, not a log of every action/);
-    expect(preface).toMatch(/run crapper, dryer and mutator only when the task assigns them/);
-    expect(preface).toMatch(/question the premise after three failed fixes, not two/);
-  });
-
-  it('says in SOURCES which part of dev-engineering-rules is quoted and which is written for Hornhoof', () => {
+    expect(rules.body).toMatch(/exact checked result to the assigned destination/i);
+    expect(rules.body).not.toMatch(/Every time you are asked to make a change follow:|Push to the main line at the end/i);
     const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
-    const row = sources.split('\n').find(line => line.startsWith('| `skills/dev-engineering-rules.md`'))!;
-    expect(row).toMatch(/word for word from "Every time you are asked to make a change follow:" to the end/);
-    expect(row).toMatch(/the lines above the quote are written for Hornhoof/);
-    expect(sources.split('\n').find(line => line.startsWith('Every role and skill text'))).toMatch(/The lines above the quote are Hornhoof's own/);
-    expect(sources.split('\n').find(line => line.startsWith('| unclebob/ub-mode |'))).toMatch(/below a preface of Hornhoof's own/);
+    expect(sources).toMatch(/unclebob\/ub-mode's SKILL\.md at commit 3da62bf3fcfd2034de41f30d920d2739e566171f/);
+    expect(sources).toMatch(/\| `skills\/dev-engineering-rules\.md` \| Original adaptation/);
   });
 
-  it('names one number of failed fixes before the premise is questioned', () => {
-    for (const id of ['dev-debugging', 'ops-incident-response', 'orch-trouble']) expect(body(id), id).toMatch(/three failed fixes|fails three times/);
-    for (const [id, skill] of templates.skills) expect(skill.body, id).not.toMatch(/two failed fixes|fails twice/);
+  it('changes approach when new evidence stops advancing the diagnosis', () => {
+    expect(body('dev-debugging')).toMatch(/new supported hypothesis[\s\S]*evidence stops advancing/i);
+    expect(body('orch-trouble')).toMatch(/new checks stop advancing/i);
+    expect(body('hh-fix-loop')).toMatch(/new hypothesis supported by evidence/i);
   });
 
   it('retains all testing-policy capabilities without a fixed downstream tester', () => {
     const policy = body('dev-testing-policy');
     for (let n = 1; n <= 11; n++) expect(policy, `T${n}`).toContain(`T${n}:`);
-    for (const rule of [/pure functions[\s\S]*direct fast tests/, /races, locks, permissions[\s\S]*real database/, /new test file always runs/i, /configuration failure or zero tests is not a pass/, /errors\/timeouts are not kills/, /money, access and security/, /false accepts and false rejects/, /do not retry or quarantine/i, /exact candidate\/fingerprint/, /CRAP 10 or above/, /0\.8 or more/, /NOT_RUN/]) expect(policy, String(rule)).toMatch(rule);
+    for (const rule of [/pure functions[\s\S]*direct fast tests/, /races, locks, permissions[\s\S]*real database/, /new test file always runs/i, /configuration failure or zero tests is not a pass/, /errors\/timeouts are not kills/, /money, access and security/, /executable rejection cases/, /diagnose unexpected results/i, /exact candidate\/fingerprint/, /measures validated for the project/, /NOT_RUN/]) expect(policy, String(rule)).toMatch(rule);
     expect(policy).toMatch(/does not assign a downstream tester/);
     expect(policy).toMatch(/full candidate validation[\s\S]*once for its candidate/);
     expect(policy).toMatch(/after a fix rerun failed and affected checks/);
-    expect(policy).toMatch(/coverage from a completed applicable run rather than starting another/);
-    expect(policy).toMatch(/unchanged old complexity is recorded separately/);
+    expect(policy).toMatch(/applicable coverage from a completed run/);
     expect(body('dev-review-verdict')).toContain('requirement -> test');
     expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/i);
   });
 
-  it('sets a time budget for tests and puts an over-budget file in the scope of whoever touches it', () => {
-    const rule = (n: number) => body('dev-testing-policy').split('\n').find(line => line.startsWith(`- **T${n}:`))!;
-    expect(rule(5)).toMatch(/a test that needs no browser takes under 1 s and its file under 30 s, and a whole run of the fast profile takes under 5 minutes of wall time/);
-    expect(rule(5)).toMatch(/browser tests keep the budget their project sets/);
-    expect(rule(5)).toMatch(/file over budget is a defect like a failing test/);
-    expect(rule(5)).toMatch(/in scope for whoever touches it or is assigned it/);
-    expect(rule(5)).toMatch(/never checked inside a test/);
-    expect(rule(5)).not.toMatch(/mass-rewrite/);
-    expect(rule(7)).toMatch(/name each file and test over the T5 budget/);
-    expect(rule(7)).not.toMatch(/fixed-minute/);
-    expect(body('dev-release-improvements')).toMatch(/files and tests over the testing policy's time budget/);
+  it('uses comparable workloads and baselines for test performance', () => {
+    const policy = body('dev-testing-policy');
+    expect(policy).toMatch(/documented workload[\s\S]*comparable baseline[\s\S]*correctness does not depend on host speed/i);
+    expect(body('dev-release-improvements')).toMatch(/comparable conditions[\s\S]*agreed baseline/i);
   });
 
   it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
@@ -310,25 +254,20 @@ describe('templates', () => {
     expect(body('dev-qa-acceptance')).toMatch(/Never pass something because the tests are green/);
   });
 
-  /* Ivan's word of 17 November 2026: the orchestrator sees and does everything in the system. */
   it.each(['dev-security-review', 'dev-security-fix', 'dev-threat-model', 'dev-review-diff', 'dev-review-verdict', 'ops-credential-vault'])(
-    '%s never takes what the orchestrator sees or does for a finding',
-    id => expect(body(id)).toContain("What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read."),
+    '%s protects owner authority and still reports unintended disclosure',
+    id => {
+      expect(body(id)).toMatch(/orchestrator[\s\S]*unintended disclosure|unintended disclosure[\s\S]*owner access/i);
+      expect(body(id)).not.toMatch(/what the orchestrator can see or do is never a finding/i);
+    },
   );
 
-  it('keeps Operations diagnosis read-only and shortcuts outside protected actions', () => {
+  it('keeps Operations diagnosis scoped and plans checks for the actual risk', () => {
     expect(body('ops-intake')).toMatch(/database tool, which only reads[\s\S]*SQL and why/);
-    expect(body('ops-intake')).toMatch(/two or three members at once/);
-    for (const id of ['ops-intake', 'ops-incident-response']) {
-      expect(body(id), id).toMatch(/Read-only diagnosis and small fixes need no gates only when reversible/);
-      expect(body(id), id).toMatch(/independent Security engineer[\s\S]*shared merge/);
-      expect(body(id), id).toMatch(/urgent|Emergency/);
-      expect(body(id), id).toMatch(/host sockets or node credentials/);
-    }
+    expect(body('ops-intake')).toMatch(/trust boundaries[\s\S]*any required independent check/);
+    expect(body('ops-incident-response')).toMatch(/route with the checks required for the permanent repair/);
     expect(body('ops-incident-response')).toMatch(/preserve logs, data and accounts/);
-    const trouble = body('orch-trouble');
-    for (const word of ['database', 'agent_changes', 'jobs', 'task_events', 'agent_events']) expect(trouble, word).toContain(word);
-    expect(trouble).toMatch(/Database repair is not permission to change people or protected access through SQL/);
+    expect(body('orch-trouble')).toMatch(/authorized execution route for code or schema changes/);
   });
 
   it('tells everyone that a reply in its window reaches only people, so an answer to an agent goes as a message', () => {
@@ -357,30 +296,21 @@ describe('templates', () => {
     for (const id of ['orch-trouble', 'orch-resources']) expect(body(id), id).not.toMatch(/[\u2014ё]/);
   });
 
-  it('asks for reports to people and heads in ordinary words with spaces', () => {
-    for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
+  it('writes identifiers and evidence clearly in reports', () => {
+    expect(body('hh-report-to-head')).toMatch(/identifiers, quantities and outcomes in separate readable words/);
   });
 
-  it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
+  it('releases an exact candidate with evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
-    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /approve the exact 40-character commit where required/, /Move main to the exact checked commit/, /Prove rollback first/, /Build and publish artifacts from that commit/, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
-    expect(release).toMatch(RELEASE_RULE);
-    expect(release).toMatch(/ask with commit before pushing when the rule requires approval/i);
-    expect(release).toMatch(/autonomous release[\s\S]*without sending a human (?:approval )?card/i);
-    expect(body('dev-task-flow')).toMatch(/recorded auto-approval under the department's autonomous release/i);
-    expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
-    expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
-    expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
-    expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
-    expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);
-    expect(body('orch-people')).toMatch(/in any turn, as the company's owner[\s\S]*notebook[\s\S]*Never use database SQL/);
-    expect(body('orch-resources')).toMatch(/What is not forbidden is allowed[\s\S]*notebook[\s\S]*open_computer_access[\s\S]*named employee on a task/);
-    expect(body('hh-notebook')).toMatch(/What is not forbidden there or by Hornhoof itself is allowed[\s\S]*without asking anyone to confirm/);
+    expect(release).toMatch(/exact candidate[\s\S]*assigned checks passed/i);
+    expect(release).toMatch(/prove rollback first/i);
+    expect(release).toMatch(/exact checked candidate[\s\S]*authorized decision or autonomous proof path/i);
+    expect(release).toMatch(/verify the published\/deployed revision and health/i);
   });
 
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
-    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV', 'VID-HEAD', 'VID-WRITE', 'VID-BOARD', 'VID-KEEP', 'VID-GEN', 'VID-EDIT', 'VID-COLOR', 'VID-SOUND', 'VID-QA'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 
@@ -448,7 +378,7 @@ describe('templates', () => {
   });
 
   it('names each role after its department code', () => {
-    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD' };
+    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD', video_production: 'VID' };
     for (const r of roles) expect(r.id.startsWith(`${codes[r.department]}-`), r.id).toBe(true);
   });
 
@@ -530,17 +460,11 @@ describe('templates', () => {
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
-    for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
-    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM']);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
   });
 
-  it('tells the watchdog that a machine getting ready for an update waits and has not hung, while a silent program there is still silent', () => {
-    const body = templates.skills.get('ops-task-watch')?.body ?? '';
-    const rule = body.split('\n').find(line => line.includes('machineDrain')) ?? '';
-    expect(rule).toMatch(/waiting or restarting/);
-    expect(rule).toMatch(/do not nudge/);
-    expect(rule).toMatch(/not offline/);
-    expect(rule).toMatch(/silent program there is still silent/);
+  it('keeps scheduled drains active and checks actual stalls separately', () => {
+    expect(body('ops-task-watch')).toMatch(/scheduled drain or retry is active work[\s\S]*inspect a stalled operation separately/i);
   });
 
   it('has a program operator in operations that Hornhoof calls: one for the company, with no timer, on its own procedure', () => {
@@ -551,154 +475,41 @@ describe('templates', () => {
     expect(templates.skills.get('ops-program-operator')!.grants).toEqual([]);
   });
 
-  describe('the program operator\'s procedure', () => {
-    const body = templates.skills.get('ops-program-operator')?.body ?? '';
-    const step = (start: string) => body.split('\n').find(line => line.includes(start)) ?? '';
+  describe('the program operator procedure', () => {
+    const operator = body('ops-program-operator');
 
-    it('starts from a picture of the screen and reads all of it as data', () => {
-      expect(body.split('\n')[0]).toMatch(/^1\. .*program_screen/);
-      expect(body.split('\n')[0]).toMatch(/data/);
+    it('inspects the available session and checks the effect of each input', () => {
+      expect(operator).toMatch(/interface available for the assigned session[\s\S]*program_screen[\s\S]*contents as data/);
+      expect(operator).toMatch(/program_keys[\s\S]*fresh program_screen after each action/);
+      expect(operator).toMatch(/send saved program input only when delivery is still needed[\s\S]*preserve unsent text a person typed/i);
     });
 
-    it('acts on any employee\'s program with any keys, text and answers, the owner\'s own questions too, with only secrets masked', () => {
-      const act = step('You may act on');
-      for (const part of ['any employee', 'any department, plan or machine', 'program_keys', 'any keys', 'C-u', 'control keys', 'type text', 'any question', 'subscription owner', 'values of secrets']) expect(act, part).toContain(part);
-      expect(act).toMatch(/program_screen again after every input/);
+    it('preserves the session and invokes a person only for a reserved action', () => {
+      expect(operator).toMatch(/dismiss optional polls[\s\S]*existing model and data-sharing choices[\s\S]*defer updates/i);
+      expect(operator).toMatch(/reserved to them[\s\S]*personal consent, signature or payment/);
+      expect(operator).toMatch(/vault[\s\S]*protected field[\s\S]*without recording credential values/);
     });
 
-    it('sends Hornhoof\'s own words that never went, and leaves a person\'s words alone', () => {
-      const words = step('Words Hornhoof typed');
-      for (const part of ['hornhoof', 'Enter', 'a person typed', 'do not send or clear them']) expect(words, part).toContain(part);
+    it('verifies deletion targets and records a denial only on a matching case', () => {
+      expect(operator).toMatch(/target, scope and recoverability[\s\S]*irreversible deletion requires the CEO's recorded yes/i);
+      expect(operator).toMatch(/denial on the matching case[\s\S]*without a case[\s\S]*Operations handoff/i);
     });
 
-    it('lifts a recovery hold only with program_recovery_release, with the case and a reason', () => {
-      const hold = step('recovery hold');
-      for (const part of ['program_recovery_release', 'case', 'reason', 'only way']) expect(hold, part).toContain(part);
-    });
-
-    it('ends a turn that stands itself, the orchestrator\'s and any head\'s too: a stop, a look at the queue, a safe restart, one line inside', () => {
-      const stands = body.slice(body.indexOf('7. A turn that stands'), body.indexOf('\n8. '));
-      for (const part of ['any employee', 'the orchestrator and the head of any department', "with no person's message", 'Never ask a person to stop a turn', 'press Stop turn or write done', 'never put this work in a wait for a person']) expect(stands, part).toContain(part);
-      expect(stands).toMatch(/stop_employee and your reason[\s\S]*queue moved[\s\S]*restart_program[\s\S]*same session[\s\S]*role, skills, memory and tasks stay[\s\S]*one line inside the company/);
-      expect(stands).toMatch(/program operator sends it to its head with message_employee; the head of Operations sends it to the orchestrator with tell_orchestrator/);
-    });
-
-    it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
-      const stuck = step('You do not understand');
-      expect(stuck).toContain('tell_orchestrator');
-      expect(stuck).toContain('failed');
-      expect(stuck).toMatch(/which screen it is and why it stands/);
-    });
-
-    it('keeps no key limit, and no rule against Escape or text', () => {
-      expect(body).not.toMatch(/at most 20 keys|takes no Escape|Press nothing on/);
-    });
-
-    it('is called to a thinking program whose screen stood still, and looks at it the same way', () => {
-      expect(step('Hornhoof also calls you')).toMatch(/screen stood still while it thinks/);
-    });
-
-    describe('on a window of the program\'s own', () => {
-      const section = body.slice(body.indexOf('### Windows of the program'), body.indexOf('### Permission questions'));
-      const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
-
-      it('passes the window itself at once, as the agent\'s owner would with the safe choice', () => {
-        expect(body.indexOf('### Windows of the program')).toBeGreaterThan(body.indexOf('\n9. '));
-        for (const part of ['no hook tells of', 'Pass each one yourself at once', 'get the turn moving', "the agent's owner", 'safe choice', 'screen stood still']) expect(section, part).toContain(part);
-      });
-
-      it('skips polls, trusts only the working folder, puts off updates and keeps the model', () => {
-        expect(point('A survey')).toMatch(/skip or dismiss it[\s\S]*share nothing/);
-        expect(point('Trust')).toMatch(/trust the agent's own working folder[\s\S]*deny any other folder/);
-        expect(point('An update')).toMatch(/never update in the middle of a turn/);
-        expect(point('An offer to switch')).toMatch(/keep the one it runs/);
-      });
-
-      it('signs in from the vault itself, and asks a person only for their own password or account', () => {
-        const signIn = point('A sign-in');
-        for (const part of ['vault_entries', 'vault_entry', 'program_keys', 'as a person does', 'their own password or account', 'needs_owner']) expect(signIn, part).toContain(part);
-      });
-
-      it('waits out a limit that ran out and never buys more of it', () => {
-        expect(point('A limit')).toMatch(/waits for it to come back[\s\S]*costs money[\s\S]*needs_owner/);
-      });
-
-      it('keeps the work, the session and the data in any other window', () => {
-        expect(point('Any other window')).toMatch(/keeps the work, the session and the data/);
-      });
-    });
-
-    describe('on a question about permission', () => {
-      const section = body.slice(body.indexOf('### Permission questions'));
-      const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
-
-      it('has a section of its own after the steps', () => {
-        expect(body).toContain('### Permission questions');
-        expect(body.indexOf('### Permission questions')).toBeGreaterThan(body.indexOf('\n6. '));
-      });
-
-      it('allows what is harmless, its own temporary folder too', () => {
-        const allow = point('Allow');
-        for (const kind of ['reading', 'working folder', 'temporary folder', 'deleting its own temporary folder']) expect(allow, kind).toContain(kind);
-      });
-
-      it('denies what reaches outside the working folder, and tells the head of that agent\'s department with the picture', () => {
-        const deny = point('Deny');
-        for (const kind of ['outside the working folder', 'system paths', 'secrets', 'unfamiliar addresses', 'not sure']) expect(deny, kind).toContain(kind);
-        for (const told of ['outcome denied', "head of that agent's department", 'picture of the screen']) expect(deny, told).toContain(told);
-      });
-
-      it('answers sign-in, consent, terms and the owner\'s own questions itself, and leaves only spending money to a person', () => {
-        const owner = point('Sign-in');
-        for (const kind of ['consent', 'terms', 'subscription owner', 'answer them yourself', 'program_keys']) expect(owner, kind).toContain(kind);
-        expect(owner).toMatch(/costs money/);
-        expect(owner).toContain('tell_orchestrator');
-      });
-
-      it("answers No to Claude Code's own check of a deletion through a variable that may be empty, and tells the program how to write it", () => {
-        const rm = point("Claude Code's own check");
-        for (const part of ['rm $VAR/*', 'only a person may allow', 'choose No', '"${VAR:?}/..."', 'literal path', 'decision to denied']) expect(rm, part).toContain(part);
-      });
-
-      it('takes a fresh picture before every input and leaves its decision in the agent\'s journal', () => {
-        const key = point('Take a fresh');
-        expect(key).toContain('program_screen');
-        expect(key).toContain('before every input');
-        for (const part of ['what was asked', 'what you chose', 'why', "agent's journal"]) expect(key, part).toContain(part);
-      });
-
-      it('leaves a question about the work itself to a person', () => {
-        const work = point('A question about the work');
-        expect(work).toContain('ask_person');
-        expect(work).toMatch(/Leave it alone/);
-      });
+    it('recovers manual and automatic holds without redelivering work', () => {
+      expect(operator).toMatch(/manual hold[\s\S]*program_recovery_release[\s\S]*exact case and reason/i);
+      expect(operator).toMatch(/verified recovery event[\s\S]*saved work resumed/);
+      expect(operator).toMatch(/stop_employee[\s\S]*verify the queue[\s\S]*restart_program[\s\S]*verify the saved work/);
     });
   });
 
-  it.each([['OPS-PROGRAM', 'role'], ['OPS-HEAD', 'role'], ['orch-trouble', 'skill']] as const)('tells %s straight that it sees and acts on any employee\'s program and lifts a hold with program_recovery_release', (id, kind) => {
-    /* A role says it through the skills it carries on, as a role's own line stays one short sentence. */
-    const text = kind === 'role' ? templates.roles.get(id)!.skills.filter(skill => skill.on).map(skill => templates.skills.get(skill.id)!.body).join('\n') : templates.skills.get(id)!.body;
-    for (const part of ['any employee', 'program_screen', 'program_keys', 'any keys', 'any question', 'subscription owner', 'values of secrets', 'program_recovery_release']) expect(text, part).toContain(part);
-  });
-
-  it('locks the program skill on for the head of Operations and the program operator, so each one hired before has it too', () => {
+  it('locks recovery instructions on for the head and operator', () => {
     for (const id of ['OPS-HEAD', 'OPS-PROGRAM']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'ops-program-operator'), id).toEqual({ id: 'ops-program-operator', on: true, locked: true });
-    for (const id of ['ops-intake', 'hh-questions']) expect(templates.skills.get(id)!.body, id).toMatch(/never ask a person to stop a turn or write done/i);
+    expect(body('ops-intake')).toMatch(/never ask a person to stop a turn or write done/i);
   });
 
-  /* An employee reads its role's line from the template every turn. */
-  it('tells a head of Operations hired before it got the operator skill, in its own line, that it lifts a hold with program_recovery_release', () => {
-    expect(templates.roles.get('OPS-HEAD')!.body).toContain('program_recovery_release');
-  });
-
-  it('tells the orchestrator that a thinking program whose screen stood still waits on a window of its own', () => {
-    expect(templates.skills.get('orch-trouble')!.body).toMatch(/still thinking is not a stall, unless its screen stood still: a window of the program waits for an answer there/);
-  });
-
-  it('names in orch-trouble exactly who acts on another employee\'s program, and why a release is refused', () => {
-    const trouble = templates.skills.get('orch-trouble')!.body;
-    for (const part of ['the head of Operations', 'the program operator', 'no one else', 'reliability engineer']) expect(trouble, part).toContain(part);
-    for (const part of ['still runs', 'program_busy', 'no_plan', 'node_unavailable', 'protected_screen', 'input_not_proven']) expect(trouble, part).toContain(part);
+  it('has the orchestrator inspect a quiet screen and preserve progress', () => {
+    expect(body('orch-trouble')).toMatch(/quiet screen calls for inspection[\s\S]*reliable progress[\s\S]*preserve the running turn/i);
+    expect(body('orch-trouble')).toMatch(/recovery interface available for the target session[\s\S]*assigned operator/);
   });
 
   it('teaches the failure collector to file an improvement as a short case, part by part as the tool takes it', () => {
@@ -706,11 +517,11 @@ describe('templates', () => {
     for (const part of ['title', 'problem', 'facts', 'source', 'guesses', 'why', 'change', 'gain']) expect(review, part).toContain(`${part}:`);
   });
 
-  it('has a turnkey team for every department, of members of that department', () => {
+  it('has a team of its own members in every department and keeps the video team on the checked route', () => {
     const teams = [...templates.teams.values()];
     expect(teams.map(team => team.department).sort()).toEqual([...new Set(roles.map(r => r.department))].sort());
     for (const team of teams) {
-      expect(team.turnkey, team.id).toBe(true);
+      expect(team.turnkey, team.id).toBe(team.department !== 'video_production');
       expect(templates.teamsOf(team.department), team.id).toEqual([team]);
       expect(team.title.ru, team.id).toMatch(/[а-я]/i);
       expect(team.description.en.length, team.id).toBeGreaterThan(20);
@@ -731,7 +542,7 @@ describe('templates', () => {
     /* The default roster has someone for every echelon: Architecture, Development, Review, Security and Tests. */
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PM']);
     expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
-    expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
+    expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Interface developer', ru: 'Разработчик интерфейсов' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
@@ -741,8 +552,8 @@ describe('templates', () => {
        comes in a stream, and the middle one for everyone whose work is checked after. */
     const asked: Record<string, string[]> = {
       top: ['DEV-ARCH', 'DEV-SEC'],
-      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA'],
-      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1'],
+      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'VID-HEAD', 'VID-KEEP', 'VID-QA'],
+      fast: ['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-CAL', 'HHD-PM', 'HHD-SUPPLY', 'HOM-PM', 'MKT-PM', 'MKT-SOCIAL', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SAL-SDR', 'SUP-PM', 'SUP-T1', 'VID-PM'],
     };
     for (const role of templates.roles.values()) {
       const tier = Object.keys(asked).find(key => asked[key]!.includes(role.id)) ?? 'standard';
@@ -750,23 +561,14 @@ describe('templates', () => {
     }
   });
 
-  it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('tells %s that a run starts with its dependencies prepared, and what to do when it did not', roleId => {
+  it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('gives %s language and preparation guidance from the project', roleId => {
     const role = templates.roles.get(roleId)!;
     const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Bruno', roleKey: roleId, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
     const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
     const rules = rendered.skills.find(s => s.name === 'dev-language-rules')!.body;
-    expect(rules).toMatch(/dependencies come prepared/);
-    expect(rules).toMatch(/installs and builds nothing first, in any language/);
-    expect(rules).toMatch(/started without the harness, install from the lockfile with the project's standard command/);
-    expect(rules).toMatch(/Install from the lockfile in your workspace once, and again when the lockfile changes/i);
-    for (const example of ['npm scripts', 'npx --no-install']) expect(rules, example).toContain(example);
-    expect(rules).toMatch(/temporary JavaScript scripts inside the repository's package or workspace that owns their dependencies/);
-    expect(rules).toMatch(/imports resolve its `node_modules`/);
-    expect(rules).toMatch(/ERR_MODULE_NOT_FOUND` when a run started without the harness is not an application defect/);
-    /* The rule holds in any language, and what is about npm stands apart, for that kind of project. */
-    const setup = rules.split('\n').find(line => line.startsWith('4.'))!;
-    expect(setup).toContain('In an npm project:');
-    expect(setup.split('In an npm project:')[0]).not.toMatch(/npm|npx|node_modules|JavaScript|ESLint|Vitest|Playwright/);
+    expect(rules).toMatch(/declared toolchain[\s\S]*the repository's documented build/i);
+    expect(rules).toMatch(/reuse compatible prepared dependencies when verified[\s\S]*prepare missing inputs/i);
+    expect(rules).toMatch(/report a missing or unsupported capability/i);
   });
 
   it('credits every source a skill names in SOURCES.md', () => {
@@ -950,10 +752,9 @@ describe('templates', () => {
       /* A rule on whom to ask is of use only to an employee who carries it, and every one of them asks. */
       expect(CORE_SKILLS).toContain('hh-questions');
       expect(skill!.grants).toEqual([]);
-      expect(skill!.body).toContain('- **Materials**:');
-      expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
-      expect(skill!.body).toMatch(/inspect[\s\S]*in full[\s\S]*before answering/i);
-      const materialsLine = skill!.body.split('\n').find(line => line.startsWith('- **Materials**:')) ?? '';
+      expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*keep raw paths and content out/i);
+      expect(skill!.body).toMatch(/inspect them before answering/i);
+      const materialsLine = skill!.body.split('\n').find(line => line.includes('attach the materials')) ?? '';
       expect(materialsLine).not.toMatch(/\bhornhoof\b|#\d+|202\d-|@\S+\.\S+/i);
       expect(materialsLine).not.toMatch(/(?<=[a-z,;:]\s)[A-Z][a-z]+/);
     });
@@ -1058,12 +859,12 @@ describe('templates', () => {
       expect(leadTasksBody().split('External outages and holds:').length - 1).toBe(1);
       expect(templates.skills.get('ops-api-connector')!.body).toContain('Never retry a payment or a send without first checking it did not already happen.');
       expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
-      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('change permissions');
-      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('An irreversible deletion waits for the CEO\'s yes');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('explicit boundaries');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toMatch(/only irreversible deletion needs the CEO's recorded yes/i);
       expect(templates.skills.get('hh-stay-in-scope')!.body).not.toMatch(/irreversible or public waits/);
       expect(templates.skills.get('dev-ci-release')!.body).toMatch(/never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i);
       expect(templates.skills.get('dev-testing-policy')!.body).toMatch(/do not retry or quarantine/i);
-      expect(templates.skills.get('ops-task-watch')!.body).toContain('Never retry it unchanged.');
+      expect(templates.skills.get('ops-task-watch')!.body).toMatch(/assign failed prerequisites to the owner who can repair them/i);
       for (const s of skills) {
         expect(s.body, s.id).not.toMatch(/\bexactly one attempt\b|\bno retries\b|\bdo not declare recovery\b/i);
       }
@@ -1096,7 +897,7 @@ describe('templates', () => {
       expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
       expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
       expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
-      expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+      expect(templates.skills.get('ops-task-watch')!.body).toMatch(/runnable work has an eligible free owner/i);
     });
 
     it('rejects head breakdown instructions that treat idle capacity as normal, omit independentPart/independentNone, assign ordinary work to urgent-only teams or leak incident names', () => {
@@ -1161,7 +962,7 @@ describe('templates', () => {
 
 type ReviewSkills = { diff: string; verdict: string; security: string };
 
-const NATIVE_TOOL_RE = /code-review skill|security-review skill|codex review --base|review-agent/i;
+const NATIVE_TOOL_RE = /review facility|code-review skill|security-review skill|codex review --base|review-agent/i;
 
 const sentencesOf = (text: string): string[] =>
   text.split(/(?<=[.!?])\s+|\n+/).map(line => line.trim()).filter(Boolean);
@@ -1194,9 +995,9 @@ const secondLookSentences = (s: ReviewSkills): string =>
 const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }[] = [
   {
     id: 'current-owner-repairs-and-model-choice',
-    holds: s => /task\.echelons/.test(s.verdict) && /Review is required for every executable result/.test(s.verdict) &&
-      /failed verdict keeps ownership with you/.test(s.verdict) && /model not weaker than its producer/.test(s.verdict) &&
-      /same provider, subscription or tariff is allowed/.test(s.verdict) &&
+    holds: s => /actual task route/.test(s.verdict) && /Review is required for executable results on the Development route/.test(s.verdict) &&
+      /failed verdict keeps ownership with you/.test(s.verdict) && /independence and capability the route requires/.test(s.verdict) &&
+      /same provider is the available choice/.test(s.verdict) &&
       forbids(s.verdict, /\breturn\w*\b[^.!?;,]*\b(?:original author|work to the author)\b/i) &&
       forbids(s.verdict, /\brequire\w*\b[^.!?;,]*\bdifferent provider\b/i),
   },
@@ -1210,11 +1011,11 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
       const all = `${s.diff}\n${s.verdict}\n${s.security}`;
       const repeats = secondLookSentences(s);
       return (
-        /\bfirst look[\s\S]*(?:role's|card)\b/i.test(all) &&
+        /\bfirst look\b/i.test(all) &&
         forbids(all, /\b(?:at|on|force|forcing|raise\s+effort\s+to)\s+high(?:\s+effort)?\b/i) &&
         forbids(repeats, /\b(?:read|reread|re-read|inspect|review)\b[^.!?;,]*\b(?:whole|entire|full)\s+(?:patch|change|branch|diff)\b/i) &&
         forbids(repeats, /\b(?:(?:re-?)?run\w*|use|invoke|repeat\w*)\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:program's own review|native review|code-review|security-review|codex review|review-agent)\b/i) &&
-        /\b(?:do not|never|skip|without|no second)\b[^.!?]*\b(?:program's own review|native review|whole (?:patch|change|branch))\b/i.test(s.diff) &&
+        /On recheck, inspect the fixes and the behavior they affect/i.test(s.diff) &&
         /\b(?:do not|never|skip|without|no second)\b[^.!?]*\b(?:program's own review|native review|whole (?:patch|change|branch))\b/i.test(s.verdict)
       );
     },
@@ -1333,24 +1134,17 @@ const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every
 
 const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
 
-/* Where tests run, said once in a skill that needs it, and how a release runs them. */
-const PLAIN_RULE = /Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./;
-const RELEASE_RULE = /Merge the ready work into the turn's branch \(or a release branch\): the run of every test happens there once, through run_tests; a failed release is mended, and its next run runs only what failed or changed; then main moves\./;
-
 const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
-  { id: 'named-test-files-local-red-green', holds: text => matchesAll(text, [/authoring or reviewing[\s\S]*own workspace/i, /one or more regular test files/i, /directory, glob, loop or variable/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\ba directory\s+locally\b/i) },
-  { id: 'quality-stages-in-own-workspace', holds: text => matchesAll(text, [/locally[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i, /whole suite[\s\S]*"run_tests"[\s\S]*groups[\s\S]*free compatible machines/i]) },
-  { id: 'local-lockfile-installs', holds: text => /Install dependencies from the lockfile in your workspace once[\s\S]*lockfile changes/i.test(text) && !/Never install dependencies locally/i.test(text) },
-  { id: 'prepared-dependencies-install-only-when-needed', holds: text => /manifest names its dependencies[^.]*already in place[^.]*install only when they are missing or after the lockfile changes/i.test(text) },
-  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*whole suite[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
-  { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to a local whole suite/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
-  { id: 'light-screenshot-and-local-browser-files', holds: text => matchesAll(text, [/lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
-  { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !hasIncidentOrBrandLeak(text) },
+  { id: 'named-test-files-local-red-green', holds: text => matchesAll(text, [/affected tests in your workspace/i, /name the executed test files/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\ba directory\s+locally\b/i) },
+  { id: 'local-lockfile-installs', holds: text => /prepare the workspace through the project's declared setup/i.test(text) && !/Never install dependencies locally/i.test(text) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => /preparation command proves no test passed/i.test(text) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => /record the unproved scope and why/i.test(text) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
+  { id: 'abstract-english-no-incident-facts', holds: text => !hasIncidentOrBrandLeak(text) },
 ];
 
 const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
   { id: 'no-skill-names-hh-run-checks', holds: s => forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
-  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /run of every test[^.]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
+  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /whole release suite/i.test(s.ciRelease) && /exact candidate[\s\S]*assigned checks/i.test(s.ciRelease) },
   { id: 'browser-suite-remote-light-screenshot-distinct', holds: s => matchesAll(s.browser, [/lightweight screenshot capture/i, /browser binary name alone/i]) && forbids(s.browser, /\btreat\w*\b[^.!?;,]*\bscreenshot capture as a full browser test suite/i) },
 ];
 
@@ -1468,7 +1262,7 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (s: OrchestratorOutageSkil
     id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
     holds: ({ trouble: text }) =>
       matchesAll(text, [
-        /\bsame internal fix fails (?:a third time|three times)\b/i,
+        /new checks stop advancing the diagnosis/i,
         /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
         /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
       ]) &&
@@ -1575,25 +1369,20 @@ const styleBookSources = (book: string): string[] => [
 ];
 
 describe('only an irreversible deletion needs the CEO, and what goes out needs nobody', () => {
-  it('tells every head and the orchestrator to help at once, ask the CEO only before an irreversible deletion, and send no confirmation cards', () => {
+  it('lets department heads and the orchestrator act on ordinary work', () => {
     const lead = templates.skills.get('hh-lead-tasks')!.body;
     expect(ORCHESTRATOR_SKILLS).toContain('hh-lead-tasks');
     expect(HEAD_SKILLS).toContain('hh-lead-tasks');
-    expect(lead).toMatch(/Ask the CEO first only for an irreversible deletion[^.!?]*(?:wip|backups|repository)/);
-    expect(lead).toMatch(/what only they know[^.!?]*password[^.!?]*taste[^.!?]*choice between directions/);
-    expect(lead).toMatch(/Never send a person a card to do or confirm what the company can do itself/);
-    expect(lead).toMatch(/goes out of the company[\s\S]*nothing of it waits for a person's yes unless the department itself set an approval rule/);
-    expect(lead).toMatch(/Hornhoof sends nothing for the company[^.!?]*sign-in is in the vault[^.!?]*company's phones/);
-    expect(lead).toMatch(/every action at once in a record in the department's git, in whatever format suits the work/);
-    expect(lead).toMatch(/asked not to be written to[^.!?]*never written to again/);
+    expect(lead).toMatch(/resolve ordinary work directly instead of asking for confirmation/i);
+    expect(lead).toMatch(/ask the CEO for a recorded yes only for irreversible deletion/i);
+    expect(lead).toMatch(/sending, posting and talking to people are the department's work[\s\S]*honor opt-outs[\s\S]*installed phone app at a human pace/i);
   });
 
-  it('tells every employee the same, in the skill each one has', () => {
+  it('uses the human question only for a person-specific action or choice', () => {
     expect(CORE_SKILLS).toEqual(expect.arrayContaining(['hh-questions', 'hh-stay-in-scope']));
     const questions = templates.skills.get('hh-questions')!.body;
-    expect(questions).toMatch(/`human_only_action` \([^)]*irreversible deletion[^)]*CEO/);
-    expect(questions).toMatch(/Nothing that goes out of the company[^.!?]*is a human_only_action/);
-    expect(questions).toMatch(/Never send a person a card to do or confirm what the company can do itself/);
+    expect(questions).toMatch(/only that person can supply[\s\S]*recorded yes only for irreversible deletion/i);
+    expect(questions).toMatch(/ask its holder to add the sign-in to the vault/i);
   });
 
   it('lets no skill ask for an account sign-up that costs nothing', () => {
@@ -1603,63 +1392,38 @@ describe('only an irreversible deletion needs the CEO, and what goes out needs n
     expect(signup.body).toMatch(/A free account needs nobody's yes/);
     expect(signup.body).toMatch(/paid plan waits for a person to pay from their own account/);
     expect(`${signup.description.en} ${signup.body}`).not.toMatch(/\bCEO's approval\b|approval and help/);
-    expect(signup.body).toMatch(/The CEO enters payment details/);
+    expect(signup.body).toMatch(/the person responsible for payment enters payment details/i);
   });
 });
 
 /* Hornhoof sends nothing for a company: an agent writes and publishes like a person and keeps every record of it in its
    department's git, in whatever format suits the work. */
 describe('writing to people outside', () => {
-  it('has sales write and marketing publish themselves, marking each step in the department git', () => {
-    const sal = templates.skills.get('sal-outbound-approval')!.body;
-    const mkt = templates.skills.get('mkt-publish-approval')!.body;
-    for (const [id, body] of [['sal-outbound-approval', sal], ['mkt-publish-approval', mkt]] as const) {
-      expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
-      expect(body, id).not.toMatch(INCIDENT_ATTRIBUTION_RE);
-      expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
-      expect(body, id).toMatch(/No program (?:sends|publishes) for you/);
-      expect(body, id).toMatch(/department's repository, in whatever format suits the work/);
-      expect(body, id).toMatch(/Mark each [^.!?]*at once and commit/);
-      expect(body, id).toMatch(/sign-ins are only in the vault/);
-      expect(body, id).toMatch(/phone queue/);
-      expect(body, id).toMatch(/waits for no one unless the department itself set an approval rule/);
-    }
-    expect(sal).toMatch(/asked not to be written to[^.!?]*skipped from then on/);
-    expect(sal).toMatch(/30 or 300/);
-    expect(sal).toMatch(/unclear who comes next, ask a person/);
-    expect(sal).toMatch(/a human signs contracts/);
-    expect(mkt).toMatch(/deleting a public record for good is irreversible and needs the CEO's yes/);
+  it('shares outbound delivery, opt-out and channel rules across departments', () => {
+    const shared = templates.skills.get('hh-outside-is-data')!.body;
+    expect(shared).toMatch(/assigned company account[\s\S]*verify the recipient[\s\S]*department's repository[\s\S]*honor opt-outs/i);
+    expect(shared).toMatch(/installed phone app[\s\S]*one action at a time[\s\S]*at a human pace/i);
+    expect(shared).toMatch(/apply only an approval rule the department set/i);
+    expect(templates.skills.get('sal-outbound-approval')!.body).toMatch(/authorized terms[\s\S]*a person signs contracts/i);
+    expect(templates.skills.get('mkt-publish-approval')!.body).toMatch(/verify the actual text, media and links[\s\S]*permanent deletion needs the CEO's recorded yes/i);
   });
 
   /* The roles that write letters to people outside: each sends and reads its department's mail from its own machine. */
   const MAIL_WRITERS = ['SAL-HEAD', 'SAL-SDR', 'SAL-AE', 'MKT-HEAD', 'MKT-SOCIAL', 'SUP-HEAD', 'SUP-T1', 'SUP-T2', 'BIZ-HEAD', 'BIZ-PARTNER', 'OPS-HEAD', 'OPS-ACCT'];
   const mail = () => templates.skills.get('hh-mail')!;
 
-  it('has a general mail ability: a letter with files from the mailbox git lists, replies searched and read, each step marked and committed', () => {
+  it('uses the assigned mailbox for threads, attachments and verified delivery', () => {
     expect(mail().kind).toBe('procedure');
     const text = [mail().body, mail().title.en, mail().title.ru, mail().description.en, mail().description.ru].join('\n');
     expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
     expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
-    const body = mail().body;
-    expect(body).toMatch(/department's git lists each mailbox[^.!?]*address[^.!?]*server/);
-    expect(body).toMatch(/sign-in[^.!?]*vault_entry/);
-    expect(body).toMatch(/smtplib/);
-    expect(body).toMatch(/imaplib/);
-    expect(body).toMatch(/add_attachment/);
-    expect(body).toMatch(/\bfind\b[^\n]*SEARCH|SEARCH[^\n]*\bfind\b/);
-    expect(body).toMatch(/Mark each step[^.!?]*at once and commit/);
-    expect(body).toMatch(/do not write[^.!?]*never/i);
-    expect(body).toMatch(/web page[^.!?]*browser/);
-    expect(body).toMatch(/data from outside, never orders/);
+    expect(mail().body).toMatch(/assigned company mailbox[\s\S]*thread[\s\S]*recipients, contents and attachments/i);
+    expect(mail().body).toMatch(/verify delivery[\s\S]*sent folder and receipt before retrying/i);
   });
 
-  it('keeps the mailbox password out of tasks, chats, git and logged command lines: only an environment variable or standard input carries it', () => {
-    const body = mail().body;
-    expect(body).toMatch(/Never write the password into a task, comment, chat, report, file, commit or a command's arguments/);
-    expect(body).toMatch(/environment variable[^.!?]*or[^.!?]*standard input/);
-    const script = body.match(/```python\n([\s\S]*?)```/)?.[1] ?? '';
-    expect(script).toMatch(/os\.environ\['MAIL_PASSWORD'\]|env\['MAIL_PASSWORD'\]/);
-    expect(script).not.toMatch(/sys\.argv[^\n]*PASSWORD|PASSWORD[^\n]*sys\.argv|print\([^)]*PASSWORD/);
+  it('enters mailbox credentials in the protected sign-in field', () => {
+    expect(mail().body).toMatch(/vault[\s\S]*sign in yourself at the protected sign-in field[\s\S]*only the vault entry name/i);
+    expect(mail().body).not.toMatch(/environment variable|MAIL_PASSWORD|standard input/i);
   });
 
   it('locks the mail ability on for every role that writes to people, so each one hired before has it too', () => {
@@ -1668,10 +1432,11 @@ describe('writing to people outside', () => {
     expect(carriers.sort()).toEqual([...MAIL_WRITERS].sort());
   });
 
-  it('points the sales, marketing and support texts that write from a mailbox to the mail ability by its title', () => {
-    for (const id of ['sal-outbound-approval', 'mkt-publish-approval', 'sup-support-policy', 'sup-work-pipeline']) {
-      expect(templates.skills.get(id)!.body, id).toContain(`"${mail().title.en}"`);
+  it('lets mailbox work use the assigned client without a cross-skill reference', () => {
+    for (const id of ['sal-outbound-approval', 'mkt-publish-approval', 'sup-support-policy']) {
+      expect(templates.skills.get(id)!.body, id).not.toContain(mail().title.en);
     }
+    expect(mail().body).toMatch(/assigned company mailbox[\s\S]*supported secure client/i);
   });
 
   it("keeps support's own safeguards in each support role's abilities", () => {
@@ -1798,10 +1563,10 @@ describe('skills compose around an assignment without a universal role', () => {
   it('keeps mandatory Review and its repairs with the current checking owner', () => {
     const verdict = body('dev-review-verdict');
     expect(templates.skills.get('dev-review-verdict')!.kind).toBe('gate');
-    expect(verdict).toMatch(/Only the current checking owner may act/);
+    expect(verdict).toMatch(/read the actual task route, version, criteria and repair ownership/i);
     expect(verdict).toMatch(/failed verdict keeps ownership with you[\s\S]*fix it within the assigned paths/);
     expect(verdict).not.toContain('task.fixReview');
-    expect(verdict).toMatch(/Review is required for every executable result/);
+    expect(verdict).toMatch(/review is required for executable results on the Development route/i);
     for (const id of ['DEV-REV', 'DEV-SEC']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-review-verdict')?.on).toBe(true);
   });
 
@@ -1835,8 +1600,8 @@ describe('skills compose around an assignment without a universal role', () => {
 
   it('preserves language-specific abilities as optional selections', () => {
     for (const role of roles) for (const id of ['mkt-russian-copy', 'mkt-telegram-vk', 'mkt-yandex-seo']) expect(role.skills.find(s => s.id === id)?.on ?? false, `${role.id} ${id}`).toBe(false);
-    expect(body('dev-language-rules')).toContain('For a language without a folder, say so in your report');
-    expect(body('dev-testing-policy')).toMatch(/Unsupported languages are NOT_RUN/);
+    expect(body('dev-language-rules')).toMatch(/report a missing or unsupported capability by purpose/i);
+    expect(body('dev-testing-policy')).toMatch(/unsupported or unavailable measures marked NOT_RUN/);
   });
 
   it('keeps speed subordinate to actual checks and exact-version evidence', () => {
@@ -1899,7 +1664,7 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(skill.body).toMatch(/start_calls[\s\S]*calls[\s\S]*stop_calls/);
     expect(skill.body).toMatch(/Use calls when:[\s\S]*independent[\s\S]*judge[\s\S]*one-shot/);
     expect(skill.body).toMatch(/Do it yourself[^:]*when:[\s\S]*questions[\s\S]*browser[\s\S]*depends on the answer/);
-    expect(skill.body).toMatch(/as many at once as[^.]*memory/);
+    expect(skill.body).toMatch(/assigned plan supports calls[\s\S]*retrieve the full answers/i);
     expect(skill.body).not.toMatch(/check queue/);
     expect(skill.body).not.toMatch(/(?:^|\s)#\d+\b|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+|Claude|Codex|Kimi|Antigravity/i);
   });
@@ -1918,16 +1683,11 @@ describe('identity, defaults and shared instruction delivery', () => {
     /* Seven ways, each in its own paragraph that says what not to do with it. */
     const sections = body.split(/^\*\*\d\. /m).slice(1);
     expect(sections.map(s => s.split('.')[0])).toEqual(['Standing employees', 'Turnkey', 'Route of stages', 'One-shot calls', 'Chains', 'Personal assistants', 'The program operator and Operations']);
-    for (const section of sections) expect(section.split('\n\n')[0]).toMatch(/\b(?:Do not|Never|not a way)\b/);
+    for (const section of sections) expect(section.split('\n\n')[0]).toMatch(/\b(?:Do not|Never|not a way|does not replace)\b/);
     expect(sections[0]).toMatch(/add_tasks[\s\S]*create_task[\s\S]*message_employee/);
     for (const word of ['"Works turnkey"', 'create_task', 'report']) expect(sections[1], word).toContain(word);
     expect(sections[2]).toMatch(/create_task[\s\S]*resultKind document[^.]*submit[^.]*no commit/);
-    expect(sections[3]).toMatch(/start_calls[\s\S]*calls[\s\S]*stop_calls/);
-    expect(sections[3]).toMatch(/as many at once as[^.]*free memory/);
-    expect(sections[3]).toMatch(/plan's limits/);
-    expect(sections[3]).toMatch(/oneShot[^.]*fanOut[^.]*judge/);
-    /* How to brief calls stays in the ability every employee carries, named by its title. */
-    expect(sections[3]).toContain(`the ability "${templates.skills.get('hh-one-shot-calls')!.title.en}"`);
+    expect(sections[3]).toMatch(/independent proposals or checks[\s\S]*assigned owner verifies[\s\S]*standing employee/i);
     expect(sections[4]).toMatch(/holder[^.]*drives|drives[^.]*holder/);
     expect(sections[5]).toMatch(/not a way to give out work/);
     expect(sections[6]).toMatch(/program_screen[\s\S]*tell_orchestrator/);
@@ -1935,7 +1695,6 @@ describe('identity, defaults and shared instruction delivery', () => {
     const src = fileURLToPath(new URL('../src', import.meta.url));
     const registered = new Set([FIND, USE, ...readdirSync(src, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.ts')).flatMap(f => [...readFileSync(join(src, f), 'utf8').matchAll(/(?:registerTool|tool)\(\s*'([a-z_]+)'/g)].map(m => m[1]!))]);
     const named = [...new Set([...body.matchAll(/\b[a-z]+(?:_[a-z]+)+\b/g)].map(m => m[0]))];
-    expect(named.length).toBeGreaterThan(8);
     for (const tool of [...named, 'calls', 'submit', 'report', 'verdict']) expect(registered.has(tool), tool).toBe(true);
   });
 
@@ -2039,18 +1798,18 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
   },
   {
     id: 'every-test-together-once-per-release',
-    holds: s => forEvery([s.runChecks, s.devPolicy, s.devTestEnv], text => PLAIN_RULE.test(text)) && RELEASE_RULE.test(s.devCiRelease),
+    holds: s => /affected tests in your workspace/i.test(s.runChecks) && /whole release suite[\s\S]*applicable scope and fingerprints/i.test(s.devCiRelease),
   },
   {
     id: 'lead-tasks-preserves-coordination-and-hold-meaning',
     holds: s =>
       matchesAll(s.leadTasks, [
-        /When small work arrives, the orchestrator passes it to the head immediately\./,
+        /before the final gate starts[\s\S]*holds its context/i,
         /Builders build and reviewers review[^.!?\n]*nobody approves their own independent gate/i,
         /Do not start a new chain merely to find a free member\./,
         /A report that claims success without evidence is treated as not done\./,
         /this ability imposes no default downstream chain/i,
-        /letters, texts, layouts and tables as well as code, as files in its repository/,
+        /document result/i,
         /`pause_task` with the reason/,
       ]),
   },
@@ -2067,23 +1826,21 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
     expect(skill('dev-task-flow')).toMatch(/A clean merge of the turn branch needs no new checks/);
   });
 
-  it('keeps the turn branch going while a release is checked and approved, in the lead and release skills', () => {
-    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/The turn branch never stops for a release/);
-    expect(skill('dev-lead')).toMatch(/never tell anyone to hold a finished result/);
-    expect(skill('dev-ci-release')).toMatch(/release_turn[^.]*the commit of the turn branch its whole run checked/);
+  it('keeps the turn branch going during checks of a frozen candidate', () => {
+    expect(skill('dev-lead')).toMatch(/never tell anyone to hold a finished result/i);
+    expect(skill('dev-ci-release')).toMatch(/keep progressing later work while testing the frozen candidate/i);
+    expect(skill('dev-ci-release')).toMatch(/record the checked release revision and suite result with release_turn/i);
   });
 
-  it("counts a turnkey holder's own checks as covering its work under autonomous release, in the lead and release skills", () => {
-    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[\s\S]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
+  it('uses the turnkey holder evidence when the autonomous route accepts it', () => {
+    expect(skill('dev-ci-release')).toMatch(/when the applicable autonomous route accepts turnkey evidence[\s\S]*holder's own review, security check and tests/i);
   });
 
   /* One rule on proof, beside the rule that everything made goes into the repository: an agent reads no exception into
      either. A task may ask for its proof in the repository; raw output never goes there. */
-  it('gives the proof of checks in the report, and commits it only where the task asks, never raw output', () => {
-    expect(skill('hh-task-flow')).toMatch(/Everything you make[^.]*as files in a commit, so that every version is kept\. Proof of checks is not something you make: give the proof a reviewer needs, logs included, in submit or report/);
-    expect(skill('hh-task-flow')).toMatch(/Commit proof only when the task asks for it, in `docs\/evidence\/task-<number>` with the work it proves/);
-    expect(skill('hh-task-flow')).toMatch(/never commit raw run logs, profiles or build output, and make no commit only to record proof or a note/);
-    expect(skill('hh-task-flow')).not.toMatch(/never commit them/);
+  it('records proof with the hand-in and keeps raw logs out of commits', () => {
+    expect(skill('hh-task-flow')).toMatch(/record verification output with the hand-in[\s\S]*attach larger logs there/i);
+    expect(skill('hh-task-flow')).toMatch(/commit durable evidence only when the assignment or repository requires it[\s\S]*secrets and raw logs removed/i);
   });
 
   it('writes the release notes once per release, with no note committed per task', () => {

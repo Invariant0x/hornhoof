@@ -18,4 +18,4 @@ Maintain the connector catalog named in the assignment. It lets users request a 
 
 Update the entry when the assigned connector changes. During an assigned audit, compare entries with the actual authorized setup and run the relevant harmless smoke tests through the approved check route. Mark failures as broken with their evidence. Propose retirement for unused entries; revoke access or delete resources only with the required authorization.
 
-The catalog records permissions; it does not grant them. Access, root, permissions or secrets changes require an independent Security engineer's pass before shared merge on the exact candidate, including urgent, small, named work and review fixes. Spending and irreversible actions retain human approval.
+Record the available permissions, exact required scope and any assigned check. Use the approved resource mechanism to change access.

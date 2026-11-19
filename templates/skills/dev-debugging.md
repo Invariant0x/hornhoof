@@ -17,4 +17,4 @@ No fix without a root cause.
 6. **Fix at the source**, with a failing test that reproduces the bug first. Then remove the temporary logging.
 7. **Defend in depth** where the bad value could enter again: validate at the boundary that let it in.
 
-Waiting on something asynchronous? Wait for the condition, not for a fixed time. After three failed fixes, stop: the problem is probably the design or your model of it. Report what you learned and what you suspect.
+Observe the actual completion condition. Continue while each attempt tests a new supported hypothesis. When evidence stops advancing, report what you ruled out and change the premise, approach or repair owner.

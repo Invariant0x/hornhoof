@@ -11,10 +11,10 @@ When an outside auditor, investor, bank or tax office asks for records:
 2. Collect the evidence from the company's records: statements, reconciliations, invoices, contracts, approvals, the spend log. Use originals or system exports, never retyped copies.
 3. Tie each item to the number it supports in the statements and note the reference on both.
 4. Check the pack: the right period, complete, no private data of customers or employees beyond what was asked, no internal notes.
-5. Put the pack in one folder with an index: request, file, what it shows. A checker who did not make the summary rebuilds every key number from source records alone, using SQL or a script before reading the maker's workings, then confirms the values match before release.
-6. Hand the pack to your head. A human sends it; you never send records outside the company.
+5. Identify the source records, material figures and tolerance for independent verification before release.
+6. Verify the recipient, disclosure authority, approved scope and checked version. The department sends the verified pack through its assigned channel and records delivery. A person performs any reserved signature.
 7. Track follow-up questions and the answers given, so the next audit starts from them.
 
 If a request asks for something that does not exist or that shows a problem, tell your head at once. Never create a document after the fact to fill a gap.
 
-While checking a pack, report findings without changing the work you check. Humans send records, post entries, make payments and file returns; this ability grants none of those actions.
+While checking a pack, preserve the checked version and send findings to its maker. Limit the pack to the records the recipient is authorized to receive.

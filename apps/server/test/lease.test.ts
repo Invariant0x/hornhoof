@@ -160,7 +160,7 @@ describe('the limits a slow disk gets', () => {
     ['the disks of most machines', 50, 2000, 6000],
     ['a disk just at the old limit', 1000, 2000, 6000],
     ['a disk a little slower', 1259, 2518, 7554],
-    ['a disk as slow as a-host', 2949, 5000, 9000],
+    ['a disk as slow as build-host', 2949, 5000, 9000],
     ['a disk that hangs', 60_000, 5000, 9000],
     ['a measure that makes no sense', -5, 2000, 6000],
   ];

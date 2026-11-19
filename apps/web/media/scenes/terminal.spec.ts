@@ -27,6 +27,8 @@ test('terminal.gif: developer window replaying terminal.rec with side panels vis
   await schema.getByRole('button').filter({ has: page.getByText('Iris', { exact: true }) }).click();
   const win = page.getByRole('complementary', { name: /^Iris/ });
   await expect(win).toBeVisible();
+  /* A window opens on the conversation; its terminal is one click away. */
+  await win.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expect(win.locator('.xterm')).toBeVisible();
 
   await win.getByRole('button', { name: 'Card', exact: true }).click();

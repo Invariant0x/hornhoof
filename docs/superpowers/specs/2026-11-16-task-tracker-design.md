@@ -1,12 +1,12 @@
 # Task tracker: design
 
-Date: 2026-11-16. Asked for by the CEO (Ivan) after his colleagues in ArSpatially lost track of who does what. Visual reference: `2026-11-16-task-tracker-mockup.html` next to this file (mockup 10 of the brainstorm, with the real data of one company), which the CEO accepted "plus or minus", on the condition that the brand style is kept and the screen stays light.
+Date: 2026-11-16. The tracker shows who is responsible for each task.
 
 ## 1. Why
 
-A company in Hornhoof already has tasks, subtasks, stages, waits and a history, but people cannot see how they connect. In ArSpatially two people (Luisa and Max) shared responsibility for several departments without knowing whose task was whose, tasks were known by numbers ("1103"), and nobody could see which goal a task served, who waits for whom, or how long something has stood still. The CEO wants a tracker like ClickUp (also Jira or Asana): goals, tasks, subtasks, one responsible person, status, result, history, and several views of the same work, in Hornhoof's own look.
+A company in Hornhoof already has tasks, subtasks, stages, waits and a history, but people cannot see how they connect. At Northwind two people (Juno and Ellis) shared responsibility for several departments without knowing whose task was whose, tasks were known by numbers ("1103"), and nobody could see which goal a task served, who waits for whom, or how long something has stood still. The CEO wants a tracker like ClickUp (also Jira or Asana): goals, tasks, subtasks, one responsible person, status, result, history, and several views of the same work, in Hornhoof's own look.
 
-Success: a person opens Tasks and at once sees what waits for them and what they are responsible for, by human titles and the goal each one serves; the CEO sees the same screen as Luisa or Max see it; a department's head and its product manager see every pipeline of the department and where each piece of work stands.
+Success: a person opens Tasks and at once sees what waits for them and what they are responsible for, by human titles and the goal each one serves; the CEO sees the same screen as Juno or Ellis see it; a department's head and its product manager see every pipeline of the department and where each piece of work stands.
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -101,7 +101,7 @@ New tables:
 - `pipelines`: `id`, `departmentId`, `name` (up to 80), `why` (up to 300), `order`, `archivedAt`, created by, version.
 - `pipeline_stages`: `id`, `pipelineId`, `parentStageId` (null: the first stages, right after the head), `name` (up to 60), `ownerRole` (a role id such as `MKT-SOCIAL`) or `ownerAgentId`, `order`.
 
-A pipeline is a tree: forks are several stages with the same parent. Example from ArSpatially Marketing, "Social": 3D content producer, then three branches at once: Instagram and TikTok, X, video producer then YouTube.
+A pipeline is a tree: forks are several stages with the same parent. Example from Northwind Marketing, "Social": 3D content producer, then three branches at once: Instagram and TikTok, X, video producer then YouTube.
 
 ## 5. How work goes through a pipeline
 

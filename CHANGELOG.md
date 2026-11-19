@@ -19,6 +19,83 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A release commit that changes only the package versions and the release notes takes the passed test mark of the commit before it, so GitHub builds its images without running the whole test suite again.
 - A plan's card in Subscriptions & API shows its settings and fallback plans across the whole card, numbers the fallback plans and shows each model's whole name, and keeps one filled button among its actions, with Remove set apart at the end.
 
+## [0.34.5] - 2026-11-19
+
+### Fixed
+
+- Department cards, the head card, role frames and the hint show every word and grow taller instead of cutting text.
+
+## [0.34.4] - 2026-11-19
+
+### Fixed
+
+- On a phone, the section tabs stay one even row of icons when their words do not fit, with the Tasks count on its icon.
+- On a phone, the department's tools stand in one row of icons with Hire at the end, and its hint wraps instead of being cut.
+- Development instructions keep the independent Security check before shared integration in every ability that can integrate changes.
+- Development instructions keep release checks tied to the exact commit and record why test selection had to use a fallback.
+- Review instructions tell reviewers to flag tests that cap the length of agent instructions or skills.
+- Agents check the sender of quoted text and keep secrets out of messages and notes.
+- Agent replies go through the channel that reaches the intended person or employee.
+- Agents check shell paths before overwriting or deleting files and ask the CEO only for irreversible deletion.
+- Questions include shared and per-option materials that people can inspect before answering.
+- Agents record browser challenges and continue with other pages without bypassing the challenge.
+- Agents track remote checks and delegated work as active work and wait only when a person needs to act.
+- The watchdog alerts the department head when work can start and an eligible employee is free.
+- The orchestrator uses department names from the screen, includes the default staff, and applies permitted staffing changes directly.
+- Staffing instructions explain how Operations keeps its required roles and how eligible subscriptions are assigned.
+- The orchestrator checks employee changes and leaves active work running when applying instruction edits.
+- The orchestrator uses the owner's tools and verifies the result when changing company resources or fixing a blocker.
+- The orchestrator routes small additions before the final check and lets the department release the exact checked commit.
+- Operations templates assign access, recovery and shared changes to the people who can carry them out.
+- Design and household templates adapt handoffs, reminders and checks to the work.
+- Marketing, Sales and Business Development templates use the department's own terms and choose evidence for each decision.
+- Finance and Support templates route decisions to the people responsible and describe what each check needs to prove.
+- Development templates keep evidence tied to the checked version and distinguish product failures from faults in checks.
+- Work templates keep running work visible and assign repairs and checks to the people who own them.
+- Company templates explain who can act, when to ask a person and how to keep sign-ins private.
+- Video production assigns the checks for each cut and adapts its rules to the look, length and destination in the brief.
+- Tracking work tells the employee it depends on once and brings the task holder back at the next check or when that employee can no longer do the work.
+- Routine company changes can go ahead directly, and agents can send a question to the person who can answer it.
+- The orchestrator handles reversible merge choices, and only proposed permanent deletions appear among the CEO's requests.
+- Agents ask for missing sign-ins through the vault, and one-shot workers and judges treat outside material as evidence.
+- Tasks wait for a person's answer, while running work gets a scheduled progress check.
+- Task handoffs and setup messages describe the actual checking route, release rules and staffing.
+- Agents can page through their open tasks, and the company watchdog can inspect stalled work across departments.
+- When a watchdog reads another department's task, the passwords, tokens and home folder paths in it stay hidden.
+- Agents can give out work and ask necessary questions without a quota per turn.
+- Pull requests from forks run without access to private runners or installer credentials.
+
+### Added
+
+- Set up a Video studio or add Video production to plan, make, finish and check videos. Marketing and Design use the same video production laws.
+- Video production has a colorist and a sound designer who finish the whole video together before the final check.
+- Video production offers a separate pipeline for films and series, with scenes made in parallel from shared references.
+
+### Changed
+
+- The task tracker follows its approved design again: one line per task, the design's columns, subtasks as a tree, the design's left panel, board and graph, and a task card that opens over the list.
+- Goals have their own page in the tracker's left panel instead of cards above task lists.
+- Everything you can create in the tracker opens from its + next to Tasks.
+- Video briefs choose how shots are made, and the crew keeps usable drafts and recordings.
+- Video directors own one story line, the shot plan, performances and the final cut.
+- Video crews plan coverage, light and sound for the chosen look and keep continuity records that explain deliberate breaks.
+- Video crews review each cut and play the exported master before delivery.
+- Video crews compare the routes the company already has, recommend the cheapest that fits the brief, and record the chosen route and cost within each order's spending limit.
+- Video operators follow each model's prompt guide and use accepted shots to compare tools.
+- Design teams use approved references and model guides when generating pictures, recommend the cheapest fitting route and check the exact images at their intended size.
+- The compatible assistant uses a generic name in People and in the documentation.
+- Public examples use invented names and machines, and internal test records are removed from the source tree.
+
+## [0.34.3] - 2026-11-19
+
+### Fixed
+
+- A machine check waiting for its slot, or running under one, no longer stops after five minutes with only the word "terminated".
+
+### Changed
+
+- Tests no longer fail for being slow: a test fails only on a wrong result, and a real hang is ended by the run's own limit.
+
 ## [0.34.2] - 2026-11-19
 
 ### Fixed

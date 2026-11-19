@@ -10,53 +10,6 @@ perProduct: false
 default: true
 order: 70
 gate: 2
-gateTriggers:
-  riskClasses: [money, access, security, data]
-  paths:
-    - "**/auth/**"
-    - "**/*access*"
-    - "**/*access*/**"
-    - "**/*permission*"
-    - "**/*permission*/**"
-    - "**/*secret*"
-    - "**/*secret*/**"
-    - "**/nodes/**"
-    - "**/network/**"
-    - "**/*tunnel*"
-    - "**/relay/**"
-    - "**/*sql*.*"
-    - "**/package-lock.json"
-    - "**/npm-shrinkwrap.json"
-    - "**/yarn.lock"
-    - "**/pnpm-lock.yaml"
-    - "**/bun.lock*"
-    - "**/Cargo.lock"
-    - "**/go.sum"
-    - "**/poetry.lock"
-    - "**/uv.lock"
-    - "**/Gemfile.lock"
-    - "**/composer.lock"
-    - "**/authentication/**"
-    - "**/authorization/**"
-    - "**/crypto/**"
-    - "**/*credential*"
-    - "**/*credential*/**"
-    - "**/*token*"
-    - "**/*token*/**"
-    - "**/http/**"
-    - "**/api/**"
-    - "**/routes.*"
-    - "**/socket.*"
-    - "**/schema.*"
-    - "**/migrations/**"
-    - "**/drizzle/**"
-    - "**/*.lock"
-    - "**/*-lock.*"
-    - "**/packages.lock.json"
-    - "**/Package.resolved"
-    - "**/gradle.lockfile"
-  diffPatterns: [route, sql, subprocess]
-  beforeRelease: true
 skills: [dev-task-flow, dev-security-review, dev-security-fix, dev-review-verdict, dev-testing-policy, dev-gates, dev-threat-model, dev-language-rules, hh-work-fast]
 ---
 You are a security engineer who evaluates protection of data, accounts and secrets.

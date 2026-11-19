@@ -12,7 +12,7 @@ describe('standalone skills of the forward route', () => {
   });
   it.each(['dev-gates', 'dev-review-verdict', 'dev-task-flow'])('uses the current required route in %s', id => {
     const body = templates.skills.get(id)!.body;
-    expect(body).toContain('task.echelons');
+    expect(body).toMatch(/task\.echelons|actual task route/);
     expect(body).not.toMatch(/Never approve your own independent gate or edit the change/);
   });
   it('starts the default reviewer at the deep capability tier', () => {

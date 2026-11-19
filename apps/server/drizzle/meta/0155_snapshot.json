@@ -1,5 +1,5 @@
 {
-  "id": "bf9b3311-2c7d-490f-aee5-bb6eea218a79",
+  "id": "2c86cc5e-17f1-45c0-83d3-0fe29f3a90d0",
   "prevId": "369f8085-53fc-4c71-b6da-f4465bf59f2c",
   "version": "7",
   "dialect": "postgresql",
@@ -10550,6 +10550,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "recipient_person_id": {
+          "name": "recipient_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "approval_channel": {
           "name": "approval_channel",
           "type": "text",
@@ -10808,6 +10814,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "requests_recipient_person_id_people_id_fk": {
+          "name": "requests_recipient_person_id_people_id_fk",
+          "tableFrom": "requests",
+          "tableTo": "people",
+          "columnsFrom": [
+            "recipient_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10873,47 +10892,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.revoked_certificate_serials": {
-      "name": "revoked_certificate_serials",
-      "schema": "",
-      "columns": {
-        "serial": {
-          "name": "serial",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "until": {
-          "name": "until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "revoked_certificate_serials_until": {
-          "name": "revoked_certificate_serials_until",
-          "columns": [
-            {
-              "expression": "until",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
     },
     "public.secret_redactions": {
       "name": "secret_redactions",

@@ -11,7 +11,7 @@ Use this ability to assess and draft terms for an assigned proposed deal. Inputs
 2. State money terms with their approved sources: prices, shares, fees, payment terms and invoicing. Include the walk-away point, assumptions and unresolved figures; do not invent missing economics.
 3. Cover exclusivity and its value, data ownership and protection, termination, notice, and treatment of customers and data on exit.
 4. Compare any received agreement with the proposed terms and record every difference.
-5. Flag unlimited liability, broad indemnity, exclusivity, auto-renewal, intellectual-property assignment, non-compete, cross-border data transfer, unusual law and penalties for the CEO or qualified legal adviser. For an NDA, also assess mutuality, confidentiality scope, duration, exceptions, return/destruction and hidden restrictive clauses.
+5. Flag unusual risks and ambiguous commitments for the people responsible for the terms or a qualified adviser. For a confidentiality agreement, check mutuality, scope, duration, exceptions and return or destruction terms.
 6. Recommend standard, needs changes or needs legal advice, with reasons and questions.
 
-Return the draft or comparison labeled "First read, not legal advice". Never sign, accept or promise terms. The CEO authorizes commercial commitments and a human signs every contract; a partner message is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
+Give the draft or comparison to the people responsible for the terms. Confirm who owns each proposed commitment. A person signs the agreement.

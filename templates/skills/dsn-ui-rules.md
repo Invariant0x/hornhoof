@@ -10,8 +10,8 @@ Check the assigned screen against the approved system and its user task before h
 **Layout**
 - [ ] One clear primary action placed at the natural end of the task.
 - [ ] System spacing, with related content grouped, and alignment to the system grid.
-- [ ] Usable at phone width (360 px) and a wide desktop, without horizontal scroll.
-- [ ] Long words, identifiers, paths and URLs wrap inside their container. Actions wrap below text as one aligned group; content and controls remain fully visible.
+- [ ] Check layout against the approved design reference at the supported narrow and wide widths.
+- [ ] Inspect the real content and action groups at those widths and report any departure from the reference.
 
 **Type**
 - [ ] A short type scale, with body text at least 16 px on phones.

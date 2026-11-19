@@ -50,7 +50,9 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }] });
     await openTasks(user);
-    await user.click(screen.getByRole('button', { name: 'Write to the orchestrator' }));
+    /* From the + beside Tasks, the one way to make something there. */
+    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: 'Create' }));
+    await user.click(within(screen.getByRole('group', { name: 'Create' })).getByRole('button', { name: 'Write to the orchestrator' }));
     expect(await screen.findByRole('complementary', { name: /Orchestrator/ })).toBeInTheDocument();
   });
 
@@ -59,6 +61,7 @@ describe('the tracker', () => {
     shell({}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
     await openTasks(user);
     expect(screen.queryByRole('button', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
   });
 
   it('says what to do when nothing is in progress and there is no turn yet', async () => {

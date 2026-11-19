@@ -193,6 +193,7 @@ function currentWaits(t: Messages, task: TaskDetail, language: Language, asksYou
       ? new Date(recorded.until).toLocaleTimeString(localeOf(language), { hour: '2-digit', minute: '2-digit' })
       : null;
     const title = waitLabel(t, task, wait, now, language, asksYou && wait.event !== 'ceo');
+    if (wait.nextCheck) return { at: wait.since, title };
     const reason = recorded && (wait.kind === 'run' || wait.kind === 'work') ? recorded.reason : null;
     const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
     return { at: wait.since, title: t.tasks.waitStep(wait.who?.name ?? (setter || t.window.hornhoof), title), note: [reason, deadline].filter(Boolean).join(' · ') };
@@ -211,7 +212,8 @@ function currentHolds(t: Messages, task: TaskDetail, when: (at: string) => strin
   return steps;
 }
 
-export function ShortTaskLog({ task, asksYou }: { task: TaskDetail; asksYou: boolean }) {
+/* heading: the name the card gives its history, over the steps. */
+export function ShortTaskLog({ task, asksYou, heading }: { task: TaskDetail; asksYou: boolean; heading?: string }) {
   const t = useT();
   const { language } = useLanguage();
   const words = useLogWords();
@@ -227,7 +229,8 @@ export function ShortTaskLog({ task, asksYou }: { task: TaskDetail; asksYou: boo
   const extra = Math.max(0, steps.length - RECENT_STEPS);
 
   return (
-    <section className="tp-history" aria-label={t.tasks.log}>
+    <section className="tp-history tp-sec" aria-label={t.tasks.log}>
+      {heading && <h3>{heading}</h3>}
       {extra > 0 && (
         <button className="t-link tp-disclosure" type="button" aria-controls={id} aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
           {earlier ? t.tasks.showLess : t.tasks.earlierSteps}

@@ -3,7 +3,7 @@ name: Media
 # Renders the README's animated pictures from apps/web/media/scenes and keeps them as an artifact to look at and commit,
 # and the marketing cuts (marketing-*) as GIF and MP4 with their ffprobe report and frames in media-videos. A
 # push to a branch named media-* renders the scenes listed below; a run by hand renders the ones it names, or these when it
-# names none. Where the repository variables BUILD_RUNS_ON and BUILDKIT_ENDPOINT name our own runner and its BuildKit, the
+# names none. In a private repository, where the variables BUILD_RUNS_ON and BUILDKIT_ENDPOINT name our own runner and its BuildKit, the
 # scenes render in a build of apps/web/media/Dockerfile there, as our runners have no Docker daemon; otherwise GitHub's
 # machine renders them with run.sh and Docker.
 on:
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   render:
-    if: ${{ !(vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT) }}
+    if: ${{ !(github.event.repository.private && vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -66,8 +66,8 @@ jobs:
           if-no-files-found: ignore
 
   render-own:
-    if: ${{ vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT }}
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    if: ${{ github.event.repository.private && vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

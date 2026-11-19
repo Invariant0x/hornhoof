@@ -130,18 +130,44 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitA
   return { task: row, wakes: [] };
 }
 
-/* The holder says its wait is over, having read what it waited for. Nobody is told: it goes on in the turn it is in. */
-export function endOwnWait(ctx: Ctx, agentId: string, taskId: string): Promise<{ task: Task; reason: string }> {
+/* A scheduled observation of active work uses the existing durable check timer. */
+export async function trackWork(ctx: Ctx, agentId: string, taskId: string, reason: string, nextCheck: string, employee?: string): Promise<Moved> {
+  const moved = await onAgent(ctx, agentId, async () => {
+    const task = await loadTask(ctx.db, taskId);
+    requireHolder(task, agentId);
+    if (task.status === 'blocked' || task.status === 'waiting') throw refuse(409, 'task_invalid', 'Resolve the blocker or human question before recording work in progress.');
+    const now = ctx.clock();
+    const until = new Date(nextCheck);
+    if (until.getTime() <= now) throw refuse(400, 'task_invalid', 'Set the next check in the future.');
+    const on = await checkedWaitTarget(ctx, task.companyId, agentId, employee ? { kind: 'employee', employee } : undefined);
+    const externalWait: ExternalWait = { reason, since: new Date(now).toISOString(), until: until.toISOString(), work: true, ...withOn(on) };
+    const notice = await requestedWaitNotice(ctx, { ...task, externalWait }, agentId);
+    const actor = { agentId };
+    const row = await move(ctx, task, { status: task.status === 'open' ? 'working' : task.status, externalWait, silent: 0 }, {
+      kind: 'updated', actor, text: `Work in progress: ${reason}. Next check at ${externalWait.until}.`, data: { externalWait },
+    }, async tx => {
+      await keepNotice(notice)(tx);
+      if (task.externalWait?.operation) await endSourceWait(tx, { taskId, kind: 'external', sourceKey: waitForSourceKey(task.externalWait.operation), sourceRevision: 0, outcome: 'superseded', proofRef: 'track_work', actor });
+    });
+    return { task: row, wakes: [] };
+  });
+  if (employee) await checkWaitHealth(ctx, new Date(ctx.clock()));
+  return moved;
+}
+
+/* The holder clears its check or older wait and goes on in its current turn. */
+export function endOwnWait(ctx: Ctx, agentId: string, taskId: string): Promise<{ task: Task; reason: string; work: boolean }> {
   return onAgent(ctx, agentId, async () => {
     const task = await loadTask(ctx.db, taskId);
     requireHolder(task, agentId);
     const wait = task.externalWait;
-    if (!wait) throw refuse(409, 'task_invalid', `#${task.number} has no wait of yours to end.`);
+    if (!wait) throw refuse(409, 'task_invalid', `#${task.number} has no progress check or external wait of yours to clear.`);
     const actor = { agentId };
-    const moved = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor, text: `The wait for "${wait.reason}" is over, says its holder.`, data: { externalWait: null, reason: wait.reason } }, async tx => {
+    const text = wait.work ? `The holder cleared the progress check for "${wait.reason}".` : `The wait for "${wait.reason}" is over, says its holder.`;
+    const moved = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor, text, data: { externalWait: null, reason: wait.reason } }, async tx => {
       if (wait.operation) await endSourceWait(tx, { taskId: task.id, kind: 'external', sourceKey: waitForSourceKey(wait.operation), sourceRevision: 0, outcome: 'cancelled', proofRef: 'end_wait', actor });
     });
-    return { task: moved, reason: wait.reason };
+    return { task: moved, reason: wait.reason, work: Boolean(wait.work) };
   });
 }
 

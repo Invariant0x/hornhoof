@@ -19,29 +19,31 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 const AT = new Date(new Date().setHours(11, 15, 0, 0)).toISOString();
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 
-describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Google Sheets in Settings', () => {
+describe('1-click spreadsheet download in the task card materials, AgentWindow chat, and Google Sheets in Settings', () => {
   it('renders task .xlsx and .csv links with the download attribute for 1-click download under their own file names', () => {
     render(
       <LanguageProvider>
-        <TaskFiles
-          files={[
-            { id: 'att-xlsx-1', name: 'partner-contacts.xlsx', size: 12_800, by: { id: 'a1', name: 'Nora' }, at: AT },
-            { id: 'att-csv-2', name: 'leads-export.csv', size: 640, by: { id: 'a1', name: 'Nora' }, at: AT },
-            { id: 'att-log-3', name: `review-text-${'a'.repeat(64)}.txt`, size: 900, by: { id: 'a1', name: 'Nora' }, at: AT },
-          ]}
-        />
+        <ul>
+          <TaskFiles
+            files={[
+              { id: 'att-xlsx-1', name: 'partner-contacts.xlsx', size: 12_800, by: { id: 'a1', name: 'Nora' }, at: AT },
+              { id: 'att-csv-2', name: 'leads-export.csv', size: 640, by: { id: 'a1', name: 'Nora' }, at: AT },
+              { id: 'att-log-3', name: `review-text-${'a'.repeat(64)}.txt`, size: 900, by: { id: 'a1', name: 'Nora' }, at: AT },
+            ]}
+          />
+        </ul>
       </LanguageProvider>,
     );
-    const xlsxLink = screen.getByRole('link', { name: 'partner-contacts.xlsx' });
+    const xlsxLink = screen.getByRole('link', { name: 'Open partner-contacts.xlsx' });
     expect(xlsxLink).toHaveAttribute('href', '/api/attachments/att-xlsx-1');
     expect(xlsxLink).toHaveAttribute('download', 'partner-contacts.xlsx');
 
-    const csvLink = screen.getByRole('link', { name: 'leads-export.csv' });
+    const csvLink = screen.getByRole('link', { name: 'Open leads-export.csv' });
     expect(csvLink).toHaveAttribute('href', '/api/attachments/att-csv-2');
     expect(csvLink).toHaveAttribute('download', 'leads-export.csv');
 
     /* A text Hornhoof keeps for a task opens to be read, under its short name. */
-    const textLink = screen.getByRole('link', { name: 'review-text.txt' });
+    const textLink = screen.getByRole('link', { name: 'Open review-text.txt' });
     expect(textLink).toHaveAttribute('target', '_blank');
     expect(textLink).not.toHaveAttribute('download');
   });

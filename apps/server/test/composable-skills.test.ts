@@ -21,7 +21,7 @@ describe('standalone employee abilities', () => {
   });
 
   it('gives every department one-sentence identities instead of role workflows', () => {
-    expect(new Set([...templates.roles.values()].map(r => r.department)).size).toBe(10);
+    expect(new Set([...templates.roles.values()].map(r => r.department))).toEqual(new Set(templates.catalogs.keys()));
     for (const role of templates.roles.values()) {
       expect(role.body, role.id).toMatch(/^You are [^\n.!?]+\.$/);
       expect(role.body, role.id).not.toMatch(/\b(?:must|never|always|submit|run_tests|after|before|then)\b|\b(?:hh|dev|dsn|fin|sup|ops|sal|mkt|biz|home|orch)-[a-z]+/i);
@@ -69,13 +69,14 @@ describe('standalone employee abilities', () => {
     expect(templates.skills.get('dev-lead')!.description.ru).not.toMatch(/универсал/i);
   });
 
-  it('requires the exact-candidate approval of the department owner, the CEO or the orchestrator acting for the owner in the standalone delivered release ability', () => {
+  it('applies only the assigned commit rule to the exact checked candidate', () => {
     const packet = renderInstructions(templates, {
       id: 'a', companyId: 'c', kind: 'worker', name: 'Alex', roleKey: 'SUP-T2',
       skills: ['dev-ci-release'], overrides: {}, templateHashes: {},
     } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
     const release = packet.skills.find(file => file.name === 'dev-ci-release')!;
-    expect(release.body).toMatch(/its owner, or the CEO when it has none, or the orchestrator acting for the owner\. Obtain their explicit yes for that exact candidate/);
+    expect(release.body).toMatch(/no approval rule, integrate on the required evidence/i);
+    expect(release.body).toMatch(/set a commit rule[\s\S]*apply it to the exact checked candidate/i);
   });
 
   it('renders one selected ability intact across department identities', () => {

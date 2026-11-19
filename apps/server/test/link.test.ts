@@ -339,12 +339,12 @@ describe('binding the company to a public link', () => {
     const { app, db, ceo, put } = await company();
     const [acme] = await db.select().from(companies);
     const [marketing] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'marketing', roleCode: 'CMO' }).returning();
-    const kate = await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [marketing!.id] } });
+    const elin = await invitePerson(app, ceo, { name: 'Elin', email: 'elin@acme.com', access: { departments: [marketing!.id] } });
     for (const res of [
-      await app.inject({ url: '/api/link', ...as(kate) }),
-      await app.inject({ url: '/api/link/names/acme', ...as(kate) }),
-      await put({ name: 'acme' }, kate),
-      await app.inject({ method: 'DELETE', url: '/api/link', ...as(kate) }),
+      await app.inject({ url: '/api/link', ...as(elin) }),
+      await app.inject({ url: '/api/link/names/acme', ...as(elin) }),
+      await put({ name: 'acme' }, elin),
+      await app.inject({ method: 'DELETE', url: '/api/link', ...as(elin) }),
     ]) {
       expect(res.statusCode).toBe(403);
       expect(res.json().error.reason).toBe('company_scope_only');

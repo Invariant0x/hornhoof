@@ -3,7 +3,7 @@ import type { Language, Messages } from '../src/i18n';
 import type { BuiltinView, MachineView, Org, ShownCommand, SubView } from '../src/types';
 import { ME, serveApi, serveOwnerKey } from './api';
 
-/* What the CEO saw on Machines at the width of a desk: the open card of a machine of his that joined before machines had the
+/* The open card on Machines of a computer that joined before machines had the
    company's core. Its button Make ... a full machine of the company ran past the card's right edge at 32 px, and the
    command it showed widened the table until the whole table stood as entries under Sort by. Its buttons now stay inside
    the card at a touch's height, the command wraps inside the card, and the table stays a table before and after; at the
@@ -12,7 +12,7 @@ test.describe.configure({ timeout: 180_000 });
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const GIB = 1024 ** 3;
-const HOST = '0xs-MacBook-Pro.local';
+const HOST = 'workstation.local';
 const OWNER = { id: ME.person.id, name: 'Ivan Korol' };
 const COMPANY = { kind: 'company' as const, id: null, name: 'Whole company' };
 const machine = (id: string, hostname: string, over: Partial<MachineView> = {}): MachineView => ({
@@ -21,15 +21,15 @@ const machine = (id: string, hostname: string, over: Partial<MachineView> = {}):
   lendsTests: false, running: { agents: [], parts: [] }, ...over,
 });
 const MACHINES: MachineView[] = [
-  machine('m1', 'a-host', { os: 'linux', arch: 'x86_64', lendsTests: true, plans: [{ id: 's1', provider: 'claude', status: 'ready', online: true }] }),
+  machine('m1', 'build-host', { os: 'linux', arch: 'x86_64', lendsTests: true, plans: [{ id: 's1', provider: 'claude', status: 'ready', online: true }] }),
   machine('m2', HOST, { needsCore: true, plans: [{ id: 's2', provider: 'codex', status: 'ready', online: true }] }),
   machine('m3', 'build-box', { owner: { id: 'p2', name: 'Olga' }, os: 'linux', arch: 'x86_64' }),
 ];
-const BUILTIN: BuiltinView = { online: true, load: null, running: { agents: [], parts: [] }, machine: { id: 'm1', hostname: 'a-host' } };
+const BUILTIN: BuiltinView = { online: true, load: null, running: { agents: [], parts: [] }, machine: { id: 'm1', hostname: 'build-host' } };
 /* A plan of his on another machine, so the card offers Add my plan beside the long button. */
 const SUBS: SubView[] = [{
   id: 's1', provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready', online: true, last4: null, owner: OWNER, place: COMPANY,
-  machines: [{ id: 'm1', hostname: 'a-host', status: 'ready', online: true }], limits: null, limitsUpdatedAt: null, budget: null,
+  machines: [{ id: 'm1', hostname: 'build-host', status: 'ready', online: true }], limits: null, limitsUpdatedAt: null, budget: null,
   isOrchestrator: false, accounts: [], tier: 'Max', accountsDiffer: false, signedInOnce: true, leaseMachine: null, agents: [],
 }];
 /* The command the server gives for the core: it joins the machine, so the screen shows it with the owner's key. */

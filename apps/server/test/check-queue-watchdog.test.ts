@@ -79,7 +79,7 @@ describe('machine check waiting and the watchdog', () => {
   });
 });
 
-/* #1060: the load of home-api waited behind its other frames and the shared pump of test runs, so the one handled was old
+/* #1060: the load of test-server waited behind its other frames and the shared pump of test runs, so the one handled was old
    while frames kept coming. The lease of a machine heard within 90 s holds; one silent for 90 s ends. */
 describe('a machine check lease and the frames heard from the machine', () => {
   it('grants a slot to a machine heard just now whose last handled load is 90 s old, and ends the one of a silent machine', async () => {

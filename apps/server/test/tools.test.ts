@@ -62,7 +62,10 @@ describe('/mcp', () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'apply_pipeline', 'approval_policy', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'close_task', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'delete_person', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'open_computer_access', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_catalog', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_budget', 'set_department_owner', 'set_goal', 'set_pipeline', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'vault_save', 'wait_for']);
+    const catchUp = (await client.listTools()).tools.find(tool => tool.name === 'program_keys');
+    expect(catchUp?.description).toContain('Ask the account holder for their personal consent');
+    expect(catchUp?.description).not.toContain('the owner\'s own too');
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'apply_pipeline', 'approval_policy', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'close_task', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'delete_person', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'open_computer_access', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_catalog', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_budget', 'set_department_owner', 'set_goal', 'set_pipeline', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'track_work', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'wait_for']);
   });
 
   it('gives an employee the company view and its task tools', async () => {
@@ -71,7 +74,13 @@ describe('/mcp', () => {
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: 'sonnet', subscriptionId: sub!.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'vault_entries', 'vault_entry', 'vault_save', 'verdict', 'wait_for', 'work_run']);
+    const catalog = (await client.listTools()).tools;
+    const description = (name: string) => catalog.find(tool => tool.name === name)?.description;
+    expect(description('run_tests')).toContain('configured main line');
+    expect(description('run_tests')).toContain('matching reusable evidence');
+    expect(description('start_calls')).toContain('read full answers with calls');
+    expect(description('phone_action')).toContain('Use social networks through their phone apps at a human pace.');
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'track_work', 'vault_entries', 'vault_entry', 'verdict', 'wait_for', 'work_run']);
   });
 
   it('describes the company with the templates and no email addresses', async () => {
@@ -117,7 +126,8 @@ describe('/mcp', () => {
       ],
       subscriptions: [{ provider: 'anthropic_api', kind: 'api_key', servesWholeCompany: true }],
     });
-    expect(view.templates).toHaveLength(10);
+    expect(view.templates).toHaveLength(11);
+    expect(view.templates).toContainEqual(expect.objectContaining({ key: 'video_production', name: 'Video production' }));
     expect(view.templates.filter((t: { alwaysOn: boolean }) => t.alwaysOn).map((t: { key: string }) => t.key)).toEqual(['operations']);
     expect(view.templates[0]).toMatchObject({ key: 'operations', name: 'Operations', description: expect.any(String) });
   });
@@ -146,10 +156,10 @@ describe('/mcp', () => {
     const client = await mcp(app, TOKEN);
     const first = await propose(client, [SALES]);
     expect(first.isError).toBeFalsy();
-    expect(text(first)).toBe('Shown to the CEO. Wait for their answer.');
+    expect(text(first)).toMatch(/^Prepared structure preview [0-9a-f-]+\. Apply the selected changes with build_structure/);
     await propose(client, [SALES, { template: 'sales', name: 'Sales Europe', checked: true, note: 'Later' }]);
     const { proposals: rows, events } = await stored(db);
-    expect(rows.map(p => p.status)).toEqual(['dismissed', 'pending']);
+    expect(rows.map(p => p.status)).toEqual(['dismissed', 'draft']);
     expect(rows[1]).toMatchObject({ agentId: orchestrator.id, jobId: running.id, brief: 'Acme sells characters to schools. Two products.' });
     expect(events).toHaveLength(2);
     expect(events[1]!.data).toMatchObject({ proposalId: rows[1]!.id, items: [SALES, { name: 'Sales Europe' }] });
