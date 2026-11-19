@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { docsOnly, type AuthorCheckDone, type AuthorCheckRun } from '@hornhoof/protocol';
 import { z } from 'zod';
 import { currentCheckLease, withCheckSlot } from './check-queue.js';
@@ -56,8 +56,9 @@ async function stillPinned(run: AuthorCheckRun, dir: string, user: JobUser, root
 
 async function scoreAt(run: AuthorCheckRun, dir: string, user: JobUser, root: string, repo: string, signal: AbortSignal): Promise<number | null> {
   const records: string[] = [];
+  const driver = resolve(repo, 'scripts', 'author-check.mjs');
   const result = await runProgram({
-    bin: process.execPath, args: ['scripts/author-check.mjs', '--sha', run.pin.commit, '--base', run.pin.baseCommit],
+    bin: process.execPath, args: [driver, '--sha', run.pin.commit, '--base', run.pin.baseCommit],
     cwd: repo, env: authorEnvironment(root, dir), timeoutMs: CHECK_MS, user, signal,
     onLine: line => {
       if (line.startsWith(RECORD_PREFIX) && records.length < 2) records.push(line.slice(RECORD_PREFIX.length));

@@ -326,9 +326,11 @@ case "$1" in
     # STUB_NODE_ENV: the settings a node was started with, one per line.
     case "${3:-}" in *.Config.Env*) printf '%b' "${STUB_NODE_ENV:-}"; exit 0 ;; esac
     # STUB_EXTRA_HOSTS words are "name=host:address", one --add-host a container was started with, one line each.
+    # STUB_EXTRA_HOSTS_UNREAD words are containers that are there but whose host mappings Docker does not say.
     case "${3:-}" in
       *.HostConfig.ExtraHosts*)
         [ -n "$(container_line "${!#}")" ] || exit 1
+        case " ${STUB_EXTRA_HOSTS_UNREAD:-} " in *" ${!#} "*) echo 'Error response from daemon: a fault of the fixture' >&2; exit 1 ;; esac
         for h in ${STUB_EXTRA_HOSTS:-}; do if [ "${h%%=*}" = "${!#}" ]; then echo "${h#*=}"; fi; done
         exit 0 ;;
     esac

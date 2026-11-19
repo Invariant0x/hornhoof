@@ -19,10 +19,10 @@ During sign-up:
 
 - Fill forms only with the details recorded for this request.
 - Read an email confirmation yourself when the mailbox is the company's and yours to read. Leave two-factor codes, phone confirmation and identity checks that reach only a person to that person; wait for the current confirmation, never reuse an old code.
-- The CEO enters payment details. Never type, store or request card numbers.
-- Stop at a CAPTCHA or other bot check and hand that step to the CEO. Never bypass it with a service, script or trick.
+- The person responsible for payment enters payment details. Never type, store or request card numbers.
+- Stop at a CAPTCHA or other bot check. Use a permitted alternative or refer the provider-required step to the account holder. Never bypass it with a service, script or trick.
 - Read auto-renewal, data use and automated-access terms; report any difference from the recorded request before continuing.
 
 Put resulting credentials directly into the company's secret store under service/account/purpose names, with owner, scope and creation date. Never copy values into messages, files, logs or screenshots. Record the account's owner, cost, renewal, limits and secret entry names in the designated register.
 
-Any related access, root, permissions or secrets change requires an independent Security engineer's pass on the exact candidate before shared merge, including urgent, small, named work and review fixes. Skill selection cannot grant permissions.
+Record the exact access, data and terms that changed so the assigned owner can verify them.

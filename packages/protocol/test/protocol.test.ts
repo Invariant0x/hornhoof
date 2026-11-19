@@ -347,17 +347,17 @@ describe('job.run', () => {
 });
 
 describe('department templates', () => {
-  it('are the ten starting departments, with operations always on', () => {
-    expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household']);
+  it('include Video production among the starting departments, with Operations always on', () => {
+    expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household', 'video_production']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.always).map(t => t.key)).toEqual(['operations']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.ticked).map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development']);
   });
 });
 
 describe('company templates', () => {
-  it('are nine, each with a distinct key from the list', () => {
+  it('are ten, each with a distinct key from the list', () => {
     expect(COMPANY_TEMPLATES.map(t => t.key)).toEqual([...COMPANY_TEMPLATE_KEYS]);
-    expect(new Set(COMPANY_TEMPLATES.map(t => t.key)).size).toBe(9);
+    expect(new Set(COMPANY_TEMPLATES.map(t => t.key)).size).toBe(10);
   });
 
   it('build only from departments that exist, with sound nesting and staffing', () => {
@@ -394,7 +394,7 @@ describe('company templates', () => {
     }
   });
 
-  it('staff Operations with its required roles and its pipeline owners once each in all nine', () => {
+  it('staff Operations with its required roles and its pipeline owners once each in every kit', () => {
     const roles = ['OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
     for (const template of COMPANY_TEMPLATES) {
       const { staff } = template.departments.find(d => d.template === 'operations')!;

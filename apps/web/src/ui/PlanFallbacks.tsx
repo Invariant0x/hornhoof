@@ -91,7 +91,7 @@ function FallbackItem(item: Item) {
   return (
     <li className="entry" data-plan={item.plan.id}>
       <span className="fallback-position" aria-hidden="true">{item.place}</span>
-      <p className="fallback-name"><bdi>{planLabel(item.plan)}</bdi></p>
+      <p className="fallback-name"><bdi dir="auto">{planLabel(item.plan)}</bdi></p>
       {item.editable ? <FallbackControls {...item} /> : <FallbackModel fallback={item.fallback} plan={item.plan} />}
     </li>
   );
@@ -143,7 +143,7 @@ function ModelField({ fallback, plan, name, pick }: { fallback: PlanFallback; pl
             <select id={id} className="sel" aria-label={label} value={value} onChange={e => pick(e.target.value)}>
               {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
-            <span className="model-value" aria-hidden="true"><bdi>{chosen}</bdi></span>
+            <span className="model-value" aria-hidden="true"><bdi dir="auto">{chosen}</bdi></span>
           </span>
         )}
       </div>
@@ -174,7 +174,7 @@ function ModelList({ id, label, options, value, chosen, pick }: { id: string; la
   return (
     <div className="model-disclosure" onKeyDown={closer(open, () => setOpen(false), trigger)}>
       <button ref={trigger} id={id} className="select-wrap model-trigger" type="button" aria-label={label} aria-expanded={open} aria-controls={choices} onClick={() => setOpen(!open)}>
-        <span className="model-value"><bdi>{chosen}</bdi></span>
+        <span className="model-value"><bdi dir="auto">{chosen}</bdi></span>
       </button>
       {open && (
         <fieldset id={choices} className="choice-list">
@@ -182,7 +182,7 @@ function ModelList({ id, label, options, value, chosen, pick }: { id: string; la
           {options.map(o => (
             <label key={o.id} className="model-choice">
               <input type="radio" name={choices} value={o.id} checked={o.id === value} onChange={() => choose(o.id)} />
-              <bdi>{o.name}</bdi>
+              <bdi dir="auto">{o.name}</bdi>
             </label>
           ))}
         </fieldset>
@@ -195,7 +195,7 @@ function ModelList({ id, label, options, value, chosen, pick }: { id: string; la
 function FallbackModel({ fallback, plan }: { fallback: PlanFallback; plan: SubView }) {
   if (!fallback.model) return null;
   const known = (plan.models ?? []).find(m => m.id === fallback.model);
-  return <p className="fallback-model part-note"><bdi>{known?.name ?? fallback.model}</bdi></p>;
+  return <p className="fallback-model part-note"><bdi dir="auto">{known?.name ?? fallback.model}</bdi></p>;
 }
 
 /* Another plan of the company to add after the ones named, from a list of their whole names that opens under Add. */
@@ -218,7 +218,7 @@ function AddFallback({ sub, plans, list, onChange, button }: { sub: SubView; pla
       </button>
       {open && (
         <ul id={choices} className="choice-list" aria-label={label}>
-          {free.map(p => <li key={p.id}><button className="act" type="button" onClick={() => add(p)}><bdi>{planLabel(p)}</bdi></button></li>)}
+          {free.map(p => <li key={p.id}><button className="act" type="button" onClick={() => add(p)}><bdi dir="auto">{planLabel(p)}</bdi></button></li>)}
         </ul>
       )}
     </div>

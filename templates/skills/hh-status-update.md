@@ -7,7 +7,7 @@ sources: [anthropics/knowledge-work-plugins product-management/skills/stakeholde
 ---
 You can give a concise, accurate progress update.
 
-Status is one line, not an essay: what is done, what runs, what stops it, like "two of three done, one task waits for the CEO's answer on prices".
+Give one plain line saying what finished, what is in progress and what specific decision or failure needs action.
 
 - Write it only when asked, or when the department finishes or gets stuck on something that matters. The orchestrator reads the tasks itself; never send it what the tracker already shows.
 - Put the one thing you need from the CEO first. Bad news goes first and early: a delay reported when it is known is cheap, the same delay found at the deadline is not.

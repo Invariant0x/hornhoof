@@ -10,12 +10,26 @@ test('a document keeps the results of all but the few tests that name it', async
 
 test('a change stays in its group: the frontend, the backend and the node leave each other alone', async () => {
   const web = await changedBy('apps/web/src/org.ts');
+  assert.ok(web.has('web:apps/web/test/org.test.tsx'));
   strays(web, 'server', 'node', 'protocol', 'release-scripts', 'mutation');
   const server = await changedBy('apps/server/src/modules/testruns/reuse.ts');
   strays(server, 'web', 'node', 'protocol', 'release-scripts', 'mutation');
   const node = await changedBy('apps/node/src/tests.ts');
   strays(node, 'server', 'web', 'protocol', 'release-scripts', 'mutation');
   assert.ok(unitsOf('node').filter(unit => node.has(unit)).length <= unitsOf('node').length / 2, 'one file of the node should not rerun most of its tests');
+});
+
+test('the Git mirror and the node author runner leave the driver in the pinned checkout', () => {
+  const graph = fingerprint.testGraph(input);
+  const mirror = graph.closure('apps/node/src/test-mirror.ts');
+  assert.ok(mirror.has('apps/node/src/author-patch.ts'));
+  assert.ok(!mirror.has('scripts/author-check.mjs'));
+  assert.ok(!mirror.has('scripts/author-check/select.mjs'));
+  const author = graph.closure('apps/node/src/author-check.ts');
+  assert.ok(author.has('apps/node/src/test-mirror.ts'));
+  assert.ok(!author.has('scripts/author-check.mjs'));
+  assert.ok(!author.has('scripts/author-check/select.mjs'));
+  assert.ok(graph.closure('scripts/test/author-check.test.mjs').has('scripts/author-check/select.mjs'));
 });
 
 /* The painter, as the SQL parser, loaded its package in its worker by a name the graph cannot read, so a test that reached it took
@@ -38,7 +52,7 @@ test('a test of test runs reads no test of the server by the patterns of the pro
 test('a scenario follows every screen of the app, and a screen takes every scenario but no test of another group', async () => {
   for (const path of ['apps/web/src/ui/Briefing.tsx', 'apps/web/src/screens/About.tsx', 'apps/web/src/theme.css']) {
     const changed = await changedBy(path);
-    assert.deepEqual(unitsOf('browser', 'browser-matrix').filter(unit => !changed.has(unit)), [], path);
+    assert.deepEqual(unitsOf('browser', 'browser-matrix', 'browser-engines').filter(unit => !changed.has(unit)), [], path);
     strays(changed, 'server', 'node', 'protocol');
   }
 });

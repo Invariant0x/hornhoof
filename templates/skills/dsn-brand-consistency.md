@@ -10,7 +10,7 @@ Review the assigned screens, emails, documents or images against the approved br
 - [ ] The logo is the approved file, at an allowed size and clear space, without stretching, recolouring or redrawing.
 - [ ] Colours come from the brand palette through approved system tokens.
 - [ ] Fonts and fallbacks match the brand, including headings.
-- [ ] Images and illustrations follow the approved style; mixed styles have an explicit rule.
+- [ ] Images and illustrations follow the approved style; mixed styles have an explicit rule. Compare generated pictures with the approved references and any applicable character sheets.
 - [ ] Product names and key terms match the approved glossary in every supported language.
 - [ ] Tone matches the voice rules and excludes prohibited claims and jokes.
 - [ ] The company holds permission or a license for third-party logos, fonts and images.

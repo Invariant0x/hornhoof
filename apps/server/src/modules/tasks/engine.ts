@@ -234,7 +234,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
   if (input.cleanup !== undefined) {
     const head = actor.agentId ? await liveAgent(ctx.db, companyId, actor.agentId) : null;
-    if (head?.kind !== 'head' || head.departmentId !== input.departmentId) throw refuse(403, 'task_not_yours', 'Only the department head may request optional Cleanup.');
+    if (head?.kind !== 'orchestrator' && (head?.kind !== 'head' || head.departmentId !== input.departmentId)) throw refuse(403, 'task_not_yours', 'Only the department head or the orchestrator may request optional Cleanup.');
   }
 }
 
@@ -843,6 +843,7 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  recipientPersonId?: string;
   /* Who answers by when, if someone promised dates. */
   plan?: WaitPlan;
   /* A goal in danger, as someone who may say so said it. */
@@ -887,6 +888,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         options,
         link: q.link ?? null,
         decisionTopic: topicOf(q),
+        recipientPersonId: q.recipientPersonId,
         ...approvalColumns(q.approval),
         ...goalColumns(q.goal),
       })
@@ -1189,7 +1191,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
 
 /* Whether a person's words take this open request: they reach its task and may take its decision. */
 function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Parameters<typeof requestSubject>[0] & Parameters<typeof requestSubject>[1] & { companyId: string }): boolean {
-  return canReach(access, taskSpot(r)) && canDecide(requestSubject(r, r), person, access, r.companyId);
+  return (r.recipientPersonId === person.id || canReach(access, taskSpot(r))) && canDecide(requestSubject(r, r), person, access, r.companyId);
 }
 
 /* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
@@ -1205,7 +1207,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   if (!person) return [];
   const access = await accessOf(ctx.db, person);
   const open = await ctx.db
-    .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, departmentId: tasks.departmentId, productId: tasks.productId })
+    .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, recipientPersonId: requests.recipientPersonId, departmentId: tasks.departmentId, productId: tasks.productId })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
@@ -1213,7 +1215,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   const wakes: Wake[] = [];
   for (const r of open) {
     /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
-    if (!takes(person, access, r)) continue;
+    if (!takes({ ...person, assistant }, access, r)) continue;
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
       wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);

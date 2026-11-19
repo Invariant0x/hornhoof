@@ -41,14 +41,14 @@ const LONG = 'build-server-eu-west-01.internal';
 function startViews(): Record<string, View> {
   const mac = access('m3', 'studio-mac', IVAN, { scope: 'all_agents' });
   return {
-    m1: access('m1', 'a-host', IVAN),
+    m1: access('m1', 'build-host', IVAN),
     m2: access('m2', 'build-node', ANNA, { open: false, scope: null }),
     m3: { ...mac, machine: { ...mac.machine, os: 'darwin' } },
     m4: access('m4', LONG, IVAN, { reachable: false, employees: [{ employeeId: 'a1', taskId: 't1' }] }),
   };
 }
 const HOSTS: Record<string, [string, { id: string; name: string }, Partial<MachineView>]> = {
-  m1: ['a-host', IVAN, {}], m2: ['build-node', ANNA, {}], m3: ['studio-mac', IVAN, { os: 'darwin', arch: 'arm64' }], m4: [LONG, IVAN, { online: false }],
+  m1: ['build-host', IVAN, {}], m2: ['build-node', ANNA, {}], m3: ['studio-mac', IVAN, { os: 'darwin', arch: 'arm64' }], m4: [LONG, IVAN, { online: false }],
 };
 
 type Sent = { path: string; body: unknown };

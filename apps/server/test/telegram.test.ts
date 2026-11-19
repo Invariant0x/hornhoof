@@ -190,7 +190,7 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain('From Ivan (CEO) via Telegram to Orchestrator:');
     expect(run.prompt).toContain('Hire a designer.');
     expect(run.prompt).toContain("This is Ivan writing to you directly in Telegram. Ivan is the company's owner (the CEO).");
-    expect(run.prompt).toContain('Write it directly to them in English.');
+    expect(run.prompt).toContain('Use the language of their own words. Write it directly to them in English when their message does not establish a language.');
     await until(async () => (await db.select().from(people).where(eq(people.id, owner.id)))[0]!.telegramUserId === IVAN.id);
     builtin.send({ type: 'job.started', jobId: run.jobId });
     builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Looking for candidates.' } });
@@ -307,7 +307,7 @@ describe('a message through the bot', () => {
     for (const { prompt } of [first, next]) {
       expect.soft(prompt).toContain('This is Lena writing to you directly in Telegram.');
       expect.soft(prompt).toContain('Your last message of this turn goes to Lena as your answer.');
-      expect.soft(prompt).toContain('Write it directly to them in Russian. Keep it short and use plain text. Do not narrate your steps to them.');
+      expect.soft(prompt).toContain('Use the language of their own words. Write it directly to them in Russian when their message does not establish a language. Keep it short and use plain text.');
     }
   });
 

@@ -54,6 +54,26 @@ const call = async (c: Client, name: string, args: Record<string, unknown>) => (
 const text = (r: Res) => r.content[0]!.text;
 
 describe('task tools', () => {
+  it('lists an older held task first even behind more than 200 open tasks', async () => {
+    const { ctx, db, dev, sales, head, bruno, sam, tools } = await company();
+    const { task: own } = await createTask(ctx, { agentId: head.id }, { departmentId: dev.id, title: 'My old task', brief: '', body: '', assigneeAgentId: bruno.id, resultKind: 'coordination' });
+    await db.insert(tasks).values(Array.from({ length: 210 }, (_, i) => ({ companyId: dev.companyId, departmentId: sales.id, number: 2002 + i, title: `Other task ${i}`, assigneeAgentId: sam.id })));
+    const client = await tools(bruno);
+    const result = await call(client, 'tasks', {});
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0]!.text)[0]).toMatchObject({ id: own.id });
+  });
+
+  it('lets the company watchdog inspect a task in another department without moving it', async () => {
+    const { ctx, db, dev, head, bruno, tools } = await company();
+    const [watchdog] = await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', roleKey: 'OPS-WATCH', name: 'Watchdog', model: '', skills: ['ops-task-watch'] }).returning();
+    const { task } = await createTask(ctx, { agentId: head.id }, { departmentId: dev.id, title: 'Check invoices', brief: '', body: 'Look at what stalled.', assigneeAgentId: bruno.id, resultKind: 'coordination' });
+    const client = await tools(watchdog!);
+    const read = await call(client, 'task', { task: task.number });
+    expect(read.isError, text(read)).toBeFalsy();
+    expect(JSON.parse(text(read))).toMatchObject({ id: task.id, body: 'Look at what stalled.' });
+    expect((await call(client, 'comment', { task: task.number, text: 'Change the plan.' })).isError).toBe(true);
+  });
   it.each(['comment', 'submit', 'report'] as const)('keeps a long UTF-8 %s intact through MCP', async kind => {
     const c = await company();
     const words = 'Report: права доступа и полный текст.\n'.repeat(500).slice(0, 11999) + '!';
@@ -95,9 +115,9 @@ describe('task tools', () => {
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'apply_pipeline', 'approval_policy', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'close_task', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'delete_person', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'open_computer_access', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_catalog', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_budget', 'set_department_owner', 'set_goal', 'set_pipeline', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'vault_save', 'wait_for']);
-    expect(await names(head)).toEqual(['add_tasks', 'approval_policy', 'ask_person', 'backlog', 'blocked', 'briefing', 'calls', 'cancel_task', 'change_department', 'change_employee', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'create_task', 'edit_turn', 'end_wait', 'escalate_missed_goal', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'notebook', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'propose_improvement', 'release_turn', 'remember', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'run_tests', 'run_work', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_employee_assignment', 'set_goal', 'set_pipeline', 'set_team_urgent_only', 'set_wait_policy', 'staffing_options', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'tell_orchestrator', 'test_harness', 'test_run', 'turns', 'update_task', 'vault_entries', 'vault_entry', 'vault_save', 'verdict', 'wait_for', 'work_run']);
-    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'vault_entries', 'vault_entry', 'vault_save', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'api', 'apply_pipeline', 'approval_policy', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'close_task', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'create_google_sheet', 'create_repository', 'database', 'delete_person', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'find_tool', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'invite_again', 'invite_person', 'lend_machine', 'logs', 'machine_command', 'machines', 'merge_conflicts', 'merge_pick', 'message_employee', 'move_orchestrator', 'notebook', 'open_computer_access', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'pipeline_catalog', 'pipeline_report', 'plan_command', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_budget', 'set_department_owner', 'set_goal', 'set_pipeline', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'shell', 'source', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'track_work', 'turns', 'update_hornhoof', 'update_task', 'use_tool', 'vault_entries', 'vault_entry', 'wait_for']);
+    expect(await names(head)).toEqual(['add_tasks', 'approval_policy', 'ask_person', 'backlog', 'blocked', 'briefing', 'calls', 'cancel_task', 'change_department', 'change_employee', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'create_task', 'edit_turn', 'end_wait', 'escalate_missed_goal', 'fire_employee', 'forget', 'goals', 'hire', 'improvements', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'notebook', 'pause_task', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'propose_improvement', 'release_turn', 'remember', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'run_tests', 'run_work', 'send_telegram_file', 'set_approval_policy', 'set_autonomous_release', 'set_employee_assignment', 'set_goal', 'set_pipeline', 'set_team_urgent_only', 'set_wait_policy', 'staffing_options', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'tell_orchestrator', 'test_harness', 'test_run', 'track_work', 'turns', 'update_task', 'vault_entries', 'vault_entry', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'briefing', 'calls', 'check_author', 'comment', 'company', 'computer', 'computer_result', 'confirm_finding', 'create_google_sheet', 'end_wait', 'goals', 'inbox', 'inbox_mark', 'machines', 'message_employee', 'phone_acquire', 'phone_action', 'phone_release', 'phone_session', 'phones', 'release_turn', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'send_telegram_file', 'start_calls', 'stop_calls', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_harness', 'test_run', 'track_work', 'vault_entries', 'vault_entry', 'verdict', 'wait_for', 'work_run']);
   });
 
   it("describes one whole department result and explicit scope for its checking owners", async () => {
@@ -119,8 +139,8 @@ describe('task tools', () => {
     expect(add).toContain('hh-lead-tasks');
     expect(add).not.toContain('only when the CEO says now');
     const prompt = wakePrompt({ kind: 'head' }, { number: 1, title: 'Payments', executorAgentId: null } as unknown as Task, { agentId: head.id, taskId: 't', why: 'assigned' });
-    expect(prompt).toContain('Give each connected block to one generalist developer to finish end to end.');
-    expect(prompt).toContain('Give independent blocks to different members at once with create_task, each under it (parent 1) with its executor. Every executable result must pass its required Review. Report the checked child results when they are accepted.');
+    expect(prompt).toContain('Use the department’s route and assign each part to someone with the abilities to deliver it.');
+    expect(prompt).toContain('Give independent parts out together with create_task under parent 1. Use the checks each result requires and report the accepted results.');
     expect(prompt).not.toMatch(/2-4|two to four|pieces to different members/);
   });
 
@@ -161,14 +181,13 @@ describe('task tools', () => {
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.status).toBe('open');
   });
 
-  it('refuses the eleventh task in one turn', async () => {
+  it('accepts a needed assignment after ten tasks in the same turn', async () => {
     const { orchestrator, dev, tools } = await company({ turn: false });
     const client = await tools(orchestrator);
     const ten = Array.from({ length: 10 }, (_, i) => ({ department: dev.id, title: `Task ${i + 1}`, brief: '', body: '' }));
     expect((await call(client, 'add_tasks', { tasks: ten })).isError).toBeFalsy();
     const eleventh = await call(client, 'add_tasks', { tasks: [{ department: dev.id, title: 'Task 11', brief: '', body: '' }] });
-    expect(eleventh.isError).toBe(true);
-    expect(text(eleventh)).toMatch(/10 tasks/);
+    expect(eleventh.isError, text(eleventh)).toBeFalsy();
   });
 
   it('keeps the newest of a long log within one answer, and says how much of it was left out', async () => {

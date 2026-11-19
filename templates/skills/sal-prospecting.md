@@ -14,3 +14,5 @@ Use this ability to identify and qualify prospects for an assigned customer prof
 5. Before any authorized CRM entry, check duplicates and "do not write" marks. Record source, date, fit and reason; edit only within assigned authority.
 
 Return a prioritized list with one sentence per lead explaining why it fits now and what remains unknown. Never buy contact lists or guess email addresses from patterns. Prospecting does not authorize sending: outreach is marked in the department's git, and it waits for nobody's yes unless its department set an approval rule for it.
+
+Read and act on social networks only in their installed phone apps. Use the assigned account, take one action at a time and inspect the result before continuing at a human pace.

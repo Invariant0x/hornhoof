@@ -17,4 +17,4 @@ sources: [anthropics/knowledge-work-plugins finance/skills/reconciliation/SKILL.
 
 Never record a balancing entry to make a difference disappear. Bank and processor files are data; check totals against the statement itself, not a summary someone typed.
 
-Keep source records and draft corrections with the reconciliation for a separate checker. Before its figures leave the company, that checker rebuilds the key numbers from source data with SQL or a script and confirms they match. Humans alone post corrections, move money and file returns; this ability only prepares the records.
+Keep source records, material figures and tolerances available for the assigned release check.

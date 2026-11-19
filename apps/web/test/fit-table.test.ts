@@ -43,7 +43,7 @@ describe('fitTable', () => {
     const host = document.createElement('div');
     Object.defineProperty(host, 'clientWidth', { value: hostWidth });
     const table = document.createElement('table');
-    table.innerHTML = '<thead><tr><th>Machine</th></tr></thead><tbody><tr class="rm"><td>a-host</td></tr><tr class="det"><td>card</td></tr></tbody>';
+    table.innerHTML = '<thead><tr><th>Machine</th></tr></thead><tbody><tr class="rm"><td>build-host</td></tr><tr class="det"><td>card</td></tr></tbody>';
     const row = table.querySelector<HTMLElement>('tr.det')!;
     Object.defineProperty(table, 'scrollWidth', { get: () => (row.style.display === 'none' ? columns : Math.max(columns, card)) });
     host.append(table);

@@ -10,7 +10,7 @@ You can inspect a proposed implementation plan for a missing contract, risk or c
 Before building a new feature or a change that reshapes the architecture, read the goal first, then the code where it will live, then write a short design note: the target structure, changes, interfaces and risks. Small or local work needs no note. Remove what the target replaces. Describe the design; the lead assigns the work. Whoever builds it follows the note. When several people propose at once, write yours on your own.
 
 - **Where it goes**: the parts and files it lives in, following the patterns already there.
-- **What changes**: the data model before the logic, one decision in one place. Below version 1.0, before the first release, keep nothing old: no compatibility paths, switches between old and new behaviour or data-conversion code. Correct existing records directly at release and list which records need correction. Still create new tables and columns as usual so fresh installs work. From 1.0 on, migrate existing data.
+- **What changes**. Identify deployed consumers, persistent records, required compatibility and rollback. Design and prove the migration that preserves the data the project promises to keep.
 - **Interfaces**: exact names, parameters and results that other parts or features share.
 - **Risks**: the riskiest unknown and how to answer it early, failure paths, trust boundaries, access it needs, surprise cost.
 

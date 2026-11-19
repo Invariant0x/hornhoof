@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isSensitiveTool } from '@hornhoof/protocol';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
@@ -114,8 +115,9 @@ describe('the tools of an agent on a machine that only reads', () => {
     const stamped = await s.tools({ 'x-hornhoof-invocation': randomUUID(), 'x-hornhoof-via': 'keeper' });
     expect((await s.call(stamped, 'tasks')).isError).toBeFalsy();
     expect((await s.call(stamped, 'remember', { text: 'A note.' })).isError).toBe(true);
-    expect(await s.call(stamped, 'vault_save', { name: 'Refused', site: 'https://example.test', login: 'test', password: 'private-read-marker' }))
-      .toEqual({ isError: true, content: [{ type: 'text', text: CUT_OFF }] });
+    /* A sensitive tool is refused before its audit and value masks start. */
+    expect(isSensitiveTool('vault_entry')).toBe(true);
+    expect(await s.call(stamped, 'vault_entry', { entry: 'Refused' })).toEqual({ isError: true, content: [{ type: 'text', text: CUT_OFF }] });
     expect(privateTurn(s.db, s.job.id)).toBeUndefined();
     expect(await s.db.select().from(toolCalls)).toEqual([]);
     expect((await s.db.select().from(jobs).where(eq(jobs.id, s.job.id)))[0]).toEqual(before);

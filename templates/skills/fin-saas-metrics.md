@@ -5,7 +5,7 @@ description: { en: "Computes recurring revenue, churn, acquisition cost and life
 kind: procedure
 sources: [alirezarezvani/claude-skills finance/skills/saas-metrics-coach/SKILL.md, wshobson/agents plugins/startup-business-analyst]
 ---
-Compute these every month from billing records. Keep one written definition for each, and never change a definition without saying so.
+Use subscription measures only when they match the revenue model and decision. Choose a reporting period from that need and record definitions, cohorts and units. Report a ratio only when its denominator is meaningful and its periods match. Mark undefined or unstable values with the inputs and reason.
 
 - **MRR**: recurring revenue for the month, without one-off fees, taxes and expiring discounts. Split it into new, expansion, contraction, churned and reactivated MRR; the parts must add up to the change since last month.
 - **ARR**: MRR x 12, for subscriptions only.
@@ -19,4 +19,4 @@ Compute these every month from billing records. Keep one written definition for 
 
 Show each metric's trend over six months with its inputs. Say when the history is short or one customer swings a number. Tie MRR back to revenue in the statements and explain the gap.
 
-Keep dated billing and cost sources with the calculations. Before these figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. Agents never post entries, make payments or file returns.
+Keep dated billing and cost sources and identify the material figures for the required release check.

@@ -48,6 +48,7 @@
         "server-slow",
         "browser",
         "browser-matrix",
+        "browser-engines",
         "mutation"
       ]
     }
@@ -508,6 +509,35 @@
       "scenarioSources": "apps/web/src"
     },
     {
+      "id": "browser-engines",
+      "root": "apps/web/e2e",
+      "files": [
+        "apps/web/e2e/maintenance-error-bar.spec.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "playwright",
+          "test",
+          "--config=e2e/maintenance-error-bar.config.ts",
+          "--project=bars-firefox",
+          "--project=bars-webkit",
+          "--workers=2",
+          "--pass-with-no-tests"
+        ],
+        "cwd": "apps/web"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "full"
+      ],
+      "finalChecks": [],
+      "scenarioSources": "apps/web/src"
+    },
+    {
       "id": "mutation",
       "root": "scripts/mutation",
       "files": [
@@ -559,7 +589,8 @@
           "server-postgres",
           "server-slow",
           "browser",
-          "browser-matrix"
+          "browser-matrix",
+          "browser-engines"
         ]
       },
       {
@@ -621,7 +652,16 @@
         ],
         "suiteIds": [
           "browser",
-          "browser-matrix"
+          "browser-matrix",
+          "browser-engines"
+        ]
+      },
+      {
+        "globs": [
+          "apps/web/e2e/maintenance-error-bar.config.ts"
+        ],
+        "suiteIds": [
+          "browser-engines"
         ]
       },
       {
@@ -710,6 +750,7 @@
           "apps/server/test/tasks-routes.test.ts",
           "apps/server/test/tasks-tools.test.ts",
           "apps/server/test/tasks-wake.test.ts",
+          "apps/server/test/template-laws.test.ts",
           "apps/server/test/templates-load.test.ts",
           "apps/server/test/templates-once.test.ts",
           "apps/server/test/templates-pipeline.test.ts",
@@ -726,6 +767,7 @@
           "apps/server/test/turn-effort-dispatch.test.ts",
           "apps/server/test/turn-effort.test.ts",
           "apps/server/test/turn-endings.test.ts",
+          "apps/server/test/video-template.test.ts",
           "apps/server/test/wait-producers.test.ts",
           "apps/server/test/work-tree-route.test.ts"
         ]

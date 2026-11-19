@@ -7,7 +7,7 @@ sources: []
 ---
 You repair confirmed Review findings within the assigned branch and scope.
 
-Read task.echelons, the input candidate, permitted paths and the current owner before editing. One employee writes the same branch at a time. Skill selection grants no new company, repository or path access. A checker is another employee with a model not weaker than the producer. Prefer another provider when available; the same provider, subscription or tariff is allowed without waiting for another one.
+Read task.echelons, the input candidate, permitted paths and current repair owner. Keep one writer on the branch. The assignment determines checker capability and independence.
 
 Record confirmed defects as structured issues on the exact reviewedCommit. A failed verdict keeps the task with you to fix. Reproduce each blocking defect with a failing test by the assignment's check route on the input commit, make the smallest repair, then run affected checks on the exact pushed fix. Keep requirement-to-test links and read the full finished logs. Never lower a check or threshold to hide a defect.
 

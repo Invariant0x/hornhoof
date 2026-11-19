@@ -1,10 +1,10 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { keyDefaults } from '../src/owner-key';
 import { Shell } from '../src/screens/Shell';
-import { accessView, MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
+import { accessView, decisions, MACHINES, ME, mockApi, ORG, REQUESTS, SUBS } from './api-mock';
 import { decl, px } from './css';
 
 function renderShell() {
@@ -216,7 +216,7 @@ describe('Shell', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Talk to the orchestrator' });
     expect(within(dialog).getByText('What would you like me to do?')).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(await within(dialog).findByRole('button', { name: 'Set up Accounting for my bills and papers' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Set up a way to manage household bills and records' }));
     expect(await within(dialog).findByText('Where do you keep your bills?')).toBeInTheDocument();
     expect(calls).toContainEqual({ method: 'POST', path: '/api/orchestrator/first-contact', body: { offer: 'householdBooks', language: 'en' } });
     await user.click(within(dialog).getByRole('button', { name: 'Close' }));
@@ -240,6 +240,89 @@ describe('Shell', () => {
 });
 
 /* The account menu's heading and groups of rows, with a line between groups that have entries. */
+describe('the section tabs', () => {
+  const ICONS = '.tabs[data-fit="icons"]';
+  const NAMES = ['Map', 'Tasks, 2 waiting for you', 'People', 'Subscriptions & API', 'Machines'];
+
+  /* The top bar as wide as `width`, the logo shown or not, and what the tabs need in words. */
+  function lay(width: number, brand: number, words: number) {
+    Object.defineProperty(document.querySelector('.topbar')!, 'clientWidth', { configurable: true, value: width });
+    Object.defineProperty(document.querySelector('.tb-brand')!, 'offsetWidth', { configurable: true, value: brand });
+    Object.defineProperty(document.querySelector('.tb-right')!, 'offsetWidth', { configurable: true, value: 44 });
+    Object.defineProperty(screen.getByRole('navigation', { name: 'Sections' }), 'scrollWidth', { configurable: true, value: words });
+  }
+
+  async function show(routes: Parameters<typeof mockApi>[0] = {}) {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/requests': [200, decisions(REQUESTS)], ...routes });
+    render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    await within(nav).findByRole('button', { name: 'Tasks, 2 waiting for you' });
+    return { nav, measure: () => act(() => callbacks.forEach(fn => fn())) };
+  }
+
+  it('turns into named icons in one row when their words do not fit one line, and back when they do', async () => {
+    const { nav, measure } = await show();
+    expect(nav).not.toHaveAttribute('data-fit');
+    expect(within(nav).getAllByRole('button').map(b => b.textContent)).toEqual(['Map', 'Tasks2', 'People', 'Subscriptions & API', 'Machines']);
+    /* A 375 px phone: no logo, 331 px beside the account for 520 px of words. */
+    lay(375, 0, 520);
+    measure();
+    expect(nav).toHaveAttribute('data-fit', 'icons');
+    const tabs = within(nav).getAllByRole('button');
+    expect(tabs.map(b => [b.getAttribute('aria-label'), b.getAttribute('title'), b.querySelectorAll('svg').length])).toEqual(NAMES.map(name => [name, name, 1]));
+    expect(tabs.map(b => b.textContent)).toEqual(['', '2', '', '', '']);
+    expect(tabs[1]!.querySelector('.nav-count')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(nav).getByRole('button', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
+    /* A wide screen gives the centred tabs 1440 - 2 * 44 px. */
+    lay(1440, 44, 520);
+    measure();
+    expect(nav).not.toHaveAttribute('data-fit');
+    expect(within(nav).getByRole('button', { name: 'People' })).toHaveTextContent('People');
+    expect(within(nav).getByRole('button', { name: 'People' })).not.toHaveAttribute('title');
+  });
+
+  it('opens each section from its icon', async () => {
+    const { nav, measure } = await show({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    lay(320, 0, 520);
+    measure();
+    expect(nav).toHaveAttribute('data-fit', 'icons');
+    const user = userEvent.setup();
+    await user.click(within(nav).getByRole('button', { name: 'Machines' }));
+    expect(await screen.findByRole('heading', { name: 'Machines' })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'Machines' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('keeps the words of every tab on one line, with no strip that scrolls sideways', () => {
+    expect(decl('.tabs button', 'white-space')).toBe('nowrap');
+    expect(decl('.topbar', 'grid-template-columns')).toBe('1fr minmax(0, auto) 1fr');
+    for (const property of ['overflow-x', 'overflow']) expect(decl('.tabs', property, '(max-width: 420px)')).toBeUndefined();
+    expect(decl('.tabs button', 'white-space', '(max-width: 420px)')).toBeUndefined();
+    expect(decl('.tabs button', 'font-size', '(max-width: 420px)')).toBeUndefined();
+  });
+
+  it('draws the icons as cells of one height with the icon in the middle and the count on its corner', () => {
+    expect(decl(`${ICONS} button`, 'display')).toBe('flex');
+    expect(decl(`${ICONS} button`, 'align-items')).toBe('center');
+    expect(decl(`${ICONS} button`, 'justify-content')).toBe('center');
+    expect(decl(`${ICONS} button`, 'position')).toBe('relative');
+    expect(decl(`${ICONS} button`, 'min-inline-size')).toBe('44px');
+    expect(decl('.tabs svg', 'width')).toBe('20px');
+    expect(decl('.tabs svg', 'height')).toBe('20px');
+    expect(decl(`${ICONS} .nav-count`, 'position')).toBe('absolute');
+    expect(decl(`${ICONS} .nav-count`, 'margin')).toBe('0');
+    expect(decl(`${ICONS} .nav-count`, 'inset-inline-start')).toBe('calc(50% + 4px)');
+    /* On a phone the cells share the whole row beside the account equally. */
+    expect(decl(ICONS, 'justify-self', '(max-width: 420px)')).toBe('stretch');
+    expect(decl(`${ICONS} button`, 'flex', '(max-width: 420px)')).toBe('1 1 0');
+  });
+});
+
 describe('the account menu', () => {
   const OPEN = { id: 'i1', title: 'Install jq', text: 'jq', seen: 1, status: 'open', result: null, at: '2026-11-15T09:00:00.000Z', updatedAt: '2026-11-15T09:00:00.000Z', agent: { id: 'w1', name: 'Wendy' }, department: { id: 'd9', name: 'Operations' }, decidedBy: null, scope: 'company', code: null };
   const LISTED = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };

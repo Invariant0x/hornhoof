@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, requests, tasks } from '../src/db/schema.js';
@@ -435,12 +435,16 @@ describe('timers', () => {
     const card = (await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(ceo) })).json();
     expect(card.alarm).toEqual({ reason: 'node_silent', since: at(10).getTime() });
 
-    /* One more call each time the quiet has doubled (20 minutes of quiet: +30m), none in between. */
+    /* One more call each time the quiet has doubled (20 minutes of quiet: +30m), none in between. Wanda is still on the
+       first call, so the free orchestrator hears the second; the watchdog never does. */
+    const callsAbout = async () => (await db.select(only(agentEvents, 'agentId')).from(agentEvents)
+      .where(and(eq(agentEvents.kind, 'message'), sql`split_part(${agentEvents.data}->>'silentJob', ':', 1) = ${turn!.id}`))).map(e => e.agentId);
     await minuteRound(app.ctx, at(25), () => () => {});
     await minuteRound(app.ctx, at(29), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(1);
+    expect(await callsAbout()).toEqual([wandaId]);
     await minuteRound(app.ctx, at(30), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(2);
+    expect((await callsAbout()).sort()).toEqual([wandaId, orchestrator.id].sort());
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(1);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
   });
 

@@ -78,7 +78,12 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
   }, { auth, network }).then(() => Buffer.concat(chunks));
 }
 
-const AUTHOR_DRIVER = ['scripts/author-check.mjs', 'scripts/author-check', 'scripts/test/tracked-files.mjs'];
+/* Root-relative literal pathspecs let Git compare the driver without making its files inputs to the mirror's fingerprint. */
+const AUTHOR_DRIVER_PATHSPECS = [
+  ':(top,literal)scripts/author-check.mjs',
+  ':(top,literal)scripts/author-check',
+  ':(top,literal)scripts/test/tracked-files.mjs',
+];
 
 function authorGit(mirror: string, context: CacheContext) {
   return async (args: string[], input?: Buffer): Promise<Buffer> => {
@@ -98,7 +103,7 @@ export async function authorComparison(run: AuthorCheckRun, context: CacheContex
   await mirrorAt(repo, scope, pin.commit, context, async mirror => {
     const args = ['--git-dir', mirror];
     await gitBytes([...args, 'merge-base', '--is-ancestor', pin.baseCommit, pin.commit], context);
-    const driver = await gitBytes([...args, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', pin.baseCommit, pin.commit, '--', ...AUTHOR_DRIVER], context);
+    const driver = await gitBytes([...args, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', pin.baseCommit, pin.commit, '--', ...AUTHOR_DRIVER_PATHSPECS], context);
     if (driver.length) throw new Error('The change edits the author-check driver.');
     if (run.verifyCherryPick) cherryPick = await matchingAuthorPatch(pin, run.mainCommit, authorGit(mirror, context));
   });

@@ -19,4 +19,4 @@ Use the assigned workbook, its source records, period, units and tolerance. You 
 
 Report the problems ranked by how much they change an output, with the corrected value where you can compute it.
 
-Do not fix the workbook being checked; send findings to the maker through your head. Before any figures leave the company, independently rebuild every key number from source records with SQL or a script, without first using the maker's workings, and confirm they match. A spreadsheet review alone is no substitute. Humans alone post entries, make payments and file returns.
+Preserve the checked workbook. Give findings to the maker with the exact figures, source records and observed discrepancies.

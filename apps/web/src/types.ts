@@ -211,6 +211,9 @@ export type Department = {
   /* What it works on now, for people who reach it. */
   current?: { id: string; number: number; title: string } | null;
   repository?: Repository | null;
+  /* Whether it or one of its products keeps a repository, for everyone, even where repository is out of reach: work without
+     one goes in as documents. None said: an older server, read as code. */
+  keepsRepository?: boolean;
   /* The GitHub key its repositories are created with, for the people who set them; none when no key is saved. */
   repoHost?: RepoHost | null;
   /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
@@ -655,7 +658,7 @@ export type WaitingRequest = MaterialStampView & {
 };
 
 /* Who takes a decision: the CEO and the CEO delegate, and also the people of its department or its owner. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner'; department: { id: string; name: string } | null };
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner' | 'named_person'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = MaterialStampView & {

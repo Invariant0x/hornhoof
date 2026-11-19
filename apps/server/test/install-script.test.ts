@@ -117,6 +117,31 @@ describe('install.sh', () => {
       expect(r.calls.find(c => c.startsWith('docker run -d'))!.match(/--add-host \S+/g)).toEqual(['--add-host host.docker.internal:host-gateway']);
     });
 
+    describe('whose host names cannot be kept', () => {
+      /* A new container without its --add-host could lose its way to the core, so the update stops before the node is
+         touched: no wait, no stop, no rename, no new container, and the old one goes on running. */
+      const changed = (calls: string[]) =>
+        calls.filter(c => c.includes(name) && (c.includes('prepare-stop') || c.endsWith(' wait-update') || /^docker (stop|rename|update|rm|run -d) /.test(c)));
+      const unread = { STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway`, STUB_EXTRA_HOSTS_UNREAD: name };
+
+      it.each([
+        ['an update', []],
+        ['an urgent update', ['--urgent']],
+      ])('stops %s when Docker does not say them, and leaves the node running as it was', (_, args) => {
+        const r = update(unread, args);
+        expect(r.code).toBe(1);
+        expect(r.out).toContain(`Could not read the host names ${name} was started with, so ${name} stays as it is and goes on running.`);
+        expect(changed(r.calls)).toEqual([]);
+      });
+
+      it('stops the same way for a host name it cannot pass on as it is', () => {
+        const r = update({ STUB_EXTRA_HOSTS: `${name}=host.docker.internal:host-gateway ${name}=mirror.lan:[fd00::7]` });
+        expect(r.code).toBe(1);
+        expect(r.out).toContain(`${name} was started with a host name this installer cannot carry over, so ${name} stays as it is and goes on running.`);
+        expect(changed(r.calls)).toEqual([]);
+      });
+    });
+
     it('leaves the node and its turns on a server from before this wait, and says why', () => {
       const r = update({ STUB_WAIT_UPDATE: '3' });
       expect(r.code).toBe(1);
@@ -736,6 +761,26 @@ describe('install.sh', () => {
     expect(runs).toHaveLength(2);
     expect(runs.find(c => c.includes('--name hornhoof-claude-1c07dac4'))!.match(/--add-host \S+/g)).toEqual(['--add-host host.docker.internal:host-gateway']);
     expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).not.toContain('--add-host');
+  });
+
+  it('leaves a node whose host names Docker does not say running as it was when the updater moves the nodes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\n');
+    const node = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_CONTAINERS: `${node}=https://hh.acme.test`,
+        STUB_EXTRA_HOSTS: `${node}=host.docker.internal:host-gateway`,
+        STUB_EXTRA_HOSTS_UNREAD: node,
+      },
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`Could not read the host names ${node} was started with, so ${node} stays as it is and goes on running.`);
+    expect(r.calls.filter(c => c.includes(node) && (c.includes('prepare-stop') || /^docker (stop|rename|update|rm|run -d) /.test(c)))).toEqual([]);
   });
 
   it("leaves the built-in node and this server's plan nodes running when the node image did not change", () => {

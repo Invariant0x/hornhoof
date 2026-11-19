@@ -5,12 +5,12 @@ description: { en: "Sets the yearly budget with each department and updates the 
 kind: procedure
 sources: [msitarzewski/agency-agents finance/finance-fpa-analyst.md]
 ---
-**Budget**, once a year or when the CEO asks:
+**Budget**, on the cadence set by the people responsible for the funds:
 1. Start from the company's goals and the base case of the financial model.
 2. Ask each department, through your head and the orchestrator, for its plan: people, tools, subscriptions, AI usage, campaigns, with the reason for each line.
 3. Build the budget by month, department and budget line. Show the total against the cash runway.
 4. Mark which lines are commitments (contracts, salaries) and which can be cut.
-5. The budget is a draft until the CEO approves it.
+5. Give the people responsible for the funds the assumptions, alternatives and proposed limits so they can set or revise the budget.
 
 **Forecast**, every month after the close:
 1. Replace the closed month's forecast with the actuals.
@@ -20,4 +20,4 @@ sources: [msitarzewski/agency-agents finance/finance-fpa-analyst.md]
 
 Keep every version with its date. Write assumptions as numbers with sources ("3 hires in Q2, per the development plan"), not as hopes.
 
-Keep the source records and calculations with the draft. Before figures leave the company, a checker who did not make them must rebuild the key numbers from source data with SQL or a script and confirm they match. Humans approve commitments, post entries, make payments and file returns; a budget or forecast author does none of these.
+Keep the source records and calculations and identify the material figures and tolerance for release checks. The person responsible for payment makes it.

@@ -152,15 +152,17 @@ describe('work tree layout', () => {
     }
   });
 
-  it('keeps lane rows and their lines fixed when task text grows', () => {
+  it('grows a row with the plate its words make taller, moves the rows under it down and keeps their lines through the middle', () => {
     const plain = treeLayout(DEV_TREE, box, 1), first = DEV_TREE.lines[0]!.agent.id, next = DEV_TREE.lines[1]!.agent.id;
-    const long = { ...DEV_TREE, lines: DEV_TREE.lines.map(line => ({ ...line, title: `${line.title} with a very long task title that must not stretch the chip` })) };
-    const grown = treeLayout(long, box, 1);
+    /* The plates as the screen measures them: the first lane's words take two more lines, the main branch's name one more. */
+    const grown = treeLayout(DEV_TREE, box, 1, { [first]: 120, main: 50, [next]: 40 });
     const row = (layout: typeof plain, id: string) => layout.rows.find(r => r.agent?.id === id)!;
-    expect(grown.rows.find(r => r.type === 'main')!.h).toBe(40);
-    expect(row(grown, first).h).toBe(96);
-    expect(grown.height).toBe(plain.height);
-    expect(row(grown, next).y).toBe(row(plain, next).y);
+    expect(grown.rows.find(r => r.type === 'main')!.h).toBe(50 + 8);
+    expect(row(grown, first).h).toBe(120 + 12);
+    /* A plate that measures less than its natural size keeps it. */
+    expect(row(grown, next).h).toBe(96);
+    expect(grown.height).toBe(plain.height + 18 + 36);
+    expect(row(grown, next).y).toBe(row(plain, next).y + 18 + 36);
     const middle = row(grown, next).y + row(grown, next).h / 2;
     const drawn = grown.paths.filter(p => p.kind === 'segment' && p.row === next);
     expect(drawn.length).toBeGreaterThan(0);

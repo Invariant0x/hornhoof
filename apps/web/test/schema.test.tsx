@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUS, CY, FHEAD, FT, FW, G, GS, HH, HW, PH, PW, PY, REP, schemaLayout, stepPaths } from '../src/screens/schema';
+import { BUS, CH, CY, FHEAD, FT, FW, G, GS, HEAD_ROOM, HH, HW, PH, PW, PY, REP, schemaLayout, stepPaths } from '../src/screens/schema';
 import { taskRoute } from './task-route';
 import type { Department, DeptRole, Employee } from '../src/types';
 import type { Point } from '../src/ui/wires';
@@ -250,6 +250,74 @@ describe('the department schema', () => {
     const [lx, ly] = s.report!.label;
     expect(REP).toBeGreaterThan(py + PH);
     expect(lx >= px && lx <= px + PW && ly >= py && ly <= py + PH).toBe(false);
+  });
+
+  it('lays out cards, headings, the head and the people that measure their natural size as it always did', () => {
+    const natural = { head: HH, cards: Object.fromEntries(TEAM.map(e => [e.id, CH])), headings: { 'DEV-BE': 60, 'DEV-FE': FHEAD - HEAD_ROOM }, people: [PH, PH] };
+    expect(schemaLayout(dept(TEAM, ROLES), 2, natural)).toEqual(schemaLayout(dept(TEAM, ROLES), 2));
+  });
+
+  it('stacks a card whose words take more lines by its measured height, and its frame, spine and the schema grow with it', () => {
+    const plain = schemaLayout(dept(TEAM, ROLES), 0);
+    const s = schemaLayout(dept(TEAM, ROLES), 0, { cards: { felix: 130 } });
+    const fe = s.frames[1]!;
+    const [felix, fiona] = fe.members;
+    expect([felix!.y, felix!.h, felix!.cy]).toEqual([FT + FHEAD, 130, FT + FHEAD + 65]);
+    expect([fiona!.y, fiona!.h, fiona!.cy]).toEqual([FT + FHEAD + 130 + PY - CH, CH, FT + FHEAD + 130 + PY - CH + CH / 2]);
+    expect(fe.h).toBe(FHEAD + 130 + PY - CH + PY + 8);
+    expect(s.h).toBe(FT + fe.h);
+    expect(s.lines).toContainEqual({ cls: 'tick', pts: [[fe.x + 10, felix!.cy], [felix!.x, felix!.cy]] });
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[fe.x + 10, BUS], [fe.x + 10, fiona!.cy]] });
+    expect(stepPaths(s).toMember('fiona')!.at(-1)).toEqual([fiona!.x + 14, fiona!.cy]);
+    /* The other frames stay where they were. */
+    expect(s.frames.filter(f => f !== fe)).toEqual(plain.frames.filter(f => f.key !== 'DEV-FE'));
+  });
+
+  it("starts a frame's cards under its heading when the heading wraps to more lines, and a call frame grows under it", () => {
+    const s = schemaLayout(dept(TEAM, ROLES), 0, { headings: { 'DEV-FE': 120 } });
+    const fe = s.frames[1]!;
+    expect(fe.members.map(m => m.y)).toEqual([FT + 120 + HEAD_ROOM, FT + 120 + HEAD_ROOM + PY]);
+    expect(fe.h).toBe(120 + HEAD_ROOM + 2 * PY + 8);
+    /* A heading that still fits keeps the cards where they stand. */
+    expect(schemaLayout(dept(TEAM, ROLES), 0, { headings: { 'DEV-FE': FHEAD - HEAD_ROOM } }).frames[1]!.members[0]!.y).toBe(FT + FHEAD);
+    const pipelines = [{ id: 'r1', department: { id: 'd1', name: 'Development' }, name: 'Changes', why: '', archived: false, isDefault: true, version: 1,
+      stages: [{ id: 's0', parentId: null, name: 'review', ownerRole: 'DEV-REV', owner: null, position: 0, echelon: 'review' as const, oneShot: { fanOut: 3, judge: true } }] }];
+    const calls = (headings: Record<string, number>) => schemaLayout({ ...dept(TEAM, ROLES), pipelines }, 0, { headings }).frames.find(f => f.oneShot)!;
+    expect(calls({}).h).toBe(FHEAD + 17);
+    expect(calls({ 'one-shot:review': 150 }).h).toBe(150 + HEAD_ROOM);
+  });
+
+  it('moves the bus, the pipeline, the frames and the report down under a taller head card', () => {
+    const plain = schemaLayout(dept(TEAM, ROLES), 0);
+    const s = schemaLayout(dept(TEAM, ROLES), 0, { head: 240 });
+    const down = 240 - HH;
+    expect([s.hh, s.bus, s.cy, s.ft]).toEqual([240, BUS + down, CY + down, FT + down]);
+    expect([plain.hh, plain.bus, plain.cy, plain.ft]).toEqual([HH, BUS, CY, FT]);
+    expect(s.h).toBe(plain.h + down);
+    expect(s.frames.map(f => f.members.map(m => m.y))).toEqual(plain.frames.map(f => f.members.map(m => m.y + down)));
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[s.hx, 240], [s.hx, s.bus]] });
+    expect(s.lines.filter(l => l.cls === 'pl' && l.arrow).map(l => l.pts)).toEqual(plain.lines.filter(l => l.cls === 'pl' && l.arrow).map(l => l.pts.map(([x, y]) => [x, y + down])));
+    expect(s.lines.filter(l => l.cls === 'gate').map(l => l.pts[0]![1])).toEqual(plain.lines.filter(l => l.cls === 'gate').map(l => l.pts[0]![1] + down));
+    expect(s.report!.pts[0]).toEqual([plain.report!.pts[0]![0], s.ft]);
+    expect(stepPaths(s).toMember('felix')!.slice(0, 2)).toEqual([[s.hx, 240 - 30], [s.hx, s.bus]]);
+    expect(stepPaths(s).onward('felix')).toEqual(stepPaths(plain).onward('felix')!.map(([x, y]) => [x, y + down]));
+  });
+
+  it("stacks the people's chips by their measured heights, their line through the middle of each, and the report under the last", () => {
+    const s = schemaLayout(dept(TEAM, ROLES), 2, { people: [100] });
+    const px = s.hx + HW / 2 + 40;
+    expect(s.people).toEqual([[px, 12], [px, 12 + 100 + 10]]);
+    expect(s.peopleH).toEqual([100, PH]);
+    expect(s.lines).toContainEqual({ cls: 'tick', pts: [[px - 14, 62], [px, 62]] });
+    expect(s.lines).toContainEqual({ cls: 'tick', pts: [[px - 14, 122 + PH / 2], [px, 122 + PH / 2]] });
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[s.hx + HW / 2, 40], [px - 14, 40], [px - 14, 122 + PH / 2]] });
+    /* The chips reach as low as the head now, so the report comes in under it, clear of them. */
+    const pts = s.report!.pts;
+    expect(pts.at(-1)![1]).toBe(HH);
+    /* A taller first chip moves the way in on the head's edge down with the second one. */
+    const edge = schemaLayout(dept(TEAM, ROLES), 2, { people: [70] }).report!.pts;
+    expect(edge.at(-1)).toEqual([s.hx + HW / 2, 12 + 70 + 10 + PH + REP - 12 - PH]);
+    for (const [a, b] of pieces(pts)) for (const [k, [x, y]] of s.people.entries()) expect(touches(a, b, [x, y, PW, s.peopleH[k]!])).toBe(false);
   });
 
   it.each([

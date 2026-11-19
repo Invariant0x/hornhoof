@@ -1045,7 +1045,7 @@ export const proposals = pgTable('proposals', {
   /* structure: departments for the company; staff: employees for one department. */
   kind: text('kind', { enum: ['structure', 'staff'] }).notNull().default('structure'),
   departmentId: uuid('department_id').references(() => departments.id),
-  status: text('status', { enum: ['pending', 'applied', 'dismissed'] }).notNull().default('pending'),
+  status: text('status', { enum: ['draft', 'pending', 'applied', 'dismissed'] }).notNull().default('pending'),
   appliedBy: uuid('applied_by').references(() => people.id),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
@@ -1501,6 +1501,7 @@ export const requests = pgTable(
     explained: text('explained'),
     /* What it is about; none on requests from before topics, which go to the CEO. */
     decisionTopic: text('decision_topic', { enum: DECISION_TOPICS }),
+    recipientPersonId: uuid('recipient_person_id').references(() => people.id, { onDelete: 'set null' }),
     /* What an approval a department's policy asked for is about: its channel, the kind of work and how much, as the agent said.
        An approval either names a commit or says this. */
     approvalChannel: text('approval_channel', { enum: APPROVAL_CHANNELS }),

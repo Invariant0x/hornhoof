@@ -11,9 +11,9 @@ Use this ability to draft an assigned first-contact message or follow-up sequenc
 2. Open with a relevant fact about their work and the problem, without flattery or a stock greeting.
 3. Present one problem and one useful outcome supported by approved product evidence. Never invent a customer result.
 4. Make one small request, such as a reply or brief conversation.
-5. Keep the first message under 100 words, plain, without attachments and with at most one approved link.
+5. Keep the first contact as short as its purpose permits and suitable for the channel and recipient.
 6. Include the required opt-out. Check the "do not write" marks in the department's records before proposing any sending sequence.
-7. Limit proposed follow-ups to two or three, each adding something useful and conditional on no reply. Stop on any reply, including refusal.
+7. Follow up only when it adds value and fits the department's contact policy. Honor every stop request.
 8. Write naturally in the prospect's language.
 
 Return drafts with the audience, account, channel, language and conditions for each step. Drafting does not authorize sending or scheduling. Every external message goes from the department's own mailbox, is marked in its git at once and committed, and waits for nobody's yes unless its department set an approval rule for it. Credentials stay on the server; never resend an unknown result blindly.

@@ -137,7 +137,7 @@ it('types the words into a Claude Code whose start the node could not prove came
   expect(paste.mock.calls.map(([, text]) => text)).toEqual([words]);
 });
 
-/* Neo's turn b559a00c on 17.11, as recorded: the node had no receipt of its assignment (delivery 268), as it refused the
+/* The node had no receipt of its assignment because it refused the
    program's hooks, but it recorded the live words after it (delivery 269) taken at 01:50:48. The operator's case 5f366ecb
    closed as failed at 02:06:13, and the program ran tools after that. A case that ends fails no turn whose program went on
    past its words: the turn runs until its end comes, someone stops it or its program is gone. */

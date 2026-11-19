@@ -59,7 +59,7 @@ function calledOffText(called: UpdateCalledOff, wait: Wait): string {
       : `the agents did not finish within ${Math.round((wait.until.getTime() - wait.since.getTime()) / 60_000)} minutes.`;
   return (
     `Hornhoof called off the update to ${called.version}: ${why} No running work was stopped, and new turns start again. ` +
-    `Still running: ${turnList(called.turns)}. Ask for it again later, or, once the CEO agrees to cut those turns short, with whenIdle false.`
+    `Still running: ${turnList(called.turns)}. Retry when work finishes. Check the affected turns and how they can resume before choosing an immediate update with whenIdle false.`
   );
 }
 

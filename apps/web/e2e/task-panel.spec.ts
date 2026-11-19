@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS } from './api';
+import { box, detail, openTaskAction, openTaskCard, serveApi, TASKS, writeToOrchestrator } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its place, the panel runs to the bottom of the window,
    scrolls by itself and leaves the page scrolled where it was. On the tracker a task's card stands at the end side, and from
@@ -14,8 +14,9 @@ test('a tab closes the task, history restores it, and the task and the agent win
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTasks(page);
   await openTask(page, 1);
+  /* The card is the mockup's drawer, at the very end of the screen. */
   const card = await box(panelOf(page, 1));
-  expect(card.x + card.width).toBe(1424);
+  expect(card.x + card.width).toBe(1440);
   await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(panelOf(page, 1)).toHaveCount(0);
@@ -25,7 +26,7 @@ test('a tab closes the task, history restores it, and the task and the agent win
   await expect(panelOf(page, 1)).toBeVisible();
   await panelOf(page, 1).getByRole('button', { name: 'Close' }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
-  await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
+  await writeToOrchestrator(page);
   const window = await box(page.getByRole('complementary', { name: 'Orchestrator' }));
   expect(window.x + window.width).toBe(1424);
 });
@@ -81,12 +82,12 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: 'a task from the list',
     go: openTasks,
-    /* The tracker's view tabs keep their place and width, from the first view to Add view; the line under them belongs to the
-       work beside them, which narrows for the card. */
+    /* The tracker's view tabs keep their place and width, from List to Graph: the card opens over the work, as the mockup's
+       drawer does, and narrows nothing. */
     content: async page => {
-      await expect(page.locator('.tr-add-view')).toBeVisible();
+      await expect(page.locator('.tr-views label').last()).toBeVisible();
       return page.locator('.tr-views').evaluate(views => {
-        const boxes = [...views.querySelectorAll(':scope > label, :scope > .tr-add-view')].map(tab => tab.getBoundingClientRect());
+        const boxes = [...views.querySelectorAll(':scope > label')].map(tab => tab.getBoundingClientRect());
         const x = Math.min(...boxes.map(b => b.left));
         return { x, width: Math.max(...boxes.map(b => b.right)) - x };
       });
@@ -102,7 +103,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
     go: openTasks,
     content: page => placeOf(row(page, 1)),
     open: async page => {
-      await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
+      await writeToOrchestrator(page);
       const panel = page.getByRole('complementary', { name: 'Orchestrator' });
       await expect(panel).toBeVisible();
       return panel;
@@ -238,8 +239,9 @@ for (const lang of CHECKED_LOCALES) {
         await expect(panel.getByRole('heading', { name: LONG_PART })).toBeVisible();
         const trigger = panel.getByRole('button', { name: t.tasks.taskActions });
         const target = await box(trigger);
-        expect(target.width).toBe(44);
-        expect(target.height).toBe(44);
+        /* 44 px for a finger on a phone, the card's 32 px for a mouse. */
+        expect(target.width).toBe(width <= 760 ? 44 : 32);
+        expect(target.height).toBe(width <= 760 ? 44 : 32);
         await panel.getByRole('button', { name: t.tasks.moreDescription, exact: true }).click();
         await expect(panel.locator('.tp-body').getByText(LONG_PART)).toBeVisible();
         await panel.getByRole('button', { name: t.tasks.earlierSteps, exact: true }).click();

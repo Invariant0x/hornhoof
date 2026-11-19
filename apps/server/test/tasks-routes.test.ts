@@ -240,6 +240,23 @@ describe('tasks for people', () => {
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository).toBe(null);
   });
 
+  /* Whether a department's work is code or documents is the same for everyone of the company, as its work tree says: only
+     where its repositories are stays with the people who set them. */
+  it('tells everyone whether a department or one of its products keeps a repository, and only its setters where', async () => {
+    const { db, companyId, dev, ceo, maria, app, get } = await company();
+    const read = async (token: string) => (await get(token, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
+    const put = (id: string, url: string) => app.inject({ method: 'PUT', url: `/api/departments/${id}/repository`, payload: { url, branch: 'main' }, ...as(ceo) });
+    expect([(await read(ceo)).keepsRepository, (await read(maria)).keepsRepository]).toEqual([false, false]);
+    const [shop] = await db.insert(departments).values({ companyId, name: 'Shop', parentId: dev.id, roleCode: 'DEV', position: 1 }).returning();
+    expect((await put(shop!.id, 'https://github.com/acme/shop.git')).statusCode).toBe(200);
+    const listed = await read(maria);
+    expect([listed.keepsRepository, listed.repository, listed.products]).toEqual([true, null, [{ id: shop!.id, name: 'Shop', repository: null }]]);
+    expect((await app.inject({ method: 'DELETE', url: `/api/departments/${shop!.id}/repository`, ...as(ceo) })).statusCode).toBe(204);
+    expect((await read(maria)).keepsRepository).toBe(false);
+    expect((await put(dev.id, 'https://github.com/acme/app.git')).statusCode).toBe(200);
+    expect([(await read(ceo)).keepsRepository, (await read(maria)).keepsRepository, (await read(maria)).repository]).toEqual([true, true, null]);
+  });
+
   it("names who the agents' commits are by, and keeps it until it is changed", async () => {
     const { dev, ceo, app, get } = await company();
     const put = (payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(ceo) });

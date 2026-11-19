@@ -9,7 +9,7 @@ import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, proposals, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
-import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
+import { DELETION_CONFLICT } from '../merge/picks.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './state.js';
 import { seesTask, type TaskPlace } from './visibility.js';
@@ -81,11 +81,10 @@ async function orchestratorCards(db: Db, me: Person, viewer: AgentViewer): Promi
 async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Candidate[]): Promise<Decisions['merges']> {
   if (!me.isOwner || me.viaHead) return [];
   const { db } = ctx;
-  const his = ORCHESTRATORS_TABLES();
   const found = (await db.execute(sql`SELECT m.id, m.label, m.source, count(*)::int AS open,
       (SELECT r.dumped_at FROM net.restores r WHERE m.source = 'kept:' || r.kept ORDER BY r.at DESC LIMIT 1) AS after
     FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge
-    WHERE c.picked IS NULL AND (c.op = 'delete' OR c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)}))
+    WHERE c.picked IS NULL AND ${sql.raw(DELETION_CONFLICT)}
     GROUP BY m.id ORDER BY m.created_at, m.source`)) as unknown as { rows: { id: string; label: string; open: number; after: string | Date | null }[] };
   if (found.rows.length === 0) return [];
   const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
@@ -110,7 +109,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt'>, me: P
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
   const seen = rows
-    .filter(r => canReach(access, taskSpot(r.task)))
+    .filter(r => r.request.recipientPersonId === me.id || canReach(access, taskSpot(r.task)))
     .map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)), known: knowsRequest(viewer, r.request, r.task) }))
     .filter(shows);
   const cards = await orchestratorCards(db, me, viewer);

@@ -17,6 +17,10 @@ const ruleFor = (c: C, departmentId: string, channel: string) => c.db.select().f
 describe('reading and changing a department\'s approval policy', () => {
   it('asks nothing on any channel while nobody set a rule, and stores nothing for that', async () => {
     const c = await company();
+    const tools = await c.tools(c.worker);
+    const listed = (await tools.listTools()).tools.find(tool => tool.name === 'approval_policy');
+    expect(listed?.description).toContain('An unset channel needs no approval.');
+    expect(listed?.description).not.toContain('every time for a commit');
     const view = (await c.policy(c.ceoToken, c.dev.id)).json();
     expect(view.rules).toEqual(['message', 'price', 'publication', 'commit', 'spend', 'other'].map(channel => ({ channel, mode: 'none' })));
     expect(view).toMatchObject({ departmentId: c.dev.id, owner: null, canSetOwner: true, canChangePolicy: true });
@@ -117,6 +121,22 @@ describe('reading and changing a department\'s approval policy', () => {
 });
 
 describe('asking for an approval under the policy', () => {
+  it('addresses ordinary machine questions to the person named by the caller', async () => {
+    const c = await company();
+    const tools = await c.tools(c.worker);
+    const asked = await call(tools, 'ask_person', { task: c.task.number, topic: 'machines', person: c.ids.dana, question: 'Which of your computers has the files?' });
+    expect(asked.isError, said(asked)).toBeFalsy();
+    const hers = (await c.app.inject({ url: '/api/requests', ...as(c.danaToken) })).json();
+    expect(hers.requests).toMatchObject([{ ownerPersonId: c.ids.dana, canAnswer: true }]);
+  });
+
+  it('does not open an ordinary question for the CEO when no responsible person was named', async () => {
+    const c = await company();
+    const tools = await c.tools(c.worker);
+    const asked = await call(tools, 'ask_person', { task: c.task.number, topic: 'machines', question: 'Can I use a computer?' });
+    expect(asked.isError).toBe(true);
+    expect(await openRequests(c)).toEqual([]);
+  });
   it('uses the commit rule when ask_person names a commit', async () => {
     const c = await company();
     const tools = await c.tools(c.worker);
@@ -328,14 +348,14 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toEqual([]);
   });
 
-  it('counts its questions with the others of the turn', async () => {
+  it('accepts a fourth required question in the same turn', async () => {
     const c = await company();
     const ask = await bruno(c);
     await c.setRule(c.danaToken, c.dev.id, 'spend', { mode: 'every' });
     for (let i = 0; i < 3; i++) await ask({ kind: `k${i}` });
     const fourth = await ask({ kind: 'k3' });
-    expect(fourth.isError).toBe(true);
-    expect(await openRequests(c)).toHaveLength(3);
+    expect(fourth.isError, said(fourth)).toBeFalsy();
+    expect(await openRequests(c)).toHaveLength(4);
   });
 });
 

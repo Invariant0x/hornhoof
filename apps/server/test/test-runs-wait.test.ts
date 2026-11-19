@@ -12,6 +12,18 @@ import { company, done, GIB, idle, nextOf, reportHost } from './test-runs-compan
 
 const anHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
+/* Seed the wait records an older server could create. Current tools use track_work for runs. */
+async function legacyWait(c: Awaited<ReturnType<typeof company>>, input: Parameters<typeof waitFor>[3]) {
+  try {
+    await waitFor(c.app.ctx, c.bruno.id, c.task.id, input);
+    return { error: false, text: '' };
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    return { error: true, text: err.message };
+  }
+}
+
+
 const RUN_TOOLS = [
   { tool: 'run_tests', state: 'test_run', stop: 'stop_tests', args: { branch: 'main' }, name: 'Test run', why: 'tests' },
   { tool: 'run_work', state: 'work_run', stop: 'stop_work', args: { branch: 'main' }, name: 'Work run', why: 'work' },
@@ -31,7 +43,7 @@ async function waitingOn(c: Awaited<ReturnType<typeof company>>, run: (typeof RU
   const t = await c.turn(c.bruno);
   const started = await t.call(run.tool, { command: 'make check', ...run.args, ...args });
   expect(started.error).toBe(false);
-  expect((await t.call('wait_for', { task: c.task.number, reason: 'The run', until: anHour(), run: Number(/run (\d+)/.exec(started.text)![1]) })).error).toBe(false);
+  expect((await legacyWait(c, { reason: 'The run', until: anHour(), run: Number(/run (\d+)/.exec(started.text)![1]) })).error).toBe(false);
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
   return t;
 }
@@ -184,7 +196,7 @@ describe('a run that ends while the one who started it waits', () => {
     const t = await c.turn(c.bruno);
     await t.call('run_tests', { branch: 'main', command: 'make one' });
     await t.call('run_work', { command: 'make two', branch: 'main' });
-    await t.call('wait_for', { task: c.task.number, reason: 'The first', until: anHour(), run: 1 });
+    await legacyWait(c, { reason: 'The first', until: anHour(), run: 1 });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
     const one = await nextOf(ann.node, 'tests.run');
     const two = await nextOf(ivan.node, 'tests.run');
@@ -195,7 +207,7 @@ describe('a run that ends while the one who started it waits', () => {
     /* The turn for the first one ran, and the agent waits for the other one again. */
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.bruno.id), eq(jobs.status, 'queued')));
     const again = await c.turn(c.bruno);
-    expect((await again.call('wait_for', { task: c.task.number, reason: 'The other one', until: anHour(), run: 2 })).error).toBe(false);
+    expect((await legacyWait(c, { reason: 'The other one', until: anHour(), run: 2 })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, again.job.id));
 
     ivan.node.send(done(two));
@@ -213,7 +225,7 @@ describe('a run that ends while the one who started it waits', () => {
     const t = await c.turn(c.bruno);
     await t.call('run_tests', { branch: 'main', command: 'make one' });
     await t.call('run_tests', { branch: 'main', command: 'make two' });
-    await t.call('wait_for', { task: c.task.number, reason: 'The second', until: anHour(), run: 2 });
+    await legacyWait(c, { reason: 'The second', until: anHour(), run: 2 });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
     const one = await nextOf(ann.node, 'tests.run');
     const two = await nextOf(ivan.node, 'tests.run');
@@ -237,7 +249,7 @@ describe('a run that ends while the one who started it waits', () => {
       const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call(run.tool, { command: 'make check', ...run.args });
-      expect((await t.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() })).error).toBe(false);
+      expect((await legacyWait(c, { reason: 'A deployment', until: anHour() })).error).toBe(false);
       await finish(c, t.job.id);
       const before = await taskRow(c);
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
@@ -254,7 +266,7 @@ describe('a run that ends while the one who started it waits', () => {
       const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { branch: 'main', command: 'make check' });
-      await t.call('wait_for', { task: c.task.number, reason: 'The run, I forgot to name it', until: anHour() });
+      await legacyWait(c, { reason: 'The run, I forgot to name it', until: anHour() });
       await finish(c, t.job.id);
       const { until: deadline, operation } = (await taskRow(c)).externalWait!;
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
@@ -275,7 +287,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       const t = await c.turn(c.bruno);
       expect((await t.call('end_wait', { task: c.task.number })).error).toBe(true);
-      await t.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() });
+      await legacyWait(c, { reason: 'A deployment', until: anHour() });
       expect((await (await c.turn(c.head, c.task.id)).call('end_wait', { task: c.task.number })).error).toBe(true);
       expect((await taskRow(c)).externalWait).toMatchObject({ reason: 'A deployment' });
     });
@@ -287,7 +299,7 @@ describe('a run that ends while the one who started it waits', () => {
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { branch: 'main', command: 'make one' });
       await t.call('run_tests', { branch: 'main', command: 'make two' });
-      await t.call('wait_for', { task: c.task.number, reason: 'The second', until: anHour(), run: 2 });
+      await legacyWait(c, { reason: 'The second', until: anHour(), run: 2 });
       await finish(c, t.job.id);
       const operation = (await taskRow(c)).externalWait!.operation!;
       ann.node.send(done(await nextOf(ann.node, 'tests.run')));
@@ -335,9 +347,9 @@ describe('a run that ends while the one who started it waits', () => {
       await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.bruno.id), eq(jobs.status, 'queued')));
       await c.db.delete(pendingWakes).where(eq(pendingWakes.agentId, c.bruno.id));
       await c.db.delete(agentEvents).where(eq(agentEvents.agentId, c.bruno.id));
-      const again = await c.turn(c.bruno);
+      await c.turn(c.bruno);
       for (const number of [1, 99]) {
-        const refused = await again.call('wait_for', { task: c.task.number, reason: 'The run', until: anHour(), run: number });
+        const refused = await legacyWait(c, { reason: 'The run', until: anHour(), run: number });
         expect(refused.error, `run ${number}`).toBe(true);
       }
       expect((await taskRow(c)).externalWait).toBeNull();
@@ -348,7 +360,7 @@ describe('a run that ends while the one who started it waits', () => {
       await c.machine(c.ceo, 'dev-mac');
       const head = await c.turn(c.head, c.task.id);
       await head.call('run_tests', { branch: 'main', command: 'make check' });
-      const refused = await (await c.turn(c.bruno)).call('wait_for', { task: c.task.number, reason: 'The run', until: anHour(), run: 1 });
+      const refused = await legacyWait(c, { reason: 'The run', until: anHour(), run: 1 });
       expect(refused.error).toBe(true);
     });
   });
@@ -496,7 +508,7 @@ describe('a run that ends while the one who started it waits', () => {
     expect((await head.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, head.job.id));
     const bruno = await c.turn(c.bruno);
-    expect((await bruno.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() })).error).toBe(false);
+    expect((await legacyWait(c, { reason: 'A deployment', until: anHour() })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, bruno.job.id));
 
     const before = await taskRow(c);
@@ -517,7 +529,7 @@ describe('a run that ends while the one who started it waits', () => {
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
     await until(async () => (await toldOf(c, c.bruno.id, c.task.id)).turns.length === 1);
 
-    const refused = await (await c.turn(c.bruno, null)).call('wait_for', { task: c.task.number, reason: 'Something else', until: anHour() });
+    const refused = await legacyWait(c, { reason: 'Something else', until: anHour() });
 
     expect(refused.error).toBe(true);
     expect(refused.text).toContain(`#${c.task.number}`);
@@ -529,7 +541,7 @@ describe('a run that ends while the one who started it waits', () => {
     const c = await company();
     const companyId = (await taskRow(c)).companyId;
     await c.db.insert(pendingWakes).values({ companyId, agentId: c.bruno.id, taskId: c.task.id, why: run.why, text: `${run.name} 1 failed.` });
-    const refused = await (await c.turn(c.bruno, null)).call('wait_for', { task: c.task.number, reason: 'Something else', until: anHour() });
+    const refused = await legacyWait(c, { reason: 'Something else', until: anHour() });
     expect(refused.error).toBe(true);
     expect((await taskRow(c)).externalWait).toBeNull();
   });
