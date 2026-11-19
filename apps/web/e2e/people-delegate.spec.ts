@@ -121,7 +121,7 @@ for (const lang of ['en', 'ru'] as const) {
 }
 
 test('a long name wraps at its words on a phone, and the mark stays whole on its line', async ({ page }) => {
-  const long: PersonView = { id: 'p5', name: 'Maximiliana Wolkenstein-Rodenegg von Schwarzenberg-Hohenlohe', email: 'max@acme.com', title: 'CMO', status: 'active', isOwner: false, isCeoDelegate: true, access: WHOLE };
+  const long: PersonView = { id: 'p5', name: 'Maya Chen Alderbrook-Riverstone Willowmere-Cedarfield-Park', email: 'maya@moonfern.example', title: 'CMO', status: 'active', isOwner: false, isCeoDelegate: true, access: WHOLE };
   const errors = await openPeople(page, 'en', 'light', 375, [...PEOPLE, long]);
   const table = page.locator('table.ptable');
   const markOf = (name: string) => table.locator('.pname', { hasText: name }).getByRole('img', { name: en.people.ceoDelegate, exact: true });
