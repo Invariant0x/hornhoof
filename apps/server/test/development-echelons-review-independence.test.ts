@@ -2,7 +2,8 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { agentIdentity } from '../src/modules/tasks/echelons-assign.js';
-import { report, submit, verdict } from '../src/modules/tasks/engine.js';
+import { report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { backOn } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
 const FIX = 'c'.repeat(40), MAIN = 'd'.repeat(40), MERGED = 'e'.repeat(40), LATER = 'f'.repeat(40);
@@ -24,7 +25,7 @@ async function withOldSkip(f: Pick<Fixture, 'db'>, taskId: string): Promise<void
 
 /* A legacy route at Security or Tests. The developer also holds the review skill, as a person can set on any employee card,
    and runs another provider than every checker, so a selection that compares only with a repair producer prefers it. */
-async function legacy(at: 'security' | 'tests', paths = OWN) {
+async function legacy(at: 'security' | 'tests', paths = OWN, skip = true) {
   const f = await fixture({ autoReviewer: true });
   await f.db.update(agents).set({ skills: [...f.author.skills, 'dev-review-diff'] }).where(eq(agents.id, f.author.id));
   const { task } = await f.create({ small: true, paths, riskClass: at === 'security' ? 'security' : 'none' });
@@ -34,12 +35,12 @@ async function legacy(at: 'security' | 'tests', paths = OWN) {
   expect(await detail()).toMatchObject({ stage: 'review', ownerAgentId: f.reviewer.id });
   await verdict(f.ctx, f.reviewer.id, task.id, pass(HEAD));
   expect(await detail()).toMatchObject({ stage: at });
-  await withOldSkip(f, task.id);
+  if (skip) await withOldSkip(f, task.id);
   return { ...f, task, detail, reviewStep: async () => (await detail()).stages.find(step => step.stage === 'review') };
 }
 
 /* What a live route looks like where the old selection already gave the reopened Review to the original developer. */
-async function assignedToAuthor(f: Fixture, taskId: string): Promise<void> {
+async function assignedToAuthor(f: Pick<Fixture, 'db' | 'task' | 'author'>, taskId: string): Promise<void> {
   const identity = await agentIdentity(f.db, f.task.companyId, f.author.id);
   const [route] = await f.db.select().from(taskRoutes).where(eq(taskRoutes.taskId, taskId));
   const state = route!.state;
@@ -108,6 +109,44 @@ describe('Review of a legacy route after a repair is never given to a producer',
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
     expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
     expect(await f.reviewStep()).toMatchObject({ status: 'pending', ownerAgentId: null, reason: 'eligible_owner_required' });
+  });
+
+  it('resumes a waiting Review with an independent reviewer, never with a producer', async () => {
+    const f = await legacy('security');
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
+    f.atCommit(FIX);
+    await submit(f.ctx, f.security.id, f.task.id, { ...code, summary: 'Repair in Security.' });
+    await backOn(f.ctx, { agentId: f.head.id }, f.author.id);
+    expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
+    await f.db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, f.reviewer.id));
+    await backOn(f.ctx, { agentId: f.head.id }, f.reviewer.id);
+    expect(await f.detail()).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: f.reviewer.id });
+  });
+
+  it('refuses the head giving the current Review to the original developer', async () => {
+    const f = await legacy('security');
+    f.atCommit(FIX);
+    await submit(f.ctx, f.security.id, f.task.id, { ...code, summary: 'Repair in Security.' });
+    const before = await f.detail();
+    await expect(updateTask(f.ctx, f.head.id, f.task.id, { ownerAgentId: f.author.id })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('cannot review it') as unknown });
+    expect(await f.detail()).toEqual(before);
+  });
+
+  it('refuses the head naming the original developer as the future reviewer of a candidate grown from its own', async () => {
+    const f = await legacy('tests', [...OWN, ...TEST], false);
+    f.atCommit(FIX, [...OWN, ...TEST]);
+    const compare = f.ctx.readCompare!;
+    f.ctx.readCompare = (repo, refs, timeout) => refs.base === HEAD && refs.head === FIX
+      ? Promise.resolve({ complete: true, baseSha: HEAD, headSha: FIX, paths: TEST, diff: '' })
+      : compare(repo, refs, timeout);
+    await submit(f.ctx, f.tester.id, f.task.id, { ...code, summary: 'Fix a test.' });
+    const atTests = await f.detail();
+    expect(atTests).toMatchObject({ stage: 'tests', ownerAgentId: f.tester.id });
+    await report(f.ctx, f.tester.id, f.task.id, { done: false, summary: 'The source needs fixing.', verification: { candidateId: atTests.candidateId!, revision: atTests.revision, delta: 'logic/totals.ts: handle the empty input.' } });
+    const before = await f.detail();
+    expect(before).toMatchObject({ stage: 'development', ownerAgentId: f.author.id });
+    await expect(updateTask(f.ctx, f.head.id, f.task.id, { echelonStage: 'review', ownerAgentId: f.author.id })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('cannot review it') as unknown });
+    expect(await f.detail()).toEqual(before);
   });
 });
 

@@ -3,8 +3,9 @@ import type { DocumentCandidate, EchelonCandidate } from '@hornhoof/protocol/ech
 import type { Ctx } from '../../app.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { currentHanded } from './echelons-candidates.js';
-import { forwardHandoff } from './echelons-handoff.js';
-import { changeRoute, routeOf, type Route } from './route-records.js';
+import { forwardHandoff, reviewReplacement } from './echelons-handoff.js';
+import { changeRoute, routeOf, skippedAuthorReview, type Route } from './route-records.js';
+import { REVIEW_SKIP_ENABLED } from './author-check.js';
 import { skippedData } from './echelons-store.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { loadTask, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './state.js';
@@ -85,7 +86,10 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     const row = await move(ctx, task, { status: 'working' }, n, async tx => { await held(tx); await changeRoute(tx, route, state); });
     return { task: row, wakes: [] };
   }
-  const next = await forwardHandoff(ctx, task, { ...route, state }, candidate);
-  const row = await move(ctx, task, next.set, { ...n, data: { ...n.data, ...skippedData(next.skipped) }, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
+  /* A route that still carries the old author-check skip goes to Review at this handoff, not at a later one. */
+  const reopen = !REVIEW_SKIP_ENABLED && Boolean(skippedAuthorReview(state));
+  const next = reopen ? await reviewReplacement(ctx, task, { ...route, state }, candidate) : await forwardHandoff(ctx, task, { ...route, state }, candidate);
+  const data = { ...n.data, ...skippedData(next.skipped), ...(reopen ? { reviewRequired: { candidateId: candidate.id, routeRevision: route.revision } } : {}) };
+  const row = await move(ctx, task, next.set, { ...n, data, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
   return { task: row, wakes: next.wakes };
 }

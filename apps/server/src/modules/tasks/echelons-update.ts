@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
-import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
+import { checkerFor, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { changeRoute, routeOf, type Route } from './route-records.js';
@@ -101,7 +101,9 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
   const team = await turnkeyTeamOf(ctx.db, task.companyId, ownerId);
   if (team) throw refuse(409, 'task_invalid', `The new owner is in ${team.name}, a turnkey team, whose members take only work of their own and never enter the echelons.`);
   const ability = state.stage ? state.abilities[state.stage] : undefined;
-  const assignment = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)), ability, ownerId) : null;
+  const handed = ability ? await currentHanded(ctx.db, task, route) : null;
+  if (handed && (await keptFromReview(ctx.db, task, state.stage, handed)).has(ownerId)) throw refuse(409, 'task_invalid', PRODUCER_REVIEW);
+  const assignment = ability && handed ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, handed), ability, ownerId) : null;
   if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
   const next: Route['state'] = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };
   const set: Partial<Task> = { assigneeAgentId: ownerId, status: ability && state.stage !== 'tests' ? 'review' : 'open', silent: 0 };

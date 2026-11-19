@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { reviewSkip, type AuthorReviewSkip } from './author-check.js';
-import { checkerFor, departmentHead, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
+import { checkerFor, departmentHead, keptFromReview, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 import { candidateReceivedAt } from './echelons-candidates.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { refuse, type Moved, type Task, type Tx, type Wake } from './state.js';
@@ -93,7 +93,10 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     const ability = route.state.abilities[next.stage];
     if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
     const received = await candidateReceivedAt(ctx.db, task, route, candidate, next.stage);
-    const owner = await checkerFor(ctx, task, received.producedBy, ability, next.ownerAgentId);
+    /* A planned reviewer who produced a candidate of the lineage gives way to an independent one; with none, Review waits. */
+    const excluded = await keptFromReview(ctx.db, task, next.stage, candidate);
+    const named = next.ownerAgentId && !excluded.has(next.ownerAgentId) ? next.ownerAgentId : null;
+    const owner = await checkerFor(ctx, task, received.producedBy, ability, named, undefined, excluded);
     if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
       stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
       skipped.push(next.stage);
