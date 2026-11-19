@@ -1,8 +1,8 @@
 import { randomUUID, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Grant } from '../src/modules/computer/grant.js';
 import { ComputerCarrier, GRANTS_FILE, type ComputerAsk } from '../src/modules/keeper/computer.js';
 import { until } from './helpers-basic.js';
@@ -46,8 +46,13 @@ function stand(over: { pin?: string | null; trustApp?: boolean } = {}) {
     if (answer !== 'never') return Promise.resolve(answer);
     return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted'))));
   };
-  const make = () => new ComputerCarrier({ controlDir, dir, machine: MACHINE, ask, pin: () => over.pin ?? null, trustApp: over.trustApp ?? over.pin === undefined, log: line => lines.push(line), now: () => new Date(now), openEveryMs: 5, closedEveryMs: 50, askMs: 30 });
-  const alive = () => writeFileSync(join(controlDir, 'alive'), '');
+  const make = () => new ComputerCarrier({ dir, machine: MACHINE, ask, pin: () => over.pin ?? null, trustApp: over.trustApp ?? over.pin === undefined, log: line => lines.push(line), now: () => new Date(now), openEveryMs: 5, closedEveryMs: 50, askMs: 30 });
+  const alive = () => {
+    mkdirSync(computerControl, { recursive: true });
+    const heartbeat = join(computerControl, 'alive');
+    writeFileSync(heartbeat, '');
+    utimesSync(heartbeat, new Date(now), new Date(now));
+  };
   const settings = () => JSON.parse(readFileSync(join(computerControl, 'computer.json'), 'utf8')) as { untilSec: number | null; until: string | null; asked: null; by: string };
   const files = () => (existsSync(join(computerControl, 'computer')) ? readdirSync(join(computerControl, 'computer')).sort() : []);
   const put = (name: string, content: object | string = '') => {
@@ -106,6 +111,25 @@ describe("a machine's keeper and its computer access", () => {
     carrier.prepare();
     await carrier.tick();
     expect(s.asked[0]!.path).toBe('/api/network/computer?standing=1&updater=0&held=');
+  });
+
+  it('takes updater liveness only from the private heartbeat and only while it is fresh', async () => {
+    const s = stand();
+    const carrier = s.make();
+    carrier.prepare();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(START);
+    onTestFinished(() => { clock.mockRestore(); });
+    const shared = join(s.controlDir, 'alive');
+    writeFileSync(shared, '');
+    utimesSync(shared, new Date(START), new Date(START));
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=0&');
+    s.alive();
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=1&');
+    s.advance(30_000);
+    await carrier.tick();
+    expect(s.asked.at(-1)?.path).toContain('&updater=0&');
   });
 
   it('closes on a refusal, and when it hears nothing for a minute', async () => {
@@ -259,7 +283,7 @@ describe("a machine's keeper and its computer access", () => {
     let answer!: (said: { status: number; body: unknown }) => void;
     const held = new Promise<{ status: number; body: unknown }>(resolve => (answer = resolve));
     const id = randomUUID();
-    const carrier = new ComputerCarrier({ controlDir: s.controlDir, dir: s.dir, machine: MACHINE, ask: method => (method === 'GET' ? held : Promise.resolve({ status: 204, body: null })), pin: () => null, trustApp: true, log: () => undefined, now: () => new Date(START) });
+    const carrier = new ComputerCarrier({ dir: s.dir, machine: MACHINE, ask: method => (method === 'GET' ? held : Promise.resolve({ status: 204, body: null })), pin: () => null, trustApp: true, log: () => undefined, now: () => new Date(START) });
     carrier.prepare();
     const round = carrier.tick();
     const stopping = carrier.stop();
@@ -313,6 +337,22 @@ describe("a machine's keeper and its computer access", () => {
     expect(s.files()).toEqual([`${gone}.started`, `${kept}.json`].sort());
     expect(s.asked.filter(call => call.method === 'POST')).toEqual([]);
     expect(s.lines.filter(line => line.includes('could not be read'))).toHaveLength(1);
+  });
+
+  it('posts output at the limit and lets go of a longer answer', async () => {
+    const s = stand();
+    const carrier = s.make();
+    carrier.prepare();
+    const [atLimit, overLimit] = [randomUUID(), randomUUID()];
+    const output = 'a'.repeat(30_000);
+    for (const [id, text] of [[atLimit, output], [overLimit, output + 'a']] as const) {
+      s.put(`${id}.json`, { id, command: 'recorded sample', timeout: 30 });
+      s.put(`${id}.out.json`, { id, exit: 0, output: text });
+    }
+    await carrier.tick();
+    expect(s.asked.filter(call => call.method === 'POST').map(call => call.path)).toEqual([`/api/network/computer/${atLimit}`]);
+    expect(s.asked.find(call => call.method === 'POST')?.body).toEqual({ exit: 0, output });
+    expect(s.files()).toEqual([]);
   });
 
   it('says so when it did not take the grant it was given', async () => {

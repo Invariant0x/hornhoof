@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,7 +45,7 @@ describe('updater, the computer', () => {
   };
   const later = () => NOW_SEC + 3600;
 
-  it('logs and ignores shared computer files while a keeper request runs', async () => {
+  it('removes old computer files, logging only the count, while a keeper request runs', async () => {
     const s = stand();
     const shared = join(s.control, 'computer');
     mkdirSync(shared);
@@ -58,9 +58,9 @@ describe('updater, the computer', () => {
     expect(r.calls.filter(call => call.startsWith('docker start'))).toEqual(['docker start -a hornhoof-computer-keeper']);
     expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-shared'));
     expect(r.calls).not.toContainEqual(expect.stringContaining('hornhoof-computer-old'));
-    expect(r.out).toContain('Computer request refused: it came from the shared control folder.');
+    expect(r.out).toContain('Removed 2 files from the old computer queue.');
     expect(r.out).not.toMatch(/private sample|shared\.json/);
-    expect(readdirSync(shared).sort()).toEqual(['old.started', 'shared.json']);
+    expect(readdirSync(shared)).toEqual([]);
     expect(answer(s, 'keeper')).toEqual({ id: 'keeper', exit: 0, output: 'ran: recorded sample\n' });
   });
 
@@ -76,9 +76,75 @@ describe('updater, the computer', () => {
     const r = await runOnce(s, null, env);
     expect(r.code).toBe(0);
     expect(r.calls.filter(call => call.startsWith('docker'))).toEqual([]);
-    expect(r.out.match(/Computer request refused: it came from the shared control folder\./g)).toHaveLength(1);
+    expect(r.out.match(/Removed 2 files from the old computer queue\./g) ?? []).toHaveLength(1);
     expect(r.out).not.toMatch(/private sample|dropped/);
-    expect(readdirSync(shared).sort()).toEqual(['dropped.json', 'k1.started']);
+    expect(readdirSync(shared)).toEqual([]);
+  });
+
+  it('publishes an answer without using the predictable temporary file', async () => {
+    const s = stand();
+    command(s, 'sample', 'recorded sample');
+    const leftover = join(s.computerControl, 'computer', 'sample.out.json.new');
+    writeFileSync(leftover, 'recorded leftover');
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(answer(s, 'sample')).toMatchObject({ exit: 126 });
+    expect(lstatSync(join(s.computerControl, 'computer', 'sample.out.json')).mode & 0o777).toBe(0o644);
+    expect(existsSync(leftover)).toBe(true);
+    expect(readFileSync(leftover, 'utf8')).toBe('recorded leftover');
+  });
+
+  it.each(['sample.out.json', 'sample.started'])('refuses a keeper request with a linked %s', async marker => {
+    const s = stand();
+    access(s, later());
+    command(s, 'sample', 'recorded sample');
+    const target = join(s.dir, 'recorded-target');
+    writeFileSync(target, 'recorded contents');
+    const link = join(s.computerControl, 'computer', marker);
+    symlinkSync(target, link);
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Computer request refused: its answer or start marker is a link.');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, 'utf8')).toBe('recorded contents');
+  });
+
+  it('clears only old queue entries without following file or directory links', async () => {
+    const s = stand();
+    const shared = join(s.control, 'computer');
+    const elsewhere = join(s.dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    const sample = join(elsewhere, 'sample.json');
+    writeFileSync(sample, 'recorded contents');
+    symlinkSync(elsewhere, shared);
+    const linked = await runOnce(s, null, env);
+    expect(linked.code).toBe(0);
+    expect(linked.out).not.toContain('old computer queue');
+    expect(readFileSync(sample, 'utf8')).toBe('recorded contents');
+
+    rmSync(shared);
+    mkdirSync(shared);
+    symlinkSync(sample, join(shared, 'old.json'));
+    writeFileSync(join(shared, 'old.out.json'), '{}');
+    writeFileSync(join(shared, 'old.out.json.new'), '{}');
+    mkdirSync(join(shared, 'directory.json'));
+    writeFileSync(join(shared, 'notes'), 'recorded notes');
+    const cleaned = await runOnce(s, null, env);
+    expect(cleaned.code).toBe(0);
+    expect(cleaned.out).toContain('Removed 3 files from the old computer queue.');
+    expect(cleaned.out).not.toContain('old.json');
+    expect(readdirSync(shared).sort()).toEqual(['directory.json', 'notes']);
+    expect(readFileSync(sample, 'utf8')).toBe('recorded contents');
+  });
+
+  it('writes the computer heartbeat where the keeper can read it', async () => {
+    const s = stand();
+    const r = await runOnce(s, null, env);
+    expect(r.code).toBe(0);
+    expect(existsSync(join(s.computerControl, 'alive'))).toBe(true);
+    expect(existsSync(join(s.control, 'alive'))).toBe(true);
   });
 
   it('runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code', async () => {

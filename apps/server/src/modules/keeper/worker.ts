@@ -255,7 +255,6 @@ export class WorkerKeeper {
     this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     this.carrier = new ComputerCarrier({
-      controlDir: opts.config.controlDir,
       dir: opts.config.dir,
       machine: opts.config.machineId,
       ask: (method, path, body, signal) => this.askComputer(method, path, body, signal),
