@@ -626,14 +626,17 @@ select:disabled { opacity: .55; }
 .chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
-.chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+/* A person's chip on the map: their name and what they do. Every word stays: the words wrap at the start edge and break with a
+   hyphen by the syllables of the page's language, and every chip of a row is as tall as the one whose words need the most,
+   as the map measures them. Words that fit stand in the middle of the old 160 by 56 and 156 by 48. */
+.chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
 .chip .ic { width: 18px; height: 18px; }
-.chip span { display: grid; min-width: 0; line-height: 1.2; }
-.chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip span { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; line-height: 1.2; text-align: start; -webkit-hyphens: auto; hyphens: auto; }
+.chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
+.chip small { color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
 .dept-chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .dept-chips > li { position: absolute; }
-.dept-chips .chip > .edge-in { gap: 8px; padding: 0 10px; }
+.dept-chips .chip > .edge-in { gap: 8px; padding: 6px 10px; }
 .dept-chips .chip .ic { width: 16px; height: 16px; }
 /* The orchestrator hub: a turning dashed ring, a half gauge of 24 segments and the share of agents at work. */
 .hub { color: var(--ink); border-radius: 50%; }

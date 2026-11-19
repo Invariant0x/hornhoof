@@ -1,12 +1,18 @@
 import type { Point } from './ui/wires';
 import { bridgeWires, type WireGap } from './map-people-bridges';
 
+/* A chip is PW wide and at least PH tall: every chip of the department people is as tall as the one whose words need the most,
+   as the map measures them, and the layout stacks and spaces them by that height. */
 export const PW = 156, PH = 48;
 const CX = 600, TURN_FLOOR = 606;
-const PGAP = 8, DOCK = 40, RAIL = 14, PORT_IN = 14, PORT = 48, RING = 18;
+/* GUTTER_ROOM: what a chip between two cards of a column leaves free above and below it together, as at 48 px. */
+const PGAP = 8, DOCK = 40, RAIL = 14, PORT_IN = 14, PORT = 48, RING = 18, GUTTER_ROOM = 12;
 const BELOW = 30, STRIP = 22, SGAP = 12, STEP = 14, LOWER_GAP = 18, LANE_STEP = 12, MAX_DOCK = 3;
 
 export type Spot = { id: string; x: number; y: number; w: number; h: number };
+/* What the department people need beside the rows of cards: the tallest stack of chips docked beside one card, and the
+   least gap between two cards of a column for a chip standing in it, 0 for none. */
+export type DockRoom = { stack: number; gutter: number };
 export type DeptPersonInput = { id: string; departments: string[] };
 export type PersonChip = { id: string; x: number; y: number; w: number; h: number };
 export type PersonWire = { id: string; personId: string; deptId: string; pts: Point[] };
@@ -159,14 +165,14 @@ function personTree(personId: string, routes: PersonRoute[], chipX: number): { w
   return { wires, vias: forkVias(wires) };
 }
 
-function placeDocked(docked: Map<RichSpot, string[]>, out: PeopleLayout): void {
+function placeDocked(docked: Map<RichSpot, string[]>, out: PeopleLayout, ph: number): void {
   for (const [s, ids] of docked) {
     const x = outerChipX(s);
     const inner = chipInnerEdge(s, x);
     const edge = cardOuterEdge(s);
     ids.forEach((id, j) => {
-      const cy = s.midY + (j - (ids.length - 1) / 2) * (PH + PGAP);
-      out.chips.push({ id, x, y: cy - PH / 2, w: PW, h: PH });
+      const cy = s.midY + (j - (ids.length - 1) / 2) * (ph + PGAP);
+      out.chips.push({ id, x, y: cy - ph / 2, w: PW, h: ph });
       const route: PersonRoute = { personId: id, deptId: s.id, pts: [[edge, cy], [inner, cy]] };
       out.routes.push(route);
       out.wires.push({ id: `${id}:${s.id}`, personId: id, deptId: s.id, pts: route.pts });
@@ -174,7 +180,7 @@ function placeDocked(docked: Map<RichSpot, string[]>, out: PeopleLayout): void {
   }
 }
 
-function placeGutter(gutter: Map<string, GutterEntry>, out: PeopleLayout): void {
+function placeGutter(gutter: Map<string, GutterEntry>, out: PeopleLayout, ph: number): void {
   for (const { id, pair: [a, b] } of gutter.values()) {
     const cy = (a.y + a.h + b.y) / 2;
     const x = outerChipX(a);
@@ -182,8 +188,8 @@ function placeGutter(gutter: Map<string, GutterEntry>, out: PeopleLayout): void 
     const edge = cardOuterEdge(a);
     const rail = a.side < 0 ? a.x - RAIL : a.x + a.w + RAIL;
     /* Leave the strip trace room between the card's bottom and the chip in the gap. */
-    a.corridor = Math.min(BELOW, (cy - PH / 2 - a.y - a.h) / 2);
-    out.chips.push({ id, x, y: cy - PH / 2, w: PW, h: PH });
+    a.corridor = Math.min(BELOW, (cy - ph / 2 - a.y - a.h) / 2);
+    out.chips.push({ id, x, y: cy - ph / 2, w: PW, h: ph });
     const routes: PersonRoute[] = [
       { personId: id, deptId: a.id, pts: [[edge, a.y + a.h - PORT_IN], [rail, a.y + a.h - PORT_IN], [rail, cy], [inner, cy]] },
       { personId: id, deptId: b.id, pts: [[edge, b.y + PORT_IN], [rail, b.y + PORT_IN], [rail, cy], [inner, cy]] },
@@ -200,7 +206,7 @@ function bottomPortX(s: RichSpot, step: number, lowUses: number, bounds: [number
 }
 
 type StripPlacement = {
-  low: number; cx: number; laneY: number; attachY: number; step: number;
+  low: number; cx: number; laneY: number; attachY: number; step: number; ph: number;
   bounds: [number, number]; cardUses: Map<string, number>;
 };
 
@@ -247,8 +253,8 @@ function clearRoutes(person: StripEntry, place: StripPlacement, blocked: Seg[], 
 function pickMemberRoutes(person: StripEntry, place: StripPlacement, lowerCount: number, blocked: Seg[]): PickedRoutes | null {
   const above = clearRoutes(person, place, blocked, false);
   if (above) return above;
-  const below = { ...place, laneY: place.attachY + PH + LOWER_GAP + lowerCount * LANE_STEP,
-    attachY: place.attachY + PH, step: place.step + lowerCount + 1 };
+  const below = { ...place, laneY: place.attachY + place.ph + LOWER_GAP + lowerCount * LANE_STEP,
+    attachY: place.attachY + place.ph, step: place.step + lowerCount + 1 };
   return clearRoutes(person, below, blocked, true);
 }
 
@@ -257,15 +263,15 @@ type RowAttempt = {
   routesById: Map<string, PersonRoute[]>; segs: Seg[]; cardUses: Map<string, number>;
   top: number; maxY: number; lowerCount: number;
 };
-type RowSettings = { lane: number; low: number; step: number; priorSegs: Seg[]; priorCards: Map<string, number> };
+type RowSettings = { lane: number; low: number; step: number; ph: number; priorSegs: Seg[]; priorCards: Map<string, number> };
 type StripProgress = RowSettings & { row: StripEntry[]; best: RowAttempt | null };
 
 function newStripRow(priority: StripEntry[], settings: RowSettings): RowAttempt {
   const orderedRow = [...priority].sort((a, b) => avgSide(a) - avgSide(b));
   const centers = rowCenters(orderedRow.length, PW, SGAP), top = settings.lane + STRIP;
-  const chips = orderedRow.map((p, i) => ({ id: p.id, x: centers[i]! - PW / 2, y: top, w: PW, h: PH }));
+  const chips = orderedRow.map((p, i) => ({ id: p.id, x: centers[i]! - PW / 2, y: top, w: PW, h: settings.ph }));
   return { orderedRow, chips, bounds: [chips[0]!.x, chips[chips.length - 1]!.x + PW],
-    routesById: new Map(), segs: [], cardUses: new Map(settings.priorCards), top, maxY: top + PH, lowerCount: 0 };
+    routesById: new Map(), segs: [], cardUses: new Map(settings.priorCards), top, maxY: top + settings.ph, lowerCount: 0 };
 }
 
 function recordRoutes(attempt: RowAttempt, person: StripEntry, picked: PickedRoutes): void {
@@ -279,7 +285,7 @@ function recordRoutes(attempt: RowAttempt, person: StripEntry, picked: PickedRou
 function addRowPerson(person: StripEntry, attempt: RowAttempt, settings: RowSettings, allowBridges: boolean): boolean {
   const chip = attempt.chips[attempt.orderedRow.indexOf(person)]!;
   const place = { low: settings.low, cx: chip.x + PW / 2, laneY: settings.lane, attachY: attempt.top,
-    step: settings.step, bounds: attempt.bounds, cardUses: attempt.cardUses };
+    step: settings.step, ph: settings.ph, bounds: attempt.bounds, cardUses: attempt.cardUses };
   const blocked = allowBridges ? [] : [...settings.priorSegs, ...attempt.segs];
   const picked = pickMemberRoutes(person, place, attempt.lowerCount, blocked);
   if (!picked) return false;
@@ -326,9 +332,9 @@ function growStrip(person: StripEntry, progress: StripProgress, out: PeopleLayou
   progress.best = tryStripRow(progress.row, progress, true);
 }
 
-function placeStrip(strip: StripEntry[], low: number, maxRow: number, out: PeopleLayout): void {
+function placeStrip(strip: StripEntry[], low: number, maxRow: number, out: PeopleLayout, ph: number): void {
   if (!strip.length) return;
-  const progress: StripProgress = { low, lane: Math.max(low, TURN_FLOOR) + BELOW, step: 0,
+  const progress: StripProgress = { low, lane: Math.max(low, TURN_FLOOR) + BELOW, step: 0, ph,
     priorSegs: [], priorCards: new Map(), row: [], best: null };
   for (const person of orderByPriority(strip, low, maxRow)) growStrip(person, progress, out);
   if (progress.best) commitStripRow(progress.best, out);
@@ -347,16 +353,26 @@ export function wirePeople(routes: PersonRoute[], chips: PersonChip[]): Pick<Peo
   return { vias: out.vias, ...bridgeWires(out.wires) };
 }
 
-/* Keep each person connected when fixed card ports need bridges, and keep their traces clear of the hub. */
-export function peopleLayout(spots: Spot[], people: DeptPersonInput[]): PeopleLayout {
+/* What the department people need beside the rows of cards, with chips ph tall. */
+export function dockedRoom(spots: Spot[], people: DeptPersonInput[], ph = PH): DockRoom {
+  if (!spots.length || !people.length) return { stack: 0, gutter: 0 };
+  const { docked, gutter } = classifyPeople(people, enrichSpots(spots));
+  const most = Math.max(0, ...[...docked.values()].map(ids => ids.length));
+  return { stack: most ? most * ph + (most - 1) * PGAP : 0, gutter: gutter.size ? ph + GUTTER_ROOM : 0 };
+}
+
+/* Keep each person connected when fixed card ports need bridges, and keep their traces clear of the hub. ph: how tall every
+   chip is, PH or what the words of the chip of the most words need; a card is at least as tall as the chips docked beside
+   it, as dockedRoom gives it. */
+export function peopleLayout(spots: Spot[], people: DeptPersonInput[], ph = PH): PeopleLayout {
   const out: PeopleLayout = { chips: [], wires: [], vias: [], routes: [], gaps: [] };
   if (!spots.length || !people.length) return out;
   const byId = enrichSpots(spots);
   const low = Math.max(...spots.map(s => s.y + s.h));
   const maxRow = Math.max(...[...byId.values()].map(s => s.row));
   const { docked, gutter, strip } = classifyPeople(people, byId);
-  placeDocked(docked, out);
-  placeGutter(gutter, out);
-  placeStrip(strip, low, maxRow, out);
+  placeDocked(docked, out, ph);
+  placeGutter(gutter, out, ph);
+  placeStrip(strip, low, maxRow, out, ph);
   return { ...out, ...bridgeWires(out.wires) };
 }
