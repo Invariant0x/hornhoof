@@ -20,6 +20,8 @@ ownDatabases();
 type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; tried_at: string | null; error: string | null; machine: string | null; counts: { added?: number } };
 
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
+/* The merge itself, taken before any test spies on it: a spy one test leaves behind would otherwise call itself. */
+const realRunMerge = apply.runMerge;
 
 /* An app that leads on a company, a control folder, and kept databases that are forks of the app's own. */
 async function stand(env: NodeJS.ProcessEnv = {}) {
@@ -247,6 +249,55 @@ describe('the databases a restore set aside', () => {
     expect((await s.merges())[0]).toMatchObject({ status: 'merged', error: null });
     await s.merger.tick();
     expect([await stateOf(), s.dropped, (await s.merges())[0]!.status]).toEqual(['kept', [name], 'done']);
+  });
+
+  it('checks an upload again on each try after it was applied, and keeps it until it is complete', async () => {
+    const s = await stand();
+    const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
+    const [machine] = await s.db
+      .insert(machines)
+      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'dev-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
+      .returning();
+    const stateOf = async () => (await s.db.select().from(machines).where(eq(machines.id, machine!.id)))[0]!.uploadState;
+    const name = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
+    /* A copy that never led and wrote a department the leader lacks, so its merge goes the whole way. */
+    const upload = await s.keep(name);
+    const [later] = await upload.db.insert(departments).values({ companyId: s.acme.id, name: 'Later', roleCode: 'LATER' }).returning();
+    await upload.client.exec('DELETE FROM net_local.lease; DELETE FROM net_local.state');
+    await s.merger.discover();
+    const [found] = await s.merges();
+    /* Its bundle is saved already: only the check holds the database and the machine's copy. */
+    await s.backup(found!.fork!);
+    let left: object | undefined;
+    const run = vi.spyOn(apply, 'runMerge').mockImplementation(async (...args) => {
+      const done = await realRunMerge(...args);
+      /* A merge that applied and left a row behind, with nothing in the journal to account for it. */
+      [{ row: left }] = await rowsOf<{ row: object }>(s.db, sql`SELECT to_jsonb(d) AS row FROM departments d WHERE d.id = ${later!.id}`);
+      await s.opened.client.exec(`SET session_replication_role = replica; DELETE FROM departments WHERE id = '${later!.id}'; SET session_replication_role = DEFAULT`);
+      return done;
+    });
+    onTestFinished(() => run.mockRestore());
+    const missing = `Not complete yet: departments ${JSON.stringify({ id: later!.id })}`;
+    await s.merger.tick();
+    expect((await s.merges())[0]).toMatchObject({ status: 'applied', tries: 1, error: missing });
+    /* Each try later checks it again: what the merge recorded of the copy's journal never stands for its rows. */
+    for (const tries of [2, 3]) {
+      s.later(RETRY_MAX_MS);
+      await s.merger.tick();
+      expect((await s.merges())[0]).toMatchObject({ status: 'applied', tries, error: missing });
+      expect([s.dropped, await stateOf()]).toEqual([[], 'received']);
+    }
+    expect(run).toHaveBeenCalledTimes(1);
+    /* Once the row is there as the merge should have left it, the next try's check passes: merged, then the database
+       goes and the machine may wipe. */
+    await s.opened.client.exec('SET session_replication_role = replica');
+    await s.db.execute(sql`INSERT INTO departments SELECT * FROM jsonb_populate_record(NULL::departments, ${JSON.stringify(left)}::jsonb)`);
+    await s.opened.client.exec('SET session_replication_role = DEFAULT');
+    s.later(RETRY_MAX_MS);
+    await s.merger.tick();
+    expect((await s.merges())[0]).toMatchObject({ status: 'merged', tries: 4, error: null });
+    await s.merger.tick();
+    expect([s.dropped, await stateOf(), (await s.merges())[0]!.status]).toEqual([[name], 'kept', 'done']);
   });
 
   it('waits for the bundle of an upload, and asks a machine again whose upload is gone', async () => {

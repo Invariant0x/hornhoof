@@ -458,4 +458,34 @@ describe('a keeper that is taking the server over', () => {
     expect([p.did, p.state.did, p.said.exits, p.taking()?.phase]).toEqual([['tunnel start', 'tunnel stop'], ['enable'], 1, 'aborted']);
     expect(p.lines).toEqual(['Gave the server back to rack: that machine called the move off.']);
   });
+
+  it('ends once it gave the server back, also when the word to end was lost, and never leads beside the old leader', async () => {
+    const p = await promoter();
+    p.said.registered = true;
+    await p.look();
+    /* The machine that offered calls the move off, and the answer is lost with its stream: nothing is done after it. */
+    const answer = await p.it.handle(A, 'POST', '/peer/switch/abort', { switch: p.id });
+    expect([answer.status, p.taking()?.phase, p.state.enabled, p.said.exits]).toEqual([200, 'aborted', true, 0]);
+    /* Its next look ends the keeper, once, to start again as one that follows; ten minutes on, when what it wrote down
+       is old enough to forget, it still does not lead. */
+    await p.look();
+    await p.look(ABORTED_KEEP_MS);
+    await p.look();
+    expect([p.said.exits, p.it.leads(), p.taking()?.phase]).toEqual([1, false, 'aborted']);
+
+    /* A give-back whose subscription could not follow again fails, and the keeper ends only once it follows. */
+    const q = await promoter();
+    const enable = q.it['opts'].subscription.enable;
+    q.it['opts'].subscription.enable = async () => Promise.reject(new Error('the database does not answer'));
+    await expect(q.it.handle(A, 'POST', '/peer/switch/abort', { switch: q.id })).rejects.toThrow('the database does not answer');
+    expect([q.taking()?.phase, q.state.enabled]).toEqual(['aborted', false]);
+    await q.look();
+    await q.look(ABORTED_KEEP_MS);
+    expect([q.said.exits, q.it.leads(), q.taking()?.phase]).toEqual([0, false, 'aborted']);
+    expect(q.lines.filter(line => line.includes('could not go on taking the server over'))).toHaveLength(1);
+    q.it['opts'].subscription.enable = enable;
+    await q.look();
+    await q.look();
+    expect([q.said.exits, q.state.enabled, q.state.did, q.it.leads()]).toEqual([1, true, ['enable'], false]);
+  });
 });

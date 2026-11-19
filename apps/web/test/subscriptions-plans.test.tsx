@@ -503,7 +503,8 @@ describe('the card of a plan that does not work', () => {
     const calls = mockApi({ ...only(key), 'DELETE /api/subscriptions/s-key': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    const side = screen.getByRole('article', { name: 'Anthropic key ending 9f3a, Ivan' }).querySelector<HTMLElement>('.blk-side')!;
+    /* Remove ends the foot of the card, across it under its blocks (#1444). */
+    const side = screen.getByRole('article', { name: 'Anthropic key ending 9f3a, Ivan' }).querySelector<HTMLElement>('.plan-card-actions')!;
     await userEvent.click(within(side).getByRole('button', { name: 'Remove Anthropic key ending 9f3a' }));
     expect(within(side).getByText('Remove Anthropic key ending 9f3a? The key is deleted from Hornhoof.')).toBeInTheDocument();
     await userEvent.click(within(side).getByRole('button', { name: 'Yes, remove' }));

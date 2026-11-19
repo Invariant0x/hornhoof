@@ -280,9 +280,10 @@ export class Merger {
     await q('UPDATE net.merges SET tried_at = $2::timestamptz, tries = tries + 1 WHERE id = $1::uuid', [row.id, now]);
     try {
       /* What a machine uploaded is a copy as much as one read on its machine. */
-      /* A database that led wrote, so it is never taken by its ids alone. */
+      /* A database that led wrote, so it is never taken by its ids alone. Nor is one whose merge was applied: what the
+         merge recorded of its journal says nothing of its rows, so it is checked again on every try. */
       const led = MACHINE_SOURCE.exec(row.source)?.[2] !== undefined;
-      if (!led && (port !== undefined || row.source.startsWith(UPLOAD)) && (await this.byIds(row, port))) return;
+      if (row.status === 'pending' && !led && (port !== undefined || row.source.startsWith(UPLOAD)) && (await this.byIds(row, port))) return;
       if (row.status === 'pending') await this.apply(row, port);
       await this.check(row, port);
     } catch (err) {
@@ -305,8 +306,8 @@ export class Merger {
     } finally {
       await source.close();
     }
-    if (found.way === 'fast') await q("UPDATE net.merges SET status = 'merged', merged_at = now(), error = NULL WHERE id = $1::uuid", [row.id]);
-    else if (found.way === 'left_out') await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [row.id, LEFT_OUT(timeWords(found.restoreAt!, this.now()))]);
+    if (found.way === 'fast') await q("UPDATE net.merges SET status = 'merged', merged_at = now(), error = NULL WHERE id = $1::uuid AND status = 'pending'", [row.id]);
+    else if (found.way === 'left_out') await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid AND status = 'pending'", [row.id, LEFT_OUT(timeWords(found.restoreAt!, this.now()))]);
     return found.way !== 'whole';
   }
 

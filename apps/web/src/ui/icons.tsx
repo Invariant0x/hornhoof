@@ -181,3 +181,15 @@ export function TrackerIcon({ name }: { name: keyof typeof TRACKER_ICONS }) {
 export function PriorityArrow() {
   return <svg className="ic tr-priority-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 3 5 10H3z" /></svg>;
 }
+
+const FALLBACK_ICONS = {
+  up: <path d="M8 13V3M4 7l4-4 4 4" />,
+  down: <path d="M8 3v10M4 9l4 4 4-4" />,
+  remove: <path d="M3 4.5h10M6 4.5v-2h4v2M4.5 4.5l.5 9h6l.5-9M7 7v4m2-4v4" />,
+  add: <path d="M8 3v10M3 8h10" />,
+};
+
+/* The signs on a fallback plan's buttons, whose names say the rest: higher, lower, away, and add one more. */
+export function FallbackIcon({ name }: { name: keyof typeof FALLBACK_ICONS }) {
+  return <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" focusable="false">{FALLBACK_ICONS[name]}</svg>;
+}

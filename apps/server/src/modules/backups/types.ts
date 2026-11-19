@@ -65,4 +65,8 @@ export type Carry = {
      restored database keeps what the bundle has. */
   link?: { name: string; url: string; hidden?: boolean; keyEnc: string; nextKeyEnc: string | null; tunnelEnc: string; createdAt: string } | null;
   peerSecrets?: { kind: string; secretEnc: string; createdAt?: string }[];
+  /* The assistants' keys that open something now, each signing secret sealed as it is stored: a key revoked or
+     replaced since the bundle opens nothing after a restore. Left out by an updater of the build before, and then the
+     restored database keeps the keys the bundle has. */
+  assistantKeys?: { personId: string; keyHash: string; keyCreatedAt: string; wakeSecretEnc: string }[];
 };

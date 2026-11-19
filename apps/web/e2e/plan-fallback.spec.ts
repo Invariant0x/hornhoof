@@ -80,7 +80,8 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect(list).toHaveCount(2);
     await expect(list.nth(0)).toContainText('Codex, Maximilian Konstantinopolsky');
     await expect(list.nth(1).getByRole('combobox')).toHaveValue('qwen/qwen3-coder-480b-a35b-instruct');
-    const part = card.locator('section.part', { has: page.locator('.plan-fallbacks') });
+    /* The fallback plans are a band of the card of their own since #1444. */
+    const part = card.locator('.plan-fallbacks');
     await part.scrollIntoViewIfNeeded();
     await part.screenshot({ path: info.outputPath(`fallbacks-${lang}-${theme}-${width}.png`) });
     await page.screenshot({ path: info.outputPath(`fallbacks-page-${lang}-${theme}-${width}.png`), fullPage: true });

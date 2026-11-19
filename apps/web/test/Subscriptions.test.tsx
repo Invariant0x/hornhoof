@@ -654,9 +654,11 @@ describe('Subscriptions', () => {
     await openAll();
     const card = rowOf('Claude');
     expect(await waitFor(() => within(card).getByText('Any plan of the company with room for the employee'))).toBeInTheDocument();
-    const add = within(card).getByRole('combobox', { name: 'Add a fallback plan for Claude, Ivan' });
-    expect([...add.querySelectorAll('option')].map(o => o.textContent)).toEqual(['Add a fallback plan', 'Codex, Ivan', 'Kimi, Ivan', 'Orchestrator (Anthropic)']);
-    await user.selectOptions(add, 's-codex');
+    /* Add opens the other plans of the company by their whole names (#1444). */
+    await user.click(within(card).getByRole('button', { name: 'Add a fallback plan for Claude, Ivan' }));
+    const choices = within(card).getByRole('list', { name: 'Add a fallback plan for Claude, Ivan' });
+    expect(within(choices).getAllByRole('button').map(b => b.textContent)).toEqual(['Codex, Ivan', 'Kimi, Ivan', 'Orchestrator (Anthropic)']);
+    await user.click(within(choices).getByRole('button', { name: 'Codex, Ivan' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { fallbacks: [{ subscription: 's-codex', model: null }] } }));
     expect(await waitFor(() => within(rowOf('Claude')).getByText('Codex, Ivan'))).toBeInTheDocument();
   });
@@ -690,7 +692,7 @@ describe('Subscriptions', () => {
     const card = rowOf('Claude');
     expect(await waitFor(() => within(card).getByText('Codex, Ivan'))).toBeInTheDocument();
     /* The model named for a fallback shows by its name; the role's own shows nothing. */
-    expect([...card.querySelectorAll('.fallback-list li')].map(item => item.textContent)).toEqual(['Codex, Ivan', 'Orchestrator (Anthropic)Claude Sonnet 5.5']);
+    expect([...card.querySelectorAll('.fallback-list li')].map(item => [...item.querySelectorAll('.fallback-name, .fallback-model')].map(part => part.textContent))).toEqual([['Codex, Ivan'], ['Orchestrator (Anthropic)', 'Claude Sonnet 5.5']]);
     expect(within(card).queryByRole('combobox', { name: /fallback|Model on/ })).not.toBeInTheDocument();
     expect(within(card).queryByRole('button', { name: /^(Move|Remove) Codex/ })).not.toBeInTheDocument();
   });
@@ -704,7 +706,7 @@ describe('Subscriptions', () => {
     const card = rowOf('Claude');
     expect(await waitFor(() => within(card).getByText('Запасные тарифы'))).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Опустить Codex, Ivan ниже' })).toBeDisabled();
-    expect(within(card).getByRole('combobox', { name: 'Добавить запасной тариф для Claude, Ivan' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Добавить запасной тариф для Claude, Ivan' })).toBeInTheDocument();
   });
 
   it('offers no orchestrator choice to a department-scope viewer', async () => {
