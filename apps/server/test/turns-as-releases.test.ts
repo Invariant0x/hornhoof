@@ -207,7 +207,7 @@ describe('a turn whose branch the repository does not have yet', () => {
     const both = new Promise<void>(done => { release = done; });
     let pushes = 0;
     f.repo.hold = async () => { if (++pushes === 2) release(); await both; };
-    const doneOf = (id: string) => report(f.ctx, f.player.id, id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
+    const doneOf = (id: string) => report(f.ctx, f.player.id, id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.', turnkey: { commit: theirs, baseCommit: 'a'.repeat(40) } });
     const answers = await Promise.all([refusal(f.done()), refusal(doneOf(second.task.id))]);
     expect(pushes).toBe(2);
     expect(f.repo.made).toEqual([{ branch: `turn-${f.turn.number}`, commit: 'a'.repeat(40) }]);
@@ -236,7 +236,7 @@ async function turnkeyInTurn() {
   const own = 'c'.repeat(40);
   const repo: Repository = { heads: { main: 'a'.repeat(40), [`turn-${turn!.number}`]: PAST, [`task-${task.number}`]: own }, tags: {}, holds: { [PAST]: [own, 'a'.repeat(40)], [own]: ['a'.repeat(40)] }, between: {}, cut: new Set<string>() };
   serve(f.ctx, repo);
-  const done = () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
+  const done = () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.', turnkey: { commit: own, baseCommit: 'a'.repeat(40) } });
   const lastReport = async () => (await f.detail(task.id)).log.findLast(event => event.kind === 'report')?.data;
   return { ...f, player, task, turn: turn!, own, repo, done, lastReport };
 }

@@ -608,6 +608,10 @@ select:disabled { opacity: .55; }
 .map[inert] *, .map[inert] *::before, .map[inert] *::after { animation-play-state: paused !important; }
 .map:active { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* The room the bars floating over the map leave free, which on a phone the map measures: what scrolls out of it goes out of
+   sight under the bars, as on a department's schema and tree there. The world keeps its place on the map. */
+.map-room { position: absolute; inset: var(--map-top, 0px) 0 var(--map-bottom, 0px); overflow: hidden; }
+.map-room > .world { top: calc(-1 * var(--map-top, 0px)); }
 .world > * { position: absolute; }
 .wires { left: 0; top: 0; pointer-events: none; overflow: visible; }
 .wires .tr { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
@@ -634,6 +638,9 @@ select:disabled { opacity: .55; }
 .chip span { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; line-height: 1.2; text-align: start; -webkit-hyphens: auto; hyphens: auto; }
 .chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .chip small { color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
+/* Japanese breaks between its phrases, not inside one, so no character of a word stands alone on a line (#1580). Only words
+   marked Japanese have their phrases found; every other language keeps its hyphens. */
+.chip b:lang(ja), .chip small:lang(ja) { word-break: auto-phrase; }
 .dept-chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .dept-chips > li { position: absolute; }
 .dept-chips .chip > .edge-in { gap: 8px; padding: 6px 10px; }
@@ -1827,6 +1834,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .dv-empty { left: 16px; right: 16px; bottom: calc(var(--tree-bottom, 228px) + 8px); transform: none; overflow-wrap: break-word; }
   .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
   .dv-drawer { top: var(--tree-top, 116px); }
+  /* The schema shows between the department's name and the dock, as the tree does: what scrolls under them goes out of sight. */
+  .dcanvas { inset-block: var(--tree-top, 116px) var(--tree-bottom, 228px); }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-inline-start: 0; }
   /* The dock stands across the bottom: the zoom at its end with out, in and Show everything, the line of what happened
@@ -2513,6 +2522,10 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 .req-form > .btn { justify-self: start; }
 .req-commit { justify-self: start; padding: 4px 8px; background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .req-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.req-unchecked { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.req-unchecked p { margin: 0; }
+.req-unchecked-title { font-weight: 600; }
+.req-unchecked ul { display: grid; gap: 4px; margin: 0; padding-inline-start: 18px; }
 .req-pics { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .req-pics img { display: block; max-width: min(280px, 100%); max-height: 180px; width: auto; height: auto; object-fit: contain; border: 1px solid var(--line); box-sizing: border-box; }
 .req-link { justify-self: start; min-width: 0; overflow-wrap: anywhere; }

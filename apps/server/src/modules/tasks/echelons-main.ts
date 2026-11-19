@@ -58,11 +58,11 @@ async function beyondByFiles(at: Repository, parent: EchelonCandidate, candidate
   return paths.filter(path => oldCommit.get(path) !== newCommit.get(path) && oldBase.get(path) === newBase.get(path));
 }
 
-/* The head of a line as the repository says it now, or null where it cannot say. */
+/* The head of a line as the repository says it now, or null where it cannot say. A tag of its name is no line. */
 async function headOfLine(at: Repository, branch: string): Promise<string | null> {
   try {
     const head = await at.readCommit(at.repo, { branch }, 5_000);
-    return 'problem' in head || head.branch !== branch ? null : head.commitSha;
+    return 'problem' in head || head.branch !== branch || head.tag ? null : head.commitSha;
   } catch { return null; }
 }
 

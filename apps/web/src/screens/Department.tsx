@@ -7,7 +7,7 @@ import { useDepartmentTree } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, Listed, modelParts, Switch, STATUS_CLASS } from '../ui/Chip';
-import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_NARROW as NARROW, FLOAT_GAP, LEFT_PANEL_COVER, canvasSpace, freeRoom, usePanZoom, ZoomBar, type Edges } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, InfoIcon, ListIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
@@ -136,13 +136,18 @@ export const READABLE_K = 0.82;
 const TOP_ROOM = 76, CANVAS_EDGE = 8;
 
 /* Where the schema stands in the room of its canvas, from the canvas's left, as wide and tall as it is, with what its bottom
-   keeps for the zoom, the line of what happened as tall as that may grow and the tools. Whole, between the top bar and that
-   room, when Show everything asks for it or when it fits so at a readable size; otherwise readable, from its top left. */
-export function schemaView(room: { left: number; width: number; height: number; bottom: number; top?: number }, size: { right: number; h: number }, whole: boolean) {
-  const padTop = Math.max(CANVAS_EDGE, TOP_ROOM - (room.top ?? 0)), padBottom = Math.max(76, room.bottom), padX = 48;
+   keeps for the zoom, the line of what happened as tall as that may grow and the tools, and what its top keeps for the bars
+   over it. Whole, between them, when Show everything asks for it or when it fits so at a readable size; otherwise readable,
+   from its top left, or on a phone, onHead, with the head's card in the middle across and its top at the top of the room:
+   the Head of Design's word for #1554. top: how far down the screen the canvas starts (#1556). free: on a phone, the top of
+   the room the bars leave free as measured in the canvas, and then bottom is what Show everything keeps free at its foot.
+   hx: the middle of the head's card in the schema. */
+export function schemaView(room: { left: number; width: number; height: number; bottom: number; top?: number; free?: number }, size: { right: number; h: number; hx?: number }, whole: boolean, onHead = false) {
+  const padTop = room.free ?? Math.max(CANVAS_EDGE, TOP_ROOM - (room.top ?? 0)), padBottom = room.free === undefined ? Math.max(76, room.bottom) : room.bottom, padX = 48;
   const bw = size.right + 80, bh = size.h + 40;
   const fitK = Math.max(MIN_K, Math.min((room.width - padX * 2) / bw, (room.height - padTop - padBottom) / bh, 1));
   const k = whole || fitK >= READABLE_K ? fitK : READABLE_K;
+  if (k !== fitK && onHead && size.hx !== undefined) return { k, x: room.left + room.width / 2 - size.hx * k, y: padTop };
   const x = k === fitK ? (room.width - bw * k) / 2 + 40 * k : padX + 40 * k;
   const y = k === fitK ? padTop + (room.height - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
   return { k, x: room.left + x, y };
@@ -424,7 +429,9 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   }, [drawer]);
 
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
+  /* What the hand scrolls: the schema as it stands, between the bars floating over it. */
+  const edges = useRef<() => Edges | null>(() => null);
+  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K }, undefined, () => edges.current());
   const far = view.k < FAR_K;
   const { s, world, measured } = useMeasuredSchema(d, reach.length, `${language}|${tree}`);
   const paths = useMemo(() => stepPaths(s), [s]);
@@ -434,16 +441,41 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
     size.current = s;
   }, [s]);
 
-  /* Opens at a readable size from the left when the schema does not fit so; Fit shows all of it. */
+  /* The room of the canvas that the department's name, the zoom, the line of what happened and the tools leave free, side px
+     in from the sides of what an open panel leaves. On a phone the canvas itself is cut FLOAT_GAP clear of the name and the
+     dock, so its content may reach the cut. */
+  const roomOf = useCallback(
+    (side?: number) => {
+      const el = box.current, root = chrome.root.current;
+      if (!el || !el.clientWidth || !root) return null;
+      const space = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
+      const bars = root.querySelectorAll(':scope > .crumbs, :scope > .dv-dock :is(.zoom, .ticker, .dv-acts)');
+      const cut = el.clientWidth <= NARROW ? { edge: 0 } : {};
+      return { space, room: freeRoom(el, bars, space, { top: TOP_ROOM - el.offsetTop, side, ...cut }) };
+    },
+    [covered, panel, chrome.root],
+  );
+  edges.current = () => {
+    const at = tree ? null : roomOf();
+    return at && { content: { x0: 0, y0: 0, x1: size.current.right, y1: size.current.h }, room: at.room };
+  };
+
+  /* Opens at a readable size, from the left or on a phone on the head's card, when the schema does not fit so; Fit shows all of
+     it. On a phone the canvas stands between the department's name and the dock: what Show everything keeps free at the
+     bottom is then only what the line of what happened may still grow by. */
   const fitBottom = chrome.fitBottom;
   const place = useCallback(
     (whole: boolean) => {
-      const el = box.current;
-      if (!el || !el.clientWidth) return;
-      const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
-      setView({ ...schemaView({ left, width, height: el.clientHeight, bottom: fitBottom.current, top: el.offsetTop }, size.current, whole), smooth: true });
+      const el = box.current, at = roomOf();
+      if (!el || !at) return;
+      const { left, width } = at.space, phone = el.clientWidth <= NARROW;
+      const below = (el.offsetParent?.clientHeight ?? el.clientHeight) - el.offsetTop - el.clientHeight;
+      const room = phone
+        ? { left, width, height: el.clientHeight, free: at.room.y0, bottom: Math.max(FLOAT_GAP, fitBottom.current - below) }
+        : { left, width, height: el.clientHeight, bottom: fitBottom.current, top: el.offsetTop };
+      setView({ ...schemaView(room, size.current, whole, phone), smooth: true });
     },
-    [covered, panel, setView, fitBottom],
+    [setView, fitBottom, roomOf],
   );
 
   /* The schema is placed again when its frames or their staff change, and once its cards are first measured, not when a card

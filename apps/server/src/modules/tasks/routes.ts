@@ -206,6 +206,8 @@ function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typ
     kind: r.request.kind,
     text: r.request.text,
     commit: r.request.commit,
+    /* What the release of that commit brings that no check covers, as Hornhoof wrote it: shown next to Approve. */
+    unchecked: r.request.unchecked,
     commitUrl: commits[i],
     images: pictures.get(r.request.id) ?? [],
     options: r.request.options,

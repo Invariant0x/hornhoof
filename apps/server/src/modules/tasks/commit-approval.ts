@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, requests, tasks } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { approvalRuleFor, departmentPolicyRow } from '../departments/approval-policy.js';
+import { namesExactly } from './unchecked.js';
 
 /* The answer route checks who may decide. Main and release take the person's answer or the orchestrator's answer for them. */
 const acceptedAnswer = and(eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
@@ -32,11 +33,13 @@ export async function exactCommitApproval(db: Pick<Db, 'select'>, companyId: str
   return approval?.id ?? null;
 }
 
-/* The newest approval of the exact commit whose card said words, as the person who approved it read them. */
-export async function commitApprovalSaying(db: Pick<Db, 'select'>, companyId: string, taskId: string, commit: string, words: string, requestId?: string): Promise<string | null> {
-  const approvals = await db.select({ id: requests.id, text: requests.text }).from(requests)
+/* The newest approval of the exact commit on whose card Hornhoof wrote exactly these lines of what its release brings that no
+   check covers, as people saw them next to Approve. The words of whoever asked never count: they may say anything, and the
+   explanation people read first may leave them out. */
+export async function commitApprovalNaming(db: Pick<Db, 'select'>, companyId: string, taskId: string, commit: string, lines: string[], requestId?: string): Promise<string | null> {
+  const approvals = await db.select({ id: requests.id, unchecked: requests.unchecked }).from(requests)
     .leftJoin(agents, eq(agents.id, requests.answeredByAgentId))
-    .where(approvalsOf(companyId, taskId, commit, requestId))
+    .where(and(approvalsOf(companyId, taskId, commit, requestId), isNotNull(requests.unchecked)))
     .orderBy(desc(requests.answeredAt));
-  return approvals.find(approval => approval.text.includes(words))?.id ?? null;
+  return approvals.find(approval => namesExactly(approval.unchecked, lines))?.id ?? null;
 }
