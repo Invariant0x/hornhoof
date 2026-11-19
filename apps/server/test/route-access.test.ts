@@ -22,6 +22,7 @@ const publicRoutes = new Map([
   ['GET /*', 'public web assets'],
   ['GET /api/health', 'public health'],
   ['GET /api/version', 'public version'],
+  ['GET /api/build', 'public, read-only build id for anyone, signed in or not: one answer of one size, the sha256 of the index.html anyone already gets at /'],
   ['GET /api/setup', 'public setup availability'],
   ['GET /install.sh', 'public installer'],
   ['GET /robots.txt', 'public word to crawlers'],
