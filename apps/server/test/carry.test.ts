@@ -77,6 +77,8 @@ describe('the carry of a restore', () => {
     expect(carry.link).toBeNull();
     expect(carry.peerSecrets).toEqual([]);
     expect(carry.serials).toEqual(['bb02']);
+    expect(carry.revokedSerials).toEqual([{ serial: 'bb02', until: expect.any(String) }]);
+    expect(new Date(carry.revokedSerials![0]!.until)).toEqual(later);
     const key = (id: string) => carry.recoveryKeys.find(one => one.id === id)!;
     expect(carry.recoveryKeys).toHaveLength(2);
     expect(key(active!.id)).toMatchObject({ recipient: 'age1active', linkPrint: 'ab'.repeat(32), linkName: 'acme', linkUrl: 'https://acme.hornhoof.org', madeBy: owner!.id, retiredAt: null });

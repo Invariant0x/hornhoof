@@ -177,6 +177,55 @@ describe('Department view', () => {
     expect(screen.getByText(description)).toBeInTheDocument();
   });
 
+  it.each([
+    ['en', ['Review', 'Security']],
+    ['ru', ['Проверка', 'Безопасность']],
+  ] as const)('names the %s call frames by their stage in the language of the screen', (language, names) => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const department = DEV_ORG.departments[0]!;
+    const stages = [['review', 'DEV-REV'], ['security', 'DEV-SEC']] as const;
+    const pipelines = [{ id: 'r1', department: { id: department.id, name: 'Development' }, name: 'Software changes', why: '', archived: false, isDefault: true, version: 1,
+      stages: stages.map(([stage, ownerRole], i) => ({ id: `s${i}`, parentId: null, name: stage, ownerRole, owner: null, position: i, echelon: stage, oneShot: { fanOut: 1, judge: false } })) }];
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, pipelines, calls: [] }}
+      deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    for (const name of names) expect(screen.getByRole('group', { name })).toHaveClass('frame-calls');
+  });
+
+  /* A department that keeps no repository, nor any of its products, hands its work in as documents: its call frames read the
+     plain stage names its task workflows read, never the names of code. */
+  it.each([
+    ['en', ['Plan', 'Work', 'Check', 'Risk check'], ['Architecture', 'Development', 'Review', 'Security']],
+    ['ru', ['План', 'Работа', 'Проверка', 'Проверка риска'], ['Архитектура', 'Разработка', 'Безопасность']],
+  ] as const)('names the %s call frames of a document department by the plain stage names', (language, names, codeNames) => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const department = DEV_ORG.departments[0]!;
+    const stages = ['architecture', 'development', 'review', 'security'] as const;
+    const pipelines = [{ id: 'r1', department: { id: department.id, name: 'Development' }, name: 'Texts', why: '', archived: false, isDefault: true, version: 1,
+      stages: stages.map((stage, i) => ({ id: `s${i}`, parentId: null, name: stage, ownerRole: null, owner: null, position: i, echelon: stage, oneShot: { fanOut: 1, judge: false } })) }];
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, keepsRepository: false, pipelines, calls: [] }}
+      deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    for (const name of names) expect(screen.getByRole('group', { name })).toHaveClass('frame-calls');
+    for (const name of codeNames) expect(screen.queryByRole('group', { name })).toBeNull();
+  });
+
+  it('keeps the names of code on the call frames of a department whose product keeps a repository', () => {
+    const department = DEV_ORG.departments[0]!;
+    const pipelines = [{ id: 'r1', department: { id: department.id, name: 'Development' }, name: 'Software changes', why: '', archived: false, isDefault: true, version: 1,
+      stages: [{ id: 's0', parentId: null, name: 'development', ownerRole: null, owner: null, position: 0, echelon: 'development' as const, oneShot: { fanOut: 1, judge: false } }] }];
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, keepsRepository: true, repository: null, pipelines, calls: [] }}
+      deputies={[]} selected={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    expect(screen.getByRole('group', { name: 'Development' })).toHaveClass('frame-calls');
+    expect(screen.queryByRole('group', { name: 'Work' })).toBeNull();
+  });
+
   it('flies into a department and shows its head and members', async () => {
     const user = userEvent.setup();
     shell();

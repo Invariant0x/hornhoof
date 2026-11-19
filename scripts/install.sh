@@ -536,19 +536,36 @@ host_env() {
 # node_hosts <name>: the --add-host words of a node, in NODE_HOSTS: the one for a server on localhost, and every one its
 # container has now. A node joined on the server's own computer reaches the core's front through host.docker.internal
 # while its label names the company's own address, so only its container says it needs that name. Each host once.
+# It ends with 1 when the container is there but Docker does not say its hosts, and with 2 when one of them is not a word
+# it passes on: a new container without them could lose its way to the core.
 NODE_HOSTS=()
 node_hosts() {
-  local host seen=' '
+  local host hosts seen=' '
   NODE_HOSTS=()
+  if ! hosts=$("${DOCKER[@]}" inspect --format '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "$1" 2> /dev/null); then
+    # A node that has no container yet has no hosts to keep.
+    if "${DOCKER[@]}" inspect --format '{{.Id}}' "$1" > /dev/null 2>&1; then return 1; fi
+    hosts=''
+  fi
+  if [ -n "$LOCAL_SERVER" ]; then hosts=$(printf 'host.docker.internal:host-gateway\n%s' "$hosts"); fi
   while IFS= read -r host; do
-    [[ "$host" =~ ^[A-Za-z0-9._-]+[:=][A-Za-z0-9.:_-]+$ ]] || continue
+    [ -n "$host" ] || continue
+    [[ "$host" =~ ^[A-Za-z0-9._-]+[:=][A-Za-z0-9.:_-]+$ ]] || return 2
     case "$seen" in *" $host "*) continue ;; esac
     seen="$seen$host "
     NODE_HOSTS+=(--add-host "$host")
-  done < <(
-    if [ -n "$LOCAL_SERVER" ]; then echo host.docker.internal:host-gateway; fi
-    "${DOCKER[@]}" inspect --format '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "$1" 2> /dev/null || true
-  )
+  done <<< "$hosts"
+}
+
+# keep_hosts <name>: node_hosts, or the update stops here, before anything of the node is touched, and it goes on running.
+keep_hosts() {
+  local code=0
+  node_hosts "$1" || code=$?
+  case "$code" in
+    0) ;;
+    2) fail "$1 was started with a host name this installer cannot carry over, so $1 stays as it is and goes on running. Without it, it could lose its way to the company's core." ;;
+    *) fail "Could not read the host names $1 was started with, so $1 stays as it is and goes on running. Without them, it could lose its way to the company's core. Run this command again." ;;
+  esac
 }
 
 STARTED=''
@@ -593,6 +610,7 @@ restore_old_node() {
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-} old='' started=1
+  keep_hosts "$name"
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
       "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
@@ -600,7 +618,6 @@ start_node() {
   fi
   say "Starting $name."
   host_env "$name"
-  node_hosts "$name"
   prepare_node_stop "$name" "${5:-node_update}"
   if "${DOCKER[@]}" inspect --format '{{.Id}}' "$name" > /dev/null 2>&1; then
     old=$(next_old_node "$name")
@@ -637,10 +654,10 @@ start_node() {
 # The server lets go of the node soon after nobody asks, so stopping this changes nothing.
 wait_for_node() {
   local name=$1 code=0
+  # It reaches the server the way the node does. A node whose hosts cannot be kept is not asked about, nor moved.
+  keep_hosts "$name"
   [ -z "$URGENT" ] || return 0
   [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$name" 2> /dev/null)" != false ] || return 0
-  # It reaches the server the way the node does.
-  node_hosts "$name"
   "${DOCKER[@]}" run --rm --cap-drop ALL --user 0:0 --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data:ro" \
     ${NODE_HOSTS[@]+"${NODE_HOSTS[@]}"} "$IMAGE" wait-update || code=$?
   [ "$code" -ne 0 ] || return 0

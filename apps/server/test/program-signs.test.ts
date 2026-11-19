@@ -145,6 +145,7 @@ describe('silence measured by signs of life', () => {
     ['Operations head', [], 'operations'],
     ['orchestrator', ['operations'], 'orchestrator'],
     ['department head', ['operations', 'orchestrator'], 'department'],
+    ['busy Operations head', ['operations', 'orchestrator', 'department'], 'operations'],
   ] as const)('tells the %s when the operator is busy and earlier recipients are silent', async (_, unavailable, expected) => {
     const c = await company();
     const operations = await c.hire('Hugo', 'head', 'OPS-HEAD', c.ops.id);

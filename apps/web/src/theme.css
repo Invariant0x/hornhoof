@@ -1630,13 +1630,14 @@ body:has(.dview) .version-mark { display: none; }
 .plan-fallbacks .part-note { font-size: inherit; overflow-wrap: anywhere; }
 /* A field of the card is as wide as what it shows, up to the band, with its caret on its end side, and 44 px high as
    every field of the screen. Its value wraps rather than ending in dots: the select itself is clear over a copy of its
-   value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. */
+   value that can take more lines. Its focus is the page's ring, not the glow of a field being typed in. Its list and caret
+   are the card's alone: :where() keeps them as light as the page's own list, which stays at most 360 px with its arrow. */
 .plan-settings .field, .plan-settings .select-wrap { justify-self: start; max-inline-size: 100%; }
 :is(.plan-settings, .plan-fallbacks) .field { gap: 6px; }
 .plan-fallbacks .field { gap: 4px; }
 :is(.plan-settings, .plan-fallbacks) .field > :is(label, .label) { font-size: 13px; font-weight: 500; color: var(--muted); }
-.select-wrap { position: relative; display: grid; min-inline-size: 0; max-inline-size: 100%; }
-.select-wrap::after {
+:where(.plan-settings, .plan-fallbacks) .select-wrap { position: relative; display: grid; min-inline-size: 0; max-inline-size: 100%; }
+:where(.plan-settings, .plan-fallbacks) .select-wrap::after {
   content: ""; position: absolute; z-index: 2; inset-inline-end: 12px; inset-block-start: calc(50% - 6px);
   inline-size: 8px; block-size: 8px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); pointer-events: none;
 }
