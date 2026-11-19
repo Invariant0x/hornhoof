@@ -21,18 +21,18 @@ type WindowWithProbe = Window & {
 
 const AT = '2026-11-14T13:45:00.000Z';
 
-const MAX_ME: Me = {
+const LEO_ME: Me = {
   person: {
-    id: 'p-max',
+    id: 'p-leo',
     companyId: 'c1',
-    name: 'Max',
-    email: 'max@northwind.example',
+    name: 'Leo',
+    email: 'leo@moonfern.example',
     title: 'CMO',
     status: 'active',
     scopeKind: 'listed',
     isOwner: false,
   },
-  company: { id: 'c1', name: 'Northwind' },
+  company: { id: 'c1', name: 'Moonfern' },
   canDecideCompany: false,
 };
 
@@ -125,7 +125,7 @@ const emitLiveBatch = (page: Page, messages: unknown[]) =>
     for (const m of ms) host.__hhLive(m);
   }, messages);
 
-function buildNorthwindFixture() {
+function buildMoonfernFixture() {
   const base = bigCompany();
   const ownDeptId = base.departments[0]!.id;
   const headBase = base.departments[0]!.employees[0]!;
@@ -151,20 +151,20 @@ function buildNorthwindFixture() {
 
   const orgFor = (answered: boolean): Org => ({
     ...base,
-    company: MAX_ME.company,
+    company: LEO_ME.company,
     orchestrator: base.orchestrator ? { ...base.orchestrator, opens: false } : null,
     people: [],
     departments: base.departments.map((d, index) => {
       const own = index === 0;
       return {
         ...d,
-        ownerPersonId: own ? MAX_ME.person.id : null,
+        ownerPersonId: own ? LEO_ME.person.id : null,
         people: own
           ? [{
-            id: MAX_ME.person.id,
-            name: MAX_ME.person.name,
-            email: MAX_ME.person.email,
-            title: MAX_ME.person.title,
+            id: LEO_ME.person.id,
+            name: LEO_ME.person.name,
+            email: LEO_ME.person.email,
+            title: LEO_ME.person.title,
             status: 'active',
             isOwner: false,
             access: { whole: false, departments: [{ id: ownDeptId, name: d.name ?? 'Department 1' }], teams: [] },
@@ -215,7 +215,7 @@ function buildNorthwindFixture() {
   };
 
   const openQuestion: WaitingRequest = {
-    id: 'r-max',
+    id: 'r-leo',
     kind: 'question',
     text: 'Should Q4 launch target enterprise or self-serve first?',
     commit: null,
@@ -228,7 +228,7 @@ function buildNorthwindFixture() {
     at: AT,
     agent: { id: headBase.id, name: headBase.name },
     task: { id: taskLine.id, number: taskLine.number, title: taskLine.title, department: { id: ownDeptId, name: 'Department 1' } },
-    ownerPersonId: MAX_ME.person.id,
+    ownerPersonId: LEO_ME.person.id,
     canAnswer: true,
   };
 
@@ -255,7 +255,7 @@ function buildNorthwindFixture() {
 }
 
 test('non-CEO department owner answers head in question card, chat and terminal on a 120-agent company without blink or grey screen', async ({ page }, info) => {
-  const fx = buildNorthwindFixture();
+  const fx = buildMoonfernFixture();
   const errors: string[] = [];
   const terminalInputs: string[] = [];
   let wsConnections = 0;
@@ -307,7 +307,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
 
     if (path === '/api/stream') return;
     if (path === '/api/setup') return route.fulfill(json({ needed: false }));
-    if (path === '/api/me') return route.fulfill(json(MAX_ME));
+    if (path === '/api/me') return route.fulfill(json(LEO_ME));
     if (path === '/api/org') {
       if (firstOrgPending) await firstOrgGate;
       return route.fulfill(json(fx.orgFor(answered)));
@@ -322,14 +322,14 @@ test('non-CEO department owner answers head in question card, chat and terminal 
         requests: reqs,
         proposals: [],
         counts: {
-          byPerson: answered ? {} : { [MAX_ME.person.id]: 1 },
+          byPerson: answered ? {} : { [LEO_ME.person.id]: 1 },
           byAgent: answered ? {} : { [fx.headId]: 1 },
           total: reqs.length,
         },
       };
       return route.fulfill(json(dec));
     }
-    if (method === 'POST' && path === '/api/requests/r-max') {
+    if (method === 'POST' && path === '/api/requests/r-leo') {
       answered = true;
       return route.fulfill(json({ ok: true }));
     }
@@ -345,15 +345,15 @@ test('non-CEO department owner answers head in question card, chat and terminal 
         echelonFindings: emptyEchelonFindings(),
         ...fx.taskLine,
         status: answered ? 'working' : 'waiting',
-        body: 'Decide Q4 rollout segment for Northwind.',
+        body: 'Decide Q4 rollout segment for Moonfern.',
         parent: null,
         after: [],
         executor: fx.taskLine.assignee,
-        createdBy: { kind: 'person', id: MAX_ME.person.id, name: MAX_ME.person.name },
+        createdBy: { kind: 'person', id: LEO_ME.person.id, name: LEO_ME.person.name },
         subtasks: [],
-        log: [{ kind: 'created', text: fx.taskLine.brief, data: {}, by: { kind: 'person', id: MAX_ME.person.id, name: MAX_ME.person.name }, at: AT }],
+        log: [{ kind: 'created', text: fx.taskLine.brief, data: {}, by: { kind: 'person', id: LEO_ME.person.id, name: LEO_ME.person.name }, at: AT }],
         requests: [{
-          id: 'r-max',
+          id: 'r-leo',
           kind: 'question',
           text: fx.openQuestion.text,
           commit: null,
@@ -387,7 +387,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
         kind: 'message',
         data: { text: body.text ?? '' },
         jobId: 'j1',
-        person: { id: MAX_ME.person.id, name: MAX_ME.person.name },
+        person: { id: LEO_ME.person.id, name: LEO_ME.person.name },
         at: AT,
       });
       return route.fulfill(json({ queued: false }));
@@ -408,7 +408,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
   });
 
-  /* 1. Navigate directly to Max's department while /api/org is still in flight: no blank grey body. */
+  /* 1. Navigate directly to Leo's department while /api/org is still in flight: no blank grey body. */
   await page.goto(`/departments/${fx.ownDeptId}`);
   await page.locator('main.body').waitFor({ state: 'attached' });
   await nextFrames(page);
@@ -460,7 +460,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   expect(await answerInput.evaluate(el => document.activeElement === el)).toBe(true);
 
   const answeredResponse = page.waitForResponse(
-    res => res.url().endsWith('/api/requests/r-max') && res.request().method() === 'POST',
+    res => res.url().endsWith('/api/requests/r-leo') && res.request().method() === 'POST',
   );
   await windowBox.getByRole('button', { name: 'Send answer' }).click();
   await answeredResponse;

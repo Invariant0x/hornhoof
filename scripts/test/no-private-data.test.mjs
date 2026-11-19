@@ -8,11 +8,14 @@ import { trackedIn } from './tracked-files.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
-/* The repository is public: its texts name no real person but its author, no real company and no real mailbox. Examples and
-   fixtures use the made-up company of the media scenes (Moonfern). The words that must not come back are kept here only as
-   SHA-256 of the lowercased word, so this list does not publish them again; a mailbox is kept as its name up to the @. */
+/* Examples and fixtures use Moonfern, the made-up company of the media scenes. Keep denied tokens only as SHA-256 of
+   their lowercase forms. The historical mailbox is shown without a domain, and one name is also a common word. */
 const DENIED = new Map([
   ['deed29a14606957869aefe56cf28e10c2ee3317aad68238fe1a753401c9e0060', 'a real company'],
+  ['84e2cdb7a166d1671bc5e2abc1e78b59777dd1f863d3c5b05d09c2dd088444c2', 'a real company'],
+  ['a50128d59f482a86171394eb7a2d1824df7c5d2788c4b2cbc5600ead757d5fd9', 'a real person'],
+  ['3c5ddd0948295663886511e0fd7a3aa89a86837d620648b702cc698c836f0166', 'a real person'],
+  ['8bc026ef9a1b238f9fcf504075d955b7a52f8d617c8270ad6a026aa4c661f6fd', 'a real person in a wait example'],
   ['73e4935fcd6dfbc26aa88d49b1304bff6f1dfdcfaa021e72e73d06025286eb1c', 'a real person'],
   ['1150b7957dfeecc8b6ddf32de3ba39a9b018c4737dd2e77157902d009cdf19b3', 'a real person'],
   ['95c08c72c3f4c5ede972450f3b3719587cb7891884c0b7b57c8aa2bd22b6b200', 'a real person'],
@@ -33,14 +36,16 @@ const DENIED = new Map([
   ['86fb3e155d1989d60ee1d218540bfad61b5ba26f0d0fed698a9060ef115ba228', 'a real person'],
   ['9da9051443e6e9a408fafea28a56da614798eaa05bdc9c453b1b3766a81832e6', 'a real person'],
   ['0f440e9bb5219a4fbf46b62e64b2ee703d5165a8803047b4d32269065f9ed059', 'a real mailbox'],
+  ['f24e864eff9e61bbfb006b54b6a8e1e80313b96f0eaa81ca2036bcc671c372c5', 'an old fixture mailbox'],
+  ['052894ea6bb334d180c5ca313ede9292423a9666ac0438738235dabc89d6c48d', 'an old fixture mailbox'],
 ]);
 
 const WORD = /[\p{L}\p{M}\p{N}]+/gu;
 /* An address ends where its domain does, never at the full stop of the sentence after it. */
 const ADDRESS = /[\p{L}\p{N}._%+-]+@(?:[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*)?/gu;
+const WAIT_EXAMPLE = /(?<![\p{L}\p{M}\p{N}])waits for [\p{L}\p{M}\p{N}]+/gu;
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
-/* Every word of a text in any script, and every address both whole and up to its @, lowercased. */
 function tokensOf(text) {
   const lower = text.toLowerCase();
   const tokens = new Set(lower.match(WORD));
@@ -48,6 +53,7 @@ function tokensOf(text) {
     tokens.add(address);
     tokens.add(address.slice(0, address.indexOf('@') + 1));
   }
+  for (const example of lower.match(WAIT_EXAMPLE) ?? []) tokens.add(example);
   return tokens;
 }
 
@@ -77,6 +83,15 @@ test('finds a denied word or mailbox by its hash alone', () => {
   assert.deepEqual(deniedIn('СЭМ and Сэм look at it.', denied), ['a person']);
   assert.deepEqual(deniedIn('Mail maya@other.example today.', denied), ['a mailbox']);
   assert.deepEqual(deniedIn('Moonfernish, mayan and maya.', denied), []);
+});
+
+test('finds an unambiguous mailbox or wait example without rejecting ordinary words', () => {
+  const denied = new Map([
+    [sha256('leo@moonfern.example'), 'a mailbox'],
+    [sha256('waits for may'), 'a wait example'],
+  ]);
+  assert.deepEqual(deniedIn('Mail Leo@Moonfern.example. The card says "Waits for May, 3 days".', denied), ['a mailbox', 'a wait example']);
+  assert.deepEqual(deniedIn('Mail Leo@other.example. The work may start in May.', denied), []);
 });
 
 test('no tracked text names a real person, company or mailbox that must not come back', () => {
