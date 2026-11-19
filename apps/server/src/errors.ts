@@ -187,6 +187,7 @@ export type ErrorReason =
   | 'key_changed'
   | 'not_a_machine'
   | 'ticket_used'
+  | 'join_refused'
   | 'machine_taken'
   | 'renew_refused'
   | 'core_present'

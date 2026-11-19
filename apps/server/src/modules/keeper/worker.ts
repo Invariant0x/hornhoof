@@ -12,6 +12,7 @@ import { TunnelKeeper, type Client } from '../link/tunnel.js';
 import { visitClientFor, VISIT_FIRST_PORT, type VisitSettings } from '../link/visit-client.js';
 import { keyPrint } from '../computer/owner-key.js';
 import { certFacts } from '../network/authority.js';
+import { joinMessage } from '../network/join-proof.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import type { CopyOrder, CopyReport } from './copy.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
@@ -472,9 +473,7 @@ export class WorkerKeeper {
     }
   }
 
-  /* What follows a ticket that let this machine in. The key first: a ticket noted as used is never sent again, so one
-     whose key could not be kept stays owed and is tried at every look; and when the keeper stops before that, the
-     ticket is sent again at its next start, which the server answers alike within its day. */
+  /* Pin the owner's key after the ticket lets this machine in. A failed pin stays owed and is tried at every look. */
   private settle(ticket: string): void {
     this.owed = this.pinOwner() ? null : ticket;
     if (!this.owed) this.spend(ticket);
@@ -505,7 +504,8 @@ export class WorkerKeeper {
 
   private async join(ticket: string, signKey: string): Promise<HeldCertificate> {
     const { joinServer, machineId } = this.opts.config;
-    const res = await this.post(`${joinServer}/api/network/join`, { ticket, networkId: machineId, signKey });
+    const signature = sign(null, Buffer.from(joinMessage(ticket, machineId)), createPrivateKey(this.key.privatePem)).toString('base64');
+    const res = await this.post(`${joinServer}/api/network/join`, { ticket, networkId: machineId, signKey, signature });
     if (res.status === 200) {
       this.settle(ticket);
       this.mergeView((res.body as { view?: unknown } | null)?.view);
