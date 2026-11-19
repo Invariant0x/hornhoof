@@ -81,11 +81,19 @@ async function openMap(page: Page, look: Look, arranged = false) {
   await still(page);
 }
 
-/* The top of the bars along the bottom of the map: on a phone they stand one over another, and the version stands on them. */
-const dockTop = (page: Page) => page.evaluate(selector => {
-  const tops = [...document.querySelectorAll(selector)].map(e => e.getBoundingClientRect()).filter(r => r.width && r.height && r.top > innerHeight / 2).map(r => r.top);
+/* What the version stands on: the top of the highest bar along the bottom of the map in its column, as the dock of a phone
+   or the zoom of a wide screen right to left, or else the bottom of the window. */
+const floorUnder = (page: Page, at: Box) => page.evaluate(({ selector, at }) => {
+  const tops = [...document.querySelectorAll(selector)].map(e => e.getBoundingClientRect())
+    .filter(r => r.width && r.height && r.top > innerHeight / 2 && r.left < at.x + at.width && at.x < r.right).map(r => r.top);
   return tops.length ? Math.min(...tops) : innerHeight;
-}, BARS);
+}, { selector: BARS, at });
+
+async function standsOn(page: Page, at: Box) {
+  const bottom = at.y + at.height, floor = await floorUnder(page, at);
+  expect(bottom, 'over the bars along the bottom').toBeLessThanOrEqual(floor);
+  expect(floor - bottom, 'near what it stands on').toBeLessThanOrEqual(NEAR);
+}
 
 /* What of the page a person can press or read as a control lies under the version. */
 const under = (page: Page, at: Box) => page.evaluate(({ selector, at }) => [...document.querySelectorAll(selector)].flatMap(e => {
@@ -135,7 +143,7 @@ for (const look of LOOKS) {
     const { width, height } = SIZES[look.width];
 
     /* No row of its own and no line: the screen and the map reach the bottom of the window. */
-    await expect(page.getByRole('contentinfo')).toBeHidden();
+    expect(await page.getByRole('contentinfo').isVisible(), 'a footer row shows').toBe(false);
     expect((await box(page.locator('.app-screen'))).y + (await box(page.locator('.app-screen'))).height).toBe(height);
     const map = await box(page.locator('.map'));
     expect(map.y + map.height).toBe(height);
@@ -162,11 +170,9 @@ for (const look of LOOKS) {
     if (look.dir === 'rtl') expect(at.x, 'gap to the left edge').toBeLessThanOrEqual(NEAR);
     expect(look.dir === 'ltr' ? at.x > width / 2 : at.x + at.width < width / 2, 'on the end half of the screen').toBe(true);
 
-    /* At the bottom: on a wide screen in the corner of the window, on a phone right on the bars along its bottom. */
-    const bottom = at.y + at.height;
-    const floor = look.width === 375 ? await dockTop(page) : height;
-    expect(bottom, 'over the bars along the bottom').toBeLessThanOrEqual(floor);
-    expect(floor - bottom, 'near what it stands on').toBeLessThanOrEqual(NEAR);
+    /* At the bottom: in the corner of the window, or right on the bars along the bottom where they stand in its column, as on
+       a phone, and as the zoom does at the left of a wide screen right to left. */
+    await standsOn(page, at);
 
     /* It covers no control and no bar, and a tap at its middle goes to the map under it. */
     expect(await under(page, at)).toEqual([]);
@@ -177,15 +183,16 @@ for (const look of LOOKS) {
   });
 }
 
-for (const dir of ['ltr', 'rtl'] as const) {
-  test(`a phone's taller dock keeps the version over it: ${dir}, 375px`, async ({ page }, info) => {
-    await openMap(page, { width: 375, dir, skin: 'cyberpunk' }, true);
+for (const width of [1440, 375] as const) for (const dir of ['ltr', 'rtl'] as const) {
+  test(`with Put back over the zoom the version still stands clear of the bars: ${dir}, ${width}px`, async ({ page }, info) => {
+    await openMap(page, { width, dir, skin: 'cyberpunk' }, true);
     const at = await box(mark(page));
-    const floor = await dockTop(page);
-    expect(at.y + at.height, 'over Put back').toBeLessThanOrEqual(floor);
-    expect(floor - (at.y + at.height), 'near what it stands on').toBeLessThanOrEqual(NEAR);
+    const end = dir === 'ltr' ? SIZES[width].width - (at.x + at.width) : at.x;
+    expect(end, 'gap to the end of the screen').toBeGreaterThanOrEqual(0);
+    expect(end, 'gap to the end of the screen').toBeLessThanOrEqual(NEAR);
+    await standsOn(page, at);
     expect(await under(page, at)).toEqual([]);
-    if (info.project.name.includes('chromium') || info.project.name === 'matrix') await capture(page, info, `map-arranged-${dir}-375`);
+    if (info.project.name.includes('chromium') || info.project.name === 'matrix') await capture(page, info, `map-arranged-${dir}-${width}`);
   });
 }
 
