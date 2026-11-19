@@ -11,16 +11,23 @@ import { pumpWaiting } from '../conversation/queue.js';
 import { identityOfKey, keyOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
 import { hasLiveDrainWork } from './drain-live.js';
+import { tellLongWait } from './drain-notice.js';
 import { drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
-/* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
-const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number(), heldAt: z.number().default(() => Date.now()) });
+/* heldAt: when this hold of the node began. A wait saved before this began when the server read it. noticed: the
+   orchestrator heard that this hold runs long. */
+const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number(), heldAt: z.number().default(() => Date.now()), noticed: z.boolean().default(false) });
 type Saved = z.infer<typeof Saved>;
 type Drain = { node: NodeIdentity; view: MachineDrain };
+type Waiting = Extract<MachineDrain, { state: 'waiting' }>;
+/* The work that holds a node, and whether any of it is live. */
+type Found = { work: Awaited<ReturnType<typeof drainWork>>; live: boolean };
 /* An installer that disappeared must not hold a node forever. Restarting gets longer for image/container startup. */
 const REQUEST_LEASE_MS = 2 * 60_000;
 const RESTART_LEASE_MS = 10 * 60_000;
 /* How often the server looks at the nodes that wait. */
 const ROUND_MS = 1000;
+/* How long a node waits for its update before the orchestrator hears of it, once. */
+const NOTICE_AFTER_MS = 30 * 60_000;
 
 class NodeDrains {
   private readonly records = new Map<string, Saved>();
@@ -63,7 +70,7 @@ class NodeDrains {
     return record ? this.overHold(record) : false;
   }
 
-  /* A node that waits for an update takes no turn of theirs, however long it waits. One an updater was told is free
+  /* A node that waits for an update takes no turn of theirs, up to the limit of its wait. One an updater was told is free
      restarts within the limit, from when it was told; past it, see nodeHeldFrom. */
   private overHold(record: Saved): boolean {
     return record.view.state === 'restarting' && Date.now() - Date.parse(record.view.since) >= this.ctx.config.nodeLeaderHoldMs;
@@ -74,7 +81,7 @@ class NodeDrains {
     const at = Date.now();
     let record = this.records.get(key);
     if (!record) {
-      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, since: new Date(at).toISOString() }, touched: at, heldAt: at };
+      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, since: new Date(at).toISOString() }, touched: at, heldAt: at, noticed: false };
       this.records.set(key, record);
       try { this.save(); }
       catch (err) { this.records.delete(key); throw err; }
@@ -130,17 +137,36 @@ class NodeDrains {
     const now = Date.now();
     const found = await this.workOf(record, this.nodeOf(record.key), now);
     if (!found) return;
-    const { work, live } = found;
-    /* A node restarts only for an updater told it is free. Until one asks, the node waits with nothing left on it, and the
-       hold ends with the lease of a wait: an updater that went away never restarts it. However long its work runs, the
-       node takes no new turn meanwhile, so it ends. */
-    if (!live) record.view = asked ? { state: 'restarting', since: new Date(now).toISOString() } : { ...record.view, turnsLeft: 0, partsLeft: 0 };
-    else record.view = { ...record.view, turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
+    record.view = this.next(record, record.view, found, asked, now);
+    const notice = this.noticeDue(record, found.live, now);
     this.save();
+    if (notice) await this.tellLong(record, found.work);
+  }
+
+  /* A node restarts only for an updater told it is free. Until one asks, the node waits with nothing left on it, and the
+     hold ends with the lease of a wait: an updater that went away never restarts it. The node takes no new turn meanwhile,
+     so its work ends; and once the wait reaches its limit the node is free whatever still runs on it, so one long turn
+     never holds the others longer. The turns its restart cuts run once more after it, as after any restart. */
+  private next(record: Saved, view: Waiting, { work, live }: Found, asked: boolean, now: number): MachineDrain {
+    const free = !live || now - record.heldAt >= this.ctx.config.nodeUpdateWaitMs;
+    if (free && asked) return { state: 'restarting', since: new Date(now).toISOString() };
+    return live ? { ...view, turnsLeft: work.turnsLeft, partsLeft: work.partsLeft } : { ...view, turnsLeft: 0, partsLeft: 0 };
+  }
+
+  /* Once in a hold, when live work has kept the node waiting for half an hour. */
+  private noticeDue(record: Saved, live: boolean, now: number): boolean {
+    const due = live && record.view.state === 'waiting' && !record.noticed && now - record.heldAt >= NOTICE_AFTER_MS;
+    if (due) record.noticed = true;
+    return due;
+  }
+
+  private tellLong(record: Saved, work: Found['work']): Promise<void> {
+    return tellLongWait(this.ctx, this.nodeOf(record.key), work, record.heldAt, record.heldAt + this.ctx.config.nodeUpdateWaitMs)
+      .catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not tell the orchestrator that a node waits long for its update.'));
   }
 
   /* The work that holds the node and whether any of it is live, or null when this hold ended meanwhile. */
-  private async workOf(record: Saved, node: NodeIdentity, now: number): Promise<{ work: Awaited<ReturnType<typeof drainWork>>; live: boolean } | null> {
+  private async workOf(record: Saved, node: NodeIdentity, now: number): Promise<Found | null> {
     const work = await drainWork(this.ctx, node);
     if (this.records.get(record.key) !== record) return null;
     const live = (work.turns.length > 0 || work.parts.length > 0) && (await hasLiveDrainWork(this.ctx, node, now));

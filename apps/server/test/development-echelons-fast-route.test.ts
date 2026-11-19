@@ -107,7 +107,7 @@ describe('echelon route without idle handoffs', () => {
       resultKind: 'turnkey', stage: null, stages: [], candidateId: null, security: { required: false },
     });
     f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: HEAD });
-    const closed = await report(f.ctx, player.id, task.id, { done: true, summary: 'Completed end to end on task branch.' });
+    const closed = await report(f.ctx, player.id, task.id, { done: true, summary: 'Completed end to end on task branch.', turnkey: { commit: HEAD, baseCommit: BASE } });
     expect(closed.task).toMatchObject({ status: 'done', assigneeAgentId: null });
   });
 });

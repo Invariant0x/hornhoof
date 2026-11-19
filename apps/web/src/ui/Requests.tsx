@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
-import type { TaskPlace, WaitingRequest } from '../types';
+import type { TaskPlace, UncheckedItem, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
@@ -105,6 +105,7 @@ function ReadOnly({
   return (
     <div className="req-form">
       {request.kind === 'approval' && <ApprovedCommit request={request} />}
+      {request.kind === 'approval' && <UncheckedList request={request} />}
       {request.kind === 'choice' && <ReadOnlyChoice options={request.options} manifest={manifest} onOpenMaterial={onOpenMaterial} />}
       <DecidedByNote by={request.decidedBy} />
     </div>
@@ -272,6 +273,7 @@ function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) 
   return (
     <div className="req-form">
       <ApprovedCommit request={request} />
+      <UncheckedList request={request} />
       <Field label={t.tasks.note}>{p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}</Field>
       <div className="req-actions entry-actions">
         <button className="btn" type="button" disabled={busy} onClick={() => onDecide(true)}>
@@ -404,6 +406,39 @@ function RequestItem({ request, onDone, inline, ...shared }: Shared & { request:
       <RequestFeedback busy={busy} failure={failure} />
       {viewer && <MaterialViewer items={availableItems} activeId={viewer.id} opener={viewer.opener} onSelect={selectViewer} onClose={closeViewer} />}
     </article>
+  );
+}
+
+/* One thing a release brings that no check covers, in the person's language. */
+function uncheckedText(t: Messages, item: UncheckedItem): string {
+  const words = t.tasks.unchecked;
+  switch (item.kind) {
+    case 'unread': return words.unread(item.base, item.commit);
+    case 'holder_off': return words.holderOff(item.task);
+    case 'no_candidate': return words.noCandidate(item.task);
+    case 'checker': return words.checker(item.task, item.commit);
+    case 'task_unread': return words.taskUnread(item.task);
+    case 'unpinned': return words.unpinned(item.task);
+    case 'merge': return words.merge(item.commit);
+    case 'commit': return words.commit(item.commit);
+  }
+}
+
+/* What the release brings that no check covers, as Hornhoof keeps it apart from the words and the plain explanation above:
+   it shows where the person approves, in every view of the card, never folded away. */
+function UncheckedList({ request }: { request: WaitingRequest }) {
+  const t = useT();
+  const items = request.unchecked ?? [];
+  if (items.length === 0) return null;
+  const heading = t.tasks.unchecked.heading(items.length);
+  return (
+    <section className="req-unchecked" aria-label={heading}>
+      <p className="req-unchecked-title">{heading}</p>
+      <ul>
+        {items.map((item, index) => <li key={index}>{uncheckedText(t, item)}</li>)}
+      </ul>
+      <p>{t.tasks.unchecked.accept}</p>
+    </section>
   );
 }
 

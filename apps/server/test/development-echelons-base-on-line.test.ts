@@ -12,14 +12,16 @@ import { testsFixture } from './development-echelons-verification.js';
 const MAIN = BASE, TURN = '7'.repeat(40), TURN_OLD = '8'.repeat(40), MAIN_ON = '9'.repeat(40), UNCHECKED = '1'.repeat(40), MERGED = 'e'.repeat(40);
 
 /* What the repository says: where each branch is, which commit holds which, and the comparisons GitHub capped at 300 files
-   (they prove the line by their commits), cut short (they prove nothing) or could not give at all. */
-type Repository = { heads: Record<string, string>; holds: Record<string, string[]>; capped: Set<string>; cut: Set<string>; failing: Set<string>; unreadable: Set<string> };
+   (they prove the line by their commits), cut short (they prove nothing) or could not give at all. A name in tagged is a tag
+   of the repository where it has no such branch, which git takes as well and says so. */
+type Repository = { heads: Record<string, string>; holds: Record<string, string[]>; capped: Set<string>; cut: Set<string>; failing: Set<string>; unreadable: Set<string>; tagged?: Set<string> };
 
 function serve(f: Awaited<ReturnType<typeof fixture>>, repo: Repository): void {
   f.ctx.readCommit = async (_repo, want) => {
     const branch = 'branch' in want ? want.branch : 'task-1';
     if (repo.unreadable.has(branch)) throw new Error('unreadable');
     const commitSha = repo.heads[branch];
+    if (commitSha && repo.tagged?.has(branch)) return { branch, commitSha, tag: true };
     return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.`, missing: true };
   };
   f.ctx.readCompare = async (_repo, refs): Promise<CompareResult> => {
@@ -87,6 +89,16 @@ describe('a candidate starts from a line its department releases', () => {
     const f = await onTheBranch();
     change(f.repo);
     await expect(f.handIn(TURN_OLD)).rejects.toMatchObject({ status: 409, message: expect.stringContaining(TURN_OLD) as unknown });
+    await f.untouched();
+  });
+
+  /* H1 of #1569: a tag of the turn branch's name, as a ref written where the branch was deleted, is no line. */
+  it('reads the lines by branch alone: a tag named as the open turn holds no base, and one named main holds none either', async () => {
+    const f = await onTheBranch();
+    f.repo.tagged = new Set([f.turnBranch]);
+    await expect(f.handIn(TURN_OLD)).rejects.toMatchObject({ status: 409, message: expect.stringContaining(TURN_OLD) as unknown });
+    f.repo.tagged = new Set(['main']);
+    await expect(f.handIn(MAIN)).rejects.toMatchObject({ status: 409 });
     await f.untouched();
   });
 

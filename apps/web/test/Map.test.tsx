@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/screens/Map';
+import { orchestratorStatus, deptLayout, pulsePath, MapScreen, writtenIn } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
@@ -147,6 +147,23 @@ describe('Map', () => {
     /* The Head of Design's word for #1489 (#1539, N4): words break by the syllables of the page's language, with a hyphen. */
     expect(decl('button.dept', 'hyphens')).toBe('auto');
     expect(decl('button.dept', '-webkit-hyphens')).toBe('auto');
+  });
+
+  /* Design's note on #1574 (#1580): a Japanese chip breaks between its phrases, not inside one. The browser finds Japanese
+     phrases only in text marked Japanese, and kana is written only in Japanese; text of kanji alone may be Chinese and is left
+     to the page's language. */
+  it('marks the words of a people chip Japanese when they hold kana, so they break between phrases', async () => {
+    const people = [
+      { ...PEOPLE[0]!, name: 'レナ', title: '財務と経理の責任者' },
+      { ...PEOPLE[1]!, name: 'ミラ', title: '最高経営責任者' },
+    ];
+    mockApi({ 'GET /api/org': [200, { ...ORG, people }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByText('レナ');
+    const words = [...container.querySelectorAll('.chips .chip :is(b, small)')].map(el => [el.textContent, el.getAttribute('lang')]);
+    expect(Object.fromEntries(words)).toEqual({ レナ: 'ja', 財務と経理の責任者: 'ja', ミラ: 'ja', 最高経営責任者: null });
+    for (const selector of ['.chip b:lang(ja)', '.chip small:lang(ja)']) expect.soft(decl(selector, 'word-break'), selector).toBe('auto-phrase');
+    expect(decl('.chip span', 'hyphens'), 'the other languages keep their hyphens').toBe('auto');
   });
 
   it('shows the orchestrator, the company people and the empty state on first run', async () => {
@@ -1446,6 +1463,21 @@ describe('Map', () => {
     expect(shots(container, 'a')[0]!.closest('[data-mask]')).toHaveAttribute('data-mask', mask);
     expect(container.querySelectorAll('.map-live .way-seg').length).toBeGreaterThan(3);
   });
+});
+
+/* #1580: words are Japanese when they hold hiragana or katakana, which only Japanese writes. Kanji alone may be Chinese, and
+   Latin letters are any language: the page's language speaks for them. */
+describe('writtenIn', () => {
+  it.each([
+    ['財務と経理の責任者', 'ja'],
+    ['レナ', 'ja'],
+    ['ブルーノ・ロッシ', 'ja'],
+    ['最高経営責任者', undefined],
+    ['开发部负责人', undefined],
+    ['Lena', undefined],
+    ['Финансы', undefined],
+    ['', undefined],
+  ])('%s is %s', (words, lang) => expect(writtenIn(words)).toBe(lang));
 });
 
 describe('deptLayout', () => {
