@@ -614,9 +614,10 @@ select:disabled { opacity: .55; }
 .map-room > .world { top: calc(-1 * var(--map-top, 0px)); }
 /* The running build over the map, in the bottom end corner of that room, where the footer row stood its text before (#1590):
    small muted text and nothing more, which a tap goes through to the map. On a phone the room ends over the bars along the
-   bottom, so it stands on them; on a wide screen the room is the whole map, so it sits in the corner of the window. */
+   bottom, so it stands on them; on a wide screen the room is the whole map, so it sits in the corner of the window, or on the
+   bar that stands there, as the zoom does right to left: --lift is how far it measures it must rise. */
 .map-version {
-  position: absolute; inset-block-end: 4px; inset-inline-end: 12px; margin: 0; color: var(--muted); font-size: 12px;
+  position: absolute; inset-block-end: calc(4px + var(--lift, 0px)); inset-inline-end: 12px; margin: 0; color: var(--muted); font-size: 12px;
   pointer-events: none; user-select: none;
 }
 .world > * { position: absolute; }
