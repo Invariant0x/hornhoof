@@ -1,12 +1,13 @@
 # shellcheck shell=bash
 # The computer this updater runs on. It runs the orchestrator's commands on this computer, as root, while the machine's
-# owner keeps access to it open: the machine's keeper refreshes computer.json {untilSec} and writes each command as
-# computer/<id>.json {id, command, timeout}; this answers computer/<id>.out.json {id, exit, output}. It checks untilSec
-# itself before each command. With HORNHOOF_HOST_OS=linux it also writes the machine's own addresses to addresses.json
-# {at, addresses} once a minute, for the keeper to report.
+# owner keeps access to it open. The keeper refreshes computer.json {untilSec} and writes each computer/<id>.json
+# {id, command, timeout} on the volume it shares with the updater. The updater writes computer/<id>.out.json
+# {id, exit, output} on that volume. With HORNHOOF_HOST_OS=linux it also reports the machine's own addresses.
 
 # The image commands on the computer run in: the updater's own, which compose names.
 COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
+COMPUTER_CONTROL="${HORNHOOF_COMPUTER_CONTROL_DIR:-/computer}"
+COMPUTER_LEGACY_SAID=''
 # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
 COMPUTER_MAX=1800
 COMPUTER_OUTPUT=30000
@@ -15,18 +16,33 @@ HOST_OS="${HORNHOOF_HOST_OS:-}"
 ADDRESSES_EVERY=60
 ADDRESSES_AT=0
 
-# Whether the machine's owner keeps access to the computer open now, by the time its keeper wrote, which ends it by
-# itself.
+# Log once while old request files are present. Their names and contents stay out of the log.
+computer_refuse_legacy() {
+  local file
+  for file in "$CONTROL"/computer/*.json; do
+    case "$file" in *.out.json) continue ;; esac
+    [ -f "$file" ] || [ -L "$file" ] || continue
+    if [ -z "$COMPUTER_LEGACY_SAID" ]; then
+      printf '%s\n' 'Computer request refused: it came from the shared control folder.' >&2
+      COMPUTER_LEGACY_SAID=1
+    fi
+    return 0
+  done
+  COMPUTER_LEGACY_SAID=''
+}
+
+# The updater trusts the leader keeper for standing access. A compromised leader keeper can still issue commands
+# while the owner's standing access is open. The keeper's time also closes access if it stops refreshing it.
 computer_open() {
   local until
-  until=$(jq -r '.untilSec // 0' "$CONTROL/computer.json" 2> /dev/null || true)
+  until=$(jq -r '.untilSec // 0' "$COMPUTER_CONTROL/computer.json" 2> /dev/null || true)
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
   [ "$until" -gt "$(date +%s)" ]
 }
 
 # computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved.
 computer_answer() {
-  local file="$CONTROL/computer/$1.out.json"
+  local file="$COMPUTER_CONTROL/computer/$1.out.json"
   tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > "$file.new"
   mv "$file.new" "$file"
 }
@@ -38,28 +54,29 @@ computer_answer() {
 # second time, and what still runs of it is stopped.
 computer_runs() {
   local file id command timeout out name watch code made
-  [ -d "$CONTROL/computer" ] || return 0
-  for file in "$CONTROL"/computer/*.started; do
+  computer_refuse_legacy
+  [ -d "$COMPUTER_CONTROL/computer" ] || return 0
+  for file in "$COMPUTER_CONTROL"/computer/*.started; do
     [ -f "$file" ] || continue
     id=$(basename "$file" .started)
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
-    [ ! -f "$CONTROL/computer/$id.json" ] || continue
+    [ ! -f "$COMPUTER_CONTROL/computer/$id.json" ] || continue
     docker rm -f "hornhoof-computer-$id" > /dev/null 2>&1 || true
     rm -f "$file"
   done
-  for file in "$CONTROL"/computer/*.json; do
+  for file in "$COMPUTER_CONTROL"/computer/*.json; do
     case "$file" in *.out.json) continue ;; esac
     [ -f "$file" ] || continue
     id=$(basename "$file" .json)
     case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
-    [ ! -f "$CONTROL/computer/$id.out.json" ] || continue
+    [ ! -f "$COMPUTER_CONTROL/computer/$id.out.json" ] || continue
     name="hornhoof-computer-$id"
     out=$(mktemp)
-    if [ -f "$CONTROL/computer/$id.started" ]; then
+    if [ -f "$COMPUTER_CONTROL/computer/$id.started" ]; then
       docker rm -f "$name" > /dev/null 2>&1 || true
       printf 'The updater restarted while this command ran, so it was stopped. Look at what it did before you run it again.\n' > "$out"
       computer_answer "$id" 125 "$out"
-      rm -f "$out" "$CONTROL/computer/$id.started"
+      rm -f "$out" "$COMPUTER_CONTROL/computer/$id.started"
       continue
     fi
     if ! computer_open; then
@@ -72,7 +89,7 @@ computer_runs() {
     timeout=$(jq -r '.timeout // empty' "$file" 2> /dev/null || true)
     case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
     if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi
-    touch "$CONTROL/computer/$id.started"
+    touch "$COMPUTER_CONTROL/computer/$id.started"
     code=0
     made=1
     # Made first and only then started, so the watch can always stop it.
@@ -114,7 +131,7 @@ computer_runs() {
     fi
     # The app stops waiting for an answer and takes the command back after a while.
     [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"
-    rm -f "$out" "$out.done" "$out.late" "$out.closed" "$CONTROL/computer/$id.started"
+    rm -f "$out" "$out.done" "$out.late" "$out.closed" "$COMPUTER_CONTROL/computer/$id.started"
   done
 }
 

@@ -66,6 +66,8 @@ services:
       - control:/control
       # The machine's own key, which never leaves this volume.
       - keeper:/keeper
+      # The updater takes computer requests and access only from this keeper-owned volume.
+      - computer:/keeper/computer-control
     depends_on:
       db:
         condition: service_healthy
@@ -141,6 +143,10 @@ services:
       HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
     volumes:
       - control:/control
+      # Mask the old computer queue while the app still needs the rest of the control volume.
+      - type: tmpfs
+        target: /control/computer
+        read_only: true
       - harness:/harness
       - files:/files
     healthcheck:
@@ -251,6 +257,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - control:/control
+      - computer:/computer
       - ${HORNHOOF_SERVER_DIR:-.}:${HORNHOOF_SERVER_DIR:-/srv/hornhoof}
     networks:
       - default
@@ -271,6 +278,7 @@ volumes:
   pgdata:
   nodedata:
   control:
+  computer:
   harness:
   files:
   keeper:
