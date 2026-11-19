@@ -78,26 +78,23 @@ function buildDevSnapshot(minutesOffset: number, patches: Record<string, Patch>)
   };
 }
 
-test('development.gif: Development structure and staff map, with task #221 advancing across gates', async ({ page }) => {
+test('development.gif: Development staff schema, with task #221 advancing across gates and a smooth pan', async ({ page }) => {
   const recorder = createSceneRecorder(page);
   const watcher = await prepareScenePage(page);
   const api = await serveMoonfern(page);
 
   await page.goto('/');
   await mapDepartment(page, 'Development').click();
-  const structure = page.getByRole('region', { name: 'Department structure', exact: true });
-  await expect(structure.getByRole('region', { name: 'Beta build way', exact: true })).toBeVisible();
-  await recorder.markReady();
-  await page.waitForTimeout(1100);
 
-  /* The staff map shows the live handoff lines and the people at each gate. */
-  await page.getByRole('button', { name: 'Staff map', exact: true }).click();
+  /* The department opens on its staff schema: the live handoff lines and the people at each gate. Wait for the fly-in,
+     zoom in once and frame it from the left. */
   const canvas = page.getByRole('region', { name: 'Department schema', exact: true });
   await expect(canvas.getByRole('group', { name: 'Performance', exact: true })).toBeVisible();
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(850);
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await smoothDrag(page, canvas, 90, 48, 4, 25);
   await page.waitForTimeout(200);
+  await recorder.markReady();
 
   const agent = (id: string) => ({ kind: 'agent' as const, id, departmentId: 'dept-dev' });
 
@@ -160,8 +157,6 @@ test('development.gif: Development structure and staff map, with task #221 advan
   api.setOrg(MOONFERN_ORG);
   await pushStream(page, { type: 'org' });
   await smoothDrag(page, canvas, 420, 0, 9, 36);
-  await page.getByRole('button', { name: 'Department structure', exact: true }).click();
-  await expect(structure).toBeVisible();
   await page.waitForTimeout(1150);
 
   watcher.assertClean();

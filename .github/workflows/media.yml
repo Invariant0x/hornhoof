@@ -1,6 +1,7 @@
 name: Media
 
-# Renders the README's animated pictures from apps/web/media/scenes and keeps them as an artifact to look at and commit. A
+# Renders the README's animated pictures from apps/web/media/scenes and keeps them as an artifact to look at and commit,
+# and the marketing cuts (marketing-*) as GIF and MP4 with their ffprobe report and frames in media-videos. A
 # push to a branch named media-* renders the scenes listed below; a run by hand renders the ones it names, or these when it
 # names none. In a private repository, where the variables BUILD_RUNS_ON and BUILDKIT_ENDPOINT name our own runner and its BuildKit, the
 # scenes render in a build of apps/web/media/Dockerfile there, as our runners have no Docker daemon; otherwise GitHub's
@@ -27,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SCENES: ${{ inputs.scenes || 'tasks.spec.ts board.spec.ts turns.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts' }}
+      SCENES: ${{ inputs.scenes || 'tasks.spec.ts board.spec.ts turns.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts marketing-map.spec.ts' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -39,6 +40,7 @@ jobs:
         env:
           KEEP_MEDIA_RESULTS: '1'
           MEDIA_ASSETS_DIR: ${{ github.workspace }}/media-out/gifs
+          MEDIA_VIDEOS_DIR: ${{ github.workspace }}/media-out/videos
         # SCENES is split into one argument per scene on purpose.
         run: npm --prefix apps/web run media -- $SCENES
       - name: Keep the pictures
@@ -48,6 +50,13 @@ jobs:
           name: media-gifs
           path: media-out/gifs
           if-no-files-found: warn
+      - name: Keep the marketing cuts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-videos
+          path: media-out/videos
+          if-no-files-found: ignore
       - name: Keep the videos, marks and failure shots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -71,7 +80,7 @@ jobs:
         with:
           context: .
           file: apps/web/media/Dockerfile
-          build-args: SCENES=${{ inputs.scenes || 'tasks.spec.ts board.spec.ts turns.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts' }}
+          build-args: SCENES=${{ inputs.scenes || 'tasks.spec.ts board.spec.ts turns.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts marketing-map.spec.ts' }}
           outputs: type=local,dest=media-out
           push: false
       - name: Show how the render went
@@ -85,6 +94,13 @@ jobs:
           name: media-gifs
           path: media-out/gifs
           if-no-files-found: warn
+      - name: Keep the marketing cuts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-videos
+          path: media-out/videos
+          if-no-files-found: ignore
       - name: Keep the videos, marks, failure shots and log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

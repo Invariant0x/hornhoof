@@ -1,11 +1,13 @@
-import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
+import type { CheckLeaseSnapshot, CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
 import { and, desc, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, nodes, machines, testParts, type RestartCause } from '../../db/schema.js';
-import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
+import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity, type NodeTransport } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator, checkPartId, type CheckSnapshot } from './check-slots-queue.js';
+import { hostResources } from './host-load.js';
+import { bookedBudget, bookedParts } from '../testruns/part-budget.js';
 
 const queues = new WeakMap<Ctx, CheckCoordinator>();
 
@@ -19,13 +21,17 @@ function queueFor(ctx: Ctx): CheckCoordinator {
   return queue;
 }
 
-export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity): Promise<void> {
+export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity, snapshot?: CheckLeaseSnapshot, transport?: NodeTransport): Promise<void> {
   const load = ctx.hub.loadOf(id);
   if (!load) return;
   const fallback = await machineKey(ctx, id);
   if (!fallback) return;
+  // A handler can finish after a newer socket has replaced the one that sent this snapshot.
+  if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
   const host = load.host && /^[0-9a-f]{64}$/.test(load.host) ? `host:${load.host}` : fallback;
-  queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at });
+  const { cpus, load: hostLoad } = hostResources(load);
+  const checkLeases = snapshot && { ...snapshot, receivedAt: transport?.receivedAt ?? load.at, linkId: transport?.linkId };
+  queueFor(ctx).node(keyOf(id), host, { cpus, load: hostLoad, at: load.at, checkLeases });
 }
 
 /* The computer a node's checks share their slots on. A built-in node of another machine than this server's is on that
@@ -49,16 +55,17 @@ export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: C
   }
   await checkQueueLoad(ctx, id);
   const partId = checkPartId(actor);
-  if (partId && !await hasRunningPart(ctx, id, partId)) {
+  const cores = partId ? await runningPartCores(ctx, id, partId) : 0;
+  if (cores === undefined) {
     ctx.hub.send(id, { type: 'check.state', id: request.id, state: 'ended', position: 0 });
     return;
   }
-  queue.acquire(key, actor);
+  queue.acquire(key, actor, cores);
 }
 
-async function hasRunningPart(ctx: Ctx, id: NodeIdentity, partId: string): Promise<boolean> {
-  const [part] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), partsOfNode(ctx, id)));
-  return Boolean(part);
+async function runningPartCores(ctx: Ctx, id: NodeIdentity, partId: string): Promise<number | undefined> {
+  const [part] = await bookedParts(ctx.db, and(eq(testParts.id, partId), partsOfNode(ctx, id)));
+  return part && bookedBudget(part).cores;
 }
 
 export function endPartChecks(ctx: Ctx, id: NodeIdentity, partId: string, cleaned: boolean): void {

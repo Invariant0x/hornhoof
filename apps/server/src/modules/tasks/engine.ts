@@ -15,7 +15,7 @@ import { replayedSubmission, submissionOperation, type Submission } from './eche
 import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, producerIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
 import { acceptDocument, documentHandIn } from './echelons-document.js';
-import { forwardHandoff } from './echelons-handoff.js';
+import { submittedHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
@@ -425,11 +425,11 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   requireSubmissionStage(task, route);
   if (route.state.stage === 'tests') return submitAtTests(ctx, agentId, task, route, r, operation);
   const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
-  const next = await forwardHandoff(ctx, task, route, candidate);
+  const next = await submittedHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...skippedData(next.skipped) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);

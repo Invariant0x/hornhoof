@@ -166,7 +166,7 @@ describe('the pool of machines', () => {
       expect.objectContaining({ name: 'ann-pc', owner: 'Ann', online: true, lent: true, loaded: true, parts: [] }),
     ]);
     expect(pool.builtin).toMatchObject({ online: false, parts: [] });
-    expect(pool.waiting).toEqual([expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 2, parts: 2, agent: 'Bruno', why: 'Running another part: dev-mac. Loaded: ann-pc.' })]);
+    expect(pool.waiting).toEqual([expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 2, parts: 2, agent: 'Bruno', why: "The node's test user is busy: dev-mac. Short of free cores (needs 1): ann-pc." })]);
 
     /* Once the first part is done, the second goes out, and nothing waits. */
     ivan.node.send(done(first));

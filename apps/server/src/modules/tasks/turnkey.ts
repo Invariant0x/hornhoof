@@ -42,10 +42,14 @@ async function turnkeyIntegration(ctx: Reader, task: Task) {
   const target = await integrationTarget(ctx, task);
   const turn = target?.turn;
   if (!target || !turn || !ctx.readCommit) return null;
+  const unreadable = () => refuse(409, 'task_changed', `The branch of #${task.number} could not be read. Try again.`);
   let own: Awaited<ReturnType<Ctx['readCommit']>>;
   try { own = await ctx.readCommit(target.repo, { task: task.number }, 5_000); }
-  catch { throw refuse(409, 'task_changed', `The branch of #${task.number} could not be read. Try again.`); }
-  if ('problem' in own) return null;
+  catch { throw unreadable(); }
+  if ('problem' in own) {
+    if (own.missing) return null;
+    throw unreadable();
+  }
   const { branch } = target;
   await requireInTurn(ctx, { ...target, turn }, own.commitSha, (head, holdsHead) => holdsHead
     ? `fast-forward ${branch} to ${own.branch} first, so the release takes it, then report done.`

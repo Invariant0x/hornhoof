@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { machines } from '../src/db/schema.js';
+import { certificates, machines } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
 import { checkHead } from '../src/modules/backups/bundle.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
@@ -544,7 +544,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await renewed.stop();
   });
 
-  it("sends its ticket again when its owner's key could not be kept", async () => {
+  it("retries keeping its owner's key after the ticket is accepted", async () => {
     const c = await company();
     const ownerKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
     const { machine, ticket } = await c.joined();
@@ -555,10 +555,13 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await until(() => w.lines.some(line => line.includes("Could not keep the owner's key")));
     await until(() => hasLeader(w.status()));
     expect(readPin(config.dir)).toBeNull();
-    /* The ticket was not noted as used, so the next ask sends it again, and the key is kept once it can be. */
+    expect(existsSync(join(config.dir, TICKET_FILE))).toBe(false);
+    /* The keeper can finish pinning locally once the folder becomes writable. */
     rmSync(join(config.dir, PIN_FILE), { recursive: true });
     await until(() => readPin(config.dir) === ownerKey);
     await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(ownerKey));
+    expect(readFileSync(join(config.dir, TICKET_FILE), 'utf8')).toBe(JSON.stringify({ hash: hashToken(ticket) }));
+    expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toHaveLength(1);
     await w.stop();
   });
 

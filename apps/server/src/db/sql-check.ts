@@ -3,7 +3,7 @@ import { PARSER_DEADLINE_MS, startParserWorker, ThrowawayParser } from './sql-pa
 
 export const ONLY_STATEMENTS = 'This tool runs only SELECT, INSERT, UPDATE, DELETE and WITH statements; Hornhoof begins and commits the transaction itself.';
 
-/* What the tool refuses by name: these reach other sessions, settings or large objects, or run query text the parser never
+/* What the reader and database both refuse by name: these reach other sessions, settings or large objects, or run query text the parser never
    sees. 'lo_*' stands for the prefix. This is the one list: what the database takes away from PUBLIC names the same functions. */
 export const REFUSED_FUNCTIONS: string[] = [
   'pg_cancel_backend',
@@ -21,7 +21,11 @@ export const REFUSED_FUNCTIONS: string[] = [
 ];
 
 const REFUSED_NAMES = new Set(REFUSED_FUNCTIONS.filter(name => !name.endsWith('*')));
-const REFUSED_PREFIXES = REFUSED_FUNCTIONS.filter(name => name.endsWith('*')).map(name => name.slice(0, -1));
+/* A read-only transaction can still take advisory locks. The app itself uses them, so refuse these in the SQL reader. */
+const REFUSED_PREFIXES = [
+  ...REFUSED_FUNCTIONS.filter(name => name.endsWith('*')).map(name => name.slice(0, -1)),
+  'pg_advisory_', 'pg_try_advisory_',
+];
 const FENCE_SCHEMAS = new Set(['net', 'net_local']);
 const ROW_STATEMENTS = new Set(['SelectStmt', 'InsertStmt', 'UpdateStmt', 'DeleteStmt']);
 

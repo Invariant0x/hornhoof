@@ -19,14 +19,16 @@ test('terminal.gif: developer window replaying terminal.rec with side panels vis
 
   await page.goto('/');
   await mapDepartment(page, 'Development').click();
-  const structure = page.getByRole('region', { name: 'Department structure' });
-  await expect(structure).toBeVisible();
+  const schema = page.getByRole('region', { name: 'Department schema', exact: true });
+  await expect(schema).toBeVisible();
   await page.waitForTimeout(850);
 
   /* Open Card: Iris first so the left 400px panel sits clear of .xterm while terminal.rec streams. */
-  await structure.getByRole('button', { name: 'Iris', exact: true }).click();
+  await schema.getByRole('button').filter({ has: page.getByText('Iris', { exact: true }) }).click();
   const win = page.getByRole('complementary', { name: /^Iris/ });
   await expect(win).toBeVisible();
+  /* A window opens on the conversation; its terminal is one click away. */
+  await win.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expect(win.locator('.xterm')).toBeVisible();
 
   await win.getByRole('button', { name: 'Card', exact: true }).click();

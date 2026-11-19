@@ -6,7 +6,8 @@ import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
-import { changeRoute, type Route } from './route-records.js';
+import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
+import { reviewReplacement } from './echelons-handoff.js';
 import { move } from './transitions.js';
 import { refuse, type Moved, type Task } from './state.js';
 import { captureReview, exactComparison, type Review } from './review-context.js';
@@ -105,14 +106,15 @@ export async function keepCandidateAtTests(
   operation: ReturnType<typeof submissionOperation>,
   detail: Record<string, unknown>,
 ): Promise<Moved> {
-  const row = await move(ctx, task, { silent: 0 }, {
+  const reviewAgain = skippedAuthorReview(route.state) ? await reviewReplacement(ctx, task, route, candidate) : null;
+  const row = await move(ctx, task, reviewAgain?.set ?? { silent: 0 }, {
     kind: 'submitted', actor: { agentId }, text: input.summary,
     data: { evidence: input.evidence, candidate, ...detail, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
   }, async tx => {
     if (!sameChecker(await heldCheckingIdentity(tx, task, route, parent), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.');
-    await changeRoute(tx, route, { ...route.state, candidateId: candidate.id });
-  });
-  return { task: row, wakes: [] };
+    await changeRoute(tx, route, reviewAgain?.state ?? { ...route.state, candidateId: candidate.id });
+  }, reviewAgain?.wakes);
+  return { task: row, wakes: reviewAgain?.wakes ?? [] };
 }
 
 export async function takeMainAtTests(ctx: Reader, agentId: string, task: Task, route: Route, input: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {

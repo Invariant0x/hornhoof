@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { parseNodeMessage, type CheckQueueRequest, type RunKind } from '@hornhoof/protocol';
+import { hashTestEnvironment, parseNodeMessage, type CheckQueueRequest, type RunKind } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, departments, machines, nodes, people, testParts, testRuns, tasks, jobs } from '../src/db/schema.js';
@@ -7,6 +7,8 @@ import { checkQueueLoad, checkQueueSnapshot, closeCheckQueue, receiveCheckReques
 import { nodeIdentity, ownBuiltin } from '../src/modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { testsHello } from '../src/modules/testruns/runs.js';
+import { hasLiveDrainWork } from '../src/modules/updates/drain-live.js';
+import { planningEnvironment } from './fixtures/run-planning/environment.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 import { company, idle } from './test-runs-company.js';
 
@@ -43,6 +45,27 @@ async function stand(kind: RunKind = 'tests', hiddenHolder = false) {
 }
 
 describe('reading a part that waits for a machine check slot', () => {
+  it('uses the pinned worker count of an assigned part for its lease', async () => {
+    const s = await stand();
+    const ctx = s.c.app.ctx;
+    await s.release(0); await s.release(1); await s.release(2);
+    const part = s.parts[1]!, { snapshot } = await planningEnvironment();
+    const browser = snapshot.description.manifest.suites[0]!;
+    browser.run = { program: 'npx', args: ['playwright', 'test', '--workers=2'], cwd: 'web' };
+    snapshot.description.manifestSource = JSON.stringify(snapshot.description.manifest);
+    snapshot.description.manifestHash = await hashTestEnvironment(snapshot.description.manifestSource);
+    await s.c.db.update(testRuns).set({ environmentSnapshot: snapshot, memoryGb: 4 }).where(eq(testRuns.id, part.runId));
+    const selection = { kind: 'suite' as const, suiteId: browser.id, files: ['web/test/a.test.ts'] };
+    await s.c.db.update(testParts).set({ environmentSelection: { selection, after: [] } }).where(eq(testParts.id, part.id));
+    const check = s.claims[1]!;
+    await receiveCheckRequest(ctx, s.id, check, sql`false`);
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [], queue: [{ request: { id: check.id } }] });
+    vi.mocked(ctx.hub.loadOf).mockImplementation(() => ({ ...idle({ cpus: 1, hostCpus: 8, hostLoad: 0 }), at: Date.now() }));
+    await checkQueueLoad(ctx, s.id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(checkQueueSnapshot(ctx, s.id)).toMatchObject({ holders: [{ request: { id: check.id } }], queue: [] });
+  });
+
   it.each(['built-in', 'ordinary'] as const)('releases old leases when a new %s node process greets the server', async kind => {
     const s = await stand();
     const ctx = s.c.app.ctx;
@@ -79,7 +102,7 @@ describe('reading a part that waits for a machine check slot', () => {
     expect(snapshot()).toMatchObject({ capacity: 1, holders: [{ request: { id: other.id } }], queue: [] });
   });
 
-  it('sends a quiet running part to Operations once through the program alarm inbox', async () => {
+  it.each([false, true])('sends a quiet running part to Operations once through the program alarm inbox, with a missed live alert=%s', async missed => {
     const s = await stand();
     const { db } = s.c;
     const companyId = s.c.task.companyId;
@@ -97,8 +120,21 @@ describe('reading a part that waits for a machine check slot', () => {
     vi.setSystemTime(Date.now() + 60_000);
     await report({ kind: 'builtin', machine: 'another-machine' });
     expect(await notices()).toEqual([]);
-    await Promise.all([report(), report()]);
+    if (!missed) await Promise.all([report(), report()]);
+    const done = { type: 'tests.done' as const, partId, ok: false, exitCode: null, error: 'silent' as const, commit: null, log: 'Stopped after silence.' };
+    await handleNodeMessage(ctx, s.id, done);
+    await handleNodeMessage(ctx, s.id, done);
     expect(await notices()).toEqual([expect.objectContaining({ text: expect.stringContaining('Test run 2, part 1'), notification: expect.objectContaining({ source: 'program_alarm' }) })]);
+  });
+
+  it('keeps an uncapped running part live for update drain past the old time limit', async () => {
+    const s = await stand();
+    const { db, app } = s.c;
+    const old = new Date(Date.now() - 3 * 60 * 60_000);
+    await db.update(testParts).set({ startedAt: old, queuedAt: old });
+    expect(await hasLiveDrainWork(app.ctx, s.id, Date.now())).toBe(false);
+    await db.update(testRuns).set({ timeoutMs: 0 }).where(eq(testRuns.id, s.parts[1]!.runId));
+    expect(await hasLiveDrainWork(app.ctx, s.id, Date.now())).toBe(true);
   });
 
   it('clears held and queued claims of a part the database replaced when its node no longer has it', async () => {

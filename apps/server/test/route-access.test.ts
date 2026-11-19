@@ -56,7 +56,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'identify', path: /^\/api\/nodes\/socket$/, rule: 'node key before websocket upgrade' },
   { name: 'nodeOf', path: /^\/api\/harness\/(?:claim|:key\/(?:done|failed|bundle|parts\/:index))$/, rule: 'node key, and a build of that node or of a product whose tests it may take' },
   { name: 'requireKeeper', path: /^\/api\/network\/(?:certificate|peers|report|secrets|backups|computer(?:\/:id)?)$/, rule: "this machine's keeper alone: its address together with the header no door lets through" },
-  { name: 'redeemTicket', path: /^\/api\/network\/join$/, rule: "the one-use ticket a join command gave the machine's installer" },
+  { name: 'redeemTicket', path: /^\/api\/network\/join$/, rule: "the one-use join ticket and a signature from the machine's key" },
   { name: 'signedRenewal', path: /^\/api\/network\/renew$/, rule: "a request signed with the machine's own key, of this moment and taken once" },
   { name: 'ownSession', path: /^\/api\/me\/key$/, rule: "the person's own session, or the orchestrator acting for them, never a head" },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },

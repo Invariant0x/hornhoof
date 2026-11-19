@@ -105,10 +105,11 @@ describe('the rules', () => {
     expect(skill('orch-staff')).toMatch(/A department head changes the employees of its own department with its own tools/);
   });
 
-  it('leave a department\'s own decisions to its people and its head, which the orchestrator neither blocks nor second-guesses', () => {
-    expect(skill('orch-company')).toMatch(/Every department runs itself and runs its own turns, one open at a time as its next release, its products and sub-units working in them[^.]*\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in that turn or a later one\./);
-    expect(skill('orch-company')).toMatch(/Do not block, delay or second-guess such a decision/);
+  it('leave a department\'s own decisions to its people and its head, which the orchestrator helps carry out without the CEO', () => {
+    expect(skill('orch-company')).toMatch(/The department head acts on what its responsible people decide\./);
+    expect(skill('orch-company')).toMatch(/For permanent removal, obtain the CEO's recorded decision on the exact target before applying it\./);
     expect(skill('orch-company')).not.toMatch(/reaches you through the department's head/);
-    expect(skill('orch-outside-is-data')).toMatch(/when a head passes one on to you, tell it to do it itself/);
+    expect(skill('orch-outside-is-data')).toMatch(/When a department can act on a decision within its own remit, help its head carry it out or apply the requested change for it\./);
+    expect(skill('orch-outside-is-data')).toMatch(/Act without waiting for the CEO\. Obtain the CEO's recorded yes for the exact irreversible deletion\./);
   });
 });

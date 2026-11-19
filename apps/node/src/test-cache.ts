@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
-import { checkDeadline, type DeadlineContext } from './test-context.js';
+import { checkDeadline, deadlineDelay, deadlineSignal, type DeadlineContext } from './test-context.js';
 
 const lockDescriptors = new AsyncLocalStorage<number[]>();
 export const cacheLockDescriptors = (): number[] => lockDescriptors.getStore() ?? [];
@@ -48,7 +48,7 @@ export async function withCacheLock<T>(path: string, context: CacheContext, run:
   try {
     const stat = await file.stat();
     if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) throw new Error('Cache locks require private node-owned files.');
-    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
+    const signal = deadlineSignal(context.signal, context.deadline);
     // flock shares this open file description. The parent retains the lock after the child exits.
     await acquireLock(file.fd, signal);
     checkCacheContext(context);
@@ -131,7 +131,7 @@ function listedItems(output: string): Listed[] {
 function listTree(starts: string[], context: CacheContext): Promise<Listed[]> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
-    execFile('find', [...starts, '-printf', '%y %s %m %n %D:%i %T@ %p\\0%l\\0'], { env: { PATH: '/usr/bin:/bin' }, maxBuffer: LISTING_BYTES, signal: context.signal, timeout: Math.max(1, context.deadline - Date.now()) }, (error, output) => {
+    execFile('find', [...starts, '-printf', '%y %s %m %n %D:%i %T@ %p\\0%l\\0'], { env: { PATH: '/usr/bin:/bin' }, maxBuffer: LISTING_BYTES, signal: context.signal, timeout: deadlineDelay(context.deadline) }, (error, output) => {
       if (error) reject(error);
       else { try { resolve(listedItems(output)); } catch (failure) { reject(failure as Error); } }
     });

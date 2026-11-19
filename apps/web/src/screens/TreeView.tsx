@@ -5,7 +5,7 @@ import type { Department, DepartmentTree, Employee } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
   idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, statePriority,
-  type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
+  type PlateSizes, type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody } from './TreeCard';
 import { segmentText } from './tree-state';
@@ -385,13 +385,34 @@ function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>): TreeLayout {
   return { ...layout, width, targets: layout.targets.map(hit => hit.round || hit.segment ? hit : { ...hit, width }) };
 }
 
+/* What the plates measure: before the first paint, after every new layout, and when one grows or shrinks on its own, as its
+   fonts arrive. Each row is laid out as tall as its plate. */
+function useMeasuredPlates(root: RefObject<HTMLDivElement | null>, layout: TreeLayout, setPlates: (set: (was: PlateSizes) => PlateSizes) => void) {
+  useLayoutEffect(() => {
+    const labels = root.current?.querySelector('.tv-labs');
+    if (!labels) return;
+    const shown = [...labels.querySelectorAll<HTMLElement>(':scope > [data-row]')];
+    const measure = () => {
+      const next: PlateSizes = Object.fromEntries(shown.map(el => [el.dataset.row!, el.offsetHeight]));
+      setPlates(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = guardedResizeObserver(measure, 'tree-plates');
+    for (const el of shown) observer.observe(el);
+    return () => observer.disconnect();
+  }, [root, layout, setPlates]);
+}
+
 export function TreeView(props: Props) {
   const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
   const visibleTree = useMemo(() => visibleDepartmentTree(tree, department), [tree, department]);
   const order = department.employees.map(e => e.id).join('\0');
-  const layout = useMemo(() => fitBadges(treeLayout(visibleTree, { ...box, agentOrder: order ? order.split('\0') : [] }, 1), t), [visibleTree, order, box, t]);
+  const [plates, setPlates] = useState<PlateSizes>({});
+  const layout = useMemo(() => fitBadges(treeLayout(visibleTree, { ...box, agentOrder: order ? order.split('\0') : [] }, 1, plates), t), [visibleTree, order, box, t, plates]);
+  useMeasuredPlates(root, layout, setPlates);
   const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!visibleTree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
   const canvas = { layout, tree: visibleTree, department, selected: selection?.pick ?? null, select };

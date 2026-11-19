@@ -9,14 +9,19 @@ export type ProductPlan = { leaves: { selection: TestExecution['selection']; aft
 function batchLeaves(input: PreparedEnvironmentPlanInput, plan: EnvironmentPartPlan | null): ProductPlan['leaves'] {
   if (!plan) return [];
   const slowest = Math.max(1, ...(input.machines ?? []).map(machine => machine.pace));
+  const unknown = new Set(plan.testPlan.unknownUnits.map(unitKey));
   return plan.parts.map((part, index) => ({
     selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha,
       selections: part.selections.map(selection => ({ ...selection, shard: part.suiteShards.find(shard => shard.suiteId === selection.suiteId)! })).map(selection => ({ ...selection, shard: { index: selection.shard.index, count: selection.shard.count } })),
     } }).selection,
     after: [],
-    estimatedMs: input.costs.setupMs + input.costs.collectMs + (part.machine?.ms ?? plan.testPlan.parts[index]!.testMs * slowest),
+    ...batchEstimate(input, plan.testPlan.parts[index]!, unknown, slowest),
     ...(part.machine ? { computer: part.machine.key } : {}),
   }));
+}
+function batchEstimate(input: PreparedEnvironmentPlanInput, part: TestPartPlan['parts'][number], unknown: Set<string>, pace: number): { estimatedMs?: number } {
+  if (part.units.every(unit => unknown.has(unitKey(unit)))) return {};
+  return { estimatedMs: input.costs.setupMs + input.costs.collectMs + (part.machine?.ms ?? part.testMs * pace) };
 }
 function finalLeaves(leaves: ProductPlan['leaves'], suiteIds: string[], onceIds: string[]): ProductPlan['leaves'] {
   return suiteIds.map(suiteId => ({ selection: { kind: 'final', suiteId, files: [] }, after: onceIds.includes(suiteId) ? [1] : leaves.flatMap((leaf, index) =>
@@ -62,10 +67,9 @@ function remainingWork(input: ReusingInput) {
     remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
   };
 }
-/* A part may take three quarters of its limit by its plan, so a slower machine or a file that grew still ends within it: a part that
-   runs into its limit leaves every file it had unproved. */
+/* Leave a quarter of the planning window for a slower machine or a file that grew. */
 export const PART_SHARE = 0.75;
-/* Every run goes out in as many parts as keep each within that share of its limit, at once on the free machines and one after another
+/* Every run goes out in as many parts as keep each within that share of the planning window, at once on the free machines and one after another
    on one; the first run of a release in two at least. */
 export function partSpread(full: boolean, limitMs: number): { spread: PartSpread } {
   return { spread: { min: full ? 2 : 1, max: MAX_TEST_PARTS, ceilingMs: Math.floor(limitMs * PART_SHARE) } };

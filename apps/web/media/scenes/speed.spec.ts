@@ -15,8 +15,7 @@ test('speed.gif: Speed side panel beside Development schema, switching from Spee
 
   await page.goto('/');
   await mapDepartment(page, 'Development').click();
-  await page.getByRole('button', { name: 'Staff map', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Department schema' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Department schema', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show everything', exact: true }).click();
   await page.waitForTimeout(850);
 

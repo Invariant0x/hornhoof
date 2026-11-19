@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
+import { RepositoryPath, RepositoryScope, type AuthorCheckRun, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
+import { deadlineSignal } from './test-context.js';
 import { GitCredentialMask, gitEnv, gitPreparationFailure, type GitPreparationError } from './workspace.js';
 import type { MutationDelta } from './test-impact-mutation.js';
+import { matchingAuthorPatch } from './author-patch.js';
 import { signalProcessGroup } from './process-group.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
@@ -32,13 +34,13 @@ function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: 
   return gitCancellation(error, stopped);
 }
 
-type GitOutput = { auth?: Record<string, string>; network?: boolean; input?: string };
+type GitOutput = { auth?: Record<string, string>; network?: boolean; input?: string | Buffer };
 const TOO_MUCH = 'Git output exceeds the configured limit.';
 /* Runs git and hands over what it prints as it comes; whatever take throws stops it, and is what the run fails with. */
 function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) => void, { auth = {}, network = false, input }: GitOutput = {}): Promise<void> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
-    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
+    const signal = deadlineSignal(context.signal, context.deadline);
     const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     let failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
     const secret = auth.HH_GIT_PASSWORD ?? '', mask = new GitCredentialMask([secret]);
@@ -74,6 +76,38 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
     if (size > limit) throw new Error(TOO_MUCH);
     chunks.push(chunk);
   }, { auth, network }).then(() => Buffer.concat(chunks));
+}
+
+/* Root-relative literal pathspecs let Git compare the driver without making its files inputs to the mirror's fingerprint. */
+const AUTHOR_DRIVER_PATHSPECS = [
+  ':(top,literal)scripts/author-check.mjs',
+  ':(top,literal)scripts/author-check',
+  ':(top,literal)scripts/test/tracked-files.mjs',
+];
+
+function authorGit(mirror: string, context: CacheContext) {
+  return async (args: string[], input?: Buffer): Promise<Buffer> => {
+    if (!input) return gitBytes(['--literal-pathspecs', '--git-dir', mirror, ...args], context, 16 * 1024 * 1024);
+    const chunks: Buffer[] = [];
+    await gitStream(args, context, chunk => chunks.push(chunk), { input });
+    return Buffer.concat(chunks);
+  };
+}
+
+/* Compare server-pinned objects inside the node's Git mirror before any candidate code can run. */
+export async function authorComparison(run: AuthorCheckRun, context: CacheContext): Promise<string | null> {
+  const { repo, repositoryScope: scope, pin } = run;
+  await mirrorAt(repo, scope, pin.baseCommit, context, async () => {});
+  if (run.mainCommit !== pin.baseCommit) await mirrorAt(repo, scope, run.mainCommit, context, async () => {});
+  let cherryPick: string | null = null;
+  await mirrorAt(repo, scope, pin.commit, context, async mirror => {
+    const args = ['--git-dir', mirror];
+    await gitBytes([...args, 'merge-base', '--is-ancestor', pin.baseCommit, pin.commit], context);
+    const driver = await gitBytes([...args, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', pin.baseCommit, pin.commit, '--', ...AUTHOR_DRIVER_PATHSPECS], context);
+    if (driver.length) throw new Error('The change edits the author-check driver.');
+    if (run.verifyCherryPick) cherryPick = await matchingAuthorPatch(pin, run.mainCommit, authorGit(mirror, context));
+  });
+  return cherryPick;
 }
 
 async function repositoryCacheRoot(source: Pick<Source, 'url'>, scope: RepositoryScope, context: CacheContext): Promise<string> {

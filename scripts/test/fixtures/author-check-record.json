@@ -4,7 +4,7 @@
   "checkCommit": "1111111111111111111111111111111111111111",
   "scope": { "kind": "changed", "paths": ["apps/node/src/a.ts", "apps/node/test/a.test.ts"], "leftToFullRun": ["apps/node/test/far.test.ts"] },
   "stages": [
-    { "name": "format", "status": "unavailable", "exitCode": null, "partId": null },
+    { "name": "format", "status": "unavailable", "exitCode": null, "reason": "repo_has_no_formatter", "partId": null },
     { "name": "lint", "status": "passed", "exitCode": 0, "partId": null },
     { "name": "types", "status": "passed", "exitCode": 0, "partId": null },
     { "name": "tests", "status": "passed", "exitCode": 0, "partId": null },

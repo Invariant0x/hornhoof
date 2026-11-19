@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PGlite } from '@electric-sql/pglite';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
@@ -39,12 +40,16 @@ async function company() {
     .values(Array.from({ length: TURNS - 1 }, (_, i) => ({ companyId, number: i + 1, title: `Turn ${i + 1}`, goal: 'Old work.', status: 'closed' as const, closedAt: new Date() })))
     .returning();
   const [open] = await db.insert(turns).values({ companyId, departmentId: dev!.id, number: TURNS, title: 'Payments', goal: 'Take card payments.', status: 'open', openedAt: new Date() }).returning();
-  let number = 0;
-  for (const turn of history) {
-    const done = { companyId, turnId: turn.id, departmentId: dev!.id, status: 'done' as const, closedAt: new Date(), executorAgentId: bruno.id, createdByAgentId: head.id };
-    const rows = await db.insert(tasks).values(Array.from({ length: PER_TURN }, () => ({ ...done, number: ++number, title: `Old task ${number}` }))).returning({ id: tasks.id });
-    for (let i = 1; i < rows.length; i++) await db.update(tasks).set({ after: [rows[i - 1]!.id] }).where(eq(tasks.id, rows[i]!.id));
-  }
+  /* Assign IDs first so the insert can write each turn's dependency chain. */
+  const oldTasks = history.flatMap(turn => {
+    const done = { companyId, turnId: turn.id, departmentId: dev!.id, status: 'done' as const, closedAt: turn.closedAt, executorAgentId: bruno.id, createdByAgentId: head.id };
+    const ids = Array.from({ length: PER_TURN }, () => randomUUID());
+    return ids.map((id, index) => {
+      const number = (turn.number - 1) * PER_TURN + index + 1;
+      return { ...done, id, number, title: `Old task ${number}`, after: index === 0 ? [] : [ids[index - 1]!] };
+    });
+  });
+  await db.insert(tasks).values(oldTasks);
   ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
 
