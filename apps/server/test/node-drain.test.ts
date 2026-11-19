@@ -90,7 +90,7 @@ describe('planned node updates', () => {
     expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]!.error).toBeNull();
   });
 
-  it('keeps a turn intact however long the node waits, wakes nobody, and permits the update once the turn ends', async () => {
+  it('keeps a turn intact while the node waits within its limit, wakes nobody, and permits the update once the turn ends', async () => {
     stillClock();
     const f = await fixture();
     const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
@@ -100,8 +100,8 @@ describe('planned node updates', () => {
     await until(() => f.app.ctx.hub.isReady(BUILTIN));
     expect((await f.prepare()).json().drain.state).toBe('waiting');
 
-    /* Past an hour and a half, with the node heard from all along. */
-    vi.setSystemTime(Date.now() + 95 * 60_000);
+    /* A minute short of the 45 minutes a wait holds new turns, with the node heard from all along. */
+    vi.setSystemTime(Date.now() + 44 * 60_000);
     node.send({ type: 'status', loggedIn: true, limits: null });
     await until(() => f.app.ctx.hub.lastSeenAt(BUILTIN) === Date.now());
     expect((await f.prepare()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });

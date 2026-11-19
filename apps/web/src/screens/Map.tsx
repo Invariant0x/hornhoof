@@ -359,15 +359,22 @@ function personDetail(t: Messages, p: MapPerson, org: Org): string {
   return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
 }
 
+/* Words that hold hiragana or katakana, which only Japanese writes, are Japanese: marked so, the browser breaks them between
+   their phrases (#1580). Words of kanji alone may be Chinese, and other letters any language: the page's language speaks for
+   them. Only the people chips use it, until the product speaks Japanese itself. */
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+export const writtenIn = (words: string): 'ja' | undefined => (KANA.test(words) ? 'ja' : undefined);
+
 function PersonChipCard({ org, person, w, h, cut, onOpen }: { org: Org; person: MapPerson; w: number; h: number; cut: number; onOpen(personId: string): void }) {
   const t = useT();
+  const detail = personDetail(t, person, org);
   return (
     <PersonButton person={person} frame={{ w, h, cut }} onOpen={() => onOpen(person.id)}>
       <Edge cut={cut} className="chip" halo>
         <PersonIcon label={t.map.person} />
         <span>
-          <b>{person.name}</b>
-          <small>{personDetail(t, person, org)}</small>
+          <b lang={writtenIn(person.name)}>{person.name}</b>
+          <small lang={writtenIn(detail)}>{detail}</small>
         </span>
       </Edge>
     </PersonButton>

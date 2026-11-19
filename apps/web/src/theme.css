@@ -646,6 +646,9 @@ select:disabled { opacity: .55; }
 .chip span { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; line-height: 1.2; text-align: start; -webkit-hyphens: auto; hyphens: auto; }
 .chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .chip small { color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
+/* Japanese breaks between its phrases, not inside one, so no character of a word stands alone on a line (#1580). Only words
+   marked Japanese have their phrases found; every other language keeps its hyphens. */
+.chip b:lang(ja), .chip small:lang(ja) { word-break: auto-phrase; }
 .dept-chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
 .dept-chips > li { position: absolute; }
 .dept-chips .chip > .edge-in { gap: 8px; padding: 6px 10px; }
