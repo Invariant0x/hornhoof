@@ -207,7 +207,7 @@ describe('a turn whose branch the repository does not have yet', () => {
     const both = new Promise<void>(done => { release = done; });
     let pushes = 0;
     f.repo.hold = async () => { if (++pushes === 2) release(); await both; };
-    const doneOf = (id: string) => report(f.ctx, f.player.id, id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
+    const doneOf = (id: string) => report(f.ctx, f.player.id, id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.', turnkey: { commit: theirs, baseCommit: 'a'.repeat(40) } });
     const answers = await Promise.all([refusal(f.done()), refusal(doneOf(second.task.id))]);
     expect(pushes).toBe(2);
     expect(f.repo.made).toEqual([{ branch: `turn-${f.turn.number}`, commit: 'a'.repeat(40) }]);

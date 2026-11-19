@@ -148,7 +148,8 @@ describe('a release credits turnkey work with only the first-parent line from th
     lay(f, [{ sha: OWN, parents: [f.R] }], { [f.branch]: OWN, [work.branch]: OWN });
     await work.done({ commit: OWN, baseCommit: f.R });
     const [closed] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.task.id), eq(taskEvents.kind, 'report')));
-    const { start: _start, ...integration } = closed!.data.integration as Record<string, unknown>;
+    const integration = { ...(closed!.data.integration as Record<string, unknown>) };
+    delete integration.start;
     await f.db.update(taskEvents).set({ data: { ...closed!.data, integration } }).where(eq(taskEvents.id, closed!.id));
     const run = await f.fullRun({ commit: OWN });
     const refused = await f.recordRelease({ commit: OWN, runId: run.id });
