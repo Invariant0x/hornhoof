@@ -140,7 +140,7 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   const { language } = useLanguage();
   if (s.kind === 'api_key') return <ul className="plist"><li><MachineMark /><span className="nm"><b>{t.subs.builtin}</b><small>{t.cards.builtinSmall}</small></span></li></ul>;
   const line = signinLine(t, language, s);
-  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
+  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note" dir="auto">{t.subs.noMachine}</p>}{line && <p className="part-note" dir="auto">{line}</p>}</>;
 }
 
 /* What the head of the card says under the state: until when a plan at its limit waits, or where an offline plan waits. */

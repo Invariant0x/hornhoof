@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CODE, SERVER, SUB_A, install } from './install-script-helpers.js';
@@ -413,6 +414,50 @@ describe('install.sh on a machine that has the core', () => {
     const only = install({ args: ['--uninstall'], env: { ...alone.shared, STUB_CONTAINERS: '' }, tty: 'y\n' });
     expect(only.code, only.out).toBe(0);
     expect(existsSync(join(home(alone.first.dir), 'hornhoof-qwerty'))).toBe(false);
+  });
+});
+
+describe('install.sh on Windows, in the run install.ps1 starts', () => {
+  const NODE = 'hornhoof-claude-1c07dac4';
+  /* Each run is a new container with a home of its own, which goes with it. What install.sh keeps is in the volume
+     install.ps1 mounts, the same for every run, as are the ports Docker keeps in a volume of their own. */
+  function windowsComputer() {
+    const volume = mkdtempSync(join(tmpdir(), 'hh-windows-volume-'));
+    const ports = mkdtempSync(join(tmpdir(), 'hh-windows-ports-'));
+    const kept = { HORNHOOF_FROM_WINDOWS: '1', HORNHOOF_DIR: join(volume, 'hornhoof'), HORNHOOF_HOME: join(volume, '.hornhoof'), HORNHOOF_LINK_FILE: join(ports, 'open-url'), STUB_PORTS_DIR: ports };
+    return { volume, ports, kept, run: (args: string[] | undefined, env: Record<string, string>, tty?: string) => install({ args, tty, env: { ...kept, ...env } }) };
+  }
+
+  it('keeps the core in the volume, where the next run and a removal find it from a new container', () => {
+    const w = windowsComputer();
+    const core = join(w.volume, 'hornhoof-qwerty');
+    const joined = w.run(undefined, { STUB_JOIN_BODY: body(CORE, MACHINE) });
+    expect(joined.code, joined.out).toBe(0);
+    expect(valueOf(readFileSync(join(core, '.env'), 'utf8'), 'HORNHOOF_SERVER_DIR')).toEqual([core]);
+    for (const file of ['compose.yaml', 'compose.worker.yaml']) expect(existsSync(join(core, file)), file).toBe(true);
+    expect(existsSync(join(home(joined.dir), 'hornhoof-qwerty'))).toBe(false);
+
+    /* The next run, in a new container, finds the core and keeps the node at its front. */
+    const nodes = { STUB_CONTAINERS: `${NODE}=${SERVER}`, STUB_NODE_SERVERS: `${NODE}=${SERVER}` };
+    const update = w.run([], nodes);
+    expect(update.code, update.out).toBe(0);
+    expect(update.calls).toContain('stdin http://host.docker.internal:8080');
+    expect(update.calls.find(call => call.startsWith('docker run -d'))).toContain('--add-host host.docker.internal:host-gateway');
+    expect(readdirSync(w.volume).filter(name => name.startsWith('hornhoof-'))).toEqual(['hornhoof-qwerty']);
+
+    /* A run whose folders went with its container, as before, finds no core: the node is not moved to the front. */
+    const lost = install({ args: [], env: { HORNHOOF_FROM_WINDOWS: '1', STUB_PORTS_DIR: w.ports, ...nodes } });
+    expect(lost.code, lost.out).toBe(0);
+    expect(lost.calls.some(call => call.endsWith(' set-server'))).toBe(false);
+    expect(lost.calls.find(call => call.startsWith('docker run -d'))).not.toContain('--add-host');
+
+    /* A removal, in a new container too, takes the core down with its folder and its ports. */
+    const gone = w.run(['--uninstall'], nodes, 'y\nn\n');
+    expect(gone.code, gone.out).toBe(0);
+    expect(gone.out).toContain(`The company's core on this machine, in ${core}, goes with them.`);
+    expect(gone.calls).toContain('docker compose down -v');
+    expect(existsSync(core)).toBe(false);
+    expect(readFileSync(join(w.ports, 'registry'), 'utf8')).toBe('');
   });
 });
 

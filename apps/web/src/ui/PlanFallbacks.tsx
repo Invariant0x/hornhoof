@@ -69,7 +69,7 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
       <h4 id={heading}>{t.subs.fallbacks}</h4>
       {named.length ? (
         <>
-          <p className="part-note">{t.subs.fallbacksHint}</p>
+          <p className="part-note" dir="auto">{t.subs.fallbacksHint}</p>
           <ol className="fallback-list">
             {named.map(({ fallback, plan }, i) => (
               <FallbackItem key={plan.id} fallback={fallback} plan={plan} list={list} place={i + 1} first={i === 0} last={i === named.length - 1} editable={editable} onChange={change} />
@@ -77,7 +77,7 @@ export function PlanFallbacks({ sub, plans, editable, onChange }: { sub: SubView
           </ol>
         </>
       ) : (
-        <p className="part-note">{t.subs.fallbacksAny}</p>
+        <p className="part-note" dir="auto">{t.subs.fallbacksAny}</p>
       )}
       {editable && <AddFallback sub={sub} plans={plans} list={list} onChange={change} button={add} />}
       <p className="sr" role="status">{said}</p>

@@ -8,11 +8,12 @@ import { idOnly, only } from '../../db/selections.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
-import { assistants, certificates, companies, computerRuns, departments, invites, machineAccess, machines, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
+import { assistants, certificates, companies, computerRuns, departments, invites, machineAccess, machines, nodes, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
 import { ApiError, loggable, type ErrorReason } from '../../errors.js';
 import { writeChoice } from '../merge/kept.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
+import { liveNode, settlePlans } from '../nodes/nodes.js';
 import { carryRemoval, disablePerson } from '../people/routes.js';
 import type { Manifest } from './bundle.js';
 import { parseRecoveryFile, type RecoveryFile } from './recovery.js';
@@ -62,8 +63,8 @@ export function readRestoreStatus(controlDir: string): RestoreStatus | null {
 
 /* Who may get in now, put into a database that was restored from an earlier time: a restore never brings back a person
    who was disabled or removed since, a password that was changed, a machine that was disconnected, a recovery file that was
-   replaced or an assistant's key that was revoked or replaced. Removed accounts leave a record even if the backup predates
-   them. Owners' machine settings carry forward; employee computer grants and sessions end. */
+   replaced or an assistant's or node's key that was revoked, cleared or replaced. Removed accounts leave a record even if
+   the backup predates them. Owners' machine settings carry forward; employee computer grants and sessions end. */
 export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   const { db } = ctx;
   const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
@@ -115,6 +116,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
   await carryRecoveryKeys(db, company.id, carry, known, now);
   await carryAssistantKeys(db, carry);
+  await carryNodeKeys(db, carry);
   await db.transaction(async tx => {
     await tx.delete(machineAccess);
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
@@ -184,6 +186,24 @@ async function carryAssistantKeys(db: Db, carry: Carry): Promise<void> {
     for (const key of keys) {
       await tx.update(assistants).set({ keyHash: key.keyHash, keyCreatedAt: timeOf(key.keyCreatedAt), wakeSecretEnc: key.wakeSecretEnc }).where(eq(assistants.personId, key.personId));
     }
+  });
+}
+
+/* The nodes' keys as they were when the old database closed: a node that signed out, was taken back or joined again with
+   a new key since opens nothing with the bundle's key, and the key that opened it then works on. A node that lost its key
+   signs in again, and the plans of the nodes whose keys were set are settled as when a node signs out. A node made since
+   is not in the restored database, nor is its key. */
+async function carryNodeKeys(db: Db, carry: Carry): Promise<void> {
+  const keys = carry.nodeKeys;
+  if (!keys) return;
+  const keeps = new Set(keys.map(key => key.id));
+  await db.transaction(async tx => {
+    const had = await tx.update(nodes).set({ keyHash: null }).where(liveNode).returning({ id: nodes.id, subscriptionId: nodes.subscriptionId });
+    const lost = had.filter(node => !keeps.has(node.id));
+    if (lost.length > 0) await tx.update(nodes).set({ status: 'needs_login' }).where(inArray(nodes.id, lost.map(node => node.id)));
+    const given: { subscriptionId: string | null }[] = [];
+    for (const key of keys) given.push(...await tx.update(nodes).set({ keyHash: key.keyHash }).where(eq(nodes.id, key.id)).returning({ subscriptionId: nodes.subscriptionId }));
+    await settlePlans(tx, [...lost, ...given].map(node => node.subscriptionId));
   });
 }
 

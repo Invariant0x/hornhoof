@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type ServerResponse } from 'node:http';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -527,6 +527,319 @@ describe('.github/workflows/images.yml', () => {
     expect(steps[0]!.with).toEqual({ 'fetch-depth': 0 });
     expect(steps[1]).toEqual({ id: 'mark', env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }, run: 'node scripts/tests-mark.mjs' });
     expect(steps.filter(step => step.env?.GITHUB_TOKEN).map(step => step.id)).toEqual(['mark', 'select']);
+  });
+});
+
+/* The step of a job that looks whether its version is out, and the release job's own steps, run as GitHub runs them: their
+   text through bash, in a checkout of the release commit, against a fake GitHub, a fake registry and a gh that asks the
+   fake GitHub and writes down everything else it is told to do. Nothing reaches the network. */
+describe('whether a version is out, as the images, publish and release jobs look', () => {
+  const VERSION = '0.34.1';
+  const TOKEN = 'ghs_workflow_token';
+  const ACTOR = 'octocat';
+  const TAG_OBJECT = 'f'.repeat(40);
+  const INDEX = `sha256:${'1'.repeat(64)}`;
+  const AMD64 = `sha256:${'2'.repeat(64)}`;
+  const ATTESTATION = `sha256:${'3'.repeat(64)}`;
+  const CONFIG = `sha256:${'4'.repeat(64)}`;
+  const IMAGE = `ghcr.io/invariant0x/hornhoof:${VERSION}`;
+
+  type Where = 'none' | 'here' | 'other';
+  /* github and registry: a status each answers everything with; limited: GitHub's rate limit is used up; down: who cannot be
+     reached at all. lightweight: the tag names its commit with no tag object; lost: GitHub has no tag object for it.
+     single: the version names one image, not an index of platforms; refused: the registry gives no token. */
+  type World = {
+    tag?: Where; release?: boolean; image?: Where | 'unlabeled'; github?: number; registry?: number; limited?: boolean; down?: 'github' | 'registry';
+    lightweight?: boolean; lost?: boolean; single?: boolean; refused?: boolean;
+  };
+  type Ran = { code: number; said: string; outputs: Record<string, Record<string, string>>; gh: string[][]; asked: { url: string; authorization: string | undefined }[]; notes: string | null; sha: string; other: string };
+
+  const project = (dir: string, version: string) => {
+    mkdirSync(join(dir, 'packages/protocol'), { recursive: true });
+    writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'hornhoof', version, workspaces: ['packages/*'] }, null, 2)}\n`);
+    writeFileSync(join(dir, 'packages/protocol/package.json'), `${JSON.stringify({ name: '@hornhoof/protocol', version }, null, 2)}\n`);
+    writeFileSync(join(dir, 'CHANGELOG.md'), `# Changelog\n\n## [${version}] - 2026-11-18\n\n### Fixed\n\n- Servers update to ${version}.\n`);
+    git(dir, 'add', 'package.json', 'packages', 'CHANGELOG.md');
+    git(dir, 'commit', '--quiet', '-m', `Release ${version}: version and its notes`);
+    return git(dir, 'rev-parse', 'HEAD');
+  };
+
+  /* The checkout a job makes: the commit before the release, the release commit on it, the annotated tag where the push put
+     one, and the repository's scripts beside them. */
+  function checkout(world: World) {
+    const dir = folder();
+    git(dir, 'init', '--quiet', '--initial-branch=main');
+    const other = project(dir, '0.34.0');
+    const sha = project(dir, VERSION);
+    if (world.tag && world.tag !== 'none') git(dir, 'tag', '-a', `v${VERSION}`, '-m', `v${VERSION}`, world.tag === 'here' ? sha : other);
+    symlinkSync(join(ROOT, 'scripts'), join(dir, 'scripts'));
+    return { dir, sha, other };
+  }
+
+  /* GitHub's API under /api, and a registry that asks for a token first, as ghcr.io does, and serves blobs from elsewhere. */
+  async function outside(world: World, sha: string, other: string) {
+    const asked: Ran['asked'] = [];
+    let base = '';
+    const revision = { here: sha, other, unlabeled: null }[world.image as 'here' | 'other' | 'unlabeled'];
+    const reply = (res: ServerResponse, code: number, body?: unknown, headers: Record<string, string> = {}) => {
+      res.writeHead(code, { 'content-type': 'application/json', ...headers });
+      res.end(body === undefined ? '' : JSON.stringify(body));
+    };
+    const api = (req: IncomingMessage, res: ServerResponse, path: string) => {
+      if (world.github) return reply(res, world.github, { message: 'GitHub is down' });
+      if (world.limited) return reply(res, 403, { message: 'API rate limit exceeded for installation.' }, { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' });
+      if (path === `/repos/acme/shop/git/ref/tags/v${VERSION}`) {
+        if (!world.tag || world.tag === 'none') return reply(res, 404, { message: 'Not Found' });
+        return reply(res, 200, { ref: `refs/tags/v${VERSION}`, object: world.lightweight ? { type: 'commit', sha: world.tag === 'here' ? sha : other } : { type: 'tag', sha: TAG_OBJECT } });
+      }
+      if (path === `/repos/acme/shop/git/tags/${TAG_OBJECT}` && !world.lost) return reply(res, 200, { tag: `v${VERSION}`, object: { type: 'commit', sha: world.tag === 'here' ? sha : other } });
+      if (path === `/repos/acme/shop/releases/tags/v${VERSION}`) return world.release ? reply(res, 200, { tag_name: `v${VERSION}` }) : reply(res, 404, { message: 'Not Found' });
+      return reply(res, 404, { message: 'Not Found' });
+    };
+    const registry = (req: IncomingMessage, res: ServerResponse, url: string) => {
+      if (world.registry) return reply(res, world.registry, { errors: [{ code: 'UNAVAILABLE' }] });
+      if (url.startsWith('/token?')) {
+        const basic = `Basic ${Buffer.from(`${ACTOR}:${TOKEN}`).toString('base64')}`;
+        if (world.refused) return reply(res, 403, { errors: [{ code: 'DENIED' }] });
+        return req.headers.authorization === basic ? reply(res, 200, { token: 'pull-token' }) : reply(res, 401, { errors: [{ code: 'UNAUTHORIZED' }] });
+      }
+      if (url === '/cdn/config') return reply(res, 200, { architecture: 'amd64', os: 'linux', config: { Labels: revision ? { 'org.opencontainers.image.revision': revision } : {} } });
+      if (req.headers.authorization !== 'Bearer pull-token') {
+        return reply(res, 401, { errors: [{ code: 'UNAUTHORIZED' }] }, { 'www-authenticate': `Bearer realm="${base}/token",service="ghcr.io",scope="repository:invariant0x/hornhoof:pull"` });
+      }
+      if (url === `/v2/invariant0x/hornhoof/manifests/${VERSION}`) {
+        if (!world.image || world.image === 'none') return reply(res, 404, { errors: [{ code: 'MANIFEST_UNKNOWN' }] });
+        if (world.single) return reply(res, 200, { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] }, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
+        return reply(res, 200, {
+          schemaVersion: 2,
+          mediaType: 'application/vnd.oci.image.index.v1+json',
+          manifests: [
+            { mediaType: 'application/vnd.oci.image.manifest.v1+json', digest: ATTESTATION, size: 1, platform: { os: 'unknown', architecture: 'unknown' } },
+            { mediaType: 'application/vnd.oci.image.manifest.v1+json', digest: AMD64, size: 1, platform: { os: 'linux', architecture: 'amd64' } },
+          ],
+        }, { 'content-type': 'application/vnd.oci.image.index.v1+json', 'docker-content-digest': INDEX });
+      }
+      if (url === `/v2/invariant0x/hornhoof/manifests/${AMD64}`) {
+        return reply(res, 200, { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: CONFIG, size: 1 }, layers: [] }, { 'content-type': 'application/vnd.oci.image.manifest.v1+json' });
+      }
+      if (url === `/v2/invariant0x/hornhoof/blobs/${CONFIG}`) return reply(res, 307, undefined, { location: `${base}/cdn/config` });
+      return reply(res, 404, { errors: [{ code: 'NAME_UNKNOWN' }] });
+    };
+    const server = createServer((req, res) => {
+      const url = req.url ?? '';
+      asked.push({ url, authorization: req.headers.authorization });
+      if (url.startsWith('/api/')) return api(req, res, url.slice('/api'.length));
+      return registry(req, res, url);
+    });
+    await listenIn(server);
+    onTestFinished(() => new Promise<void>(done => {
+      server.closeAllConnections();
+      server.close(() => done());
+    }));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { asked, api: `${base}/api`, registry: base };
+  }
+
+  /* A gh that asks the fake GitHub for `gh api` and only writes down what else it was told. */
+  function gh() {
+    const bin = folder();
+    const calls = join(bin, 'calls.jsonl');
+    writeFileSync(calls, '');
+    writeFileSync(join(bin, 'gh'), [
+      `#!${process.execPath}`,
+      "const args = process.argv.slice(2);",
+      "require('node:fs').appendFileSync(process.env.GH_CALLS, JSON.stringify(args) + '\\n');",
+      "if (args[0] === 'api') fetch(`${process.env.GITHUB_API_URL}/${args[1]}`, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}` } }).then(res => process.exit(res.ok ? 0 : 1), () => process.exit(1));",
+      '',
+    ].join('\n'), { mode: 0o755 });
+    return { bin, calls };
+  }
+
+  /* An expression as GitHub fills it in, from what the step can see. */
+  const evaluate = (expression: string, context: object) => runInNewContext(expression.replace(/^\$\{\{|\}\}$/g, '').trim(), context) as unknown;
+  const fill = (value: string, context: object) => value.replace(/\$\{\{(.*?)\}\}/g, (_all, expression: string) => String(evaluate(expression, context) ?? ''));
+
+  const bash = (script: string, cwd: string, env: NodeJS.ProcessEnv) => new Promise<{ code: number; out: string }>(done => {
+    execFile('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], { cwd, env }, (error, stdout, stderr) => done({ code: error ? Number(error.code ?? 1) : 0, out: `${stdout}${stderr}` }));
+  });
+
+  /* The steps of the job that run a script, in order, each when its condition holds, until one fails: only the step that
+     looks, for the images and publish jobs, whose later steps build and move images. */
+  async function run(name: 'images' | 'publish' | 'release', world: World, event = 'push'): Promise<Ran> {
+    const { dir, sha, other } = checkout(world);
+    const { asked, api, registry } = await outside(world, sha, other);
+    const stub = gh();
+    const temp = folder();
+    const own = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GITHUB_|GH_|RUNNER_|HORNHOOF_)/.test(key)));
+    const outputs: Ran['outputs'] = {};
+    let said = '';
+    let code = 0;
+    const steps = JOBS[name]!.steps.filter(step => step.run && (name === 'release' || step.id === 'fresh'));
+    for (const [at, step] of steps.entries()) {
+      const context = { github: { event_name: event, sha, repository: 'acme/shop', ref: 'refs/heads/main' }, secrets: { GITHUB_TOKEN: TOKEN }, vars: {}, steps: Object.fromEntries(Object.entries(outputs).map(([id, values]) => [id, { outputs: values }])) };
+      if (step.if && !evaluate(step.if, context)) continue;
+      const output = join(temp, `output-${at}`);
+      writeFileSync(output, '');
+      const env = {
+        ...own,
+        PATH: `${stub.bin}:${process.env.PATH}`,
+        GH_CALLS: stub.calls,
+        GITHUB_SHA: sha,
+        GITHUB_REPOSITORY: 'acme/shop',
+        GITHUB_EVENT_NAME: event,
+        GITHUB_ACTOR: ACTOR,
+        GITHUB_API_URL: world.down === 'github' ? 'http://127.0.0.1:1/api' : api,
+        GITHUB_OUTPUT: output,
+        RUNNER_TEMP: temp,
+        HORNHOOF_REGISTRY_URL: world.down === 'registry' ? 'http://127.0.0.1:1' : registry,
+        ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, fill(value, context)])),
+      };
+      const ran = await bash(step.run!, dir, env);
+      said += ran.out;
+      if (step.id) outputs[step.id] = Object.fromEntries(readFileSync(output, 'utf8').split('\n').filter(Boolean).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+      if (ran.code !== 0) {
+        code = ran.code;
+        break;
+      }
+    }
+    const calls = readFileSync(stub.calls, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]);
+    let notes: string | null = null;
+    try { notes = readFileSync(join(temp, 'release-notes.md'), 'utf8'); } catch { notes = null; }
+    return { code, said, outputs, gh: calls.filter(args => args[0] !== 'api'), asked, notes, sha, other };
+  }
+
+  const released = (ran: Ran) => ran.gh.filter(args => args[0] === 'release' && args[1] === 'create');
+  const siteStarted = (ran: Ran) => ran.gh.some(args => args.join(' ') === 'workflow run installer-site.yml --repo acme/shop --ref main');
+
+  it('builds, publishes and releases a version whose tag came with main on this very commit, with no images yet, as 0.34.1 did', async () => {
+    const world: World = { tag: 'here', release: false, image: 'none' };
+    const images = await run('images', world);
+    expect(images.code, images.said).toBe(0);
+    expect(images.outputs.fresh).toEqual({ version: 'new' });
+    const publish = await run('publish', world);
+    expect(publish.code, publish.said).toBe(0);
+    expect(publish.outputs.fresh).toEqual({ version: 'new' });
+    const release = await run('release', world);
+    expect(release.code, release.said).toBe(0);
+    expect(released(release)).toHaveLength(1);
+    expect(released(release)[0]!.slice(0, 3)).toEqual(['release', 'create', `v${VERSION}`]);
+    expect(siteStarted(release)).toBe(true);
+    expect(release.notes).toContain(`Servers update to ${VERSION}.`);
+  });
+
+  it('builds, publishes, tags and releases a new version that has neither a tag nor images', async () => {
+    const world: World = { tag: 'none', release: false, image: 'none' };
+    expect((await run('images', world)).outputs.fresh).toEqual({ version: 'new' });
+    expect((await run('publish', world)).outputs.fresh).toEqual({ version: 'new' });
+    const release = await run('release', world);
+    expect(release.code, release.said).toBe(0);
+    expect(released(release)[0]).toEqual(expect.arrayContaining(['release', 'create', `v${VERSION}`, '--target', release.sha]));
+    expect(siteStarted(release)).toBe(true);
+  });
+
+  it('builds, moves and releases nothing when the tag, the images of this commit and the release are all out', async () => {
+    const world: World = { tag: 'here', release: true, image: 'here' };
+    const images = await run('images', world);
+    expect(images.code, images.said).toBe(0);
+    expect(images.outputs.fresh).toEqual({ version: 'out' });
+    expect(images.said).toContain(`Version ${VERSION} is out already`);
+    const publish = await run('publish', world);
+    expect(publish.code, publish.said).toBe(0);
+    expect(publish.outputs.fresh).toEqual({ version: 'out' });
+    const release = await run('release', world);
+    expect(release.code, release.said).toBe(0);
+    expect(release.gh).toEqual([]);
+  });
+
+  it('creates only the release when the tag and the images are out but the release is missing', async () => {
+    const world: World = { tag: 'here', release: false, image: 'here' };
+    expect((await run('images', world)).outputs.fresh).toEqual({ version: 'out' });
+    expect((await run('publish', world)).outputs.fresh).toEqual({ version: 'out' });
+    const release = await run('release', world);
+    expect(release.code, release.said).toBe(0);
+    expect(released(release)).toHaveLength(1);
+    expect(siteStarted(release)).toBe(true);
+  });
+
+  it.each(['images', 'publish', 'release'] as const)('the %s job stops, and says why, when the tag is on another commit', async name => {
+    const ran = await run(name, { tag: 'other', release: false, image: 'none' });
+    expect(ran.code).not.toBe(0);
+    expect(ran.said).toContain(`The tag v${VERSION} is on commit ${ran.other}, not on this commit ${ran.sha}.`);
+    expect(ran.gh).toEqual([]);
+  });
+
+  it.each(['images', 'publish'] as const)('the %s job stops, and says why, when the published images are those of another commit', async name => {
+    const ran = await run(name, { tag: 'none', release: false, image: 'other' });
+    expect(ran.code).not.toBe(0);
+    expect(ran.said).toContain(`${IMAGE} holds the images of commit ${ran.other}, not of this commit ${ran.sha}.`);
+  });
+
+  it.each(['images', 'publish'] as const)('the %s job stops when the published images carry no revision label to tell whose they are', async name => {
+    const ran = await run(name, { tag: 'here', release: false, image: 'unlabeled' });
+    expect(ran.code).not.toBe(0);
+    expect(ran.said).toContain(`${IMAGE} has no revision label`);
+  });
+
+  it('builds the images of a run by hand whatever is out, and asks neither GitHub nor the registry', async () => {
+    const ran = await run('images', { tag: 'other', release: true, image: 'other' }, 'workflow_dispatch');
+    expect(ran.code, ran.said).toBe(0);
+    expect(ran.outputs.fresh).toEqual({ version: 'new' });
+    expect(ran.asked).toEqual([]);
+  });
+
+  /* A lookup that fails says nothing about the version, so the job stops: no images are built, no tag moves, and no
+     release is made. Only a 404 says a thing is not there. */
+  it.each([
+    ['images', 'GitHub answers 500', { github: 500 }, 'GitHub answered 500 for git/ref/tags/v0.34.1'],
+    ['publish', 'GitHub has used up its rate limit', { limited: true }, 'GitHub answered 403 for git/ref/tags/v0.34.1, as its rate limit is used up'],
+    ['release', 'GitHub has used up its rate limit', { limited: true }, 'GitHub answered 403 for git/ref/tags/v0.34.1, as its rate limit is used up'],
+    ['images', 'GitHub cannot be reached', { down: 'github' }, 'GitHub could not be reached'],
+    ['release', 'GitHub cannot be reached', { down: 'github' }, 'GitHub could not be reached'],
+    ['release', 'GitHub answers 502', { github: 502 }, 'GitHub answered 502 for git/ref/tags/v0.34.1'],
+    ['images', 'the registry answers 500', { registry: 500 }, 'the registry answered 500 for manifests/0.34.1'],
+    ['publish', 'the registry answers 429', { registry: 429 }, 'the registry answered 429 for manifests/0.34.1'],
+    ['publish', 'the registry cannot be reached', { down: 'registry' }, 'the registry could not be reached'],
+    ['images', 'the registry gives no token', { refused: true }, 'the registry answered 403 for a token'],
+    ['release', 'GitHub has no tag object for the tag', { lost: true }, 'GitHub has no tag object for v0.34.1'],
+  ] as const)('the %s job cannot tell when %s, and stops without building, moving or releasing anything', async (name, _when, trouble, reason) => {
+    const ran = await run(name, { tag: 'here', release: false, image: 'none', ...trouble });
+    expect(ran.code, ran.said).not.toBe(0);
+    expect(ran.outputs.fresh).toEqual({});
+    expect(ran.said).toContain(`Could not tell whether version ${VERSION} is out: ${reason}.`);
+    expect(released(ran)).toEqual([]);
+    expect(siteStarted(ran)).toBe(false);
+  });
+
+  it('reads a tag with no tag object, and an image for one platform alone, as git and the registry give them', async () => {
+    const images = await run('images', { tag: 'here', lightweight: true, image: 'none' });
+    expect(images.outputs.fresh, images.said).toEqual({ version: 'new' });
+    expect(images.said).toContain(`though its tag v${VERSION} is on this commit`);
+    expect(images.asked.map(a => a.url)).not.toContain(`/api/repos/acme/shop/git/tags/${TAG_OBJECT}`);
+    const elsewhere = await run('release', { tag: 'other', lightweight: true });
+    expect(elsewhere.said).toContain(`The tag v${VERSION} is on commit ${elsewhere.other}, not on this commit ${elsewhere.sha}.`);
+    const publish = await run('publish', { tag: 'here', image: 'here', single: true });
+    expect(publish.outputs.fresh, publish.said).toEqual({ version: 'out' });
+    expect(publish.asked.map(a => a.url)).not.toContain(`/v2/invariant0x/hornhoof/manifests/${AMD64}`);
+  });
+
+  it.each([
+    ['images', { tag: 'here', image: 'none' }, 'has no published images yet'],
+    ['publish', { tag: 'none', image: 'none' }, 'has no published images yet'],
+    ['release', { tag: 'here', release: false }, 'has no release yet'],
+  ] as const)('the %s job reads a 404 as not out, and only a 404', async (name, world, said) => {
+    const ran = await run(name, world);
+    expect(ran.code, ran.said).toBe(0);
+    expect(ran.outputs.fresh).toEqual({ version: 'new' });
+    expect(ran.said).toContain(said);
+  });
+
+  it('gives the token only to GitHub and the registry, never where a blob is served from, and prints it nowhere', async () => {
+    for (const name of ['images', 'publish', 'release'] as const) {
+      const ran = await run(name, { tag: 'here', release: true, image: 'here' });
+      expect(ran.said).not.toContain(TOKEN);
+      expect(ran.said).not.toContain(Buffer.from(`${ACTOR}:${TOKEN}`).toString('base64'));
+      expect(ran.asked.filter(a => a.url.startsWith('/cdn/')).map(a => a.authorization)).toEqual(name === 'release' ? [] : [undefined]);
+    }
   });
 });
 

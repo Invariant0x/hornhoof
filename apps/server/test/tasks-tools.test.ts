@@ -112,7 +112,8 @@ describe('task tools', () => {
     const { orchestrator, head, tools } = await company();
     const said = async (agent: { id: string }, name: string) => (await (await tools(agent)).listTools()).tools.find(t => t.name === name)!.description!;
     expect(await said(head, 'create_task')).toContain('Code follows Architecture (unless small or shared with its Development owner), Development, Review, risk-based Security, then Tests on the final candidate.');
-    expect(await said(head, 'create_task')).toContain('A small task, docs-only change or verified clean cherry-pick may skip Review with a green check_author receipt and CRAP below 10 on that commit.');
+    expect(await said(head, 'check_author')).toContain('Disabled.');
+    expect(await said(head, 'create_task')).not.toContain('may skip Review');
     expect(await said(orchestrator, 'add_tasks')).toContain('Gives tasks to the heads of their departments');
     const add = await said(orchestrator, 'add_tasks');
     expect(add).toContain('hh-lead-tasks');

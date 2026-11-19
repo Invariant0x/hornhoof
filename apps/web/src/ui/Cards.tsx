@@ -39,7 +39,7 @@ export function Gauge({ label, figure, unit, used, sub, empty = false, name, tit
 }
 
 export function EmptyBox({ title, hint }: { title: string; hint?: string }) {
-  return <div className="empty"><b>{title}</b>{hint && <span>{hint}</span>}</div>;
+  return <div className="empty"><b>{title}</b>{hint && <span dir="auto">{hint}</span>}</div>;
 }
 
 export function MachineMark() {

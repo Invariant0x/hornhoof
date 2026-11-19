@@ -1,14 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { AuthorCheckRun, type AuthorCheckDone } from '@hornhoof/protocol';
+import type { AuthorCheckDone } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { WebSocket } from 'ws';
+import { hashToken } from '../src/crypto/tokens.js';
 import { jobs, subscriptions, taskEvents } from '../src/db/schema.js';
-import { NodeHub, ownBuiltin } from '../src/modules/nodes/hub.js';
+import { keyOf, NodeHub, ownBuiltin } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { recordAuthorCheck, requestAuthorCheck } from '../src/modules/tasks/author-check.js';
-import { submit, updateTask } from '../src/modules/tasks/engine.js';
+import { requestAuthorCheck } from '../src/modules/tasks/author-check.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
 async function setup() {
@@ -29,45 +29,34 @@ async function setup() {
   f.ctx.readCommit = async (_repo, want) => ({
     branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'task' in want ? HEAD : BASE,
   });
-  const request = await requestAuthorCheck(f.ctx, f.author.id, job!.id, f.task.id);
-  const completed: AuthorCheckDone = { type: 'author_check.done', requestId: request.requestId, taskId: f.task.id, commit: HEAD, crap: 2, cherryPick: null };
-  const receipts = async () => (await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id))).filter(event => event.data.authorCheckReceipt);
-  return { ...f, node, sent, job: job!, request, completed, receipts };
+  const events = () => f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id));
+  return { ...f, node, sent, job: job!, events };
 }
 
-describe('author check request and receipt boundary', () => {
-  it('selects the repository and both SHAs and records the node reply once', async () => {
+describe('the disabled author check boundary', () => {
+  it('does not dispatch a node check for an eligible Development task', async () => {
     const f = await setup();
-    expect(f.sent).toHaveLength(1);
-    const run = AuthorCheckRun.parse(f.sent[0]);
-    expect(run).toMatchObject({
-      repo: { url: 'https://github.com/acme/shop.git' },
-      pin: { baseCommit: BASE, commit: HEAD, branch: `task-${f.task.number}` }, mainCommit: BASE,
+    await expect(requestAuthorCheck(f.ctx, f.author.id, f.job.id, f.task.id)).rejects.toMatchObject({
+      status: 409, message: 'The author check for skipping Review is disabled.',
     });
-    const [event] = await f.db.select().from(taskEvents).where(eq(taskEvents.uuid, f.request.requestId));
-    expect(event?.data.authorCheckRequest).not.toHaveProperty('repo');
-    await handleNodeMessage(f.ctx, f.node, f.completed);
-    await Promise.all([recordAuthorCheck(f.ctx, f.node, f.completed), recordAuthorCheck(f.ctx, f.node, f.completed)]);
-    expect(await f.receipts()).toMatchObject([{ agentId: null, personId: null, data: { authorCheckReceipt: { pin: run.pin, crap: 2 } } }]);
-    const moved = await submit(f.ctx, f.author.id, f.task.id, { summary: 'Ready.', evidence: 'Checked.', review: { baseCommit: BASE } });
-    expect(moved.task.assigneeAgentId).toBe(f.tester.id);
+    expect(f.sent).toHaveLength(0);
+    expect((await f.events()).some(event => event.data.authorCheckRequest)).toBe(false);
   });
 
-  it('rejects another machine, task, SHA and nonce', async () => {
+  it('ignores a node result for a request made before Review skips were disabled', async () => {
     const f = await setup();
-    await recordAuthorCheck(f.ctx, { kind: 'builtin', machine: 'other' }, f.completed);
-    for (const mismatch of [{ taskId: randomUUID() }, { commit: 'c'.repeat(40) }, { requestId: randomUUID() }]) {
-      await recordAuthorCheck(f.ctx, f.node, { ...f.completed, ...mismatch });
-    }
-    expect(await f.receipts()).toHaveLength(0);
-  });
-
-  it('refuses a stale route, an unrelated job and a different author', async () => {
-    const f = await setup();
-    await updateTask(f.ctx, f.head.id, f.task.id, { riskClass: 'security' });
-    await recordAuthorCheck(f.ctx, f.node, f.completed);
-    expect(await f.receipts()).toHaveLength(0);
-    await expect(requestAuthorCheck(f.ctx, f.reviewer.id, f.job.id, f.task.id)).rejects.toMatchObject({ status: 409 });
-    await expect(requestAuthorCheck(f.ctx, f.author.id, randomUUID(), f.task.id)).rejects.toMatchObject({ status: 409 });
+    const requestId = randomUUID();
+    const route = (await f.detail()).echelons;
+    await f.db.insert(taskEvents).values({
+      uuid: requestId, companyId: f.task.companyId, taskId: f.task.id, agentId: f.author.id, kind: 'comment', text: 'Author check started.',
+      data: { authorCheckRequest: {
+        pin: { taskId: f.task.id, agentId: f.author.id, branch: `task-${f.task.number}`, baseCommit: BASE, commit: HEAD,
+          repoUrlHash: hashToken('https://github.com/acme/shop.git'), paths: ['logic/totals.ts'] },
+        routeRevision: route.revision, node: keyOf(f.node), verifyCherryPick: false,
+      } },
+    });
+    const completed: AuthorCheckDone = { type: 'author_check.done', requestId, taskId: f.task.id, commit: HEAD, crap: 2, cherryPick: null };
+    await handleNodeMessage(f.ctx, f.node, completed);
+    expect((await f.events()).some(event => event.data.authorCheckReceipt)).toBe(false);
   });
 });
